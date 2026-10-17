@@ -44,7 +44,7 @@ Mock-Flug (ohne Simulator, fliegt eine Platzrunde EDDF 25C mit sauberem 3°-Anfl
 cmd:
 
 ```bat
-cd app && set VECTASIM_PROVIDER=mock && npm run tauri dev
+cd app && set "VECTASIM_PROVIDER=mock" && npm run tauri dev
 ```
 
 PowerShell:

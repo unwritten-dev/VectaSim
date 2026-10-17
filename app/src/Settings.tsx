@@ -81,7 +81,7 @@ export default function Settings({ providers, onProvider, online, status, flight
     invoke("set_setting", { key: "simbrief_user", value: v })
       .then(() => {
         setStoredUser(v);
-        // confirmed inline at the field, not with a toast (02 §5)
+        // confirmed inline at the field, not with a toast
         setSavedMark(true);
         window.setTimeout(() => setSavedMark(false), 2500);
       })

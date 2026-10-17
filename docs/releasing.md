@@ -43,7 +43,7 @@ Der Release-Workflow braucht in *Repository → Settings → Secrets and variabl
 
 Der Workflow `ci.yml` führt bei jedem Push `cargo test`, `clippy -D warnings`, `tsc` und `npm test` aus.
 
-Der Release-Workflow nutzt `tauri-apps/tauri-action@v0`. Empfohlen ist, die Action auf einen festen Commit-SHA zu pinnen (`uses: tauri-apps/tauri-action@<sha> # v0.x.y`), damit ein geänderter Tag nicht unbemerkt in den Build mit Zugriff auf den Signaturschlüssel gelangt.
+Der Release-Workflow pinnt `tauri-apps/tauri-action` auf einen festen Commit-SHA (Kommentar nennt die Version), damit ein geänderter Tag nicht unbemerkt in den Build mit Zugriff auf den Signaturschlüssel gelangt. Beim Aktualisieren SHA und Kommentar gemeinsam ändern.
 
 ## Lokal testen
 

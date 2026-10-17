@@ -266,7 +266,7 @@
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
-/* TDZ: ok at 10 % with a 1-px edge at 40 % (01 §4.3) */
+/* TDZ: ok at 10 % with a 1-px edge at 40 % */
 .rd-tdz {
   fill: color-mix(in srgb, var(--ok) 10%, transparent);
   stroke: color-mix(in srgb, var(--ok) 40%, transparent);

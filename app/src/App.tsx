@@ -181,7 +181,7 @@ export default function App() {
     currentFlightId().then((id) => (id ? openFlight(id) : setView("logbook")));
   }, [openFlight]);
 
-  // Ctrl+1…5 switch views (also used by the screenshot tooling)
+  // Ctrl+1…5 switch views
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!e.ctrlKey) return;

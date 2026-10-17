@@ -5,7 +5,7 @@ import { PHASE_LABEL, fmt, fmtClock, fmtNum, fmtSigned } from "./format";
 import { PROFILE } from "./theme";
 
 /**
- * Altitude / speed profile of a recorded flight (feature spec B2), plain SVG.
+ * Altitude / speed profile of a recorded flight, plain SVG.
  * Altitude MSL is the filled area on the left axis; ground speed and V/S are
  * thin lines on two right axes. Phase changes and touchdowns are vertical
  * markers; hovering shows a crosshair with the values at that moment.

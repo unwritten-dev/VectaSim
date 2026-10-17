@@ -44,7 +44,7 @@ export function isRealSimError(status: StatusSnapshot | null | undefined): boole
 
 const SIM_LABEL: Record<string, string> = { simconnect: "MSFS 2020/2024", mock: "Demo-Flug" };
 
-/** Simulator name for UI text (Wortliste: "Simulator", not "Quelle"/"Provider"). */
+/** Simulator name for UI text (UI wording: "Simulator", not "Quelle"/"Provider"). */
 export function providerLabel(provider: string | null | undefined): string {
   if (!provider) return "–";
   return SIM_LABEL[provider] ?? provider;

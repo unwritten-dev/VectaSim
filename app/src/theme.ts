@@ -87,7 +87,7 @@ export function mapThemeOf(t: ThemeDef): MapTheme {
     trackRamp: t.ramp.map(([a, col]) => [a, col] as [number, string]),
     airportDot: { large: m.apt, medium: m.aptSmall, small: c.textFaint, seaplane: c.textFaint },
     traffic: c.traffic,
-    // ATC by brightness, not by four hues (01 §3.6)
+    // ATC by brightness, not by four hues
     facility: { app: c.text, twr: m.apt, gnd: c.textMuted, del: c.textMuted, atis: c.textFaint },
     // METAR category: green / blue / red / deep red – no magenta in any theme
     category: {

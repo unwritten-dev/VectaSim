@@ -20,7 +20,7 @@ const style = {
 type L = { paint?: Record<string, unknown>; layout?: Record<string, unknown>; minzoom?: number };
 const layerOf = (s: StyleSpecification, id: string) => s.layers.find((l) => l.id === id) as unknown as L | undefined;
 
-describe("patchBasemapStyle (Nachtcockpit, 01 §3.6)", () => {
+describe("patchBasemapStyle (Nachtcockpit)", () => {
   const out = patchBasemapStyle(style, themeById("nachtcockpit"));
   const layer = (id: string) => layerOf(out, id)!;
 

@@ -1,9 +1,9 @@
 # Checkliste: erster Test auf dem Sim-PC
 
-Die App wird später auf demselben PC wie MSFS laufen; der Entwicklungsrechner hat keinen Sim. Alles unten ist bisher nur gegen den Mock und per Unit-Tests abgesichert und muss einmal live bestätigt werden.
+Alles unten ist bisher nur gegen den Mock-Provider und per Unit-Tests abgesichert und muss einmal live gegen MSFS bestätigt werden.
 
 ## Vorbereitung
-- [ ] `SimConnect.dll` auffindbar: MSFS SDK installiert (`MSFS_SDK`/`MSFS2024_SDK` gesetzt) **oder** DLL neben `vectasim.exe` **oder** `VECTASIM_SIMCONNECT_DLL=<Pfad>`. Die App zeigt sonst einen roten Banner mit den durchsuchten Pfaden.
+- [ ] `SimConnect.dll` auffindbar: MSFS SDK installiert (`MSFS_SDK`/`MSFS2024_SDK` gesetzt) **oder** DLL neben `VectaSim.exe` **oder** `VECTASIM_SIMCONNECT_DLL=<Pfad>`. Die App zeigt sonst einen roten Banner mit den durchsuchten Pfaden.
 - [ ] `RUST_LOG=info` setzen und die Konsole mitlaufen lassen (`npm run tauri dev` oder Debug-EXE).
 
 ## SimConnect-Verbindung
@@ -15,7 +15,7 @@ Die App wird später auf demselben PC wie MSFS laufen; der Entwicklungsrechner h
 - [ ] PC in Standby und zurück: Verbindung überlebt oder stellt sich wieder her; kein Phasensprung.
 
 ## Datenqualität
-- [ ] `ATC MODEL`/`ATC TYPE` liefern bei Default-Flugzeugen `TT:ATCCOM…`-Tokens → Mapping Title→ICAO-Typ nötig (Fleet-Manager, V1). Bei Add-ons (PMDG, Fenix, FBW) Werte notieren.
+- [ ] `ATC MODEL`/`ATC TYPE` liefern bei Default-Flugzeugen `TT:ATCCOM…`-Tokens → Mapping Title→ICAO-Typ nötig. Bei Add-ons (PMDG, Fenix, FBW) Werte notieren.
 - [ ] `PLANE TOUCHDOWN NORMAL VELOCITY`: Vorzeichen und Größenordnung gegen die gemessene V/S vergleichen (Landebericht zeigt beide). Erwartung: Sim-Wert positiv-down in ft/s ×60, Detektor normalisiert auf negativ.
 - [ ] Landerate gegen ein zweites Tool (MSFS Landing Inspector, FLARE, Volanta) vergleichen – Abweichung dokumentieren.
 - [ ] `G FORCE` am Touchdown plausibel (1.1–2.0), keine Ausreißer bei niedriger FPS.

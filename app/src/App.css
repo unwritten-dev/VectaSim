@@ -86,7 +86,7 @@
   --shadow-overlay: var(--shadow-float);
   --shadow-menu: var(--shadow-float);
 
-  /* motion (01 §3.7): live values never animate */
+  /* motion: live values never animate */
   --curve: cubic-bezier(0.2, 0.8, 0.2, 1);
   --dur-1: 100ms;
   --dur-2: 180ms;

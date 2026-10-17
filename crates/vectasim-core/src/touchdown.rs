@@ -318,7 +318,7 @@ impl Event {
     }
 
     /// Keep the worst contact of this event as its landing rate. A sim value outranks a
-    /// measured fallback (the reference only falls back when the sim has nothing).
+    /// measured fallback, used only when the sim reports nothing usable.
     fn consider(&mut self, (rate, source): (f64, LandingRateSource)) {
         let r = &mut self.report;
         let replace = match (r.landing_rate_source, source) {
