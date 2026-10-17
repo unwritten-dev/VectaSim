@@ -1,0 +1,34 @@
+[package]
+name = "vectasim"
+description = "VectaSim – flight tracker and logbook for flight simulators"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lib]
+# The `_lib` suffix is necessary to keep the lib name unique from the bin name on Windows.
+name = "vectasim_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+vectasim-core = { path = "../../crates/vectasim-core" }
+vectasim-simconnect = { path = "../../crates/vectasim-simconnect" }
+vectasim-store = { path = "../../crates/vectasim-store" }
+vectasim-data = { path = "../../crates/vectasim-data" }
+vectasim-simbrief = { path = "../../crates/vectasim-simbrief" }
+vectasim-online = { path = "../../crates/vectasim-online" }
+vectasim-photos = { path = "../../crates/vectasim-photos" }
+tauri = { version = "2", features = ["protocol-asset"] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+serde = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }
+env_logger = "0.11"
+tokio = { version = "1", features = ["time"] }

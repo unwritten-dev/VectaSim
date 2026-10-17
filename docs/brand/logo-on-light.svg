@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+<title>VectaSim</title><defs><mask id="vs-k" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64"><rect width="64" height="64" fill="#fff"/><circle cx="47" cy="43" r="7.4" fill="#000"/></mask></defs>
+  <g mask="url(#vs-k)">
+    <path d="M4 13.5 H14 C26 13.5 30 41 47 41" fill="none" stroke="#1f86c4" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="2" y="48.5" width="8" height="5.5" rx="1.2" fill="#0f1318"/>
+    <rect x="14" y="48.5" width="48" height="5.5" rx="1.2" fill="#0f1318"/>
+  </g>
+  <circle cx="47" cy="43" r="4.5" fill="#ffd54a" stroke="#0f1318" stroke-width="1.4"/>
+</svg>

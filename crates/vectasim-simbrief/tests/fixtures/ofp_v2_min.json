@@ -1,0 +1,33 @@
+{
+  "fetch": { "userid": "123456", "static_id": "", "status": "Success", "time": "0.1 seconds" },
+  "params": { "request_id": 987654321, "user_id": 123456, "time_generated": 1792200000, "static_id": "", "ofp_layout": "LIDO", "airac": 2510, "units": "kgs" },
+  "general": {
+    "icao_airline": "DLH", "flight_number": "4YA", "is_etops": 0, "costindex": 25, "initial_altitude": 36000,
+    "stepclimb_string": "EDDF/0360", "gc_distance": 1086, "route_distance": 1176, "air_distance": 1150, "total_burn": 6850,
+    "cruise_tas": 449, "cruise_mach": 0.78, "passengers": 150,
+    "route": "ANEKI Y163 HERBI UZ29 KUDES UT10 ELB M729 GIPEP"
+  },
+  "origin": { "icao_code": "EDDF", "iata_code": "FRA", "elevation": 364, "pos_lat": 50.0333, "pos_long": 8.5706, "name": "FRANKFURT MAIN", "plan_rwy": "25C", "trans_alt": 5000, "trans_level": 7000 },
+  "destination": { "icao_code": "LIRF", "iata_code": "FCO", "elevation": 15, "pos_lat": 41.8003, "pos_long": 12.2389, "name": "ROMA FIUMICINO", "plan_rwy": "16L", "trans_alt": 6000, "trans_level": 7000 },
+  "alternate": { "icao_code": "LIRN", "iata_code": "NAP", "elevation": 294, "pos_lat": 40.8860, "pos_long": 14.2908, "name": "NAPOLI CAPODICHINO", "plan_rwy": "24" },
+  "navlog": {
+    "fix": [
+      { "ident": "ANEKI", "name": "ANEKI", "type": "wpt", "pos_lat": "49.9522", "pos_long": "8.6414", "stage": "CLB", "via_airway": "ANEKI1L", "is_sid_star": "1", "distance": "9", "altitude_feet": "4000", "time_total": "180", "fuel_plan_onboard": "8300" },
+      { "ident": "HERBI", "name": "HERBI", "type": "wpt", "pos_lat": 49.3008, "pos_long": 8.9183, "stage": "CLB", "via_airway": "Y163", "is_sid_star": 0, "distance": 42, "altitude_feet": 18000, "time_total": 600, "fuel_plan_onboard": 7700 },
+      { "ident": "TOC", "name": "TOP OF CLIMB", "type": "ltlg", "pos_lat": 48.1, "pos_long": 9.4, "stage": "CLB", "via_airway": "UZ29", "is_sid_star": 0, "distance": 80, "altitude_feet": 36000, "time_total": 1200, "fuel_plan_onboard": 7000 },
+      { "ident": "ELB", "name": "ELBA", "type": "vor", "pos_lat": 42.7306, "pos_long": 10.3978, "stage": "CRZ", "via_airway": "UT10", "is_sid_star": 0, "distance": 350, "altitude_feet": 36000, "time_total": 4200, "fuel_plan_onboard": 4200 },
+      { "ident": "GIPEP", "name": "GIPEP", "type": "wpt", "pos_lat": 42.0, "pos_long": 11.9, "stage": "DSC", "via_airway": "M729", "is_sid_star": 0, "distance": 70, "altitude_feet": 12000, "time_total": 5100, "fuel_plan_onboard": 3600 },
+      { "ident": "LIRF", "name": "ROMA FIUMICINO", "type": "apt", "pos_lat": 41.8003, "pos_long": 12.2389, "stage": "DSC", "via_airway": "GIPEP1A", "is_sid_star": 1, "distance": 30, "altitude_feet": 15, "time_total": 5700, "fuel_plan_onboard": 3300 }
+    ]
+  },
+  "aircraft": { "icaocode": "A20N", "iata_code": "32N", "base_type": "A20N", "icao_code": "A20N", "name": "A320-251N", "reg": "D-AINA", "fin": "", "selcal": "", "max_passengers": "180", "is_custom": 0 },
+  "fuel": { "taxi": 200, "enroute_burn": 5300, "contingency": 265, "alternate_burn": 900, "reserve": 1100, "etops": 0, "extra": 500, "min_takeoff": 7565, "plan_takeoff": 8065, "plan_ramp": 8265, "plan_landing": 2765, "avg_fuel_flow": 2400, "max_tanks": 18700 },
+  "times": {
+    "est_time_enroute": 5700, "sched_time_enroute": 5700, "sched_out": 1792207200, "sched_off": 1792208100, "sched_on": 1792213800, "sched_in": 1792214400,
+    "sched_block": 7200, "est_out": 1792207200, "est_off": 1792208100, "est_on": 1792213800, "est_in": 1792214400, "est_block": 7200,
+    "taxi_out": 900, "taxi_in": 600, "reserve_time": 1800, "endurance": 12300
+  },
+  "weights": { "oew": 44300, "pax_count": 150, "bag_count": 150, "pax_weight": 84, "bag_weight": 20, "cargo": 1500, "payload": 14100, "est_zfw": 58400, "max_zfw": 64300, "est_tow": 66465, "max_tow": 79000, "est_ldw": 61165, "max_ldw": 67400, "est_ramp": 66665 },
+  "atc": { "flightplan_text": "(FPL-DLH4YA-IS ...)", "route": "ANEKI Y163 HERBI UZ29 KUDES UT10 ELB M729 GIPEP", "callsign": "DLH4YA", "initial_spd": "0449", "initial_alt": "360" },
+  "text": { "plan_html": "<div>...</div>" }
+}

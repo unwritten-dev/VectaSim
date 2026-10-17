@@ -1,0 +1,70 @@
+// Pure helpers for airframes (one aircraft per registration). Mirrors the store's
+// rules in crates/vectasim-store/src/airframe.rs, see airframe.test.ts.
+
+import type { Airframe } from "../types";
+
+const PLACEHOLDER_IDS = new Set(["ASXGS", "ASOBO", "N12345", "NONE", "UNKNOWN", "TEST", "XXXX", "XXXXX", "ABC", "ABCD", "ABCDE"]);
+
+/** Upper case without spaces, or null when it is no plausible registration (same rule as the store). */
+export function normalizeRegistration(raw: string | null | undefined): string | null {
+  const reg = (raw ?? "").replace(/\s+/g, "").toUpperCase();
+  if (reg.length < 3 || reg.length > 8) return null;
+  if (!/^[A-Z0-9-]+$/.test(reg)) return null;
+  if (reg.startsWith("-") || reg.endsWith("-") || reg.includes("--")) return null;
+  if (!/[A-Z]/.test(reg)) return null;
+  if (PLACEHOLDER_IDS.has(reg.replace(/-/g, ""))) return null;
+  return reg;
+}
+
+/** Planespotters cache rules (crates/vectasim-photos): hit 7 days, miss 24 h, picked image forever. */
+export const PHOTO_HIT_TTL_MS = 7 * 24 * 3600 * 1000;
+export const PHOTO_MISS_TTL_MS = 24 * 3600 * 1000;
+
+/** Whether the UI should ask the backend for a (new) photo of this airframe. */
+export function needsPhotoLookup(a: Pick<Airframe, "imageSource" | "imageFetchedMs">, nowMs: number): boolean {
+  if (a.imageSource === "user") return false;
+  if (a.imageFetchedMs == null) return true;
+  const age = nowMs - a.imageFetchedMs;
+  if (a.imageSource === "planespotters") return age >= PHOTO_HIT_TTL_MS;
+  if (a.imageSource === "none") return age >= PHOTO_MISS_TTL_MS;
+  return true;
+}
+
+/** Headline name: the user's name, else airline + type, else the sim title, else the registration. */
+export function airframeName(a: Pick<Airframe, "registration" | "customName" | "title" | "airline" | "icaoType">): string {
+  if (a.customName?.trim()) return a.customName.trim();
+  if (a.title?.trim()) return a.title.trim();
+  const combo = [a.airline, a.icaoType].filter((s) => s?.trim()).join(" ");
+  return combo || a.registration;
+}
+
+/** Credit line for the photo; Planespotters requires photographer + source. */
+export function photoCredit(a: Pick<Airframe, "imageSource" | "imageCredit">): string | null {
+  if (a.imageSource === "planespotters") return a.imageCredit ? `© ${a.imageCredit} · Planespotters.net` : "© Planespotters.net";
+  if (a.imageSource === "user") return a.imageCredit || "Eigenes Bild";
+  return null;
+}
+
+/** Search over registration, name, type and airline for the picker / fleet filter. */
+export function matchesAirframe(a: Pick<Airframe, "registration" | "customName" | "title" | "airline" | "icaoType">, query: string): boolean {
+  const q = query.trim().toUpperCase().replace(/\s+/g, " ");
+  if (!q) return true;
+  const compact = q.replace(/[\s-]/g, "");
+  if (a.registration.replace(/-/g, "").includes(compact)) return true;
+  return [a.customName, a.title, a.airline, a.icaoType].some((s) => s && s.toUpperCase().includes(q));
+}
+
+/**
+ * Picker options: existing airframes matching the query, plus "new registration" when the
+ * query is a valid registration that does not exist yet.
+ */
+export function pickerOptions<T extends Pick<Airframe, "registration" | "customName" | "title" | "airline" | "icaoType">>(
+  all: T[],
+  query: string,
+  limit = 8,
+): { matches: T[]; newReg: string | null } {
+  const matches = all.filter((a) => matchesAirframe(a, query)).slice(0, limit);
+  const reg = normalizeRegistration(query);
+  const newReg = reg && !all.some((a) => a.registration === reg) ? reg : null;
+  return { matches, newReg };
+}

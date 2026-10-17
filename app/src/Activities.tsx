@@ -1,0 +1,131 @@
+import { useCallback, useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import type { Airport, FlightRow } from "./types";
+import { fmt } from "./format";
+import ErrorNotice from "./ErrorNotice";
+import { usePrefs } from "./prefs";
+import { countedFlights } from "./totals";
+
+interface Visited {
+  icao: string;
+  name: string;
+  country: string;
+  departures: number;
+  arrivals: number;
+}
+
+/** "Where have I been": visited airports and countries from the logbook. */
+export default function Activities() {
+  const [visited, setVisited] = useState<Visited[] | null>(null);
+  const [countries, setCountries] = useState<string[]>([]);
+  const [demoHidden, setDemoHidden] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const { showDemo } = usePrefs();
+
+  const refresh = useCallback(async () => {
+    let all: FlightRow[];
+    try {
+      all = await invoke<FlightRow[]>("list_flights", { limit: 100000 });
+      setError(null);
+    } catch (e) {
+      setError(String(e));
+      return;
+    }
+    const flights = countedFlights(all, showDemo);
+    setDemoHidden(all.length - flights.length);
+    const counts = new Map<string, { departures: number; arrivals: number }>();
+    for (const f of flights) {
+      if (f.depIcao) {
+        const c = counts.get(f.depIcao) ?? { departures: 0, arrivals: 0 };
+        c.departures += 1;
+        counts.set(f.depIcao, c);
+      }
+      if (f.arrIcao) {
+        const c = counts.get(f.arrIcao) ?? { departures: 0, arrivals: 0 };
+        c.arrivals += 1;
+        counts.set(f.arrIcao, c);
+      }
+    }
+    // local airport DB, queried in parallel; an unknown ICAO just shows without name/country
+    const entries = [...counts.entries()];
+    const details = await Promise.all(
+      entries.map(([icao]) => invoke<{ airport: Airport } | null>("get_airport", { ident: icao }).catch(() => null)),
+    );
+    const countrySet = new Set<string>();
+    const rows: Visited[] = entries.map(([icao, c], i) => {
+      const a = details[i]?.airport;
+      if (a?.country) countrySet.add(a.country);
+      return { icao, name: a?.name ?? "", country: a?.country ?? "", ...c };
+    });
+    rows.sort((a, b) => b.departures + b.arrivals - (a.departures + a.arrivals));
+    setVisited(rows);
+    setCountries([...countrySet].sort());
+  }, [showDemo]);
+
+  useEffect(() => {
+    refresh();
+    const un = listen("logbook:changed", refresh);
+    return () => {
+      un.then((u) => u());
+    };
+  }, [refresh]);
+
+  return (
+    <section className="logbook">
+      {error && <ErrorNotice error={error} context="logbook" onRetry={refresh} />}
+      <div className="totals totals-compact">
+        <div className="tile">
+          <div className="tile-label">Besuchte Flughäfen</div>
+          <div className="tile-value num">{visited ? fmt(visited.length) : "–"}</div>
+        </div>
+        <div className="tile">
+          <div className="tile-label">Länder</div>
+          <div className="tile-value num">{visited ? fmt(countries.length) : "–"}</div>
+          <div className="detail">{countries.join(" · ")}</div>
+        </div>
+      </div>
+      <table className="flights">
+        <thead>
+          <tr>
+            <th>ICAO</th>
+            <th>Name</th>
+            <th>Land</th>
+            <th className="num right">Abflüge</th>
+            <th className="num right">Ankünfte</th>
+          </tr>
+        </thead>
+        <tbody>
+          {visited === null && !error && (
+            <tr className="empty-row">
+              <td colSpan={5} className="detail">
+                Aktivitäten werden geladen …
+              </td>
+            </tr>
+          )}
+          {visited?.length === 0 && (
+            <tr className="empty-row">
+              <td colSpan={5} className="detail">
+                Jeder Flughafen, an dem du startest oder landest, erscheint hier.
+              </td>
+            </tr>
+          )}
+          {visited?.map((v) => (
+            <tr key={v.icao} className="static">
+              <td>{v.icao}</td>
+              <td>{v.name || "–"}</td>
+              <td>{v.country || "–"}</td>
+              <td className="num right">{fmt(v.departures)}</td>
+              <td className="num right">{fmt(v.arrivals)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {demoHidden > 0 && (
+        <div className="detail">
+          {demoHidden} Demo-Flug{demoHidden === 1 ? "" : "e"} nicht mitgezählt (Einstellungen → Anzeige → Demo-Flüge einbeziehen).
+        </div>
+      )}
+    </section>
+  );
+}

@@ -1,0 +1,26 @@
+[
+  {
+    "icaoId": "EDDF", "receiptTime": "2026-10-17T12:23:12.000Z", "obsTime": 1792239000,
+    "reportTime": "2026-10-17T12:20:00.000Z", "temp": 14, "dewp": 6, "wdir": 250, "wspd": 12, "wgst": 22,
+    "visib": "6+", "altim": 1013, "slp": null, "qcField": 16, "wxString": null, "presTime": null,
+    "metarType": "METAR", "rawOb": "EDDF 171220Z 25012G22KT 9999 FEW035 BKN045 14/06 Q1013 NOSIG",
+    "lat": 50.033, "lon": 8.571, "elev": 111, "name": "Frankfurt/Main Intl, HE, DE",
+    "cover": "BKN", "clouds": [{"cover": "FEW", "base": 3500}, {"cover": "BKN", "base": 4500}], "fltCat": "VFR"
+  },
+  {
+    "icaoId": "EGLL", "receiptTime": "2026-10-17T12:23:12.000Z", "obsTime": 1792239000,
+    "reportTime": "2026-10-17T12:20:00.000Z", "temp": 11, "dewp": 10, "wdir": 230, "wspd": 18, "wgst": null,
+    "visib": 2.49, "altim": 1004, "slp": null, "qcField": 4, "wxString": "-RA BR", "presTime": null,
+    "metarType": "METAR", "rawOb": "EGLL 171220Z AUTO 23018KT 4000 -RA BR BKN008 OVC012 11/10 Q1004 TEMPO 2500 RADZ BKN005",
+    "lat": 51.477, "lon": -0.461, "elev": 25, "name": "London/Heathrow Intl, EN, GB",
+    "cover": "OVC", "clouds": [{"cover": "BKN", "base": 800}, {"cover": "OVC", "base": 1200}], "fltCat": "IFR"
+  },
+  {
+    "icaoId": "KJFK", "receiptTime": "2026-10-17T12:56:12.000Z", "obsTime": 1792241460,
+    "reportTime": "2026-10-17T13:00:00.000Z", "temp": 8.3, "dewp": 7.2, "wdir": "VRB", "wspd": 3, "wgst": null,
+    "visib": 0.5, "altim": 1017.3, "slp": 1017.2, "qcField": 4, "wxString": "FG", "presTime": null,
+    "metarType": "METAR", "rawOb": "KJFK 171251Z VRB03KT 1/2SM R04R/2400VP6000FT FG VV002 08/07 A3004 RMK AO2 SLP172 T00830072",
+    "lat": 40.639, "lon": -73.762, "elev": 4, "name": "New York/JF Kennedy Intl, NY, US",
+    "cover": "OVX", "clouds": [{"cover": "OVX", "base": 200}], "fltCat": "LIFR"
+  }
+]

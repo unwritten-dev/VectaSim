@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<title>VectaSim</title><rect x="100" y="100" width="824" height="824" rx="185" fill="#0f1318"/>
+  <rect x="101.5" y="101.5" width="821" height="821" rx="183.5" fill="none" stroke="#c8dcff" stroke-opacity="0.12" stroke-width="3"/>
+  <g transform="translate(182 182) scale(10.3125)"><defs><mask id="vs-ai" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64"><rect width="64" height="64" fill="#fff"/><circle cx="47" cy="43" r="7.4" fill="#000"/></mask></defs>
+  <g mask="url(#vs-ai)">
+    <path d="M4 13.5 H14 C26 13.5 30 41 47 41" fill="none" stroke="#5ab8f0" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="2" y="48.5" width="8" height="5.5" rx="1.2" fill="#e7ebf0"/>
+    <rect x="14" y="48.5" width="48" height="5.5" rx="1.2" fill="#e7ebf0"/>
+  </g>
+  <circle cx="47" cy="43" r="5.2" fill="#ffd54a"/></g>
+</svg>

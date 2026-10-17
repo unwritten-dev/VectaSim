@@ -1,0 +1,115 @@
+{
+  "general": {
+    "version": 3,
+    "reload": 1,
+    "update": "20261017123015",
+    "update_timestamp": "2026-10-17T12:30:15.1234567Z",
+    "connected_clients": 9,
+    "unique_users": 9
+  },
+  "pilots": [
+    {
+      "cid": 1234567, "name": "Pilot One EDDF", "callsign": "DLH4AB", "server": "GERMANY",
+      "pilot_rating": 1, "military_rating": 0,
+      "latitude": 50.0333, "longitude": 8.5706, "altitude": 364, "groundspeed": 0,
+      "transponder": "1000", "heading": 251, "qnh_i_hg": 29.92, "qnh_mb": 1013,
+      "flight_plan": {
+        "flight_rules": "I", "aircraft": "A20N/M-SDE2E3FGHIJ1RWXY/LB1", "aircraft_faa": "H/A20N/L",
+        "aircraft_short": "A20N", "departure": "EDDF", "arrival": "LEPA", "alternate": "LEIB",
+        "cruise_tas": "450", "altitude": "36000", "deptime": "1245", "enroute_time": "0205",
+        "fuel_time": "0330", "remarks": "PBN/A1B1C1D1 /v/", "route": "ANEKI1L ANEKI Y163 NATOR N850 ABUDO",
+        "revision_id": 2, "assigned_transponder": "1000"
+      },
+      "logon_time": "2026-10-17T11:58:01.0000000Z", "last_updated": "2026-10-17T12:30:14.0000000Z"
+    },
+    {
+      "cid": 1300001, "name": "Pilot Two", "callsign": "BAW117", "server": "UK",
+      "pilot_rating": 3, "military_rating": 0,
+      "latitude": 51.2, "longitude": -10.4, "altitude": 37012, "groundspeed": 487,
+      "transponder": "2000", "heading": 268, "qnh_i_hg": 29.84, "qnh_mb": 1010,
+      "flight_plan": {
+        "flight_rules": "I", "aircraft": "B77W/H-SDE3FGHIJ2J3J4J5M1RWXY/LB1D1", "aircraft_faa": "H/B77W/L",
+        "aircraft_short": "B77W", "departure": "EGLL", "arrival": "KJFK", "alternate": "KBOS",
+        "cruise_tas": "490", "altitude": "37000", "deptime": "1100", "enroute_time": "0740",
+        "fuel_time": "0930", "remarks": "/v/", "route": "CPT3F CPT L9 KENET UL9 STU", "revision_id": 1,
+        "assigned_transponder": "2000"
+      },
+      "logon_time": "2026-10-17T10:41:00.0000000Z", "last_updated": "2026-10-17T12:30:13.0000000Z"
+    },
+    {
+      "cid": 1400002, "name": "Pilot Three", "callsign": "DEABC", "server": "GERMANY",
+      "pilot_rating": 0, "military_rating": 0,
+      "latitude": 50.12, "longitude": 8.71, "altitude": 2480, "groundspeed": 104,
+      "transponder": "7000", "heading": 85, "qnh_i_hg": 29.92, "qnh_mb": 1013,
+      "flight_plan": null,
+      "logon_time": "2026-10-17T12:10:00.0000000Z", "last_updated": "2026-10-17T12:30:12.0000000Z"
+    },
+    {
+      "cid": 1500003, "name": "Pilot Four", "callsign": "QFA1", "server": "AUSTRALIA",
+      "pilot_rating": 1, "military_rating": 0,
+      "latitude": -12.5, "longitude": 179.6, "altitude": 39000, "groundspeed": 502,
+      "transponder": "3412", "heading": 95, "qnh_i_hg": 29.92, "qnh_mb": 1013,
+      "flight_plan": {
+        "flight_rules": "I", "aircraft": "A388/H-SDE", "aircraft_faa": "H/A388/L", "aircraft_short": "A388",
+        "departure": "YSSY", "arrival": "KLAX", "alternate": "KSFO", "cruise_tas": "490", "altitude": "39000",
+        "deptime": "0600", "enroute_time": "1330", "fuel_time": "1500", "remarks": "", "route": "DCT",
+        "revision_id": 0, "assigned_transponder": "0000"
+      },
+      "logon_time": "2026-10-17T05:50:00.0000000Z", "last_updated": "2026-10-17T12:30:10.0000000Z"
+    }
+  ],
+  "controllers": [
+    {
+      "cid": 900001, "name": "Observer", "callsign": "JD_OBS", "frequency": "199.998", "facility": 0,
+      "rating": 1, "server": "GERMANY", "visual_range": 300, "text_atis": null,
+      "last_updated": "2026-10-17T12:30:00.0000000Z", "logon_time": "2026-10-17T12:00:00.0000000Z"
+    },
+    {
+      "cid": 900002, "name": "Tower", "callsign": "EDDF_TWR", "frequency": "119.900", "facility": 4,
+      "rating": 3, "server": "GERMANY", "visual_range": 50,
+      "text_atis": ["Frankfurt Tower", "Charts: chartfox.org"],
+      "last_updated": "2026-10-17T12:30:00.0000000Z", "logon_time": "2026-10-17T11:00:00.0000000Z"
+    },
+    {
+      "cid": 900003, "name": "Approach", "callsign": "EDDF_N_APP", "frequency": "120.805", "facility": 5,
+      "rating": 4, "server": "GERMANY", "visual_range": 150, "text_atis": null,
+      "last_updated": "2026-10-17T12:30:00.0000000Z", "logon_time": "2026-10-17T11:00:00.0000000Z"
+    },
+    {
+      "cid": 900004, "name": "Langen", "callsign": "EDGG_CTR", "frequency": "136.955", "facility": 6,
+      "rating": 5, "server": "GERMANY", "visual_range": 600,
+      "text_atis": ["Langen Radar, EDGG combined"],
+      "last_updated": "2026-10-17T12:30:00.0000000Z", "logon_time": "2026-10-17T10:00:00.0000000Z"
+    },
+    {
+      "cid": 900005, "name": "Not on position", "callsign": "EDDM_GND", "frequency": "199.998", "facility": 3,
+      "rating": 2, "server": "GERMANY", "visual_range": 20, "text_atis": null,
+      "last_updated": "2026-10-17T12:30:00.0000000Z", "logon_time": "2026-10-17T12:20:00.0000000Z"
+    }
+  ],
+  "atis": [
+    {
+      "cid": 900002, "name": "Tower", "callsign": "EDDF_ATIS", "frequency": "118.025", "facility": 4,
+      "rating": 3, "server": "GERMANY", "visual_range": 50, "atis_code": "K",
+      "text_atis": ["FRANKFURT INFORMATION K", "RWY 25C 25L IN USE", "WIND 250 DEG 12 KT", "QNH 1013"],
+      "last_updated": "2026-10-17T12:30:00.0000000Z", "logon_time": "2026-10-17T11:00:00.0000000Z"
+    }
+  ],
+  "servers": [],
+  "prefiles": [
+    {
+      "cid": 1600004, "name": "Prefiler", "callsign": "EWG9KL",
+      "flight_plan": {
+        "flight_rules": "I", "aircraft": "A320/M-SDFGIRWY/S", "aircraft_faa": "A320/L", "aircraft_short": "A320",
+        "departure": "EDDL", "arrival": "LPFR", "alternate": "LPPT", "cruise_tas": "450", "altitude": "37000",
+        "deptime": "1400", "enroute_time": "0255", "fuel_time": "0400", "remarks": "", "route": "DCT",
+        "revision_id": 1, "assigned_transponder": "0000"
+      },
+      "last_updated": "2026-10-17T12:25:00.0000000Z"
+    }
+  ],
+  "facilities": [],
+  "ratings": [],
+  "pilot_ratings": [],
+  "military_ratings": []
+}

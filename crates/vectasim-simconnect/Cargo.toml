@@ -1,0 +1,12 @@
+[package]
+name = "vectasim-simconnect"
+description = "SimConnect provider for MSFS 2020/2024 (and P3D/FSX best effort) via dynamically loaded SimConnect.dll"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+vectasim-core = { path = "../vectasim-core" }
+log = { workspace = true }
+libloading = "0.8"

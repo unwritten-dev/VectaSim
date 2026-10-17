@@ -1,0 +1,52 @@
+# Builds the Windows installer, signs the updater artifact and publishes a draft
+# GitHub release with latest.json – the file the in-app updater polls
+# (tauri.conf.json → plugins.updater.endpoints). Publish the draft to ship it.
+#
+# Trigger: push a tag like v0.2.0 (the tag must match app/src-tauri/tauri.conf.json → version).
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+
+      - run: npm ci
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: app
+          tagName: ${{ github.ref_name }}
+          releaseName: "VectaSim ${{ github.ref_name }}"
+          releaseBody: "Siehe CHANGELOG.md. Der Installer aktualisiert bestehende Installationen; die App findet neue Versionen selbst."
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: true

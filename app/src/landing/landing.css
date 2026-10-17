@@ -1,0 +1,520 @@
+/* Landing debrief (LandingDebrief.tsx). Tokens only, see App.css :root. */
+
+.debrief-overlay {
+  position: fixed;
+  inset: var(--titlebar-h, 0) 0 0; /* the title bar (window controls) stays usable */
+  z-index: 50;
+  background: color-mix(in srgb, var(--bg-sidebar) 80%, transparent);
+  display: flex;
+  justify-content: center;
+  overflow: hidden;
+}
+.debrief {
+  width: min(1320px, 100%);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  box-shadow: var(--shadow-menu);
+}
+.debrief-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-5);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-1);
+  flex: none;
+}
+.debrief-kicker {
+  font-size: var(--fs-micro);
+  letter-spacing: var(--label-ls, 0.06em);
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: 550;
+}
+.debrief-pager {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.debrief-state {
+  padding: var(--sp-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.debrief-body {
+  overflow-y: auto;
+  padding: var(--sp-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+}
+
+.debrief-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--sp-5);
+}
+.debrief-title {
+  margin: 0 0 var(--sp-1);
+  font-size: var(--fs-xl);
+  font-weight: 550;
+  letter-spacing: 0;
+}
+.debrief-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+.debrief-wind {
+  text-align: right;
+  min-width: 220px;
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--surface-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+}
+.debrief-wind-main {
+  font-size: var(--fs-xl);
+  font-weight: 550;
+}
+.debrief-wind-source {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+/* the current METAR only approximates the wind of the landing */
+.debrief-wind-source.is-current {
+  color: var(--warn);
+}
+
+/* key sentence + three hero values (no boxes: air and one hairline) */
+.debrief-sentence {
+  margin: 0;
+  font-size: var(--fs-xl);
+  font-weight: 550;
+  letter-spacing: -0.015em;
+  line-height: 1.3;
+  max-width: 60ch;
+}
+.hero-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--sp-6);
+  padding-bottom: var(--sp-4);
+  border-bottom: 1px solid var(--hairline);
+}
+.hero {
+  min-width: 0;
+}
+.hero-label {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+.hero-value {
+  font-size: 30px;
+  font-weight: 500;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  margin-top: var(--sp-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hero-xl .hero-value {
+  font-size: var(--num-xl);
+  font-weight: 450;
+  line-height: 1;
+  letter-spacing: -0.03em;
+}
+.hero-value .unit {
+  font-family: var(--font-sans);
+  font-size: var(--fs-lg);
+  font-weight: 450;
+  letter-spacing: 0;
+  color: var(--text-muted);
+  margin-left: 4px;
+}
+.hero-band {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: var(--fs-md);
+}
+.band-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+.hero-sub {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  margin-top: 4px;
+  line-height: 1.4;
+}
+.fact-row {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: var(--sp-3) var(--sp-6);
+  margin-top: calc(-1 * var(--sp-2));
+}
+.fact-value {
+  font-family: var(--font-num);
+  font-size: var(--num-md);
+  font-weight: 500;
+}
+.fact.warn .fact-value {
+  color: var(--warn);
+}
+.fact-label {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+/* the score: small, below the raw values, never the headline */
+.index-line {
+  margin-left: auto;
+  font-size: var(--fs-sm);
+  align-self: flex-end;
+}
+.index-line strong {
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+.debrief-fold .panel-title {
+  font-size: var(--fs-md);
+}
+.method-sub {
+  margin: 4px 0 0;
+  padding-left: var(--sp-4);
+}
+.index-parts {
+  margin-top: 4px;
+  color: var(--text);
+}
+
+.debrief-section h3 {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.debrief-section > p {
+  margin: 0 0 var(--sp-2);
+}
+.debrief-cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: var(--sp-5);
+}
+
+@media (max-width: 1100px) {
+  .hero-row {
+    gap: var(--sp-5);
+  }
+  .debrief-cols {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* runway diagram */
+.rd {
+  background: var(--surface-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.rd svg {
+  display: block;
+  background: var(--surface-1);
+}
+.rd-runway {
+  fill: var(--surface-3);
+  stroke: var(--text-faint);
+  stroke-width: 1;
+}
+.rd-marking {
+  fill: var(--text);
+  opacity: 0.85;
+}
+.rd-centre {
+  stroke: var(--text);
+  stroke-width: 1.5;
+  stroke-dasharray: 12 9;
+  opacity: 0.8;
+}
+.rd-ext-centre {
+  stroke: var(--text-faint);
+  stroke-width: 1;
+  stroke-dasharray: 3 5;
+}
+.rd-designator {
+  fill: var(--text);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+/* TDZ: ok at 10 % with a 1-px edge at 40 % (01 §4.3) */
+.rd-tdz {
+  fill: color-mix(in srgb, var(--ok) 10%, transparent);
+  stroke: color-mix(in srgb, var(--ok) 40%, transparent);
+  stroke-width: 1;
+}
+.rd-tdz-label {
+  fill: var(--ok);
+}
+.rd-label {
+  fill: var(--text-muted);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+.rd-tick {
+  stroke: var(--text-muted);
+  stroke-width: 1;
+}
+.rd-track-air {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+.rd-track-ground {
+  fill: none;
+  stroke: var(--own-aircraft);
+  stroke-width: 2;
+  stroke-dasharray: 5 3;
+}
+.rd-offset {
+  stroke: var(--text);
+  stroke-width: 1;
+  stroke-dasharray: 2 2;
+}
+.rd-td {
+  stroke: var(--bg-sidebar);
+  stroke-width: 2;
+}
+.rd-td-label {
+  fill: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  paint-order: stroke;
+  stroke: var(--bg-sidebar);
+  stroke-width: 3px;
+}
+.rd-bounce {
+  fill: var(--warn);
+  stroke: var(--bg-sidebar);
+  stroke-width: 1.5;
+}
+.rd-rollout {
+  fill: var(--text-muted);
+  stroke: var(--bg-sidebar);
+  stroke-width: 1.5;
+}
+.rd-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-4);
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  border-top: 1px solid var(--border-subtle);
+}
+.rd-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.rd-scale {
+  margin-left: auto;
+}
+.lg-line {
+  display: inline-block;
+  width: 18px;
+  height: 0;
+  border-top: 2px solid var(--accent);
+}
+.lg-ground {
+  border-top: 2px dashed var(--own-aircraft);
+}
+.lg-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.lg-bounce {
+  background: var(--warn);
+}
+.lg-square {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  background: var(--text-muted);
+}
+.lg-box {
+  display: inline-block;
+  width: 14px;
+  height: 9px;
+  background: var(--ok-soft);
+  border: 1px dashed var(--ok);
+}
+
+/* approach chart */
+.ac {
+  background: var(--surface-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+  padding-top: var(--sp-2);
+  overflow: hidden;
+}
+.ac svg {
+  display: block;
+}
+.ac.empty {
+  padding: var(--sp-4);
+}
+.ac-band {
+  fill: color-mix(in srgb, var(--text) 7%, transparent);
+  stroke: none;
+}
+.ac-refline {
+  fill: none;
+  stroke: var(--text);
+  stroke-width: 1;
+  stroke-dasharray: 6 4;
+  opacity: 0.7;
+}
+.ac-ref {
+  color: var(--text);
+}
+.ac-marker {
+  stroke: var(--text-muted);
+  stroke-width: 1;
+}
+.ac-gate {
+  stroke: var(--accent);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  opacity: 0.7;
+}
+
+/* stabilised approach */
+.sa-table {
+  width: 100%;
+}
+.sa-cell {
+  white-space: nowrap;
+}
+.sa-icon {
+  display: inline-block;
+  width: 1.4em;
+  font-weight: 700;
+}
+.sa-pass .sa-icon {
+  color: var(--ok);
+}
+.sa-fail {
+  color: var(--warn);
+}
+.sa-fail .sa-icon {
+  color: var(--err);
+}
+.sa-unavailable {
+  color: var(--text-muted);
+}
+.sa-note {
+  margin: var(--sp-2) 0 0;
+}
+
+/* hints */
+.hints {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.hint {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: baseline;
+  padding: 6px var(--sp-3);
+  background: var(--surface-1);
+  border-left: 3px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-base);
+  font-variant-numeric: tabular-nums;
+}
+.hint-icon {
+  flex: none;
+  width: 1.2em;
+  text-align: center;
+  font-weight: 700;
+}
+.hint-ok {
+  border-left-color: var(--ok);
+}
+.hint-ok .hint-icon {
+  color: var(--ok);
+}
+.hint-warn {
+  border-left-color: var(--warn);
+}
+.hint-warn .hint-icon {
+  color: var(--warn);
+}
+.hint-info .hint-icon {
+  color: var(--accent);
+}
+
+.method {
+  margin: 0;
+  padding-left: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+.method strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* logbook: summary card of the last landing */
+.landing-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+  padding: var(--sp-3);
+  background: var(--surface-2);
+  border-radius: var(--r-md);
+  border-left: 3px solid var(--border-strong);
+  margin-bottom: var(--sp-3);
+}
+.landing-summary-title {
+  font-weight: 600;
+}
+.landing-summary .facts {
+  display: flex;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+  font-size: var(--fs-sm);
+}
