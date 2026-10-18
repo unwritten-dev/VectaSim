@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PHOTO_HIT_TTL_MS, PHOTO_MISS_TTL_MS, airframeName, matchesAirframe, needsPhotoLookup, normalizeRegistration, photoCredit, pickerOptions } from "./airframe";
+import { PHOTO_HIT_TTL_MS, PHOTO_MISS_TTL_MS, airframeName, matchesAirframe, needsPhotoLookup, normalizeRegistration, parseVapp, photoCredit, pickerOptions } from "./airframe";
 
 const base = { registration: "D-AINA", customName: null, title: null, airline: null, icaoType: null };
 
@@ -58,5 +58,19 @@ describe("picker", () => {
     expect(pickerOptions(all, "a2").newReg).toBeNull();
     expect(pickerOptions(all, "").matches).toHaveLength(3);
     expect(pickerOptions(all, "", 2).matches).toHaveLength(2);
+  });
+});
+
+describe("parseVapp", () => {
+  it("empty means the flown value, numbers are rounded knots", () => {
+    expect(parseVapp("")).toBeNull();
+    expect(parseVapp("  ")).toBeNull();
+    expect(parseVapp("138")).toBe(138);
+    expect(parseVapp("137,6")).toBe(138);
+  });
+  it("refuses implausible values", () => {
+    expect(parseVapp("12")).toBeUndefined();
+    expect(parseVapp("400")).toBeUndefined();
+    expect(parseVapp("abc")).toBeUndefined();
   });
 });

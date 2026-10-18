@@ -8,5 +8,11 @@ authors.workspace = true
 
 [dependencies]
 vectasim-core = { path = "../vectasim-core" }
+vectasim-dump = { path = "../vectasim-dump" }
 log = { workspace = true }
 libloading = "0.8"
+serde_json = { workspace = true }
+zstd = "0.13"
+
+[dev-dependencies]
+tempfile = "3"

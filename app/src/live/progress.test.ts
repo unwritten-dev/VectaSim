@@ -86,3 +86,17 @@ describe("matchRunway", () => {
     expect(matchRunway({ ...mid, headingTrueDeg: 249 }, [{ leIdent: "x", heIdent: "y" }])).toBeNull();
   });
 });
+
+import { normalizeTab } from "./LiveView";
+
+describe("normalizeTab", () => {
+  it("maps the old five tab ids onto Flug/Dispatch", () => {
+    expect(normalizeTab("flight")).toBe("flight");
+    expect(normalizeTab("systems")).toBe("flight");
+    expect(normalizeTab("events")).toBe("flight");
+    expect(normalizeTab("plan")).toBe("dispatch");
+    expect(normalizeTab("online")).toBe("dispatch");
+    expect(normalizeTab("dispatch")).toBe("dispatch");
+    expect(normalizeTab("garbage")).toBe("flight");
+  });
+});

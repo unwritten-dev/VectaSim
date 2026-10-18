@@ -8,6 +8,7 @@ import {
   deltaMinutes,
   fmt,
   fmtAltitude,
+  TRANSITION_ALTITUDE_FT,
   fmtClock,
   fmtCoord,
   fmtDate,
@@ -17,7 +18,22 @@ import {
   fmtDuration,
   fmtNum,
   fmtSigned,
+  fmtWeight,
+  fmtWeightNum,
+  getWeightUnit,
+  isWeightUnit,
   setTimeLocal,
+  setWeightUnit,
+  weightIn,
+  isPrivacyMode,
+  maskAirline,
+  maskCallsign,
+  maskPath,
+  maskRegistration,
+  maskSimbriefId,
+  maskTitle,
+  privacy,
+  setPrivacyMode,
 } from "./format";
 
 /** Write expectations with plain spaces / "-"; compare against the typographic output. */
@@ -26,7 +42,65 @@ const S = 1000;
 const MIN = 60 * S;
 const H = 60 * MIN;
 
-afterEach(() => setTimeLocal(false));
+afterEach(() => {
+  setTimeLocal(false);
+  setWeightUnit("kg");
+  setPrivacyMode(false);
+});
+
+describe("Streamer-Modus masking", () => {
+  it("keeps the first segment of a registration", () => {
+    expect(maskRegistration("D-AINA")).toBe("D-••••");
+    expect(maskRegistration("OE-LBX")).toBe("OE-••••");
+    expect(maskRegistration("N123AB")).toBe("N••••");
+    expect(maskRegistration(" HB-JNA ")).toBe("HB-••••");
+    expect(maskRegistration("")).toBe("");
+    expect(maskRegistration(null)).toBe("");
+  });
+
+  it("hides callsigns, airlines and the SimBrief ID completely", () => {
+    expect(maskCallsign("DLH4AB")).toBe("•••••");
+    expect(maskCallsign("Lufthansa 123")).toBe("•••••");
+    expect(maskCallsign("  ")).toBe("");
+    expect(maskAirline("Lufthansa")).toBe("•••");
+    expect(maskSimbriefId("123456")).toBe("••••");
+    expect(maskSimbriefId(undefined)).toBe("");
+  });
+
+  it("replaces the user folder in paths", () => {
+    expect(maskPath("C:\\Users\\Max\\AppData\\Local\\io.vectasim.app\\logs\\vectasim.log")).toBe("%LOCALAPPDATA%\\io.vectasim.app\\logs\\vectasim.log");
+    expect(maskPath("C:\\Users\\Max Mustermann\\AppData\\Roaming\\io.vectasim.app\\vectasim.db")).toBe("%APPDATA%\\io.vectasim.app\\vectasim.db");
+    expect(maskPath("c:\\users\\max\\Pictures\\VectaSim")).toBe("%USERPROFILE%\\Pictures\\VectaSim");
+    expect(maskPath("C:\\Users\\Max\\AppData\\LocalLow\\x")).toBe("%USERPROFILE%\\AppData\\LocalLow\\x");
+    expect(maskPath("D:/Users/Jörg/AppData/Local/x")).toBe("%LOCALAPPDATA%/x");
+    expect(maskPath('open "C:\\\\Users\\\\Max\\\\AppData\\\\Local\\\\x.vsdump": denied')).toBe('open "%LOCALAPPDATA%\\\\x.vsdump": denied');
+    expect(maskPath("SimConnect nicht gefunden: C:\\Users\\a\\x.dll; C:\\MSFS SDK\\SimConnect.dll")).toBe("SimConnect nicht gefunden: %USERPROFILE%\\x.dll; C:\\MSFS SDK\\SimConnect.dll");
+    for (const s of ["C:\\MSFS SDK\\SimConnect.dll", "C:\\Program Files\\VectaSim", "C:\\Users\\", "abc:\\Users\\x", ""]) expect(maskPath(s)).toBe(s);
+  });
+
+  it("masks known values inside an aircraft title", () => {
+    const known = { registration: "D-AINA", airline: "Lufthansa", callsign: "DLH4AB" };
+    expect(maskTitle("FBW A320neo Lufthansa (d-aina)", known, true)).toBe("FBW A320neo ••• (D-••••)");
+    expect(maskTitle("A320neo · DLH4AB", known, true)).toBe("A320neo · •••••");
+    expect(maskTitle("FBW A320neo Lufthansa", known, false)).toBe("FBW A320neo Lufthansa");
+    expect(maskTitle("Cessna 172", { registration: "N", airline: "" }, true)).toBe("Cessna 172");
+    expect(maskTitle("a+b (x)", { airline: "+b (" }, true)).toBe("a•••x)");
+  });
+
+  it("privacy() masks only while the mode is on", () => {
+    expect(isPrivacyMode()).toBe(false);
+    expect(privacy("D-AINA", "registration")).toBe("D-AINA");
+    expect(privacy("D-AINA", "registration", true)).toBe("D-••••");
+    setPrivacyMode(true);
+    expect(privacy("D-AINA", "registration")).toBe("D-••••");
+    expect(privacy("DLH4AB", "callsign")).toBe("•••••");
+    expect(privacy("Lufthansa", "airline")).toBe("•••");
+    expect(privacy("123456", "simbrief")).toBe("••••");
+    expect(privacy("C:\\Users\\Max\\Desktop", "path")).toBe("%USERPROFILE%\\Desktop");
+    expect(privacy(null, "callsign")).toBe("");
+    expect(privacy("D-AINA", "registration", false)).toBe("D-AINA");
+  });
+});
 
 describe("fmtDuration", () => {
   it("never renders m:ss", () => {
@@ -92,9 +166,13 @@ describe("numbers", () => {
     expect(fmtSigned(-112, 0, "fpm")).toBe(t("-112 fpm"));
     expect(fmtSigned(0, 0, "fpm")).toBe(t("±0 fpm"));
   });
-  it("altitude as FL from 18 000 ft", () => {
+  it("altitude as FL above the transition altitude (5 000 ft)", () => {
+    expect(TRANSITION_ALTITUDE_FT).toBe(5000);
     expect(fmtAltitude(35000)).toBe("FL350");
+    expect(fmtAltitude(12000)).toBe("FL120");
+    expect(fmtAltitude(5000)).toBe(t("5 000 ft"));
     expect(fmtAltitude(4500)).toBe(t("4 500 ft"));
+    expect(fmtAltitude(12000, 18000)).toBe(t("12 000 ft"));
   });
   it("coordinates with hemisphere", () => {
     expect(fmtCoord(50.0333, 8.5706)).toBe("50,033° N 8,571° E");
@@ -155,5 +233,32 @@ describe("clock and date", () => {
     expect(fmtClock(null)).toBe("–");
     expect(fmtClock(0)).toBe("–");
     expect(fmtDate(undefined)).toBe("–");
+  });
+});
+
+describe("weights (kg / lb)", () => {
+  it("kg by default", () => {
+    expect(getWeightUnit()).toBe("kg");
+    expect(fmtWeight(61959)).toBe(t("61 959 kg"));
+    expect(fmtWeightNum(61959.4)).toBe(t("61 959"));
+    expect(fmtWeight(null)).toBe("–");
+  });
+  it("lb converts from kg (1 lb = 0.45359237 kg)", () => {
+    setWeightUnit("lb");
+    expect(weightIn(0.45359237)).toBeCloseTo(1, 9);
+    expect(fmtWeight(1000)).toBe(t("2 205 lb"));
+    expect(fmtWeightNum(78000)).toBe(t("171 961"));
+    expect(fmtDeltaKg(4200, 5434)).toBe(t("-2 721 lb"));
+    expect(fmtDeltaKg(5400.1, 5400)).toBe(t("±0 lb"));
+  });
+  it("explicit unit wins over the setting", () => {
+    setWeightUnit("lb");
+    expect(fmtWeight(1000, "kg")).toBe(t("1 000 kg"));
+  });
+  it("accepts only kg and lb", () => {
+    expect(isWeightUnit("kg")).toBe(true);
+    expect(isWeightUnit("lb")).toBe(true);
+    expect(isWeightUnit("lbs")).toBe(false);
+    expect(isWeightUnit(undefined)).toBe(false);
   });
 });

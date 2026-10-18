@@ -1,0 +1,167 @@
+/*
+ * Accessibility, window and state (accessibility pass). Imported by App.tsx after
+ * App.css and flows.css; App.css stays untouched. Every rule is at least as specific as the one
+ * it refines, so the import order is only a tie-breaker. Tokens only, see App.css :root.
+ */
+
+/* ---- views kept mounted (4.17) -------------------------------------------------------- */
+
+/* The live view and the logbook stay mounted while another view is shown; `hidden` must win
+   over their own display (grid/flex). MapLibre measures 0 × 0 meanwhile and resizes when the
+   view comes back (LiveView dispatches a resize). */
+section.live[hidden],
+section.logbook-view[hidden] {
+  display: none !important;
+}
+
+/* the content area takes focus after Ctrl+1/2/3 and when the debrief closes; no ring for that */
+main.layout:focus,
+main.layout:focus-visible {
+  outline: none;
+}
+
+/* ---- debrief as a modal (4.13) -------------------------------------------------------- */
+
+/* the background does not scroll while the debrief is open (.shell-body is inert) */
+body.modal-open {
+  overflow: hidden;
+}
+.debrief-overlay,
+.debrief-overlay .debrief-body {
+  overscroll-behavior: contain;
+}
+.debrief-bands {
+  margin: calc(-1 * var(--sp-1)) 0 0;
+}
+
+/* ---- toasts (4.14) -------------------------------------------------------------------- */
+
+/* The viewport stays in the layout when empty (it holds no live region any more, the
+   announcer does; an empty fixed box with pointer-events: none is invisible and inert).
+   Above the debrief (50), below popovers (60). */
+div.toast-viewport,
+div.toast-viewport:empty {
+  display: flex;
+}
+div.toast-viewport {
+  z-index: 55;
+}
+div.toast-viewport .toast:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---- window from 1024 × 640 (4.16) ---------------------------------------------------- */
+
+/* Below 1100 px the side panel and the logbook list give up a little width, so map and
+   detail keep a usable size at the new minimum window (1024 px: 968 px content). */
+@media (max-width: 1099px) {
+  .live .side-panel {
+    width: 320px;
+  }
+  .logbook-view .master-detail {
+    grid-template-columns: minmax(340px, 40%) minmax(0, 1fr);
+  }
+}
+/* low windows (1080p at 150 % leaves ~690 px): less padding above the content */
+@media (max-height: 699px) {
+  main.layout:not(.layout-live) {
+    padding-top: var(--sp-2);
+    gap: var(--sp-2);
+  }
+}
+
+/* ---- scatter plots: hit areas, table alternative (4.19) ------------------------------- */
+
+/* invisible 24 px target around the small marks (they stay 7–13 px) */
+.dp-pt .dp-hit {
+  fill: transparent;
+  stroke: none;
+  pointer-events: all;
+}
+.dp-pt:focus {
+  outline: none;
+}
+
+details.dp-table {
+  margin-top: var(--sp-2);
+}
+details.dp-table > summary {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+details.dp-table > summary:hover {
+  color: var(--text);
+}
+.dp-table-scroll {
+  overflow-x: auto;
+  margin-top: var(--sp-2);
+}
+table.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+table.data-table th,
+table.data-table td {
+  padding: 4px var(--sp-2);
+  border-bottom: 1px solid var(--hairline);
+  text-align: left;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+table.data-table thead th {
+  color: var(--text-muted);
+  font-weight: var(--fw-text);
+}
+table.data-table .num-col {
+  text-align: right;
+}
+table.data-table .band-swatch {
+  vertical-align: -1px;
+}
+
+/* ---- settings: zoom, keyboard (4.16, 4.19) -------------------------------------------- */
+
+.zoom-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.zoom-control .btn-sm {
+  min-width: 28px;
+}
+.zoom-value {
+  min-width: 4.5em;
+  text-align: center;
+}
+
+table.shortcut-table {
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+table.shortcut-table th,
+table.shortcut-table td {
+  padding: 4px var(--sp-3) 4px 0;
+  border-bottom: 1px solid var(--hairline);
+  text-align: left;
+  vertical-align: top;
+  font-weight: var(--fw-text);
+}
+table.shortcut-table th {
+  white-space: nowrap;
+}
+table.shortcut-table kbd {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text);
+}

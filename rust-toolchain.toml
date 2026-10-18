@@ -1,0 +1,7 @@
+# Pinned so local builds, CI and the release workflow use the same compiler (edition 2024,
+# let-chains, `is_none_or`, `as_chunks` need >= 1.88). Bump deliberately, together with a
+# clippy run: `rustup update` alone does not change what this repository builds with.
+[toolchain]
+channel = "1.99.1"
+components = ["clippy", "rustfmt"]
+profile = "minimal"

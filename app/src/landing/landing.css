@@ -30,10 +30,10 @@
 }
 .debrief-kicker {
   font-size: var(--fs-micro);
-  letter-spacing: var(--label-ls, 0.06em);
-  text-transform: uppercase;
+  letter-spacing: var(--label-ls);
+  text-transform: var(--label-case);
   color: var(--text-muted);
-  font-weight: 550;
+  font-weight: var(--fw-strong);
 }
 .debrief-pager {
   display: inline-flex;
@@ -63,7 +63,7 @@
 .debrief-title {
   margin: 0 0 var(--sp-1);
   font-size: var(--fs-xl);
-  font-weight: 550;
+  font-weight: var(--fw-strong);
   letter-spacing: 0;
 }
 .debrief-badges {
@@ -82,7 +82,7 @@
 }
 .debrief-wind-main {
   font-size: var(--fs-xl);
-  font-weight: 550;
+  font-weight: var(--fw-strong);
 }
 .debrief-wind-source {
   font-size: var(--fs-xs);
@@ -97,7 +97,7 @@
 .debrief-sentence {
   margin: 0;
   font-size: var(--fs-xl);
-  font-weight: 550;
+  font-weight: var(--fw-strong);
   letter-spacing: -0.015em;
   line-height: 1.3;
   max-width: 60ch;
@@ -121,8 +121,8 @@
   white-space: nowrap;
 }
 .hero-value {
-  font-size: 30px;
-  font-weight: 500;
+  font-size: var(--num-hero);
+  font-weight: var(--fw-strong);
   line-height: 1.15;
   letter-spacing: -0.02em;
   margin-top: var(--sp-1);
@@ -132,14 +132,14 @@
 }
 .hero-xl .hero-value {
   font-size: var(--num-xl);
-  font-weight: 450;
+  font-weight: var(--fw-text);
   line-height: 1;
   letter-spacing: -0.03em;
 }
 .hero-value .unit {
   font-family: var(--font-sans);
   font-size: var(--fs-lg);
-  font-weight: 450;
+  font-weight: var(--fw-text);
   letter-spacing: 0;
   color: var(--text-muted);
   margin-left: 4px;
@@ -173,7 +173,7 @@
 .fact-value {
   font-family: var(--font-num);
   font-size: var(--num-md);
-  font-weight: 500;
+  font-weight: var(--fw-strong);
 }
 .fact.warn .fact-value {
   color: var(--warn);
@@ -190,7 +190,7 @@
 }
 .index-line strong {
   font-size: var(--fs-md);
-  font-weight: 600;
+  font-weight: var(--fw-strong);
 }
 .debrief-fold .panel-title {
   font-size: var(--fs-md);
@@ -207,9 +207,9 @@
 .debrief-section h3 {
   margin: 0 0 var(--sp-2);
   font-size: var(--fs-xs);
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-weight: var(--fw-title);
+  letter-spacing: var(--label-ls);
+  text-transform: var(--label-case);
   color: var(--text-muted);
 }
 .debrief-section > p {
@@ -263,8 +263,14 @@
 }
 .rd-designator {
   fill: var(--text);
-  font-weight: 700;
+  font-family: var(--font-num);
+  font-weight: var(--fw-title);
   font-variant-numeric: tabular-nums;
+  /* halo: stays readable where the track crosses it */
+  paint-order: stroke;
+  stroke: var(--surface-3);
+  stroke-width: 4px;
+  stroke-linejoin: round;
 }
 /* TDZ: ok at 10 % with a 1-px edge at 40 % */
 .rd-tdz {
@@ -308,7 +314,7 @@
 .rd-td-label {
   fill: var(--text);
   font-size: var(--fs-sm);
-  font-weight: 600;
+  font-weight: var(--fw-strong);
   font-variant-numeric: tabular-nums;
   paint-order: stroke;
   stroke: var(--bg-sidebar);
@@ -372,6 +378,15 @@
   background: var(--ok-soft);
   border: 1px dashed var(--ok);
 }
+/* aiming-point marking: two bars like on the runway */
+.lg-aim {
+  display: inline-block;
+  width: 10px;
+  height: 9px;
+  border-top: 3px solid var(--text);
+  border-bottom: 3px solid var(--text);
+  opacity: 0.85;
+}
 
 /* approach chart */
 .ac {
@@ -422,7 +437,7 @@
 .sa-icon {
   display: inline-block;
   width: 1.4em;
-  font-weight: 700;
+  font-weight: var(--fw-title);
 }
 .sa-pass .sa-icon {
   color: var(--ok);
@@ -464,7 +479,7 @@
   flex: none;
   width: 1.2em;
   text-align: center;
-  font-weight: 700;
+  font-weight: var(--fw-title);
 }
 .hint-ok {
   border-left-color: var(--ok);
@@ -494,7 +509,7 @@
 }
 .method strong {
   color: var(--text);
-  font-weight: 600;
+  font-weight: var(--fw-strong);
 }
 
 /* logbook: summary card of the last landing */
@@ -510,11 +525,409 @@
   margin-bottom: var(--sp-3);
 }
 .landing-summary-title {
-  font-weight: 600;
+  font-weight: var(--fw-title);
 }
 .landing-summary .facts {
   display: flex;
   gap: var(--sp-4);
   flex-wrap: wrap;
   font-size: var(--fs-sm);
+}
+
+/* debrief head: Touchdown Card export (save / copy) */
+.debrief-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+
+/* approach section (approach_analysis) */
+.approach-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-3);
+}
+.approach-sentence {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-strong);
+  line-height: 1.35;
+  max-width: 64ch;
+}
+.approach-badges {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.approach-band {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-strong);
+  white-space: nowrap;
+}
+.approach-band.muted {
+  color: var(--text-muted);
+  font-weight: var(--fw-strong);
+}
+.approach-band.ga {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.approach-heroes {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.approach-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px var(--sp-4);
+  margin: var(--sp-3) 0 0;
+  font-size: var(--fs-sm);
+}
+.approach-facts dt {
+  color: var(--text-muted);
+}
+.approach-facts dd {
+  margin: 0;
+}
+.approach-lowest {
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--hairline);
+}
+.approach-exceedances {
+  width: 100%;
+  margin-top: var(--sp-3);
+}
+.approach-exceedances .ex-s2 td:nth-child(2) {
+  color: var(--err);
+  font-weight: var(--fw-strong);
+}
+.approach-exceedances .ex-s1 td:nth-child(2) {
+  color: var(--warn);
+  font-weight: var(--fw-strong);
+}
+.approach-none,
+.approach-error {
+  margin: var(--sp-3) 0 0;
+}
+.approach-picker button {
+  white-space: nowrap;
+}
+
+/* approach gate table */
+.sa-approach th {
+  vertical-align: top;
+}
+.sa-approach .sa-cell {
+  vertical-align: top;
+}
+.sa-sub {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  font-weight: var(--fw-text);
+  white-space: nowrap;
+}
+.sa-approach .sa-sub {
+  padding-left: 1.4em;
+}
+.sa-approach th .sa-sub {
+  padding-left: 0;
+}
+.sa-na {
+  color: var(--text-muted);
+}
+.sa-value {
+  color: var(--text);
+}
+.sa-unreached {
+  vertical-align: middle !important;
+  text-align: center;
+}
+.sa-outside td {
+  border-top: 1px solid var(--hairline);
+}
+
+/* long approach profile: range switch, configuration ticks, lateral strip */
+.ac-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 var(--sp-3) var(--sp-1);
+}
+.ac-cfg {
+  fill: var(--text-muted);
+}
+.ac-lateral {
+  display: block;
+  border-top: 1px solid var(--border-subtle);
+}
+.ac-lat-bg {
+  fill: none;
+}
+.ac-lat-runway {
+  fill: var(--surface-3);
+  stroke: var(--text-faint);
+  stroke-width: 1;
+}
+.ac-note {
+  margin: 0;
+  padding: var(--sp-4);
+}
+
+/* shared replay cursor + 2D playback (replayStore.ts, ReplayBar.tsx) */
+.replay-hit {
+  cursor: crosshair;
+}
+.rd-cursor {
+  fill: var(--accent);
+  stroke: var(--surface-1);
+  stroke-width: 2;
+}
+.replay-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-4);
+  align-items: flex-start;
+  margin-top: var(--sp-2);
+}
+.replay {
+  flex: 1 1 420px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.replay-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.replay-play {
+  min-width: 2.6em;
+}
+.replay-slider {
+  flex: 1 1 160px;
+  min-width: 120px;
+  accent-color: var(--accent);
+}
+.replay-time {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+  min-width: 6.5em;
+  text-align: right;
+}
+.replay-marks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.replay-mark.active {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+.replay-values {
+  flex: 0 1 340px;
+  min-width: 260px;
+  background: var(--surface-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+  padding: var(--sp-2) var(--sp-3);
+}
+.replay-values dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px var(--sp-3);
+  margin: 0;
+}
+.replay-values dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+.replay-values dt {
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+}
+.replay-values dd {
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.replay-values p {
+  margin: 0;
+}
+.replay-source {
+  margin-top: var(--sp-1) !important;
+  font-size: var(--fs-xs);
+}
+.sa-table .sa-cursor {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.sa-table th.sa-cursor {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+/* cursor on the track map (map/TrackMap.tsx) */
+.track-cursor {
+  pointer-events: none;
+}
+.track-cursor-ring {
+  fill: color-mix(in srgb, var(--bg) 70%, transparent);
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+.track-cursor-arrow {
+  fill: var(--accent);
+}
+.track-cursor.no-heading .track-cursor-arrow {
+  display: none;
+}
+
+/* ---- runway geometry source (R2): note under the title, runway editor ---- */
+.debrief-rwy-source {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-3);
+  margin: 2px 0 4px;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+.debrief-rwy-source > span::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  vertical-align: 1px;
+  background: var(--text-faint);
+}
+.debrief-rwy-source.src-derived > span::before,
+.debrief-rwy-source.src-databaseDerived > span::before {
+  background: none;
+  border: 1.5px solid var(--warn);
+}
+.debrief-rwy-source.src-user > span::before {
+  background: var(--accent);
+}
+.fact.fact-na .fact-value {
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: var(--fs-md);
+}
+
+.rwe-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: var(--sp-6) var(--sp-4);
+  overflow: auto;
+  background: color-mix(in srgb, var(--bg-sidebar) 60%, transparent);
+}
+.rwe {
+  width: min(640px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-5, 20px);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-menu);
+}
+.rwe-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+.rwe-head h3 {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-title);
+}
+.rwe-intro {
+  margin: 0;
+  line-height: 1.45;
+}
+.rwe-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-3);
+}
+.rwe-ident {
+  grid-column: 1 / -1;
+  max-width: 10em;
+}
+.rwe-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.rwe-pair legend {
+  padding: 0;
+  margin-bottom: 3px;
+}
+.rwe-check,
+.rwe-note,
+.rwe-error,
+.rwe-actions {
+  grid-column: 1 / -1;
+}
+.rwe-error {
+  color: var(--err);
+  font-size: var(--fs-sm);
+}
+.rwe-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.rwe-actions .spacer {
+  flex: 1;
+}
+.rwe-list {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--sp-3);
+}
+.rwe-list h4 {
+  margin: 0 0 var(--sp-2);
+}
+.rwe-list .data-table {
+  width: 100%;
+}
+@media (max-width: 560px) {
+  .rwe-form,
+  .rwe-pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* dispersion: a landing without measurable lateral offset (derived runway) – hollow, dashed */
+.dp-pt.no-lateral .dp-dot {
+  stroke-width: 1.75;
+  stroke-dasharray: 2.5 2;
+}
+.dp-swatch.no-lateral {
+  width: 10px;
+  height: 10px;
+  border: 1.5px dashed var(--text-muted);
 }

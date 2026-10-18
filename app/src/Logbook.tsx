@@ -1,25 +1,56 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { save } from "@tauri-apps/plugin-dialog";
-import type { FlightDetail as Detail, FlightRow, TrackSample } from "./types";
-import { fmt, fmtClock, fmtDate, fmtDuration } from "./format";
+import type { DeletedFlight, FlightCounts, FlightDetail as Detail, FlightRow, MergeCandidate, MergeReport, TrackSample } from "./types";
+import { fmt, fmtDuration } from "./format";
 import ErrorNotice from "./ErrorNotice";
-import FlightDetail, { stateLabel } from "./FlightDetail";
+import FlightDetail from "./FlightDetail";
+import FlightStrip, { type StripFact } from "./FlightStrip";
 import { setPref, usePrefs } from "./prefs";
 import { computeTotals, countedFlights, isDemoRow } from "./totals";
-import { QUICK_FILTERS, callsignOf, filterFlights, moveSelection, type QuickFilter } from "./logbookFilter";
+import { QUICK_FILTERS, TRASH_DAYS, filterFlights, moveSelection, tagCounts, type QuickFilter } from "./logbookFilter";
 import Stat from "./ui/Stat";
 import EmptyState from "./ui/EmptyState";
 import { showToast } from "./ui/Toast";
 import { userMessage } from "./errors";
-import { openDebrief } from "./landing/debriefStore";
+import { isDebriefOpen, openDebrief } from "./landing/debriefStore";
+import type { ApproachFactsResult } from "./landing/approachTypes";
+import { stripFactsFrom, type LandingStripFact } from "./stripFacts";
+import { mergeHint, mergeKey } from "./resume";
+
+/** Merge hints dismissed with "Ignorieren" (per viewer, best effort). */
+const MERGE_IGNORED_KEY = "vectasim.mergeIgnored";
+/** Hints shown above the list at most. */
+const MERGE_HINTS_MAX = 3;
+
+function loadIgnored(): Set<string> {
+  try {
+    const raw = localStorage.getItem(MERGE_IGNORED_KEY);
+    return new Set(raw ? (JSON.parse(raw) as string[]) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveIgnored(keys: Set<string>) {
+  try {
+    localStorage.setItem(MERGE_IGNORED_KEY, JSON.stringify([...keys].slice(-200)));
+  } catch {
+    // private window / storage blocked: the hint comes back next time
+  }
+}
 
 /** Rows rendered in the list; the search narrows it down. */
 const LIST_LIMIT = 300;
 const FETCH_LIMIT = 100000;
 
 interface Props {
+  /**
+   * The logbook is on screen. App keeps it mounted (hidden) once opened, so search, filters,
+   * selection and scroll position survive a view change; Ctrl+F only works while shown.
+   */
+  active?: boolean;
   /** Select this flight (landing notice "Details"); `n` changes on every request. */
   focus?: { id: string; n: number } | null;
   onGoLive?: () => void;
@@ -32,7 +63,76 @@ const BOOK_ICON = (
 );
 
 /** Logbook as master-detail: filterable list on the left, the selected flight on the right. */
-export default function Logbook({ focus, onGoLive }: Props) {
+/** Screen-reader hint of the strips with a landing (aria-describedby). */
+const STRIP_HINT_ID = "logbook-strip-hint";
+
+/** Chip „Tags“ with a dropdown of the logbook's tags (multiple choice: at least one must match). */
+function TagFilter({ tags, selected, disabled, onChange }: { tags: Array<{ tag: string; count: number }>; selected: string[]; disabled?: boolean; onChange: (next: string[]) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open]);
+  const isOn = (t: string) => selected.some((s) => s.toLowerCase() === t.toLowerCase());
+  const toggle = (t: string) => onChange(isOn(t) ? selected.filter((s) => s.toLowerCase() !== t.toLowerCase()) : [...selected, t]);
+  const active = !disabled && selected.length > 0;
+  return (
+    <div
+      className="export-menu tag-filter"
+      ref={ref}
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && open) {
+          e.stopPropagation();
+          setOpen(false);
+          ref.current?.querySelector<HTMLButtonElement>("button")?.focus();
+        }
+      }}
+    >
+      <button
+        className={`chip${active ? " active" : ""}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-pressed={active}
+        onClick={() => setOpen((o) => !o)}
+        title={tags.length ? "Nach Tags filtern (mehrere: mindestens einer passt)" : "Noch keine Tags – im Flugdetail unter „Notizen & Tags“ vergeben"}
+      >
+        Tags{active ? ` (${selected.length})` : ""} ▾
+      </button>
+      {open && (
+        <div className="export-menu-list tag-filter-list" role="menu" aria-label="Tags">
+          {tags.length === 0 ? (
+            <span className="detail tag-filter-empty">Noch keine Tags vergeben.</span>
+          ) : (
+            tags.map((t) => (
+              <button key={t.tag} role="menuitemcheckbox" aria-checked={isOn(t.tag)} onClick={() => toggle(t.tag)}>
+                <span className="tag-filter-check" aria-hidden="true">
+                  {isOn(t.tag) ? "✓" : ""}
+                </span>
+                {t.tag}
+                <span className="detail num">{t.count}</span>
+              </button>
+            ))
+          )}
+          {selected.length > 0 && (
+            <>
+              <div className="export-menu-sep" role="separator" />
+              <button role="menuitem" onClick={() => onChange([])}>
+                Tag-Filter aufheben
+              </button>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function Logbook({ active = true, focus, onGoLive }: Props) {
   const [flights, setFlights] = useState<FlightRow[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -42,12 +142,53 @@ export default function Logbook({ focus, onGoLive }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [quick, setQuick] = useState<QuickFilter>("all");
+  /** Chip filter „Tags“: flights with at least one of these. */
+  const [tagFilter, setTagFilter] = useState<string[]>([]);
   const [deleteRequest, setDeleteRequest] = useState(0);
+  /** Papierkorb: the list shows the deleted flights instead of the logbook. */
+  const [trash, setTrash] = useState(false);
+  const [deleted, setDeleted] = useState<DeletedFlight[]>([]);
   const { showDemo } = usePrefs();
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  /** Touchdown position and approach values per flight for the strips (best effort). */
+  const [facts, setFacts] = useState<Map<string, StripFact>>(new Map());
+  /** Interrupted flights directly followed by their likely continuation ("Zusammenführen"). */
+  const [mergeCandidates, setMergeCandidates] = useState<MergeCandidate[]>([]);
+  const [mergeIgnored, setMergeIgnored] = useState<Set<string>>(loadIgnored);
+  /** Key of the hint whose "Zusammenführen" asks for confirmation / is running. */
+  const [mergeConfirm, setMergeConfirm] = useState<string | null>(null);
+  const [merging, setMerging] = useState(false);
+
+  /** Landing + approach facts for the strips (best effort: the strips work without them). */
+  const loadFacts = useCallback(() => {
+    const landings = invoke<{ facts: LandingStripFact[] }>("landing_facts_recent", { limit: LIST_LIMIT, includeDemo: true })
+      .then((r) => r.facts)
+      .catch(() => null);
+    // the backend caps the approach facts at 200
+    const approaches = invoke<ApproachFactsResult>("approach_facts_recent", { limit: Math.min(LIST_LIMIT, 200), includeDemo: true })
+      .then((r) => r.facts)
+      .catch(() => null);
+    // both failed (e.g. backend busy): keep what the strips show
+    Promise.all([landings, approaches]).then(([l, a]) => (l || a) && setFacts(stripFactsFrom(l ?? [], a ?? [])));
+  }, []);
+
+  const loadTrash = useCallback(() => {
+    invoke<DeletedFlight[]>("list_deleted_flights")
+      .then(setDeleted)
+      .catch(() => {});
+  }, []);
+
+  const loadMergeCandidates = useCallback(() => {
+    invoke<MergeCandidate[]>("list_merge_candidates")
+      .then(setMergeCandidates)
+      .catch(() => {});
+  }, []);
 
   const refresh = useCallback(() => {
+    loadFacts();
+    loadTrash();
+    loadMergeCandidates();
     invoke<FlightRow[]>("list_flights", { limit: FETCH_LIMIT })
       .then((f) => {
         setFlights(f);
@@ -55,22 +196,37 @@ export default function Logbook({ focus, onGoLive }: Props) {
         setError(null);
       })
       .catch((e) => setError(String(e)));
-  }, []);
+  }, [loadFacts, loadTrash, loadMergeCandidates]);
 
   useEffect(() => {
     refresh();
     const un = listen("logbook:changed", refresh);
-    const timer = setInterval(refresh, 30_000);
+    // approach facts are cached after the flight ended, shortly after logbook:changed
+    const unApproach = listen("approach:facts", loadFacts);
+    // safety net next to the events: a cheap count query, the full list only when it changed
+    let lastKey: string | null = null;
+    const check = () =>
+      invoke<FlightCounts>("flight_summary_counts")
+        .then((c) => {
+          const key = `${c.flights}|${c.deleted}|${c.lastUpdatedMs ?? ""}|${c.lastDeletedMs ?? ""}`;
+          if (lastKey != null && key !== lastKey) refresh();
+          lastKey = key;
+        })
+        .catch(() => refresh());
+    void check();
+    const timer = setInterval(() => void check(), 30_000);
     return () => {
       un.then((u) => u());
+      unApproach.then((u) => u());
       clearInterval(timer);
     };
-  }, [refresh]);
+  }, [refresh, loadFacts]);
 
-  // Ctrl+F → search
+  // Ctrl+F → search (only while shown and nothing modal is open)
   useEffect(() => {
+    if (!active) return;
     const onKey = (e: globalThis.KeyboardEvent) => {
-      if (e.ctrlKey && e.key.toLowerCase() === "f") {
+      if (e.ctrlKey && !e.altKey && e.key.toLowerCase() === "f" && !isDebriefOpen()) {
         e.preventDefault();
         searchRef.current?.focus();
         searchRef.current?.select();
@@ -78,15 +234,34 @@ export default function Logbook({ focus, onGoLive }: Props) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [active]);
+
+  // scroll positions of list and detail, put back when the logbook is shown again
+  // (hiding with display:none may drop them)
+  const detailRef = useRef<HTMLDivElement>(null);
+  const scrollMemo = useRef({ list: 0, detail: 0 });
+  useLayoutEffect(() => {
+    if (!active) return;
+    if (listRef.current) listRef.current.scrollTop = scrollMemo.current.list;
+    if (detailRef.current) detailRef.current.scrollTop = scrollMemo.current.detail;
+  }, [active]);
 
   const counted = countedFlights(flights, showDemo);
   const totals = loaded ? computeTotals(counted) : null;
   const demoCount = flights.filter(isDemoRow).length;
-  const rows = useMemo(() => filterFlights(flights, { query, quick, showDemo }), [flights, query, quick, showDemo]);
+  const trashRows = useMemo(() => deleted.map((d) => d.flight), [deleted]);
+  const deletedAt = useMemo(() => new Map(deleted.map((d) => [d.flight.id, d.deletedMs])), [deleted]);
+  /** What the list works on: the logbook, or the Papierkorb (all of it, demo flights included). */
+  const source = trash ? trashRows : flights;
+  const rows = useMemo(
+    () => (trash ? filterFlights(trashRows, { query, quick: "all", showDemo: true }) : filterFlights(flights, { query, quick, showDemo, tags: tagFilter })),
+    [trash, trashRows, flights, query, quick, showDemo, tagFilter],
+  );
+  /** Tags of the flights the list can show (demo setting respected), for the „Tags“ dropdown. */
+  const allTags = useMemo(() => tagCounts(showDemo ? flights : flights.filter((f) => !isDemoRow(f))), [flights, showDemo]);
   const shown = rows.slice(0, LIST_LIMIT);
   const ids = useMemo(() => shown.map((r) => r.id), [shown]);
-  const selectedRow = flights.find((f) => f.id === selectedId) ?? null;
+  const selectedRow = source.find((f) => f.id === selectedId) ?? null;
   const selectedHidden = !!selectedId && !!selectedRow && !ids.includes(selectedId);
 
   // external selection request (landing notice)
@@ -102,6 +277,8 @@ export default function Logbook({ focus, onGoLive }: Props) {
 
   // load the selected flight; reload when it changed in the store (running flight)
   const selectedUpdated = selectedRow?.updatedMs ?? 0;
+  /** "Erneut versuchen" on a failed detail load re-runs the effect below. */
+  const [detailAttempt, setDetailAttempt] = useState(0);
   useEffect(() => {
     if (!selectedId) {
       setDetail(null);
@@ -133,7 +310,7 @@ export default function Logbook({ focus, onGoLive }: Props) {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId, selectedUpdated]);
+  }, [selectedId, selectedUpdated, detailAttempt]);
 
   const select = (id: string | null, focusRow = false) => {
     setSelectedId(id);
@@ -150,7 +327,7 @@ export default function Logbook({ focus, onGoLive }: Props) {
     if (e.key in step) {
       e.preventDefault();
       select(moveSelection(ids, selectedId, step[e.key]), true);
-    } else if (e.key === "Enter" && selectedId && flights.find((r) => r.id === selectedId)?.landingVsFpm != null) {
+    } else if (e.key === "Enter" && !trash && selectedId && flights.find((r) => r.id === selectedId)?.landingVsFpm != null) {
       // Enter on a flight with a landing: straight to the landing debrief
       e.preventDefault();
       openDebrief(selectedId, null);
@@ -160,19 +337,91 @@ export default function Logbook({ focus, onGoLive }: Props) {
     }
   };
 
+  /** The row after `id` (or before it) – the selection once `id` leaves the list. */
+  const neighbour = (id: string) => moveSelection(ids.filter((x) => x !== id), ids[ids.indexOf(id) + 1] ?? ids[ids.indexOf(id) - 1] ?? null, 0);
+
+  const focusSelected = () => {
+    if (selectedId) select(selectedId, true);
+  };
+
+  const restore = (id: string, fromToast = false) =>
+    invoke<boolean>("restore_flight", { id })
+      .then(() => {
+        refresh();
+        if (fromToast) {
+          // back where it was: in the logbook, selected
+          setTrash(false);
+          setSelectedId(id);
+        } else {
+          setSelectedId(neighbour(id));
+          showToast({ tone: "ok", title: "Flug wiederhergestellt", body: "Er steht wieder im Logbuch." });
+        }
+      })
+      .catch((e) => setError(String(e)));
+
+  /** Logbook: into the Papierkorb (with „Rückgängig“). Papierkorb: delete for good. */
   const remove = (id: string) => {
-    const next = moveSelection(
-      ids.filter((x) => x !== id),
-      ids[ids.indexOf(id) + 1] ?? ids[ids.indexOf(id) - 1] ?? null,
-      0,
-    );
+    const next = neighbour(id);
+    if (trash) {
+      invoke("delete_flight_permanently", { id })
+        .then(() => {
+          setSelectedId(next);
+          refresh();
+          showToast({ tone: "ok", title: "Flug endgültig gelöscht" });
+        })
+        .catch((e) => setError(String(e)));
+      return;
+    }
     invoke("delete_flight", { id })
       .then(() => {
         setSelectedId(next);
         refresh();
-        showToast({ tone: "ok", title: "Flug gelöscht" });
+        showToast({
+          id: `trash-${id}`,
+          tone: "ok",
+          title: "Flug im Papierkorb",
+          body: `${TRASH_DAYS} Tage wiederherstellbar (Logbuch → Papierkorb).`,
+          durationMs: 10_000,
+          actions: [{ label: "Rückgängig", onClick: () => void restore(id, true) }],
+        });
       })
       .catch((e) => setError(String(e)));
+  };
+
+  const visibleMerges = useMemo(() => mergeCandidates.filter((c) => !mergeIgnored.has(mergeKey(c))), [mergeCandidates, mergeIgnored]);
+  /** Gap to the following flight, per interrupted flight with a merge candidate (strip tooltip). */
+  const gapToNext = useMemo(() => new Map(mergeCandidates.map((c) => [c.first.id, c.gapMs])), [mergeCandidates]);
+
+  const ignoreMerge = (c: MergeCandidate) => {
+    const next = new Set(mergeIgnored).add(mergeKey(c));
+    setMergeIgnored(next);
+    saveIgnored(next);
+  };
+
+  const merge = (c: MergeCandidate) => {
+    setMerging(true);
+    invoke<MergeReport>("merge_flights", { firstId: c.first.id, secondId: c.second.id })
+      .then(() => {
+        setMergeConfirm(null);
+        setSelectedId(c.first.id);
+        refresh();
+        showToast({
+          tone: "ok",
+          title: "Flüge zusammengeführt",
+          body: `Ein Flug mit Lücke ${fmtDuration(c.gapMs, { seconds: false })}. Der zweite Teil liegt im Papierkorb (${TRASH_DAYS} Tage).`,
+          durationMs: 8000,
+        });
+      })
+      .catch((e) => {
+        const m = userMessage(e, "logbook");
+        showToast({ tone: "warn", title: "Zusammenführen nicht möglich", body: m.detail || m.hint, durationMs: 10_000 });
+      })
+      .finally(() => setMerging(false));
+  };
+
+  const toggleTrash = () => {
+    setTrash((t) => !t);
+    setSelectedId(null);
   };
 
   const exportLogbook = async () => {
@@ -191,12 +440,13 @@ export default function Logbook({ focus, onGoLive }: Props) {
   const resetFilters = () => {
     setQuery("");
     setQuick("all");
+    setTagFilter([]);
   };
-  const filtered = query.trim() !== "" || quick !== "all";
+  const filtered = query.trim() !== "" || (!trash && (quick !== "all" || tagFilter.length > 0));
 
-  if (loaded && flights.length === 0) {
+  if (loaded && flights.length === 0 && deleted.length === 0) {
     return (
-      <section className="logbook-view">
+      <section className="logbook-view" hidden={!active}>
         {error && <ErrorNotice error={error} context="logbook" onRetry={refresh} onDismiss={() => setError(null)} />}
         <EmptyState
           icon={BOOK_ICON}
@@ -213,13 +463,17 @@ export default function Logbook({ focus, onGoLive }: Props) {
   }
 
   return (
-    <section className="logbook-view">
-      {error && <ErrorNotice error={error} context="logbook" onRetry={refresh} onDismiss={() => setError(null)} />}
+    <section className="logbook-view" hidden={!active}>
+      <span id={STRIP_HINT_ID} className="sr-only">
+        Eingabetaste öffnet die Landeauswertung, Entf legt den Flug in den Papierkorb.
+      </span>
+      {/* first load failed: the list itself offers "Erneut versuchen", the notice keeps the details */}
+      {error && <ErrorNotice error={error} context="logbook" onRetry={loaded ? refresh : undefined} onDismiss={loaded ? () => setError(null) : undefined} />}
 
       <div className="totals-strip">
-        <Stat size="sm" label="Flüge" value={totals ? fmt(totals.flights) : "–"} sub={totals ? `${fmt(totals.completed)} gespeichert` : undefined} />
+        <Stat size="sm" label="Flüge" value={totals ? fmt(totals.flights) : "–"} sub={totals ? `${fmt(totals.completed)} abgeschlossen` : undefined} />
         <Stat size="sm" label="Blockzeit" value={fmtDuration(totals?.blockTimeMs, { seconds: false })} />
-        <Stat size="sm" label="Flugzeit" value={fmtDuration(totals?.flightTimeMs, { seconds: false })} />
+        <Stat size="sm" label="Luftzeit" title="Abheben bis Aufsetzen – für das Flugbuch zählt die Blockzeit" value={fmtDuration(totals?.flightTimeMs, { seconds: false })} />
         <Stat size="sm" label="Distanz" value={fmt(totals?.distanceNm, 0)} unit="nm" />
         <Stat size="sm" label="Landungen" value={totals ? fmt(totals.landings) : "–"} />
         <Stat
@@ -236,8 +490,9 @@ export default function Logbook({ focus, onGoLive }: Props) {
           ref={searchRef}
           type="search"
           className="logbook-search"
-          placeholder="Suche: Route, Flugzeug, Rufzeichen, Datum (Strg+F)"
-          aria-label="Logbuch durchsuchen"
+          placeholder="Suchen (Strg+F)"
+          title="Route, Flugzeug, Registrierung, Rufzeichen, Datum, Notizen oder Tags (Strg+F)"
+          aria-label="Logbuch durchsuchen: Route, Flugzeug, Registrierung, Rufzeichen, Datum, Notizen oder Tags"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
@@ -251,10 +506,27 @@ export default function Logbook({ focus, onGoLive }: Props) {
         />
         <div className="chips" role="group" aria-label="Filter">
           {QUICK_FILTERS.map((q) => (
-            <button key={q.id} className={`chip${quick === q.id ? " active" : ""}`} aria-pressed={quick === q.id} onClick={() => setQuick(q.id)}>
+            <button
+              key={q.id}
+              className={`chip${!trash && quick === q.id ? " active" : ""}`}
+              aria-pressed={!trash && quick === q.id}
+              onClick={() => {
+                if (trash) toggleTrash();
+                setQuick(q.id);
+              }}
+            >
               {q.label}
             </button>
           ))}
+          <TagFilter
+            tags={allTags}
+            selected={tagFilter}
+            disabled={trash}
+            onChange={(next) => {
+              if (trash) toggleTrash();
+              setTagFilter(next);
+            }}
+          />
           <span className="chip-sep" aria-hidden="true" />
           <button
             className={`chip${showDemo ? " active" : ""}`}
@@ -264,27 +536,97 @@ export default function Logbook({ focus, onGoLive }: Props) {
           >
             Demo-Flüge{demoCount ? ` (${demoCount})` : ""}
           </button>
+          <button
+            className={`chip chip-trash${trash ? " active" : ""}`}
+            aria-pressed={trash}
+            onClick={toggleTrash}
+            title={`Gelöschte Flüge – ${TRASH_DAYS} Tage wiederherstellbar, danach endgültig weg`}
+          >
+            Papierkorb{deleted.length ? ` (${deleted.length})` : ""}
+          </button>
         </div>
         <div className="spacer" />
-        <button onClick={exportLogbook} disabled={flights.length === 0} title="Das ganze Logbuch als CSV-Datei speichern (eine Zeile pro Flug, z. B. für Excel)">
-          Logbuch exportieren
+        <button
+          className="btn-icon-text logbook-export"
+          onClick={exportLogbook}
+          disabled={flights.length === 0}
+          aria-label="Logbuch exportieren"
+          title="Das ganze Logbuch als CSV-Datei speichern (eine Zeile pro Flug, z. B. für Excel)"
+        >
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M12 4v11M7 10l5 5 5-5M5 20h14" />
+          </svg>
+          <span className="label-long">Logbuch exportieren</span>
+          <span className="label-short" aria-hidden="true">
+            Export
+          </span>
         </button>
       </div>
 
       <div className="master-detail">
         <div className="master">
           <div className="master-head detail num" aria-live="polite">
-            {loaded ? (
+            {loaded && trash ? (
+              <>
+                Papierkorb · {fmt(rows.length)} von {fmt(deleted.length)} Flügen · nach {TRASH_DAYS} Tagen endgültig gelöscht
+              </>
+            ) : loaded ? (
               <>
                 {fmt(rows.length)} von {fmt(flights.length)} Flügen
                 {rows.length > LIST_LIMIT && ` · zeigt die neuesten ${LIST_LIMIT}, Suche grenzt ein`}
                 {!showDemo && demoCount > 0 && ` · ${demoCount} Demo ausgeblendet`}
               </>
+            ) : error ? (
+              "Logbuch nicht geladen"
             ) : (
               "Logbuch wird geladen …"
             )}
           </div>
-          {selectedHidden && (
+          {!trash && visibleMerges.length > 0 && (
+            <div className="merge-hints" role="group" aria-label="Unterbrochene Flüge zusammenführen">
+              {visibleMerges.slice(0, MERGE_HINTS_MAX).map((c) => {
+                const key = mergeKey(c);
+                const h = mergeHint(c);
+                const confirm = mergeConfirm === key;
+                return (
+                  <div key={key} className="merge-hint detail">
+                    <span className="merge-hint-text">
+                      {h.text} <span className="num">· {h.detail}</span>
+                    </span>
+                    <span className="merge-hint-actions">
+                      {confirm ? (
+                        <>
+                          <button className="btn-sm btn-primary" disabled={merging} onClick={() => merge(c)}>
+                            {merging ? "Wird zusammengeführt …" : "Ja, zusammenführen"}
+                          </button>
+                          <button className="btn-sm" disabled={merging} onClick={() => setMergeConfirm(null)}>
+                            Abbrechen
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            className="btn-sm"
+                            onClick={() => setMergeConfirm(key)}
+                            title="Beide Teile werden ein Flug (Zeiten, Track, Landung); der zweite Teil kommt in den Papierkorb"
+                          >
+                            Zusammenführen
+                          </button>
+                          <button className="link-btn" onClick={() => select(c.first.id, true)}>
+                            Anzeigen
+                          </button>
+                          <button className="link-btn" onClick={() => ignoreMerge(c)} title="Diesen Hinweis nicht mehr zeigen">
+                            Ignorieren
+                          </button>
+                        </>
+                      )}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {selectedHidden && !trash && (
             <div className="master-hint detail">
               Der ausgewählte Flug ist durch den Filter ausgeblendet.{" "}
               <button
@@ -298,7 +640,25 @@ export default function Logbook({ focus, onGoLive }: Props) {
               </button>
             </div>
           )}
-          {loaded && rows.length === 0 ? (
+          {!loaded && error ? (
+            <EmptyState
+              compact
+              title="Logbuch konnte nicht geladen werden"
+              text="Deine Flüge sind nicht verloren – das Lesen ist gerade fehlgeschlagen."
+              actions={
+                <button className="btn-primary" onClick={refresh}>
+                  Erneut versuchen
+                </button>
+              }
+            />
+          ) : loaded && trash && rows.length === 0 ? (
+            <EmptyState
+              compact
+              title={deleted.length ? "Kein gelöschter Flug passt zur Suche" : "Der Papierkorb ist leer"}
+              text={`Gelöschte Flüge bleiben ${TRASH_DAYS} Tage hier und lassen sich wiederherstellen.`}
+              actions={<button onClick={toggleTrash}>Zum Logbuch</button>}
+            />
+          ) : loaded && rows.length === 0 ? (
             <EmptyState
               compact
               title="Keine Flüge passen zum Filter"
@@ -311,75 +671,49 @@ export default function Logbook({ focus, onGoLive }: Props) {
               }
             />
           ) : (
-            <div ref={listRef} className="flight-list" role="listbox" aria-label="Flüge" onKeyDown={onListKey}>
+            <div
+              ref={listRef}
+              className="flight-list strip-list"
+              role="listbox"
+              aria-label="Flüge"
+              onKeyDown={onListKey}
+              onScroll={(e) => active && (scrollMemo.current.list = e.currentTarget.scrollTop)}
+            >
               {shown.map((f, i) => {
                 const sel = f.id === selectedId;
-                const hard = (f.landingVsFpm ?? 0) <= -600;
-                const block = f.onBlockMs && f.offBlockMs ? f.onBlockMs - f.offBlockMs : null;
                 return (
-                  <div
+                  <FlightStrip
                     key={f.id}
-                    data-id={f.id}
-                    role="option"
-                    aria-selected={sel}
+                    flight={f}
+                    fact={facts.get(f.id) ?? null}
+                    selected={sel}
                     tabIndex={sel || (!selectedId && i === 0) || (selectedHidden && i === 0) ? 0 : -1}
-                    className={`flight-item${sel ? " selected" : ""}`}
-                    onClick={() => select(f.id)}
-                    onFocus={() => !sel && select(f.id)}
-                  >
-                    <div className="fi-line1">
-                      <strong className="num">
-                        {f.depIcao ?? "····"} → {f.arrIcao ?? (f.state === "active" ? "…" : "····")}
-                      </strong>
-                      {isDemoRow(f) && <span className="badge badge-demo badge-inline">Demo</span>}
-                      {f.state !== "completed" && <span className={`badge badge-inline state-${f.state}`}>{stateLabel(f.state)}</span>}
-                      <span className="spacer" />
-                      <span className="detail num">
-                        {fmtDate(f.offBlockMs ?? f.createdMs)} {fmtClock(f.offBlockMs ?? f.createdMs)}
-                      </span>
-                    </div>
-                    <div className="fi-line2 detail">
-                      <span className="fi-aircraft">
-                        {f.aircraft.title || "–"}
-                        {callsignOf(f) && ` · ${callsignOf(f)}`}
-                      </span>
-                      <span className="spacer" />
-                      <span className="num">{fmtDuration(block, { seconds: false })}</span>
-                      {f.landingVsFpm != null ? (
-                        <button
-                          className={`num fi-landing${hard ? " warn-text" : ""}`}
-                          tabIndex={-1}
-                          title={`${hard ? "Harte Landung (ab 600 fpm). " : ""}Landeauswertung öffnen`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            select(f.id);
-                            openDebrief(f.id, null);
-                          }}
-                        >
-                          {hard && (
-                            <span className="warn-icon" aria-label="Harte Landung">
-                              !
-                            </span>
-                          )}
-                          {fmt(f.landingVsFpm, 0, "fpm")}
-                        </button>
-                      ) : (
-                        <span className="num fi-landing">–</span>
-                      )}
-                    </div>
-                  </div>
+                    onSelect={() => select(f.id)}
+                    onDebrief={() => openDebrief(f.id, null)}
+                    describedBy={!trash && f.landingVsFpm != null ? STRIP_HINT_ID : undefined}
+                    gapToNextMs={trash ? null : (gapToNext.get(f.id) ?? null)}
+                  />
                 );
               })}
             </div>
           )}
         </div>
 
-        <div className="detail-pane">
-          {detailError && <ErrorNotice error={detailError} context="logbook" onDismiss={() => setDetailError(null)} compact />}
+        <div ref={detailRef} className="detail-pane" onScroll={(e) => active && (scrollMemo.current.detail = e.currentTarget.scrollTop)}>
+          {detailError && <ErrorNotice error={detailError} context="logbook" onRetry={() => setDetailAttempt((n) => n + 1)} onDismiss={() => setDetailError(null)} compact />}
           {detail && detail.flight.id === selectedId ? (
-            <FlightDetail detail={detail} track={track} onDelete={() => remove(detail.flight.id)} deleteRequest={deleteRequest} />
+            <FlightDetail
+              detail={detail}
+              track={track}
+              onDelete={() => remove(detail.flight.id)}
+              deleteRequest={deleteRequest}
+              onCancelDelete={focusSelected}
+              deletedMs={trash ? (deletedAt.get(detail.flight.id) ?? null) : null}
+              onRestore={trash ? () => void restore(detail.flight.id) : undefined}
+            />
           ) : selectedId ? (
-            <div className="detail detail-loading">Flug wird geladen …</div>
+            // after an error the notice above says it; no endless "wird geladen"
+            !detailError && <div className="detail detail-loading">Flug wird geladen …</div>
           ) : (
             <EmptyState compact title="Kein Flug ausgewählt" text="Wähle links einen Flug – mit ↑/↓ blätterst du durch die Liste." />
           )}

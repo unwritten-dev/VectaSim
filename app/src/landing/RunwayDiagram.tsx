@@ -1,14 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
 import { NNBSP, fmt, fmtNum } from "../format";
-import { BAND_VAR } from "./facts";
-import { TRACK_BEFORE_M, pathOf, runwayLayout, sideLabel, type XY } from "./geometry";
-import type { LandingAnalysis } from "./types";
+import { BAND_VAR, isDerivedRunway, lateralMeasurable, touchdownDistanceText, zoneText } from "./facts";
+import { cardExaggeration, designatorPx, showDesignator } from "./LandingCard";
+import { TRACK_BEFORE_M, drawWidthM, pathOf, runwayLayout, sideLabel, type XY } from "./geometry";
+import { sampleAt, timeAtValue, useReplayCursor, useReplayStore } from "./replayStore";
+import type { ApproachPoint, LandingAnalysis } from "./types";
 
 /**
  * Top-down runway with the landing direction left → right: runway to scale along its
  * axis (lateral axis stretched when the runway would be too thin to read), threshold
- * stripes, centreline, touchdown zone, the last nm of ground track, touchdown and
- * bounce points and the end of the rollout.
+ * stripes, centreline, touchdown zone (from the threshold) with the aiming-point
+ * marking, the last nm of ground track, touchdown and bounce points and the end of the
+ * rollout. An unknown width is drawn as 30 m and said so in the legend. The lateral
+ * exaggeration is the landing card's (cardExaggeration), so both pictures match.
  */
 export default function RunwayDiagram({ analysis: a }: { analysis: LandingAnalysis }) {
   const [wrap, setWrap] = useState<HTMLDivElement | null>(null);
@@ -22,29 +26,35 @@ export default function RunwayDiagram({ analysis: a }: { analysis: LandingAnalys
     return () => ro.disconnect();
   }, [wrap]);
 
+  const store = useReplayStore();
   const rwy = a.runway!;
   const tp = a.touchdownPoint!;
+  /** Samples in the runway frame (for the shared cursor). */
+  const framed = useMemo(() => a.samples.filter((s) => s.xM != null && s.yM != null), [a.samples]);
+  const exaggeration = useMemo(() => cardExaggeration(a) ?? undefined, [a]);
   const model = useMemo(() => {
     const pts: Array<XY & { ground: boolean }> = a.samples
       .filter((s) => s.xM != null && s.yM != null)
       .map((s) => ({ x: s.xM!, y: s.yM!, ground: s.onGround }));
     const td = { x: tp.distanceM, y: tp.lateralM };
-    const layout = runwayLayout({ lengthM: rwy.lengthM, widthM: rwy.widthM, points: pts, touchdown: td, widthPx: width });
+    const layout = runwayLayout({ lengthM: rwy.lengthM, widthM: drawWidthM(rwy.widthM), points: pts, touchdown: td, widthPx: width, exaggeration });
     const visible = pts.filter((p) => p.x >= layout.xMin);
     // airborne part up to the touchdown, ground part from it
     const firstGround = visible.findIndex((p) => p.ground);
     const air = firstGround >= 0 ? [...visible.slice(0, firstGround), td] : visible;
     const ground = firstGround >= 0 ? [td, ...visible.slice(firstGround)] : [];
     return { layout, air, ground, td };
-  }, [a.samples, rwy.lengthM, rwy.widthM, tp.distanceM, tp.lateralM, width]);
+  }, [a.samples, rwy.lengthM, rwy.widthM, tp.distanceM, tp.lateralM, width, exaggeration]);
 
   const { layout: L, air, ground, td } = model;
   const P = L.toSvg;
-  const W = Math.max(rwy.widthM, 10);
+  const W = Math.max(drawWidthM(rwy.widthM), 10);
   const [rx0, ry0] = P({ x: 0, y: -W / 2 });
   const [rx1, ry1] = P({ x: rwy.lengthM, y: W / 2 });
   const [tdzX0] = P({ x: tp.tdzStartM, y: 0 });
   const [tdzX1] = P({ x: tp.tdzEndM, y: 0 });
+  const [aimX] = P({ x: tp.aimingPointM, y: 0 });
+  const aimLen = Math.max(3, 45 * L.xScale);
   const [tdx, tdy] = P(td);
   const [, cy] = P({ x: 0, y: 0 });
   const rwyH = ry1 - ry0;
@@ -54,7 +64,11 @@ export default function RunwayDiagram({ analysis: a }: { analysis: LandingAnalys
   const rolloutEnd = a.rollout && a.samples.length > 0 ? a.samples[a.samples.length - 1] : null;
   const rolloutXY = rolloutEnd?.xM != null && rolloutEnd.yM != null ? P({ x: rolloutEnd.xM, y: rolloutEnd.yM }) : null;
   const before = Math.round(Math.min(-L.xMin, TRACK_BEFORE_M));
-  const designatorSize = Math.min(18, Math.max(10, rwyH * 0.45));
+  const designatorSize = designatorPx(rwyH);
+  // designators sit right after the threshold stripes, rotated like the painted marking
+  // (read from the approach), and are drawn over the track with a halo – never under it
+  const desX0 = rx0 + stripeLen + 6 + designatorSize * 0.5;
+  const desX1 = rx1 - stripeLen - 6 - designatorSize * 0.5;
   const exaggerated = L.exaggeration > 1.05;
   // label beside the point when it is off the runway, below the distance marks when on it
   const offRunway = tdy < ry0 - 6 || tdy > ry1 + 6;
@@ -62,10 +76,28 @@ export default function RunwayDiagram({ analysis: a }: { analysis: LandingAnalys
   const tdLabelX = offRunway ? tdx + (tdLabelRight ? 12 : -12) : tdx;
   const tdLabelY = offRunway ? tdy + 4 : Math.min(L.heightPx - 4, ry1 + 34);
   const tdLabelAnchor = offRunway ? (tdLabelRight ? "start" : "end") : "middle";
+  // pointer → runway x → the time the track passed it
+  const timeAt = (e: React.MouseEvent<SVGSVGElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const px = ((e.clientX - rect.left) / Math.max(1, rect.width)) * width;
+    const xm = (px - P({ x: 0, y: 0 })[0]) / L.xScale;
+    return timeAtValue(framed, (s) => s.xM, xm);
+  };
 
   return (
     <div ref={setWrap} className="rd">
-      <svg width={width} height={L.heightPx} role="img" aria-label={`Runway ${rwy.ident} von oben mit Aufsetzpunkt ${fmt(tp.distanceM, 0, "m")} hinter der Schwelle, ${sideLabel(tp.lateralM)}`}>
+      <svg
+        width={width}
+        height={L.heightPx}
+        className="replay-hit"
+        onMouseMove={(e) => store.hover(timeAt(e))}
+        onMouseLeave={() => store.hover(null)}
+        onClick={(e) => {
+          store.pause();
+          store.setCursor(timeAt(e));
+        }}
+        role="img"
+        aria-label={`Piste ${rwy.ident} von oben mit Aufsetzpunkt ${touchdownDistanceText(tp)} hinter der Schwelle, ${lateralMeasurable(tp) ? sideLabel(tp.lateralM) : "Querablage nicht messbar"}`}>
         <defs>
           <clipPath id="rd-clip">
             <rect x={0} y={0} width={width} height={L.heightPx} />
@@ -80,8 +112,15 @@ export default function RunwayDiagram({ analysis: a }: { analysis: LandingAnalys
           {/* touchdown zone */}
           <rect x={tdzX0} y={ry0 - 3} width={Math.max(1, tdzX1 - tdzX0)} height={rwyH + 6} className="rd-tdz" />
           <text x={(tdzX0 + tdzX1) / 2} y={ry0 - 8} textAnchor="middle" className="rd-label rd-tdz-label">
-            Touchdown-Zone {fmtNum(tp.tdzStartM)}–{fmtNum(tp.tdzEndM)}{NNBSP}m
+            Aufsetzzone {zoneText(tp, rwy)}
           </text>
+          {/* aiming-point marking: two bars beside the centreline (named in the legend, labels below are taken) */}
+          <g className="rd-aim">
+            <title>Zielpunkt {fmt(tp.aimingPointM, 0, "m")} hinter der Schwelle (Markierung nach ICAO Annex 14)</title>
+            {[-1, 1].map((s) => (
+              <rect key={s} x={aimX} y={s < 0 ? cy - rwyH * 0.36 : cy + rwyH * 0.22} width={aimLen} height={rwyH * 0.14} className="rd-marking" />
+            ))}
+          </g>
           {/* threshold stripes at both ends */}
           {L.stripes.map((y) => {
             const [, sy] = P({ x: 0, y });
@@ -95,24 +134,6 @@ export default function RunwayDiagram({ analysis: a }: { analysis: LandingAnalys
           })}
           {/* centreline */}
           <line x1={rx0 + stripeLen + 30} x2={rx1 - stripeLen - 30} y1={cy} y2={cy} className="rd-centre" />
-          {/* designators (only when the runway is drawn long enough to hold them) */}
-          {rx1 - rx0 > 180 && (
-          <>
-          <text x={rx0 + stripeLen + 8} y={cy + designatorSize * 0.36} className="rd-designator" style={{ fontSize: designatorSize }}>
-            {rwy.ident}
-          </text>
-          <text
-            x={rx1 - stripeLen - 8}
-            y={cy + designatorSize * 0.36}
-            textAnchor="end"
-            className="rd-designator"
-            style={{ fontSize: designatorSize }}
-            transform={`rotate(180 ${rx1 - stripeLen - 8 - designatorSize * 0.6} ${cy})`}
-          >
-            {rwy.oppositeIdent}
-          </text>
-          </>
-          )}
 
           {/* distance marks */}
           {L.ticks.map((d) => {
@@ -135,7 +156,7 @@ export default function RunwayDiagram({ analysis: a }: { analysis: LandingAnalys
           {ground.length > 1 && <path d={pathOf(ground, P)} className="rd-track-ground" />}
 
           {/* lateral offset callout */}
-          {Math.abs(tp.lateralM) >= 0.5 && <line x1={tdx} x2={tdx} y1={cy} y2={tdy} className="rd-offset" />}
+          {lateralMeasurable(tp) && Math.abs(tp.lateralM) >= 0.5 && <line x1={tdx} x2={tdx} y1={cy} y2={tdy} className="rd-offset" />}
 
           {/* bounces */}
           {a.bouncePoints.map((b, i) =>
@@ -152,11 +173,24 @@ export default function RunwayDiagram({ analysis: a }: { analysis: LandingAnalys
               </text>
             </g>
           )}
+          {/* designators (only when the runway is drawn large enough to hold them) */}
+          {showDesignator(rx1 - rx0, rwyH) && (
+            <g className="rd-designators" style={{ fontSize: designatorSize }}>
+              <text x={desX0} y={cy} transform={`rotate(90 ${desX0} ${cy})`} textAnchor="middle" dominantBaseline="central" className="rd-designator">
+                {rwy.ident}
+              </text>
+              <text x={desX1} y={cy} transform={`rotate(-90 ${desX1} ${cy})`} textAnchor="middle" dominantBaseline="central" className="rd-designator">
+                {rwy.oppositeIdent}
+              </text>
+            </g>
+          )}
           {/* touchdown */}
           <circle cx={tdx} cy={tdy} r={7} fill={tdColor} className="rd-td" />
           <text x={tdLabelX} y={tdLabelY} textAnchor={tdLabelAnchor} className="rd-td-label">
-            {fmt(tp.distanceM, 0, "m")} · {sideLabel(tp.lateralM)}
+            {touchdownDistanceText(tp)}
+            {lateralMeasurable(tp) ? ` · ${sideLabel(tp.lateralM)}` : ""}
           </text>
+          <RunwayCursor samples={framed} xMin={L.xMin} toSvg={P} height={L.heightPx} />
         </g>
       </svg>
       <div className="rd-legend">
@@ -180,12 +214,36 @@ export default function RunwayDiagram({ analysis: a }: { analysis: LandingAnalys
           </span>
         )}
         <span>
-          <i className="lg-box" /> Touchdown-Zone
+          <i className="lg-box" /> Aufsetzzone ab der Schwelle
         </span>
+        <span>
+          <i className="lg-aim" /> Zielpunkt {fmt(tp.aimingPointM, 0, "m")}
+        </span>
+        {rwy.widthM == null && <span>Breite unbekannt – mit {fmt(drawWidthM(null), 0, "m")} gezeichnet</span>}
+        {isDerivedRunway(rwy) && (
+          <span title="Achse und Schwelle sind aus deiner Rollspur geschätzt, nicht vermessen">
+            Piste aus der Rollspur abgeleitet: Achse = deine Linie, Schwelle ±{fmt(tp.distanceUncertaintyM ?? rwy.alongUncertaintyM ?? 50, 0, "m")}
+            {rwy.lengthEstimated ? " · Pistenende unbekannt (gezeichnet bis zum Ende des Rollouts)" : ""}
+          </span>
+        )}
         <span className="rd-scale">
           Längsachse maßstäblich{exaggerated ? ` · Querachse ×${fmtNum(L.exaggeration, L.exaggeration < 10 ? 1 : 0)} überhöht` : " · Querachse maßstäblich"}
         </span>
       </div>
     </div>
+  );
+}
+
+/** The shared cursor on the runway: the aircraft's point on the track and a helper line across. */
+function RunwayCursor({ samples, xMin, toSvg, height }: { samples: ApproachPoint[]; xMin: number; toSvg: (p: XY) => [number, number]; height: number }) {
+  const tMs = useReplayCursor();
+  const p = sampleAt(samples, tMs);
+  if (!p || p.xM == null || p.yM == null || p.xM < xMin) return null;
+  const [cx, cy] = toSvg({ x: p.xM, y: p.yM });
+  return (
+    <g pointerEvents="none" aria-hidden="true" className="replay-cursor">
+      <line x1={cx} x2={cx} y1={0} y2={height} className="pc-cross" />
+      <circle cx={cx} cy={cy} r={5} className="rd-cursor" />
+    </g>
   );
 }

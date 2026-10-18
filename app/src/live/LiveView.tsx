@@ -4,36 +4,40 @@ import Dispatch from "../Dispatch";
 import OnlinePanel from "../OnlinePanel";
 import {
   PHASE_LABEL,
-  deltaMinutes,
   fmt,
   fmtAltitude,
+  TRANSITION_ALTITUDE_FT,
   fmtClock,
   fmtCoord,
-  fmtDeltaKg,
-  fmtDeltaMin,
   fmtDuration,
   fmtMetarLine,
   fmtNum,
   fmtSigned,
+  fmtWeight,
+  fmtWeightNum,
   haversineNm,
 } from "../format";
+import { usePrefs, usePrivacy } from "../prefs";
 import { userMessage } from "../errors";
 import { CATEGORY_COLOR } from "../theme";
-import type { AircraftInfo, FlightPhase, FlightSummary, Metar, OnlineSummary, OnlineView, Ofp, Telemetry } from "../types";
+import type { AircraftInfo, Airport, FlightPhase, Metar, NavFix, OnlineSummary, OnlineView, Ofp, StatusSnapshot, Telemetry } from "../types";
+import { shallowEqual, useFlight, useFlightHead, useTelemetry, useTelemetrySelector } from "../telemetryStore";
 import Stat, { KV } from "../ui/Stat";
 import { TabPanel, Tabs } from "../ui/Tabs";
 import { Chevron } from "../ui/Panel";
-import EmptyState from "../ui/EmptyState";
 import { ToastViewport } from "../ui/Toast";
 import { useAirport, useMetar, useNearestIcao, useStoredState } from "./hooks";
 import { etaMs, remainingNm } from "./progress";
+import { actualFromSummary, fmtPunctuality, fmtPvaDelta, fmtPvaValue, planVsActual, type PvaLine } from "../pirep";
 import AirframeImage from "../airframes/AirframeImage";
-import { airframeName } from "../airframes/airframe";
+import { airframeName, shownAirframeName } from "../airframes/airframe";
 import { useActiveAirframe } from "../airframes/hooks";
 import { navigate } from "../airframes/navigation";
-import type { RecStatus } from "../status";
+import { DEMO_LABEL, WAITING_SHORT, type RecStatus } from "../status";
 import AfterFlightCard, { type AfterFlight } from "./AfterFlightCard";
-import { openDebrief } from "../landing/debriefStore";
+import ReadyCard from "./ReadyCard";
+import { isDebriefOpen, openDebrief, useDebrief } from "../landing/debriefStore";
+import { G_HARD } from "../landing/facts";
 
 export interface LogLine {
   ms: number;
@@ -41,8 +45,11 @@ export interface LogLine {
 }
 
 interface Props {
-  telemetry: Telemetry | null;
-  flight: FlightSummary | null;
+  /**
+   * The live view is on screen. App keeps it mounted while another view is shown (hidden),
+   * so the map keeps camera, layers and track; its shortcuts and map toasts pause meanwhile.
+   */
+  active?: boolean;
   aircraft: AircraftInfo | null;
   ofp: Ofp | null;
   onOfp: (ofp: Ofp | null) => void;
@@ -52,6 +59,7 @@ interface Props {
   onOpenFlight?: () => void;
   /** Recording status for the pill on the map (same texts as the sidebar button). */
   rec: RecStatus;
+  status: StatusSnapshot | null;
   /** The flight that just ended (from on-block until the next off-block). */
   afterFlight?: AfterFlight | null;
   onAfterFlightLogbook?: (flightId: string) => void;
@@ -60,7 +68,12 @@ interface Props {
   onTryDemo?: () => void;
 }
 
-type Tab = "flight" | "plan" | "systems" | "online" | "events";
+type Tab = "flight" | "dispatch";
+
+/** Earlier builds stored five tab ids; map them onto the two tabs. */
+export function normalizeTab(raw: string): Tab {
+  return raw === "plan" || raw === "online" || raw === "dispatch" ? "dispatch" : "flight";
+}
 
 /** From top of descent on, the destination weather is what matters. */
 const PAST_TOD: FlightPhase[] = ["descent", "approach", "final", "landing", "taxiIn", "shutdown"];
@@ -74,16 +87,25 @@ const LIGHT_LABEL: Array<[keyof Telemetry["lights"], string]> = [
   ["taxi", "Rolllicht"],
 ];
 
+/**
+ * "Bereit" card hidden by the pilot: for this app session (module state, survives view
+ * changes and a remount), back with the next flight.
+ */
+let readyDismissedSession = false;
+
 const PANEL_KEY = "vectasim.livePanel";
 const TAB_KEY = "vectasim.liveTab";
 
 /**
  * Live view: the map fills the content area, the six primary values sit
  * in a bar over the map, everything else is in a collapsible side panel (Ctrl+.).
+ *
+ * Telemetry and the flight summary come from telemetryStore (up to 10×/s). The view itself
+ * only follows the flight's frame (state, phase, times, departure/arrival) and a few coarse
+ * values; the HUD numbers, the side panel sections and the map read the samples themselves.
  */
 export default function LiveView({
-  telemetry: t,
-  flight: f,
+  active = true,
   aircraft,
   ofp,
   onOfp,
@@ -91,92 +113,130 @@ export default function LiveView({
   events,
   onOpenFlight,
   rec,
+  status,
   afterFlight,
   onAfterFlightLogbook,
   onAfterFlightDismiss,
   onTryDemo,
 }: Props) {
+  const priv = usePrivacy();
+  const f = useFlightHead();
   const [panelOpen, setPanelOpen] = useStoredState<boolean>(PANEL_KEY, true);
-  const [tab, setTab] = useStoredState<Tab>(TAB_KEY, "flight");
+  const [storedTab, setTab] = useStoredState<string>(TAB_KEY, "flight");
+  const tab = normalizeTab(storedTab);
+  const [readyDismissed, setReadyDismissedState] = useState(readyDismissedSession);
+  const setReadyDismissed = (v: boolean) => {
+    readyDismissedSession = v;
+    setReadyDismissedState(v);
+  };
+  // a new flight: the card may come back before the next one
+  const flightActive = f?.state === "active";
+  useEffect(() => {
+    if (!flightActive) return;
+    readyDismissedSession = false;
+    setReadyDismissedState(false);
+  }, [flightActive]);
+  const debriefOpen = useDebrief() != null;
+  /** Basemap tiles not reachable (LiveMap onOffline): a hint, recording is unaffected. */
+  const [mapOffline, setMapOffline] = useState(false);
+  const openDispatch = () => {
+    setPanelOpen(true);
+    setTab("dispatch");
+  };
   const [onlineView, setOnlineView] = useState<{ view: OnlineView | null; center: { lat: number; lon: number } } | null>(null);
 
   useEffect(() => {
+    if (!active) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.key === ".") {
+      if (e.ctrlKey && e.key === "." && !isDebriefOpen()) {
         e.preventDefault();
         setPanelOpen(!panelOpen);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [panelOpen, setPanelOpen]);
+  }, [active, panelOpen, setPanelOpen]);
+
+  // back on screen: MapLibre measured a hidden (0 × 0) container meanwhile – let it resize
+  // (its ResizeObserver usually does; the window event is the safety net)
+  useEffect(() => {
+    if (!active) return;
+    const id = requestAnimationFrame(() => {
+      window.dispatchEvent(new Event("resize"));
+      window.dispatchEvent(new Event("vectasim:map-visible"));
+    });
+    return () => cancelAnimationFrame(id);
+  }, [active]);
 
   // ---- airports, destination, weather ----------------------------------------------
   const depIcao = useNearestIcao(f?.departure);
   const arrIcao = useNearestIcao(f?.arrival);
   // Before a flight starts there is no departure point yet: use the airport we stand on.
-  // Rounded to ~1 km so taxiing doesn't trigger a lookup per frame.
-  const groundPoint =
-    t?.onGround && f?.state !== "active" ? { latitude: Math.round(t.latitude * 100) / 100, longitude: Math.round(t.longitude * 100) / 100 } : null;
+  // Rounded to ~1 km so taxiing doesn't trigger a lookup (nor a re-render) per frame.
+  const groundPoint = useTelemetrySelector(
+    ({ telemetry: t, flight }) =>
+      t?.onGround && flight?.state !== "active" ? { latitude: Math.round(t.latitude * 100) / 100, longitude: Math.round(t.longitude * 100) / 100 } : null,
+    shallowEqual,
+  );
   const groundIcao = useNearestIcao(groundPoint);
 
   const destIcao = (ofp?.destinationIcao || arrIcao) ?? null;
   const destAirport = useAirport(destIcao);
-  const pos = t ? { latitude: t.latitude, longitude: t.longitude } : null;
-  const directNm = destAirport && t ? haversineNm(t.latitude, t.longitude, destAirport.latitude, destAirport.longitude) : null;
   const routeForDest = ofp && ofp.destinationIcao === destIcao ? ofp.navlog : null;
-  const restNm = remainingNm(pos, destAirport, routeForDest);
   const landed = !!f?.landingMs;
-  const eta = landed ? null : etaMs(Date.now(), restNm, t?.groundSpeedKt);
+  // a boolean: the view re-renders when the aircraft crosses the 100 nm ring, not per sample
+  const nearDest = useTelemetrySelector(
+    ({ telemetry: t }) => !!destAirport && !!t && haversineNm(t.latitude, t.longitude, destAirport.latitude, destAirport.longitude) < DEST_WX_RANGE_NM,
+  );
 
-  const useDest = !!destIcao && (PAST_TOD.includes(f?.phase ?? "preflight") || (directNm != null && directNm < DEST_WX_RANGE_NM));
+  const useDest = !!destIcao && (PAST_TOD.includes(f?.phase ?? "preflight") || nearDest);
   const depOrGround = depIcao ?? (ofp?.originIcao || null) ?? groundIcao;
   // departure weather until takeoff, then the destination's (if known), else stay on departure
   const wxIcao = useDest || (f?.takeoffMs && destIcao) ? destIcao : depOrGround;
   const { metar: wx, error: wxError } = useMetar(wxIcao);
 
   // ---- derived values --------------------------------------------------------------
-  const vs = t?.verticalSpeedFpm ?? 0;
-  const vsWarn = !t
-    ? null
-    : vs > 4000
-      ? "Steigrate über 4 000 fpm"
-      : vs < -1000 && !t.onGround && t.altitudeAglFt < 2500
-        ? "Sinkrate über 1 000 fpm unter 2 500 ft AGL"
-        : null;
   const phase = f?.phase ?? "preflight";
   const routeText = `${depIcao ?? (f?.departure ? "····" : (ofp?.originIcao || "–"))} → ${arrIcao ?? (ofp?.destinationIcao || (f?.arrival ? "····" : "–"))}`;
-  const callsign = ofp?.callsign || (aircraft ? `${aircraft.atcAirline} ${aircraft.atcFlightNumber}`.trim() || aircraft.atcId : "");
-  const altSub = !t ? undefined : !t.onGround && t.altitudeAglFt < 2500 ? `AGL ${fmt(t.altitudeAglFt, 0, "ft")}` : t.altitudeMslFt >= 18000 ? fmtAltitude(t.altitudeMslFt) : undefined;
-  const restSub = landed
-    ? "gelandet"
-    : !destIcao
-      ? "Ziel unbekannt"
-      : eta
-        ? `ETA ${fmtClock(eta)} · ${fmtDuration(eta - Date.now(), { seconds: false })}`
-        : "ETA ab 50 kt GS";
+  const rawCallsign = ofp?.callsign || (aircraft ? `${aircraft.atcAirline} ${aircraft.atcFlightNumber}`.trim() || aircraft.atcId : "");
+  // Streamer-Modus: the HUD line shows no callsign/registration (display only)
+  const callsign = priv.mask(rawCallsign, rawCallsign === aircraft?.atcId && !ofp?.callsign ? "registration" : "callsign");
 
   const tabs: Array<{ id: Tab; label: string; badge?: string }> = [
-    { id: "flight", label: "Flug" },
-    { id: "plan", label: "Flugplan", badge: ofp ? "●" : undefined },
-    { id: "systems", label: "Systeme" },
-    { id: "online", label: "Online" },
-    { id: "events", label: "Ereignisse", badge: events.length ? String(events.length) : undefined },
+    { id: "flight", label: "Flug", badge: events.length ? String(events.length) : undefined },
+    { id: "dispatch", label: "Dispatch", badge: ofp || online?.enabled ? "●" : undefined },
   ];
+  const showAfter = !!afterFlight && f?.state !== "active";
+  const showReady = !showAfter && !readyDismissed && f?.state !== "active";
 
   return (
-    <section className={`live${panelOpen ? " panel-open" : ""}`}>
+    <section className={`live${panelOpen ? " panel-open" : ""}`} hidden={!active}>
       <div className="live-map-area">
         <LiveMap
-          telemetry={t}
           aircraft={aircraft}
           route={ofp?.navlog}
           trafficOn={online?.enabled ?? false}
           onOnlineView={(v, center) => setOnlineView({ view: v, center })}
-          overlay={<StatusPill rec={rec} onTryDemo={onTryDemo} />}
+          onOffline={setMapOffline}
+          overlay={
+            <>
+              {/* the Bereit card leads before a flight: the pill then only names the state, the demo is offered on the card */}
+              <StatusPill rec={rec} onTryDemo={showReady ? undefined : onTryDemo} short={showReady && rec.kind === "waiting"} />
+              {mapOffline && (
+                <div className="status-pill pill-suspended map-offline-pill" role="status" title="Die Kartenkacheln laden gerade nicht. Position, Track und Aufzeichnung laufen lokal weiter.">
+                  <span className="dot dot-suspended" aria-hidden="true" />
+                  <span className="status-pill-text">Karte offline – Tracking läuft weiter</span>
+                </div>
+              )}
+            </>
+          }
         />
-        <ToastViewport regions={["map"]} placement="top" />
-        {afterFlight && f?.state !== "active" && (
+        {/* while hidden or behind the debrief, App's viewport shows the map toasts */}
+        <ToastViewport regions={active && !debriefOpen ? ["map"] : []} placement="top" />
+        {showReady && (
+          <ReadyCard rec={rec} status={status} ofp={ofp} aircraft={aircraft} onOpenDispatch={openDispatch} onTryDemo={onTryDemo} onDismiss={() => setReadyDismissed(true)} />
+        )}
+        {showAfter && afterFlight && (
           <AfterFlightCard
             flight={afterFlight}
             onDebrief={() => openDebrief(afterFlight.flightId, null)}
@@ -196,27 +256,17 @@ export default function LiveView({
           <Chevron dir={panelOpen ? "right" : "left"} />
         </button>
 
-        <div className="hud" aria-label="Flugdaten">
+        <div className="hud" role="group" aria-label="Flugdaten">
           <div className="hud-values">
             <div className="stat stat-lg hud-phase">
               <div className="stat-label">Phase</div>
               <div className={`stat-value phase-${phase}`} aria-live="polite">
                 {PHASE_LABEL[phase]}
               </div>
-              <div className="stat-sub">{f?.state === "active" ? "Aufzeichnung" : f?.state === "completed" ? "gespeichert" : "Bereit"}</div>
+              {/* the recording state is the pill's and the Bereit card's job; here only what the flight is */}
+              {f?.state === "active" ? <div className="stat-sub">Aufzeichnung</div> : f?.state === "completed" ? <div className="stat-sub">abgeschlossen</div> : null}
             </div>
-            <Stat size="lg" label="Höhe MSL" value={t ? fmtNum(t.altitudeMslFt) : "–"} unit="ft" sub={altSub} />
-            <Stat size="lg" label="GS / IAS" value={t ? fmtNum(t.groundSpeedKt) : "–"} unit="kt" sub={t ? `IAS ${fmt(t.iasKt, 0, "kt")}` : undefined} />
-            <Stat size="lg" label="V/S" value={t ? fmtSigned(Math.round(vs)) : "–"} unit="fpm" warn={vsWarn} />
-            <Stat size="lg" label="HDG" value={t ? String(Math.round(t.headingMagDeg) % 360 || 360).padStart(3, "0") : "–"} unit="°" sub="magnetisch" />
-            <Stat
-              size="lg"
-              label={destIcao ? `Rest bis ${destIcao}` : "Rest"}
-              value={restNm != null && !landed ? fmtNum(restNm) : "–"}
-              unit="nm"
-              sub={restSub}
-              title={!destIcao ? "Lade einen SimBrief-Flugplan, um Restdistanz und ETA zu sehen." : routeForDest ? "Entlang der geplanten Route" : "Großkreis-Distanz"}
-            />
+            <HudValues destIcao={destIcao} destAirport={destAirport} routeForDest={routeForDest} landed={landed} />
           </div>
           <div className="hud-foot">
             <strong className="route">{routeText}</strong>
@@ -233,43 +283,100 @@ export default function LiveView({
         <div className="side-body">
           {tab === "flight" && (
             <TabPanel idBase="live" id="flight">
-              <FlightSection t={t} f={f} aircraft={aircraft} ofp={ofp} routeText={routeText} wxIcao={wxIcao} wx={wx} wxError={wxError} onOpenFlight={onOpenFlight} />
+              <FlightSection aircraft={aircraft} ofp={ofp} routeText={routeText} wxIcao={wxIcao} wx={wx} wxError={wxError} onOpenFlight={onOpenFlight} />
+              <SystemsSection ofp={ofp} />
+              <div className="side-stack">
+                <div className="side-group">
+                  <div className="side-group-title">Ereignisse</div>
+                  {events.length === 0 ? (
+                    <div className="detail">Phasenwechsel, Landungen und Pausen dieser Sitzung erscheinen hier.</div>
+                  ) : (
+                    <ul className="events">
+                      {events.map((e, i) => (
+                        <li key={i}>
+                          <span className="num detail">{fmtClock(e.ms, { seconds: true })}</span> {e.text}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
             </TabPanel>
           )}
-          {tab === "plan" && (
-            <TabPanel idBase="live" id="plan">
+          {tab === "dispatch" && (
+            <TabPanel idBase="live" id="dispatch">
               <Dispatch ofp={ofp} onOfp={onOfp} />
-            </TabPanel>
-          )}
-          {tab === "systems" && (
-            <TabPanel idBase="live" id="systems">
-              <SystemsSection t={t} f={f} ofp={ofp} />
-            </TabPanel>
-          )}
-          {tab === "online" && (
-            <TabPanel idBase="live" id="online">
-              <OnlinePanel summary={online} view={onlineView?.view ?? null} origin={t ? { lat: t.latitude, lon: t.longitude } : (onlineView?.center ?? null)} />
-            </TabPanel>
-          )}
-          {tab === "events" && (
-            <TabPanel idBase="live" id="events">
-              {events.length === 0 ? (
-                <EmptyState compact title="Noch keine Ereignisse" text="Phasenwechsel, Landungen und Pausen dieser Sitzung erscheinen hier." />
-              ) : (
-                <ul className="events">
-                  {events.map((e, i) => (
-                    <li key={i}>
-                      <span className="num detail">{fmtClock(e.ms, { seconds: true })}</span> {e.text}
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <LiveOnlinePanel summary={online} view={onlineView?.view ?? null} center={onlineView?.center ?? null} />
             </TabPanel>
           )}
         </div>
       </aside>
     </section>
   );
+}
+
+/**
+ * The five HUD numbers: the only part of the frame that follows every telemetry sample, so
+ * only it re-renders 10×/s (not the live view with its map, cards and side panel).
+ */
+function HudValues({
+  destIcao,
+  destAirport,
+  routeForDest,
+  landed,
+}: {
+  destIcao: string | null;
+  destAirport: Airport | null;
+  routeForDest: NavFix[] | null;
+  landed: boolean;
+}) {
+  const t = useTelemetry();
+  const pos = t ? { latitude: t.latitude, longitude: t.longitude } : null;
+  const restNm = remainingNm(pos, destAirport, routeForDest);
+  const eta = landed ? null : etaMs(Date.now(), restNm, t?.groundSpeedKt);
+  const vs = t?.verticalSpeedFpm ?? 0;
+  const vsWarn = !t
+    ? null
+    : vs > 4000
+      ? "Steigrate über 4 000 fpm"
+      : vs < -1000 && !t.onGround && t.altitudeAglFt < 2500
+        ? "Sinkrate über 1 000 fpm unter 2 500 ft AGL"
+        : null;
+  const altSub = !t ? undefined : !t.onGround && t.altitudeAglFt < 2500 ? `AGL ${fmt(t.altitudeAglFt, 0, "ft")}` : t.altitudeMslFt > TRANSITION_ALTITUDE_FT ? fmtAltitude(t.altitudeMslFt) : undefined;
+  const restSub = landed
+    ? "gelandet"
+    : !destIcao
+      ? "Ziel unbekannt"
+      : eta
+        ? `ETA ${fmtClock(eta)} · ${fmtDuration(eta - Date.now(), { seconds: false })}`
+        : "ETA ab 50 kt GS";
+  return (
+    <>
+      <Stat size="lg" label="Höhe MSL" value={t ? fmtNum(t.altitudeMslFt) : "–"} unit="ft" sub={altSub} />
+      <Stat size="lg" label="GS / IAS" value={t ? fmtNum(t.groundSpeedKt) : "–"} unit="kt" sub={t ? `IAS ${fmt(t.iasKt, 0, "kt")}` : undefined} />
+      <Stat size="lg" label="V/S" value={t ? fmtSigned(Math.round(vs)) : "–"} unit="fpm" warn={vsWarn} />
+      <Stat size="lg" label="HDG" value={t ? String(Math.round(t.headingMagDeg) % 360 || 360).padStart(3, "0") : "–"} unit="°" sub="magnetisch" />
+      <Stat
+        size="lg"
+        label={destIcao ? `Rest bis ${destIcao}` : "Rest"}
+        value={restNm != null && !landed ? fmtNum(restNm) : "–"}
+        unit="nm"
+        sub={restSub}
+        title={!destIcao ? "Lade einen SimBrief-Flugplan, um Restdistanz und ETA zu sehen." : routeForDest ? "Entlang der geplanten Route" : "Großkreis-Distanz"}
+      />
+    </>
+  );
+}
+
+type Origin = { lat: number; lon: number } | null;
+
+/** "Nearby" traffic from the own position rounded to ~100 m (distances there are whole nm), else the map centre. */
+function LiveOnlinePanel({ summary, view, center }: { summary: OnlineSummary | null; view: OnlineView | null; center: Origin }) {
+  const own = useTelemetrySelector<Origin>(
+    ({ telemetry: t }) => (t ? { lat: Math.round(t.latitude * 1000) / 1000, lon: Math.round(t.longitude * 1000) / 1000 } : null),
+    shallowEqual,
+  );
+  return <OnlinePanel summary={summary} view={view} origin={own ?? center} />;
 }
 
 function MetarInline({ icao, metar, error }: { icao: string; metar: Metar | null; error: string | null }) {
@@ -300,8 +407,6 @@ function MetarInline({ icao, metar, error }: { icao: string; metar: Metar | null
 // ---- side panel: Flug ----------------------------------------------------------------
 
 function FlightSection({
-  t,
-  f,
   aircraft,
   ofp,
   routeText,
@@ -310,8 +415,6 @@ function FlightSection({
   wxError,
   onOpenFlight,
 }: {
-  t: Telemetry | null;
-  f: FlightSummary | null;
   aircraft: AircraftInfo | null;
   ofp: Ofp | null;
   routeText: string;
@@ -320,23 +423,28 @@ function FlightSection({
   wxError: string | null;
   onOpenFlight?: () => void;
 }) {
-  const now = t?.timestampMs;
-  const blockMs = f?.offBlockMs ? (f.onBlockMs ?? now ?? f.offBlockMs) - f.offBlockMs : null;
-  const flightMs = f?.takeoffMs ? (f.landingMs ?? now ?? f.takeoffMs) - f.takeoffMs : null;
-  const fuelUsed = f?.fuelStartKg != null && t ? f.fuelStartKg - (f.fuelEndKg ?? t.fuelTotalKg) : null;
-  const plannedBlockMs = ofp ? ofp.times.blockS * 1000 : null;
-  // OFP vs actual: block delta only once the flight is complete, landing fuel once landed
-  const blockDone = !!f?.onBlockMs && blockMs != null;
-  const blockDelta = blockDone ? fmtDeltaMin(blockMs, plannedBlockMs) : null;
-  const blockDeltaMin = blockDone ? deltaMinutes(blockMs, plannedBlockMs) : null;
-  const landingFuel = f?.landingMs ? (f.fuelEndKg ?? t?.fuelTotalKg ?? null) : null;
-  const fuelDelta = ofp && landingFuel != null ? fmtDeltaKg(landingFuel, ofp.fuel.planLandingKg) : null;
-  const fuelBelowPlan = !!ofp && landingFuel != null && landingFuel < ofp.fuel.planLandingKg - 0.5;
+  const { weightUnit } = usePrefs();
+  const priv = usePrivacy();
+  // times, totals and fuel run with every sample: this section reads them itself
+  const t = useTelemetry();
+  const f = useFlight();
+  // plan against actual (pirep.ts, same as the logbook detail); deltas only once a value is final
+  const pva = planVsActual(actualFromSummary(f, t), null, ofp);
+  const L = pva.byKey;
+  const blockMs = L.block?.actual ?? null;
+  const flightMs = L.air?.actual ?? null;
+  const fuelUsed = L.blockFuel?.actual ?? null;
+  const delta = (l: PvaLine | undefined) => (l && l.delta != null ? fmtPvaDelta(l) : null);
+  const planSub = (l: PvaLine | undefined, label = "Plan") => {
+    if (!ofp || !l) return undefined;
+    const d = delta(l);
+    return `${label} ${fmtPvaValue(l.kind, l.plan)}${d ? ` · ${d}` : ""}`;
+  };
   const lastTd = f?.touchdowns.length ? f.touchdowns[f.touchdowns.length - 1] : null;
-  const plan = (s: number | undefined) => (ofp && s ? `Plan ${fmtClock(s * 1000)}` : undefined);
   const aircraftLine = aircraft
-    ? [aircraft.atcModel, aircraft.atcId, `${aircraft.atcAirline} ${aircraft.atcFlightNumber}`.trim()].filter(Boolean).join(" · ")
+    ? [aircraft.atcModel, priv.mask(aircraft.atcId, "registration"), priv.mask(`${aircraft.atcAirline} ${aircraft.atcFlightNumber}`.trim(), "callsign")].filter(Boolean).join(" · ")
     : "";
+  const aircraftTitle = aircraft ? priv.title(aircraft.title, { registration: aircraft.atcId, airline: aircraft.atcAirline, callsign: ofp?.callsign }) : null;
   const airframe = useActiveAirframe(`${f?.state}|${f?.offBlockMs}|${aircraft?.atcId}`);
   const integrity = f?.integrity;
   const issues = integrity
@@ -345,6 +453,7 @@ function FlightSection({
         integrity.timeAccelerationDetected && `Zeitraffer (max. ${fmt(integrity.maxSimRate, 0)}×)`,
         integrity.crashed && "Absturz",
         integrity.fuelIncreasedAirborne && "Treibstoff in der Luft erhöht",
+        integrity.teleportDetected && "Positionssprung (Teleport/Neuladen)",
         integrity.pauseCount > 0 && `${integrity.pauseCount}× Pause (${fmtDuration(integrity.pausedMs)})`,
       ].filter(Boolean)
     : [];
@@ -353,16 +462,16 @@ function FlightSection({
     <div className="side-stack">
       <div className="flight-head">
         <div className="flight-route num">{routeText}</div>
-        <div className="flight-aircraft" title={aircraft?.title}>
-          {aircraft?.title ?? "Kein Flugzeug erkannt"}
+        <div className="flight-aircraft" title={aircraftTitle ?? undefined}>
+          {aircraftTitle ?? "Kein Flugzeug erkannt"}
         </div>
         {aircraftLine && <div className="detail">{aircraftLine}</div>}
         {airframe && f?.state === "active" && (
           <button className="af-live" onClick={() => navigate({ kind: "airframe", registration: airframe.registration })} title="Flugzeug in der Flotte öffnen">
             <AirframeImage airframe={airframe} />
             <span className="af-live-text">
-              <strong className="num">{airframe.registration}</strong>
-              <span className="detail">{airframeName(airframe) !== airframe.registration ? airframeName(airframe) : "gebucht auf dieses Flugzeug"}</span>
+              <strong className="num">{priv.mask(airframe.registration, "registration")}</strong>
+              <span className="detail">{airframeName(airframe) !== airframe.registration ? shownAirframeName(airframe, priv.on) : "gebucht auf dieses Flugzeug"}</span>
             </span>
           </button>
         )}
@@ -384,33 +493,34 @@ function FlightSection({
       <div className="side-group">
         <div className="side-group-title">Zeiten</div>
         <div className="stat-grid cols-4">
-          <Stat size="sm" label="Off-Block" value={fmtClock(f?.offBlockMs)} sub={plan(ofp?.times.schedOutS)} />
-          <Stat size="sm" label="Start" value={fmtClock(f?.takeoffMs)} sub={plan(ofp?.times.schedOffS)} />
-          <Stat size="sm" label="Landung" value={fmtClock(f?.landingMs)} sub={plan(ofp?.times.schedOnS)} />
-          <Stat size="sm" label="On-Block" value={fmtClock(f?.onBlockMs)} sub={plan(ofp?.times.schedInS)} />
+          <Stat size="sm" label="Off-Block" value={fmtClock(f?.offBlockMs)} sub={planSub(L.offBlock)} />
+          <Stat size="sm" label="Start" value={fmtClock(f?.takeoffMs)} sub={planSub(L.takeoff)} />
+          <Stat size="sm" label="Landung" value={fmtClock(f?.landingMs)} sub={planSub(L.landing)} />
+          <Stat
+            size="sm"
+            label="On-Block"
+            value={fmtClock(f?.onBlockMs)}
+            sub={planSub(L.onBlock)}
+            warn={pva.arrival?.status === "late" ? `On-Block ${fmtPunctuality(pva.arrival)}` : null}
+          />
         </div>
       </div>
 
       <div className="side-group">
         <div className="side-group-title">{ofp ? "Ist gegen Plan" : "Flug"}</div>
         <div className="stat-grid cols-2">
-          <Stat
-            label="Blockzeit"
-            value={fmtDuration(blockMs)}
-            sub={ofp ? `Plan ${fmtDuration(plannedBlockMs)}${blockDelta ? ` · ${blockDelta}` : ""}` : undefined}
-            warn={blockDeltaMin != null && blockDeltaMin >= 15 ? `Blockzeit ${blockDelta} über Plan` : null}
-          />
-          <Stat label="Flugzeit" value={fmtDuration(flightMs)} sub={ofp ? `Plan ${fmtDuration(ofp.times.enrouteS * 1000)}` : undefined} />
-          <Stat label="Distanz" value={fmt(f?.distanceNm, 1)} unit="nm" sub={ofp ? `Plan ${fmt(ofp.routeDistanceNm, 0, "nm")}` : undefined} />
+          <Stat label="Blockzeit" value={fmtDuration(blockMs)} sub={planSub(L.block)} warn={L.block?.warn ?? null} />
+          <Stat label="Luftzeit" title="Abheben bis Aufsetzen – für das Flugbuch zählt die Blockzeit" value={fmtDuration(flightMs)} sub={planSub(L.air)} />
+          <Stat label="Distanz" value={fmt(f?.distanceNm, 1)} unit="nm" sub={planSub(L.distance)} />
           <Stat
             label="Verbrauch"
-            value={fmt(fuelUsed, 0)}
-            unit="kg"
-            sub={fuelDelta ? `Landung ${fuelDelta} vs. Plan` : ofp ? `Plan ${fmt(ofp.fuel.tripKg + ofp.fuel.taxiKg, 0, "kg")}` : undefined}
-            warn={fuelBelowPlan ? "Weniger Treibstoff bei der Landung als geplant" : null}
+            value={fmtWeightNum(fuelUsed)}
+            unit={weightUnit}
+            sub={delta(L.landingFuel) ? `Landung ${delta(L.landingFuel)} vs. Plan` : planSub(L.blockFuel)}
+            warn={L.landingFuel?.warn ?? null}
           />
-          <Stat label="Max. Höhe" value={fmt(f?.maxAltitudeMslFt, 0)} unit="ft" sub={ofp ? `Plan FL${Math.round(ofp.cruiseAltitudeFt / 100)}` : undefined} />
-          <Stat label="Treibstoff an Bord" value={fmt(t?.fuelTotalKg, 0)} unit="kg" sub={ofp ? `Plan Landung ${fmt(ofp.fuel.planLandingKg, 0, "kg")}` : undefined} />
+          <Stat label="Max. Höhe" value={fmt(f?.maxAltitudeMslFt, 0)} unit="ft" sub={planSub(L.cruise)} />
+          <Stat label="Treibstoff an Bord" value={fmtWeightNum(t?.fuelTotalKg)} unit={weightUnit} sub={planSub(L.landingFuel, "Plan Landung")} />
         </div>
       </div>
 
@@ -446,11 +556,11 @@ function FlightSection({
               warn={lastTd.landingRateFpm <= -600 ? "Harte Landung (ab 600 fpm)" : null}
             />
             <Stat size="sm" label="Messwert" value={fmt(lastTd.vsFpmMeasured, 0)} unit="fpm" sub="letztes Sample" />
-            <Stat size="sm" label="G-Last" value={fmt(lastTd.peakG, 2)} unit="G" warn={lastTd.peakG > 1.75 ? "G-Last über 1,75 G" : null} />
+            <Stat size="sm" label="g-Last" value={fmt(lastTd.peakG, 2)} unit="g" warn={lastTd.peakG >= G_HARD ? "g-Last ab 2,0 g (Band „hart“)" : null} />
             <Stat size="sm" label="Bounces" value={String(lastTd.bounces)} warn={lastTd.bounces > 0 ? `${lastTd.bounces} Bounce${lastTd.bounces > 1 ? "s" : ""}` : null} />
           </div>
         ) : (
-          <div className="detail">Nach dem Aufsetzen siehst du hier Landerate, G-Last und Bounces.</div>
+          <div className="detail">Nach dem Aufsetzen siehst du hier Landerate, g-Last und Bounces.</div>
         )}
       </div>
     </div>
@@ -459,8 +569,13 @@ function FlightSection({
 
 // ---- side panel: Systeme -------------------------------------------------------------
 
-function SystemsSection({ t, f, ofp }: { t: Telemetry | null; f: FlightSummary | null; ofp: Ofp | null }) {
-  if (!t) return <EmptyState compact title="Keine Live-Daten" text="Sobald der Simulator verbunden ist, erscheinen hier Konfiguration, Triebwerke und Lichter." />;
+function SystemsSection({ ofp }: { ofp: Ofp | null }) {
+  const t = useTelemetry();
+  const f = useFlight();
+  // re-render on a kg/lb switch even while no telemetry arrives (paused sim)
+  usePrefs();
+  // without telemetry the flight section above already says that the sim is not connected
+  if (!t) return null;
   const gear = t.gearPct >= 99 ? "ausgefahren" : t.gearPct <= 1 ? "eingefahren" : `${fmt(t.gearPct, 0, "%")} (in Bewegung)`;
   const fuelUsed = f?.fuelStartKg != null ? f.fuelStartKg - (f.fuelEndKg ?? t.fuelTotalKg) : null;
   return (
@@ -474,7 +589,7 @@ function SystemsSection({ t, f, ofp }: { t: Telemetry | null; f: FlightSummary |
             ["Parkbremse", t.parkingBrake ? "gesetzt" : "gelöst"],
             ["Am Boden", t.onGround ? "ja" : "nein"],
             ["Nick / Querlage", `${fmt(t.pitchDeg, 1, "°")} / ${fmt(t.bankDeg, 1, "°")}`],
-            ["G-Last", fmt(t.gForce, 2, "G")],
+            ["g-Last", fmt(t.gForce, 2, "g")],
             ["Transponder", String(t.transponderCode).padStart(4, "0")],
           ]}
         />
@@ -484,9 +599,9 @@ function SystemsSection({ t, f, ofp }: { t: Telemetry | null; f: FlightSummary |
         <KV
           rows={[
             ["Triebwerke", `${t.enginesRunning} von ${t.numEngines} laufen`],
-            ["Treibstoff", fmt(t.fuelTotalKg, 0, "kg")],
-            ["Verbrauch", fmt(fuelUsed, 0, "kg")],
-            ...(ofp ? ([["Plan Rampe / Landung", `${fmt(ofp.fuel.planRampKg, 0, "kg")} / ${fmt(ofp.fuel.planLandingKg, 0, "kg")}`]] as Array<[string, string]>) : []),
+            ["Treibstoff", fmtWeight(t.fuelTotalKg)],
+            ["Verbrauch", fmtWeight(fuelUsed)],
+            ...(ofp ? ([["Plan Rampe / Landung", `${fmtWeight(ofp.fuel.planRampKg)} / ${fmtWeight(ofp.fuel.planLandingKg)}`]] as Array<[string, string]>) : []),
           ]}
         />
       </div>
@@ -494,12 +609,12 @@ function SystemsSection({ t, f, ofp }: { t: Telemetry | null; f: FlightSummary |
         <div className="side-group-title">Gewichte</div>
         <KV
           rows={[
-            ["Gesamtgewicht", fmt(t.totalWeightKg, 0, "kg")],
+            ["Gesamtgewicht", fmtWeight(t.totalWeightKg)],
             ...(ofp
               ? ([
-                  ["Plan TOW", `${fmt(ofp.weights.estTowKg, 0, "kg")} (max. ${fmt(ofp.weights.maxTowKg, 0, "kg")})`],
-                  ["Plan LDW", `${fmt(ofp.weights.estLdwKg, 0, "kg")} (max. ${fmt(ofp.weights.maxLdwKg, 0, "kg")})`],
-                  ["Plan ZFW", fmt(ofp.weights.estZfwKg, 0, "kg")],
+                  ["Plan TOW", `${fmtWeight(ofp.weights.estTowKg)} (max. ${fmtWeight(ofp.weights.maxTowKg)})`],
+                  ["Plan LDW", `${fmtWeight(ofp.weights.estLdwKg)} (max. ${fmtWeight(ofp.weights.maxLdwKg)})`],
+                  ["Plan ZFW", fmtWeight(ofp.weights.estZfwKg)],
                 ] as Array<[string, string]>)
               : []),
           ]}
@@ -536,15 +651,15 @@ function SystemsSection({ t, f, ofp }: { t: Telemetry | null; f: FlightSummary |
 
 // ---- recording status pill (map, top left) -------------------------------------------
 
-function StatusPill({ rec, onTryDemo }: { rec: RecStatus; onTryDemo?: () => void }) {
+function StatusPill({ rec, onTryDemo, short }: { rec: RecStatus; onTryDemo?: () => void; short?: boolean }) {
   const mark = rec.error ? "error" : rec.kind;
   return (
     <div className={`status-pill pill-${mark}`} role="status" title={rec.hint}>
       <span className={`dot dot-${mark}`} aria-hidden="true" />
-      <span className="status-pill-text">{rec.text}</span>
+      <span className="status-pill-text">{short ? WAITING_SHORT : rec.text}</span>
       {rec.kind === "waiting" && onTryDemo && (
-        <button className="link-btn" onClick={onTryDemo}>
-          Ohne Simulator ausprobieren
+        <button className="link-btn" onClick={onTryDemo} title="Ohne Simulator ausprobieren – ein simulierter Flug">
+          {DEMO_LABEL} starten
         </button>
       )}
     </div>

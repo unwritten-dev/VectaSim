@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="VectaSim" xmlns="http://www.topografix.com/GPX/1/1" xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v2" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">
+  <metadata>
+    <name>EDDF → EGLL · DLH4AB</name>
+    <time>2026-10-16T08:00:00Z</time>
+  </metadata>
+  <trk>
+    <name>EDDF → EGLL · DLH4AB</name>
+    <desc>A320neo &lt;Lufthansa&gt; &amp; &quot;Grüße&quot;, =Livery</desc>
+    <type>flight</type>
+    <trkseg>
+      <trkpt lat="50.0333000" lon="8.5706000"><ele>110.9</ele><time>2026-10-16T08:00:00Z</time><extensions><gpxtpx:TrackPointExtension><gpxtpx:speed>72.02</gpxtpx:speed><gpxtpx:course>350.0</gpxtpx:course></gpxtpx:TrackPointExtension></extensions></trkpt>
+
+      <trkpt lat="50.0343000" lon="8.5691000"><ele>147.7</ele><time>2026-10-16T08:00:01Z</time><extensions><gpxtpx:TrackPointExtension><gpxtpx:speed>72.54</gpxtpx:speed><gpxtpx:course>249.8</gpxtpx:course></gpxtpx:TrackPointExtension></extensions></trkpt>
+
+      <trkpt lat="50.0353000" lon="8.5676000"><ele>184.4</ele><time>2026-10-16T08:00:02Z</time><extensions><gpxtpx:TrackPointExtension><gpxtpx:speed>73.05</gpxtpx:speed><gpxtpx:course>249.8</gpxtpx:course></gpxtpx:TrackPointExtension></extensions></trkpt>
+
+      <trkpt lat="50.0363000" lon="8.5661000"><ele>221.1</ele><time>2026-10-16T08:00:03.250Z</time><extensions><gpxtpx:TrackPointExtension><gpxtpx:speed>73.57</gpxtpx:speed><gpxtpx:course>249.8</gpxtpx:course></gpxtpx:TrackPointExtension></extensions></trkpt>
+
+      <trkpt lat="50.0373000" lon="8.5646000"><ele>257.9</ele><time>2026-10-16T08:00:04Z</time><extensions><gpxtpx:TrackPointExtension><gpxtpx:speed>74.08</gpxtpx:speed><gpxtpx:course>249.8</gpxtpx:course></gpxtpx:TrackPointExtension></extensions></trkpt>
+
+      <trkpt lat="50.0383000" lon="8.5631000"><ele>294.6</ele><time>2026-10-16T08:00:05Z</time><extensions><gpxtpx:TrackPointExtension><gpxtpx:speed>74.59</gpxtpx:speed><gpxtpx:course>249.8</gpxtpx:course></gpxtpx:TrackPointExtension></extensions></trkpt>
+
+      <trkpt lat="50.0393000" lon="8.5616000"><ele>331.3</ele><time>2026-10-16T08:00:06Z</time><extensions><gpxtpx:TrackPointExtension><gpxtpx:speed>75.11</gpxtpx:speed><gpxtpx:course>249.8</gpxtpx:course></gpxtpx:TrackPointExtension></extensions></trkpt>
+
+      <trkpt lat="50.0403000" lon="8.5601000"><ele>368.0</ele><time>2026-10-16T08:00:07Z</time><extensions><gpxtpx:TrackPointExtension><gpxtpx:speed>75.62</gpxtpx:speed><gpxtpx:course>249.8</gpxtpx:course></gpxtpx:TrackPointExtension></extensions></trkpt>
+
+      <trkpt lat="50.0413000" lon="8.5586000"><ele>404.8</ele><time>2026-10-16T08:00:08Z</time><extensions><gpxtpx:TrackPointExtension><gpxtpx:speed>76.14</gpxtpx:speed><gpxtpx:course>249.8</gpxtpx:course></gpxtpx:TrackPointExtension></extensions></trkpt>
+
+      <trkpt lat="50.0423000" lon="8.5571000"><ele>441.5</ele><time>2026-10-16T08:00:09Z</time><extensions><gpxtpx:TrackPointExtension><gpxtpx:speed>76.65</gpxtpx:speed><gpxtpx:course>249.8</gpxtpx:course></gpxtpx:TrackPointExtension></extensions></trkpt>
+
+    </trkseg>
+  </trk>
+</gpx>

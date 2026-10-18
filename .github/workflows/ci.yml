@@ -1,3 +1,8 @@
+# Checks on every push to main and every pull request. Third-party actions are pinned to a
+# commit SHA (the comment names the release); the Rust toolchain comes from rust-toolchain.toml.
+#
+# Not (yet) part of it: `cargo fmt --check` – rustfmt.toml exists, but the tree has not been
+# formatted with it in one go (see DEVELOPMENT.md → Werkzeuge).
 name: CI
 
 on:
@@ -8,17 +13,39 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   rust:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+          persist-credentials: false
+      # installs the pinned toolchain (with clippy and rustfmt) named in rust-toolchain.toml
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # --locked: fails when Cargo.lock is out of date instead of silently updating it
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
+      # caches ~/.cargo/bin as well, so cargo-audit is compiled once per cache key
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: audit
+      - run: cargo install cargo-audit --locked --version 0.22.2
+      # RustSec advisories against Cargo.lock; vulnerabilities fail the job, warnings
+      # (unmaintained / unsound crates) are printed only
+      - run: cargo audit
 
   frontend:
     runs-on: ubuntu-latest
@@ -26,12 +53,18 @@ jobs:
       run:
         working-directory: app
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: app/package-lock.json
+      # npm ci fails when package-lock.json does not match package.json
       - run: npm ci
+      # known vulnerabilities in production dependencies (high/critical) fail the job
+      - run: npm audit --omit=dev --audit-level=high
+      - run: npm run lint
       - run: npx tsc --noEmit
       - run: npm test

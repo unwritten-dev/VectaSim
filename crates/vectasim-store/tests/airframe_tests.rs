@@ -221,7 +221,7 @@ fn existing_flights_are_booked_by_the_v6_migration() {
         conn.execute("UPDATE schema_version SET version = 5", []).unwrap();
     }
     let store = Store::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 6);
+    assert_eq!(store.schema_version().unwrap(), vectasim_store::SCHEMA_VERSION);
     let reg = |id: &str| store.get_flight(id).unwrap().unwrap().flight.airframe_reg;
     assert_eq!(reg(&ids[0]).as_deref(), Some("D-AINA"));
     assert_eq!(reg(&ids[1]).as_deref(), Some("D-AVCT"));
@@ -230,5 +230,81 @@ fn existing_flights_are_booked_by_the_v6_migration() {
     assert_eq!((a.icao_type.as_deref(), a.airline.as_deref()), (Some("A20N"), Some("DLH")));
     assert_eq!(store.list_airframes(true).unwrap().len(), 2);
     drop(store);
-    assert_eq!(Store::open(&path).unwrap().schema_version().unwrap(), 6);
+    assert_eq!(Store::open(&path).unwrap().schema_version().unwrap(), vectasim_store::SCHEMA_VERSION);
+}
+
+#[test]
+fn demo_flights_and_their_airframes_are_purged_but_edited_airframes_stay() {
+    let store = Store::open_in_memory().unwrap();
+    let mut rec = FlightRecorder::new(
+        store.clone(),
+        RecorderContext { provider: "mock".into(), aircraft: Some(MockFlight::aircraft()), ..Default::default() },
+    );
+    run(&mut rec, 60.0);
+    assert_eq!(store.list_flights(10, 0).unwrap().len(), 1);
+    assert!(store.get_airframe("D-AVCT").unwrap().is_some());
+
+    assert_eq!(store.delete_demo_flights().unwrap(), 1);
+    assert!(store.list_flights(10, 0).unwrap().is_empty());
+    assert!(store.get_airframe("D-AVCT").unwrap().is_none(), "an airframe only the demo created goes with it");
+
+    // an airframe the user touched survives the purge
+    let mut rec = FlightRecorder::new(
+        store.clone(),
+        RecorderContext { provider: "mock".into(), aircraft: Some(MockFlight::aircraft()), ..Default::default() },
+    );
+    run(&mut rec, 60.0);
+    store
+        .upsert_airframe(&AirframeEdit { registration: "D-AVCT".into(), custom_name: Some("Meine Neo".into()), ..Default::default() }, 1)
+        .unwrap();
+    assert_eq!(store.delete_demo_flights().unwrap(), 1);
+    assert!(store.get_airframe("D-AVCT").unwrap().is_some());
+}
+
+#[test]
+fn vapp_per_airframe_is_set_cleared_validated_and_found_from_the_flight() {
+    let store = Store::open_in_memory().unwrap();
+    let mut rec = FlightRecorder::new(
+        store.clone(),
+        RecorderContext { provider: "mock".into(), aircraft: Some(MockFlight::aircraft()), ..Default::default() },
+    );
+    run(&mut rec, 60.0);
+    let id = store.list_flights(1, 0).unwrap()[0].id.clone();
+    assert_eq!(store.flight_vapp_kt(&id).unwrap(), None, "nothing entered yet");
+
+    let edit = |v: Option<f64>| AirframeEdit { registration: "D-AVCT".into(), vapp_kt: v, ..Default::default() };
+    let a = store.upsert_airframe(&edit(Some(138.0)), 5).unwrap().unwrap();
+    assert_eq!(a.vapp_kt, Some(138.0));
+    assert_eq!(store.flight_vapp_kt(&id).unwrap(), Some(138.0));
+    assert_eq!(store.list_airframes(true).unwrap()[0].airframe.vapp_kt, Some(138.0), "the fleet list carries it");
+    // other edits leave it alone
+    let a = store.upsert_airframe(&AirframeEdit { registration: "D-AVCT".into(), notes: Some("n".into()), ..Default::default() }, 6).unwrap().unwrap();
+    assert_eq!(a.vapp_kt, Some(138.0));
+    // implausible values are refused, nothing changes
+    assert!(store.upsert_airframe(&edit(Some(12.0)), 7).is_err());
+    assert!(store.upsert_airframe(&edit(Some(400.0)), 7).is_err());
+    assert_eq!(store.get_airframe("D-AVCT").unwrap().unwrap().vapp_kt, Some(138.0));
+    // 0 clears
+    assert_eq!(store.upsert_airframe(&edit(Some(0.0)), 8).unwrap().unwrap().vapp_kt, None);
+    assert_eq!(store.flight_vapp_kt(&id).unwrap(), None);
+    assert_eq!(store.flight_vapp_kt("no-such-flight").unwrap(), None);
+
+    // merging keeps the target's Vapp, fills it from the source when empty
+    store.upsert_airframe(&edit(Some(140.0)), 9).unwrap();
+    store.merge_airframes("D-AVCT", "D-AINA", 10).unwrap();
+    assert_eq!(store.get_airframe("D-AINA").unwrap().unwrap().vapp_kt, Some(140.0));
+    assert_eq!(store.flight_vapp_kt(&id).unwrap(), Some(140.0));
+}
+
+#[test]
+fn an_airframe_with_a_vapp_survives_the_demo_purge() {
+    let store = Store::open_in_memory().unwrap();
+    let mut rec = FlightRecorder::new(
+        store.clone(),
+        RecorderContext { provider: "mock".into(), aircraft: Some(MockFlight::aircraft()), ..Default::default() },
+    );
+    run(&mut rec, 60.0);
+    store.upsert_airframe(&AirframeEdit { registration: "D-AVCT".into(), vapp_kt: Some(132.0), ..Default::default() }, 1).unwrap();
+    assert_eq!(store.delete_demo_flights().unwrap(), 1);
+    assert_eq!(store.get_airframe("D-AVCT").unwrap().unwrap().vapp_kt, Some(132.0));
 }

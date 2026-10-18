@@ -1,5 +1,5 @@
 use std::time::Duration;
-use vectasim_online::metar::{decode, parse_noaa_json, parse_vatsim_text};
+use vectasim_online::metar::{decode, observation_ms, parse_noaa_json, parse_vatsim_text};
 use vectasim_online::vatsim::backoff_delay;
 use vectasim_online::{Facility, FlightCategory, Metar, MetarClient, VatsimFeed, parse_vatsim_json};
 
@@ -137,6 +137,20 @@ fn decodes_vatsim_text() {
     assert_eq!(kbos.ceiling_ft, Some(1500));
     assert_eq!((kbos.temperature_c, kbos.dewpoint_c), (Some(-2), Some(-5)));
     assert_eq!(kbos.category, FlightCategory::Ifr);
+}
+
+#[test]
+fn observation_time_relative_to_the_landing() {
+    // same day
+    assert_eq!(observation_ms("181130Z", 1_792_324_800_000), Some(1_792_323_000_000)); // 2026-10-18 12:00 → 11:30
+    // report from the last day of the previous month, landing just after midnight
+    assert_eq!(observation_ms("302350Z", 1_793_492_400_000), Some(1_793_404_200_000)); // 2026-11-01 00:20 → 10-30 23:50
+    // report of the next day, landing just before midnight
+    assert_eq!(observation_ms("010010Z", 1_793_490_600_000), Some(1_793_491_800_000)); // 10-31 23:50 → 11-01 00:10
+    // day 31 does not exist in November: October 31 is taken
+    assert_eq!(observation_ms("311200Z", 1_794_744_000_000), Some(1_793_448_000_000)); // 11-15 → 10-31 12:00
+    assert_eq!(observation_ms("1811Z", 1_792_324_800_000), None);
+    assert_eq!(observation_ms("182460Z", 1_792_324_800_000), None);
 }
 
 #[test]

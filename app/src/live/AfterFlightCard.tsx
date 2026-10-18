@@ -3,6 +3,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { fmt, fmtClock, fmtDuration } from "../format";
 import { BAND_LABEL, BAND_VAR, vsBandOf, zonePhrase } from "../landing/facts";
 import type { LandingDebriefData } from "../landing/types";
+import { saveCardPng } from "../landing/exportCard";
+import { HistoryLine } from "../landing/HistoryPanel";
+import { userMessage } from "../errors";
+import { showToast } from "../ui/Toast";
 
 /** The flight that just ended (on-block); shown on the map until the next off-block. */
 export interface AfterFlight {
@@ -27,13 +31,18 @@ interface Props {
  */
 export default function AfterFlightCard({ flight, onDebrief, onLogbook, onDismiss }: Props) {
   const [place, setPlace] = useState<string | null>(null);
+  /** The analysis behind the place line; reused for the landing card PNG. */
+  const [data, setData] = useState<LandingDebriefData | null>(null);
+  const [saving, setSaving] = useState(false);
   useEffect(() => {
     let alive = true;
     setPlace(null);
+    setData(null);
     if (flight.landingRateFpm == null) return;
     invoke<LandingDebriefData>("landing_analysis", { flightId: flight.flightId, touchdownIndex: null })
       .then((d) => {
         if (!alive) return;
+        setData(d);
         const rwy = d.analysis.runway;
         const zone = zonePhrase(d.analysis);
         setPlace([rwy ? `RWY ${rwy.ident}` : null, zone].filter(Boolean).join(" · ") || null);
@@ -44,6 +53,18 @@ export default function AfterFlightCard({ flight, onDebrief, onLogbook, onDismis
       alive = false;
     };
   }, [flight.flightId, flight.landingRateFpm]);
+
+  const saveCard = async () => {
+    setSaving(true);
+    try {
+      const d = data ?? (await invoke<LandingDebriefData>("landing_analysis", { flightId: flight.flightId, touchdownIndex: null }));
+      await saveCardPng(d);
+    } catch (e) {
+      showToast({ id: "card-export", tone: "warn", title: "Landekarte nicht erstellt", body: userMessage(e, "export").hint });
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const rate = flight.landingRateFpm;
   const band = rate != null ? vsBandOf(rate) : null;
@@ -82,9 +103,14 @@ export default function AfterFlightCard({ flight, onDebrief, onLogbook, onDismis
           <div className="after-value">{fmtDuration(flight.blockMs, { seconds: false })}</div>
         </div>
       </div>
+      {/* "besser als 70 % deiner letzten 20 Landungen auf EDDF 25C" – nothing without history */}
+      {rate != null && <HistoryLine flightId={flight.flightId} />}
       <div className="after-actions">
         <button className="btn-primary" onClick={onDebrief} disabled={rate == null} title={rate == null ? "Keine Landung aufgezeichnet" : undefined}>
           Landeauswertung
+        </button>
+        <button onClick={() => void saveCard()} disabled={rate == null || saving} title={rate == null ? "Keine Landung aufgezeichnet" : "Landekarte speichern (PNG zum Teilen)"}>
+          {saving ? "Speichert …" : "Landekarte"}
         </button>
         <button onClick={onLogbook}>Im Logbuch</button>
       </div>

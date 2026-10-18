@@ -47,6 +47,15 @@ pub struct Telemetry {
     pub transponder_code: u32,
 }
 
+impl Telemetry {
+    /// Sim rate other than 1× (time acceleration or slow motion). 0 means "not reported"
+    /// and counts as real time. The phase engine and the touchdown detector both skip such
+    /// samples, so neither a cruise nor a landing can be faked by fast-forwarding.
+    pub fn time_accelerated(&self) -> bool {
+        self.sim_rate != 0.0 && (self.sim_rate - 1.0).abs() > 0.01
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Lights {

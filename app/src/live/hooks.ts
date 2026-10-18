@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Airport, GeoPoint, Metar, NearestAirport } from "../types";
 
@@ -80,13 +80,17 @@ export function useStoredState<T extends string | boolean>(key: string, initial:
       return initial;
     }
   });
-  const set = (v: T) => {
-    setValue(v);
-    try {
-      localStorage.setItem(key, typeof v === "boolean" ? (v ? "1" : "0") : v);
-    } catch {
-      /* storage unavailable: the state still works for this session */
-    }
-  };
+  // stable per key, so callers can list it as an effect/callback dependency
+  const set = useCallback(
+    (v: T) => {
+      setValue(v);
+      try {
+        localStorage.setItem(key, typeof v === "boolean" ? (v ? "1" : "0") : v);
+      } catch {
+        /* storage unavailable: the state still works for this session */
+      }
+    },
+    [key],
+  );
   return [value, set];
 }

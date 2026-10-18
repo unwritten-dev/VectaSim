@@ -10,8 +10,17 @@ export const M_PER_NM = 1852;
 export const TRACK_BEFORE_M = M_PER_NM;
 /** The runway is drawn at least this many pixels wide (lateral axis exaggerated). */
 export const MIN_RUNWAY_PX = 44;
+/** With a fixed exaggeration the runway may get thinner (narrow window), but not below this. */
+const MIN_DRAWN_RUNWAY_PX = 28;
 /** Lateral extent beyond which track points are clipped (circling, go-arounds). */
 const MAX_LATERAL_M = 600;
+/** Drawn width of a runway whose width the database does not know (as the ±15 m fallback in landing.rs). */
+export const UNKNOWN_WIDTH_DRAW_M = 30;
+
+/** Width to draw: the database width, or UNKNOWN_WIDTH_DRAW_M when unknown. */
+export function drawWidthM(widthM: number | null | undefined): number {
+  return widthM != null && widthM > 0 ? widthM : UNKNOWN_WIDTH_DRAW_M;
+}
 
 export interface XY {
   x: number;
@@ -28,6 +37,12 @@ export interface RunwayLayoutInput {
   widthPx: number;
   minHeightPx?: number;
   maxHeightPx?: number;
+  /**
+   * Fixed lateral exaggeration (yScale / xScale), so two drawings of different widths
+   * (debrief and landing card) show the same landing alike; still never below true scale,
+   * never wider than the height allows and never thinner than MIN_DRAWN_RUNWAY_PX.
+   */
+  exaggeration?: number;
 }
 
 export interface RunwayLayout {
@@ -94,7 +109,10 @@ export function runwayLayout(o: RunwayLayoutInput): RunwayLayout {
   const fit = (maxH / 2 - PAD_V) / (maxAbsY * 1.1);
   // a far-off touchdown that does not fit at true scale shrinks the whole drawing uniformly
   const xScale = Math.min(fullScale, fit);
-  const yScale = Math.max(xScale, Math.min(MIN_RUNWAY_PX / W, fit));
+  const yScale =
+    o.exaggeration != null
+      ? Math.max(xScale, Math.min(Math.max(xScale * o.exaggeration, MIN_DRAWN_RUNWAY_PX / W), fit))
+      : Math.max(xScale, Math.min(MIN_RUNWAY_PX / W, fit));
   const padLeft = PAD_L + ((xMax - xMin) * (fullScale - xScale)) / 2;
   const heightPx = Math.round(Math.min(maxH, Math.max(minH, 2 * (maxAbsY * 1.1 * yScale + PAD_V))));
   const cy = heightPx / 2;
@@ -154,9 +172,13 @@ export function nearestByDist<T extends { distM: number }>(samples: T[], d: numb
   return best;
 }
 
-/** "3 m rechts", "12 m links", "auf der Mittellinie" (|y| < 0.5 m). */
+/**
+ * "3 m rechts", "12 m links", "auf der Mittellinie" (|y| < 0.5 m). Whole metres: the
+ * runway coordinates are often only good to ±5 m (4 decimals), a decimal would be
+ * false precision (OurAirports runway coordinates are only metre-accurate).
+ */
 export function sideLabel(lateralM: number): string {
   const a = Math.abs(lateralM);
   if (a < 0.5) return "auf der Mittellinie";
-  return `${fmtNum(a, a < 10 ? 1 : 0)}${NNBSP}m ${lateralM > 0 ? "rechts" : "links"}`;
+  return `${fmtNum(a, 0)}${NNBSP}m ${lateralM > 0 ? "rechts" : "links"}`;
 }

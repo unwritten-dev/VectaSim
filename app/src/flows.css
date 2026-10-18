@@ -1,0 +1,496 @@
+/*
+ * Flows & texts (flow pass). Layout fixes for the logbook strips, the fleet list and the
+ * logbook toolbar at ~1100 px window width, plus small pieces for the new UI bits. App.css stays
+ * untouched: every rule here is more specific than the one it refines (e.g. `.strip-list > .strip`
+ * over `.strip`), so the import order does not matter.
+ */
+
+/* ---- logbook strips (FlightStrip.tsx) ------------------------------------------------ */
+
+/* The list is the grid; each strip is a subgrid row, so the callsign column has one width for
+   all strips: as wide as the longest callsign, at least 64 px, ellipsis only beyond 110 px. */
+.flight-list {
+  container-type: inline-size;
+  container-name: flights;
+  overflow-x: hidden;
+}
+.flight-list.strip-list {
+  display: grid;
+  grid-template-columns: minmax(64px, max-content) minmax(0, 1fr) auto;
+  column-gap: var(--sp-2);
+  align-content: start;
+}
+.strip-list > .strip {
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+}
+/* the option (identity + route) spans the first two columns; the landing-rate button is its
+   sibling in the third (FlightStrip.tsx: no interactive element inside an option) */
+.strip-list > .strip > .strip-option {
+  grid-column: 1 / 3;
+  display: grid;
+  grid-template-columns: subgrid;
+  align-items: center;
+  min-width: 0;
+}
+.strip-list > .strip > .strip-option > .strip-id {
+  max-width: 110px;
+}
+/* the focus ring belongs to the whole row, not only to the option part */
+.strip-list > .strip > .strip-option:focus-visible {
+  outline: none;
+}
+.strip-list > .strip:has(> .strip-option:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* route on one line; badges live in the second line behind date and block time */
+.strip-list .strip-legs {
+  flex-wrap: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.strip-list .strip-legs > span {
+  min-width: 0;
+}
+.strip-list .strip-meta {
+  flex-wrap: nowrap;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.strip-list .strip-meta > * {
+  flex: none;
+}
+
+/* clock times in the route line only where they fit (the detail pane always has them) */
+@container flights (max-width: 560px) {
+  .strip-list .strip-time {
+    display: none;
+  }
+}
+/* "stabil ab …" under the landing rate only with room; the rate button's title keeps it */
+@container flights (max-width: 380px) {
+  .strip-list .strip-stable {
+    display: none;
+  }
+}
+
+/* ---- fleet list (Fleet.tsx): no horizontal scrollbar ---------------------------------- */
+
+/* The second line (flights · block · landings · Ø · last flown) was nowrap with five fixed-width
+   spans and pushed the list wider than the master column. It may wrap now; the date goes right. */
+.flight-list .af-item {
+  min-width: 0;
+}
+.flight-list .af-item .af-item-text {
+  overflow: hidden;
+}
+.flight-list .af-item .fi-line2 {
+  flex-wrap: wrap;
+  column-gap: var(--sp-2);
+  row-gap: 0;
+}
+.flight-list .af-item .fi-line2 .af-last {
+  margin-left: auto;
+}
+@container flights (max-width: 420px) {
+  .flight-list .af-item .af-avg {
+    display: none;
+  }
+}
+
+/* ---- logbook toolbar: one line ---------------------------------------------------------- */
+
+.logbook-view .logbook-toolbar {
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+.logbook-view .logbook-toolbar .logbook-search {
+  flex: 0 1 260px;
+  width: auto;
+  min-width: 140px;
+}
+.logbook-view .logbook-toolbar .chips {
+  flex-wrap: nowrap;
+  flex: none;
+}
+.logbook-view .logbook-toolbar .chips > button {
+  white-space: nowrap;
+}
+.btn-icon-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.btn-icon-text svg {
+  flex: none;
+}
+.logbook-export .label-short {
+  display: none;
+}
+@media (max-width: 1199px) {
+  .logbook-export .label-long {
+    display: none;
+  }
+  .logbook-export .label-short {
+    display: inline;
+  }
+}
+
+/* ---- map: offline hint under the status pill ------------------------------------------ */
+
+.map-topleft .map-offline-pill {
+  height: 26px;
+  font-size: var(--fs-sm);
+}
+
+/* ---- logbook detail: Plan gegen Ist + PIREP entries in the export menu ----------------- */
+
+.detail-section h3.pva-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.detail-section h3.pva-head .detail {
+  font-weight: normal;
+}
+table.pva-table th[scope="row"] {
+  text-align: left;
+  font-weight: normal;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+table.pva-table tr.pva-group > * {
+  border-top: 1px solid var(--border);
+}
+table.pva-table td.num {
+  white-space: nowrap;
+}
+.export-menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
+}
+
+/* ---- after a crash: merge hints above the logbook list (Logbook.tsx, R3) ------------------ */
+.merge-hints {
+  flex: none;
+  display: grid;
+  gap: 1px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--border-subtle);
+}
+.merge-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px var(--sp-2);
+  padding: 6px var(--sp-3);
+  background: var(--warn-soft);
+}
+.merge-hint-text {
+  flex: 1 1 220px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.merge-hint-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* ---- Notizen & Tags (NotesEditor.tsx, FlightStrip.tsx, Logbook.tsx, R4) --------------------- */
+.notes-editor .notes-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(220px, 2fr);
+  gap: var(--sp-3) var(--sp-4);
+  align-items: start;
+}
+@media (max-width: 1240px) {
+  .notes-editor .notes-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.notes-editor .notes-side {
+  display: grid;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+.notes-editor .notes-label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+.notes-editor .notes-textarea {
+  width: 100%;
+  min-height: 84px;
+  resize: vertical;
+  font: inherit;
+  line-height: 1.45;
+  box-sizing: border-box;
+}
+.notes-editor .notes-hint {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  margin-top: 2px;
+  font-size: var(--fs-xs);
+}
+/* plain text with the pilot's line breaks (no Markdown) */
+.notes-editor .notes-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.notes-editor .tag-box {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-1);
+  cursor: text;
+}
+.notes-editor .tag-box:focus-within {
+  border-color: var(--accent);
+}
+.notes-editor .tag-chips {
+  display: contents;
+  list-style: none;
+}
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 22px;
+  padding: 0 4px 0 8px;
+  border-radius: var(--r-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--fs-sm);
+  max-width: 100%;
+}
+.tag-chip > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+button.tag-chip-x {
+  height: 18px;
+  min-width: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: inherit;
+  line-height: 1;
+}
+button.tag-chip-x:hover {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.notes-editor .tag-input-wrap {
+  position: relative;
+  flex: 1 1 90px;
+  min-width: 90px;
+}
+.notes-editor input.tag-input {
+  width: 100%;
+  height: 24px;
+  padding: 0 2px;
+  border: none;
+  background: transparent;
+  outline: none;
+  box-sizing: border-box;
+}
+.notes-editor .tag-suggest {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 4px);
+  z-index: 6;
+  min-width: 180px;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  box-shadow: var(--shadow-menu);
+}
+.notes-editor .tag-suggest > li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: 4px 8px;
+  border-radius: var(--r-xs);
+  cursor: pointer;
+}
+.notes-editor .tag-suggest > li:hover,
+.notes-editor .tag-suggest > li.active {
+  background: var(--surface-2);
+}
+
+.notes-editor .star-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.notes-editor button.star {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--text-faint);
+}
+.notes-editor button.star.on {
+  color: var(--warn);
+}
+.notes-editor button.star:disabled {
+  background: none;
+}
+.notes-editor button.star.on:disabled {
+  color: var(--warn);
+}
+.notes-editor button.star:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: var(--r-xs);
+}
+.notes-editor .star-clear {
+  margin-left: var(--sp-2);
+  font-size: var(--fs-xs);
+}
+.notes-editor .notes-rating-text {
+  display: block;
+  font-size: var(--fs-xs);
+}
+
+.notes-editor .notes-correct-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.notes-editor .corr-form {
+  margin-top: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+.notes-editor .corr-intro {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-xs);
+}
+.notes-editor .corr-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--sp-2) var(--sp-3);
+  margin-bottom: var(--sp-2);
+}
+.notes-editor .corr-field {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+.notes-editor .corr-field input {
+  width: 100%;
+  box-sizing: border-box;
+}
+.notes-editor .corr-field input.upper {
+  text-transform: uppercase;
+}
+.notes-editor .corr-field input[aria-invalid="true"] {
+  border-color: var(--warn);
+}
+.notes-editor .corr-help {
+  font-size: var(--fs-micro);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.notes-editor .corr-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+/* a value the pilot corrected (header): dotted underline, the tooltip shows the recorded one */
+.flight-detail .corrected {
+  text-decoration: underline dotted color-mix(in srgb, var(--text-muted) 70%, transparent);
+  text-underline-offset: 3px;
+  cursor: help;
+}
+
+/* strip: up to two tags, the rating and a note symbol behind the other badges */
+.strip-meta .strip-tag {
+  display: inline-block;
+  max-width: 9em;
+  height: 16px;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--fs-micro);
+  line-height: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.strip-meta .strip-tag-more {
+  background: var(--surface-2);
+  color: var(--text-muted);
+}
+.strip-meta .strip-rating {
+  color: var(--warn);
+  font-size: var(--fs-xs);
+}
+.strip-meta .strip-note {
+  display: inline-flex;
+  color: var(--text-muted);
+  cursor: help;
+}
+@container flights (max-width: 380px) {
+  .strip-list .strip-tag-2,
+  .strip-list .strip-tag-more {
+    display: none;
+  }
+}
+
+/* logbook toolbar: chip „Tags“ with its dropdown */
+.tag-filter .tag-filter-list {
+  left: 0;
+  right: auto;
+  min-width: 200px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.tag-filter .tag-filter-list button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tag-filter .tag-filter-list button .detail {
+  margin-left: auto;
+}
+.tag-filter .tag-filter-check {
+  width: 1em;
+  color: var(--accent);
+}
+.tag-filter .tag-filter-empty {
+  padding: 6px 10px;
+}

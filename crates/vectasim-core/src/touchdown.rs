@@ -17,20 +17,75 @@
 //!   GS ≤ 200 kt) – [`ground_contact_corroborated`];
 //! - first contact opens the report; it is only emitted after the aircraft was
 //!   corroborated on ground for 3 consecutive samples spanning ≥ 2 s (three 1 Hz
-//!   samples), then at the end of the bounce window or the rollout.
+//!   samples), then at the end of the bounce window or the rollout;
+//! - a bounce needs at least [`BOUNCE_MIN_AIR_MS`] (0.3 s) in the air between two ground
+//!   contacts: a shorter gap (`SIM ON GROUND` flickering on grass or one gear leg, at
+//!   sim frame rate) is the same contact (debounce window, see [`BOUNCE_MIN_AIR_MS`]).
+//!
+//! Outcome (full stop or touch-and-go): the report carries the landing
+//! rate as soon as the bounce window is over, but a touch-and-go rolls 10–20 s before it
+//! lifts off again, so the outcome is decided separately, after the report, and handed out
+//! through [`TouchdownDetector::take_outcome`] (exactly one outcome per report):
+//!
+//! | outcome                          | condition (whichever comes first)                        |
+//! |----------------------------------|----------------------------------------------------------|
+//! | [`TouchdownOutcome::FullStop`]   | on ground below 30 kt GS (rollout over)                  |
+//! | [`TouchdownOutcome::TouchAndGo`] | airborne again, > 50 ft AGL for 3 s and climbing (higher than where it passed 50 ft, or V/S > 0) – or > 50 ft for 10 s regardless – without having slowed below 30 kt first |
+//! | [`TouchdownOutcome::FullStop`]   | on ground 120 s after the first contact, neither of the above |
+//! | [`TouchdownOutcome::Unknown`]    | context reset ([`TouchdownDetector::reset`]) before a decision |
+//!
+//! While the report is still unsent (bounce window open), a decision made then is part of
+//! the report itself (`touch_and_go`) and its outcome follows in the same sample. A climb
+//! above 50 ft holds the report back until it is decided (at most 3 s), so a short-roll
+//! touch-and-go is reported with `touch_and_go = true` right away; a long roll is reported
+//! with `touch_and_go = false` and corrected by the outcome. Between the report and the
+//! outcome the detector is "rolling": further contacts belong to the same event and do not
+//! open a new report.
+//!
+//! Resets ([`TouchdownDetector::reset`], after a reconnect, teleport or reload): the ring
+//! buffer and the `qualified` latch are dropped, so the first ground contact after a
+//! reset is never a landing – the detector first needs qualified air time again
+//! (> 500 ft AGL, or [`MS_REQUALIFY_AFTER_RESET`] when the reset happened in the air,
+//! 60 s otherwise). A confirmed event still settling is handed back, not lost; an event
+//! whose outcome was not decided yet gets [`TouchdownOutcome::Unknown`] rather than a guess.
+//!
+//! Time base: windows and timers (ring buffer, bounce window, confirmation, air time,
+//! outcome timeout) run on a [`MonoClock`], so a backward step of the system clock counts
+//! as Δt = 0; `TouchdownReport::timestamp_ms` stays the wall-clock time of the first
+//! contact. Samples that are paused, slewed or time-accelerated
+//! ([`Telemetry::time_accelerated`]) are skipped exactly like in the phase engine. A contact
+//! made while fast-forwarding is therefore not evaluated by either; back at 1× on the
+//! ground, both see the landing at the first real-time sample (the phase engine fires
+//! Landing, the detector opens the report). Slewing and fast-forwarding drop the V/S ring
+//! buffer, so the rate is the sim's touchdown value or, without one, the V/S of that
+//! sample – never a V/S from before the skipped stretch. The flight carries
+//! `time_acceleration_detected` either way.
 
 use crate::Telemetry;
+use crate::clock::MonoClock;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 
 const RING_MS: u64 = 2_500;
 const PEAK_G_WINDOW_MS: u64 = 500;
 const BOUNCE_WINDOW_MS: u64 = 5_000;
+/// Shorter air time between two ground contacts is one contact, not a bounce.
+pub const BOUNCE_MIN_AIR_MS: u64 = 300;
 /// Leaving the ground and climbing above this is a touch-and-go, below it a bounce.
 const TOUCH_AND_GO_AGL_FT: f64 = 50.0;
+/// … once it stayed above [`TOUCH_AND_GO_AGL_FT`] (and kept climbing) for this long.
+pub const TOUCH_AND_GO_CLIMB_MS: u64 = 3_000;
+/// … or stayed above it this long, climbing or not.
+const TOUCH_AND_GO_AIRBORNE_MS: u64 = 10_000;
+/// Rollout over: below this GS on the ground the touchdown is a full stop.
 const ROLLOUT_DONE_KT: f64 = 30.0;
+/// Without a decision this long after the first contact (on the ground) it is a full stop.
+pub const OUTCOME_TIMEOUT_MS: u64 = 120_000;
 const QUALIFY_AGL_FT: f64 = 500.0;
 const QUALIFY_AIRBORNE_MS: u64 = 60_000;
+/// Air time that requalifies a flight after a context reset in the air: long enough
+/// that the ring buffer holds real airborne V/S again (and shared with the phase engine).
+pub const MS_REQUALIFY_AFTER_RESET: u64 = 10_000;
 const G_MAX_PLAUSIBLE: f64 = 5.0;
 /// On-ground corroboration: AGL limit, or GS limit when AGL is unusable.
 pub const ON_GROUND_MAX_AGL_FT: f64 = 50.0;
@@ -59,6 +114,36 @@ impl LandingRateSource {
 
     pub fn parse(s: &str) -> Self {
         if s == "sim" { LandingRateSource::Sim } else { LandingRateSource::Measured }
+    }
+}
+
+/// How a touchdown ended (see the module doc for the rules).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TouchdownOutcome {
+    /// Reported, not decided yet (still rolling).
+    #[default]
+    Pending,
+    /// Rolled out (below 30 kt), or still on the ground 120 s after the first contact.
+    FullStop,
+    /// Climbed away again without having rolled out.
+    TouchAndGo,
+    /// The data stream broke off (reconnect, teleport, reload) before a decision.
+    Unknown,
+}
+
+impl TouchdownOutcome {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TouchdownOutcome::Pending => "pending",
+            TouchdownOutcome::FullStop => "fullStop",
+            TouchdownOutcome::TouchAndGo => "touchAndGo",
+            TouchdownOutcome::Unknown => "unknown",
+        }
+    }
+
+    pub fn is_decided(self) -> bool {
+        self != TouchdownOutcome::Pending
     }
 }
 
@@ -103,7 +188,9 @@ pub struct TouchdownReport {
     pub latitude: f64,
     pub longitude: f64,
     pub bounces: u32,
-    /// Aircraft climbed away again instead of rolling out.
+    /// Aircraft climbed away again instead of rolling out. In a freshly emitted report this
+    /// is only `true` when that was already decided; a long-roll touch-and-go is corrected
+    /// by the [`TouchdownOutcome`] that follows (see the module doc).
     pub touch_and_go: bool,
     /// Headline landing rate of this event: worst contact, sim value preferred (see module doc).
     #[serde(default)]
@@ -119,11 +206,51 @@ struct Sample {
     on_ground: bool,
 }
 
+/// Climb-out tracking for the touch-and-go decision: when (and at which AGL) the aircraft
+/// passed [`TOUCH_AND_GO_AGL_FT`] in the current airborne stretch.
+#[derive(Clone, Copy, Debug, Default)]
+struct ClimbOut {
+    since: Option<(u64, f64)>,
+}
+
+impl ClimbOut {
+    /// Feed one sample; true once it is a touch-and-go: > 50 ft for 3 s and climbing (higher
+    /// than where it passed 50 ft, or a positive V/S), or > 50 ft for 10 s whatever it does
+    /// (it is flying again; the phase engine's Landing → Climb takes as long).
+    fn update(&mut self, on_ground: bool, t: &Telemetry, now: u64) -> bool {
+        let agl_ft = t.altitude_agl_ft;
+        // NaN AGL counts as "not above"
+        if on_ground || agl_ft.is_nan() || agl_ft <= TOUCH_AND_GO_AGL_FT {
+            self.since = None;
+            return false;
+        }
+        let (since, start_agl) = *self.since.get_or_insert((now, agl_ft));
+        let above_ms = now.saturating_sub(since);
+        let climbing = agl_ft > start_agl || t.vertical_speed_fpm > 0.0;
+        above_ms >= TOUCH_AND_GO_CLIMB_MS && climbing || above_ms >= TOUCH_AND_GO_AIRBORNE_MS
+    }
+
+    /// Above 50 ft for less than [`TOUCH_AND_GO_CLIMB_MS`]: the decision is imminent.
+    fn deciding(&self, now: u64) -> bool {
+        self.since.is_some_and(|(s, _)| now.saturating_sub(s) < TOUCH_AND_GO_CLIMB_MS)
+    }
+
+    fn shift(&mut self, ms: u64) {
+        if let Some((s, _)) = self.since.as_mut() {
+            *s = s.saturating_add(ms);
+        }
+    }
+}
+
 #[derive(Debug)]
 struct Event {
     report: TouchdownReport,
+    /// First contact of the event (the outcome timeout runs from here).
+    first_contact_ms: u64,
     last_contact_ms: u64,
     airborne_now: bool,
+    /// When the current airborne stretch inside the window began.
+    air_since_ms: u64,
     /// Start and sample count of the current corroborated ground run.
     ground_since_ms: u64,
     ground_samples: u32,
@@ -133,6 +260,16 @@ struct Event {
     stale_sim: f64,
     /// Last airborne V/S before the current contact.
     contact_vs: f64,
+    climb: ClimbOut,
+}
+
+/// Reported touchdown whose outcome is not decided yet.
+#[derive(Debug)]
+struct Rollout {
+    first_contact_ms: u64,
+    /// Start of the current airborne stretch, if airborne.
+    air_since_ms: Option<u64>,
+    climb: ClimbOut,
 }
 
 #[derive(Debug)]
@@ -143,6 +280,8 @@ enum State {
     Airborne { since: u64, qualified: bool },
     /// First contact happened; collecting peak G, bounces and confirmation.
     Settling(Box<Event>),
+    /// Report emitted, waiting for the outcome (full stop or touch-and-go).
+    Rolling(Rollout),
 }
 
 #[derive(Debug)]
@@ -151,6 +290,14 @@ pub struct TouchdownDetector {
     state: State,
     /// Raw sim touchdown value of the latest airborne sample.
     last_air_sim: f64,
+    /// Air time that qualifies (shorter right after a reset in the air).
+    qualify_ms: u64,
+    /// Wall clock → monotonic time for every window and timer above (reports keep wall time).
+    clock: MonoClock,
+    /// Decided outcome of the last report, with the wall-clock time of the decision.
+    outcome: Option<(TouchdownOutcome, u64)>,
+    /// Wall-clock time of the latest sample (time of an outcome decided by a reset).
+    last_wall_ms: u64,
 }
 
 impl Default for TouchdownDetector {
@@ -159,18 +306,141 @@ impl Default for TouchdownDetector {
     }
 }
 
+/// Detector internals for the Diagnose view.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DetectorDebug {
+    /// ground | airborne | settling | rolling (reported, outcome pending)
+    pub state: String,
+    pub airborne_since_ms: Option<u64>,
+    /// Airborne long/high enough that the next contact counts as a landing.
+    pub qualified: bool,
+    pub qualify_ms: u64,
+    /// Settling: corroborated ground samples / confirmed / bounces / back in the air.
+    pub ground_samples: u32,
+    pub confirmed: bool,
+    pub bounces: u32,
+    pub airborne_now: bool,
+    /// Settling: the sim touchdown value that still belongs to the previous landing.
+    pub stale_sim: Option<f64>,
+    /// Raw sim touchdown value of the latest airborne sample.
+    pub last_air_sim: f64,
+}
+
 impl TouchdownDetector {
-    pub fn new() -> Self {
-        Self { ring: VecDeque::new(), state: State::Ground, last_air_sim: 0.0 }
+    pub fn debug(&self) -> DetectorDebug {
+        let mut d = DetectorDebug { last_air_sim: self.last_air_sim, qualify_ms: self.qualify_ms, ..Default::default() };
+        match &self.state {
+            State::Ground => d.state = "ground".into(),
+            State::Airborne { since, qualified } => {
+                d.state = "airborne".into();
+                d.airborne_since_ms = Some(self.clock.to_wall(*since));
+                d.qualified = *qualified;
+            }
+            State::Settling(ev) => {
+                d.state = "settling".into();
+                d.qualified = true;
+                d.ground_samples = ev.ground_samples;
+                d.confirmed = ev.confirmed;
+                d.bounces = ev.report.bounces;
+                d.airborne_now = ev.airborne_now;
+                d.stale_sim = Some(ev.stale_sim);
+            }
+            State::Rolling(r) => {
+                d.state = "rolling".into();
+                d.qualified = true;
+                d.confirmed = true;
+                d.airborne_now = r.air_since_ms.is_some();
+                d.airborne_since_ms = r.air_since_ms.map(|m| self.clock.to_wall(m));
+            }
+        }
+        d
     }
 
-    /// Feed one sample; returns a finished report once the event is confirmed and over
-    /// (or as a touch-and-go when the aircraft climbed away).
+    pub fn new() -> Self {
+        Self {
+            ring: VecDeque::new(),
+            state: State::Ground,
+            last_air_sim: 0.0,
+            qualify_ms: QUALIFY_AIRBORNE_MS,
+            clock: MonoClock::new(),
+            outcome: None,
+            last_wall_ms: 0,
+        }
+    }
+
+    /// Drop the V/S history and the airborne latch (data stream discontinuity). Returns
+    /// the report of a confirmed touchdown that was still settling, so it is not lost.
+    /// `resume_airborne`: the reset happened in the air, requalify after a short stretch.
+    /// A touchdown reported (now or before) without a decided outcome gets
+    /// [`TouchdownOutcome::Unknown`] (see [`TouchdownDetector::take_outcome`]).
+    pub fn reset(&mut self, resume_airborne: bool) -> Option<TouchdownReport> {
+        self.ring.clear();
+        self.qualify_ms = if resume_airborne { MS_REQUALIFY_AFTER_RESET } else { QUALIFY_AIRBORNE_MS };
+        match std::mem::replace(&mut self.state, State::Ground) {
+            State::Settling(ev) if ev.confirmed => {
+                self.decide(TouchdownOutcome::Unknown, self.last_wall_ms);
+                Some(ev.report)
+            }
+            State::Rolling(_) => {
+                self.decide(TouchdownOutcome::Unknown, self.last_wall_ms);
+                None
+            }
+            _ => None,
+        }
+    }
+
+    /// The outcome of the last report once it is decided (exactly once per report), with
+    /// the wall-clock time of the decision. Call after [`TouchdownDetector::update`] and
+    /// [`TouchdownDetector::reset`]; a report and its outcome can come from the same call.
+    pub fn take_outcome(&mut self) -> Option<(TouchdownOutcome, u64)> {
+        self.outcome.take()
+    }
+
+    /// A touchdown was reported and its outcome is not decided yet.
+    pub fn outcome_pending(&self) -> bool {
+        matches!(self.state, State::Rolling(_))
+    }
+
+    /// Cut a pause of `ms` out of the timers (air time, bounce window, outcome timeout).
+    pub fn shift_time(&mut self, ms: u64) {
+        for s in &mut self.ring {
+            s.ts = s.ts.saturating_add(ms);
+        }
+        match &mut self.state {
+            State::Ground => {}
+            State::Airborne { since, .. } => *since = since.saturating_add(ms),
+            State::Settling(ev) => {
+                ev.first_contact_ms = ev.first_contact_ms.saturating_add(ms);
+                ev.last_contact_ms = ev.last_contact_ms.saturating_add(ms);
+                ev.ground_since_ms = ev.ground_since_ms.saturating_add(ms);
+                ev.climb.shift(ms);
+            }
+            State::Rolling(r) => {
+                r.first_contact_ms = r.first_contact_ms.saturating_add(ms);
+                if let Some(s) = r.air_since_ms.as_mut() {
+                    *s = s.saturating_add(ms);
+                }
+                r.climb.shift(ms);
+            }
+        }
+    }
+
+    /// Feed one sample; returns a finished report once the event is confirmed and the bounce
+    /// window is over (or the rollout or a touch-and-go was decided before that). The
+    /// outcome follows through [`TouchdownDetector::take_outcome`].
     pub fn update(&mut self, t: &Telemetry) -> Option<TouchdownReport> {
-        if t.paused || t.slew {
+        // the clock sees every sample, so a backward step during a pause is absorbed too
+        let now = self.clock.advance(t.timestamp_ms);
+        self.last_wall_ms = t.timestamp_ms;
+        // same rule as the phase engine: paused, slewed and time-accelerated samples do not count
+        if t.slew || t.time_accelerated() {
+            // the aircraft moved on without us: the V/S history no longer describes it
+            self.ring.clear();
+        }
+        if t.paused || t.slew || t.time_accelerated() {
             return None;
         }
-        let now = t.timestamp_ms;
         let g = if (0.0..=G_MAX_PLAUSIBLE).contains(&t.g_force) { t.g_force } else { 1.0 };
         let on_ground = ground_contact_corroborated(t);
         self.push(Sample { ts: now, vs: t.vertical_speed_fpm, on_ground });
@@ -182,10 +452,11 @@ impl TouchdownDetector {
             }
             State::Airborne { since, qualified } => {
                 let qualified =
-                    qualified || t.altitude_agl_ft > QUALIFY_AGL_FT || now.saturating_sub(since) > QUALIFY_AIRBORNE_MS;
+                    qualified || t.altitude_agl_ft > QUALIFY_AGL_FT || now.saturating_sub(since) > self.qualify_ms;
                 if on_ground {
                     if qualified {
-                        let mut ev = self.first_contact(t);
+                        self.qualify_ms = QUALIFY_AIRBORNE_MS;
+                        let mut ev = self.first_contact(t, now);
                         ev.note_sim(t.touchdown_vs_fpm);
                         self.state = State::Settling(Box::new(ev));
                     } else {
@@ -197,7 +468,11 @@ impl TouchdownDetector {
                 }
                 None
             }
-            State::Settling(ev) => self.settle(ev, t, on_ground, g),
+            State::Settling(ev) => self.settle(ev, t, now, on_ground, g),
+            State::Rolling(r) => {
+                self.roll(r, t, now, on_ground);
+                None
+            }
         };
         if !on_ground {
             self.last_air_sim = t.touchdown_vs_fpm;
@@ -205,24 +480,34 @@ impl TouchdownDetector {
         out
     }
 
-    fn settle(&mut self, mut ev: Box<Event>, t: &Telemetry, on_ground: bool, g: f64) -> Option<TouchdownReport> {
-        let now = t.timestamp_ms;
+    fn decide(&mut self, outcome: TouchdownOutcome, wall_ms: u64) {
+        self.outcome = Some((outcome, wall_ms));
+    }
+
+    fn settle(&mut self, mut ev: Box<Event>, t: &Telemetry, now: u64, on_ground: bool, g: f64) -> Option<TouchdownReport> {
         // peak G shortly after each contact
         if now.saturating_sub(ev.last_contact_ms) <= PEAK_G_WINDOW_MS {
             ev.report.peak_g = ev.report.peak_g.max(g);
         }
+        if ev.climb.update(on_ground, t, now) {
+            // climbed away before the report went out: a touch-and-go (kept, but never the
+            // flight's landing rate), decided together with the report
+            ev.report.touch_and_go = true;
+            self.decide(TouchdownOutcome::TouchAndGo, t.timestamp_ms);
+            self.state = State::Airborne { since: ev.air_since_ms, qualified: true };
+            return Some(ev.report);
+        }
         if !on_ground {
-            if t.altitude_agl_ft > TOUCH_AND_GO_AGL_FT {
-                // climbed away: a touch-and-go (kept, but never the flight's landing rate)
-                ev.report.touch_and_go = true;
-                self.state = State::Airborne { since: now, qualified: true };
-                return Some(ev.report);
-            }
             if !ev.airborne_now {
                 ev.airborne_now = true;
+                ev.air_since_ms = now;
                 // a sim value already shown now belongs to the earlier contact
                 ev.stale_sim = t.touchdown_vs_fpm;
             }
+        } else if ev.airborne_now && now.saturating_sub(ev.air_since_ms) < BOUNCE_MIN_AIR_MS {
+            // ground flag flickered: still the same contact, the ground run goes on
+            ev.airborne_now = false;
+            ev.ground_samples += 1;
         } else if ev.airborne_now {
             // came back down inside the window without climbing away: a bounce
             ev.report.bounces += 1;
@@ -241,20 +526,48 @@ impl TouchdownDetector {
         if !ev.confirmed && !ev.airborne_now {
             ev.confirmed = ev.ground_samples >= CONFIRM_SAMPLES && now.saturating_sub(ev.ground_since_ms) >= CONFIRM_MS;
         }
-        let window_closed = now.saturating_sub(ev.last_contact_ms) > BOUNCE_WINDOW_MS;
-        let rolled_out = on_ground && t.ground_speed_kt < ROLLOUT_DONE_KT;
-        if ev.confirmed && (window_closed || rolled_out) {
+        if ev.confirmed && on_ground && t.ground_speed_kt < ROLLOUT_DONE_KT {
+            // the rollout is already over: report and outcome at once
+            self.decide(TouchdownOutcome::FullStop, t.timestamp_ms);
             self.state = State::Ground;
             return Some(ev.report);
         }
-        if window_closed && ev.airborne_now {
-            // stayed low in the air for the whole window: it did not stay down
-            ev.report.touch_and_go = true;
-            self.state = State::Airborne { since: now, qualified: true };
+        // A climb above 50 ft holds the report until the touch-and-go is decided (≤ 3 s);
+        // hanging above 50 ft without climbing further, the window closes as usual.
+        let window_closed = now.saturating_sub(ev.last_contact_ms) > BOUNCE_WINDOW_MS;
+        if window_closed && !ev.climb.deciding(now) && (ev.confirmed || ev.airborne_now) {
+            // landing rate known, outcome not yet: report now, decide after the rollout
+            self.state = State::Rolling(Rollout {
+                first_contact_ms: ev.first_contact_ms,
+                air_since_ms: ev.airborne_now.then_some(ev.air_since_ms),
+                climb: ev.climb,
+            });
             return Some(ev.report);
         }
         self.state = State::Settling(ev);
         None
+    }
+
+    /// Reported, outcome pending: rolled out, climbed away, or timed out.
+    fn roll(&mut self, mut r: Rollout, t: &Telemetry, now: u64, on_ground: bool) {
+        if on_ground {
+            r.air_since_ms = None;
+            r.climb.update(true, t, now);
+            if t.ground_speed_kt < ROLLOUT_DONE_KT || now.saturating_sub(r.first_contact_ms) >= OUTCOME_TIMEOUT_MS {
+                self.decide(TouchdownOutcome::FullStop, t.timestamp_ms);
+                self.state = State::Ground;
+                return;
+            }
+        } else {
+            let since = *r.air_since_ms.get_or_insert(now);
+            if r.climb.update(false, t, now) {
+                self.decide(TouchdownOutcome::TouchAndGo, t.timestamp_ms);
+                // the climb-out belongs to a real flight: the next contact is a landing again
+                self.state = State::Airborne { since, qualified: true };
+                return;
+            }
+        }
+        self.state = State::Rolling(r);
     }
 
     fn push(&mut self, s: Sample) {
@@ -268,7 +581,7 @@ impl TouchdownDetector {
         self.ring.iter().rev().find(|s| !s.on_ground).map(|s| s.vs)
     }
 
-    fn first_contact(&self, t: &Telemetry) -> Event {
+    fn first_contact(&self, t: &Telemetry, now: u64) -> Event {
         let vs_measured = self.last_airborne_vs().unwrap_or(t.vertical_speed_fpm);
         let (rate, source) = compute_landing_rate(0.0, vs_measured);
         Event {
@@ -290,13 +603,16 @@ impl TouchdownDetector {
                 landing_rate_fpm: rate,
                 landing_rate_source: source,
             },
-            last_contact_ms: t.timestamp_ms,
+            first_contact_ms: now,
+            last_contact_ms: now,
             airborne_now: false,
-            ground_since_ms: t.timestamp_ms,
+            air_since_ms: now,
+            ground_since_ms: now,
             ground_samples: 1,
             confirmed: false,
             stale_sim: self.last_air_sim,
             contact_vs: vs_measured,
+            climb: ClimbOut::default(),
         }
     }
 }
@@ -342,11 +658,12 @@ mod tests {
         t_ms: u64,
         step: u64,
         out: Vec<TouchdownReport>,
+        outcomes: Vec<TouchdownOutcome>,
     }
 
     impl Feed {
         fn new(step: u64) -> Self {
-            Self { det: TouchdownDetector::new(), t_ms: 1_000_000, step, out: Vec::new() }
+            Self { det: TouchdownDetector::new(), t_ms: 1_000_000, step, out: Vec::new(), outcomes: Vec::new() }
         }
         fn run(&mut self, secs: f64, f: impl Fn(&mut Telemetry)) {
             for _ in 0..((secs * 1000.0) / self.step as f64).round() as u64 {
@@ -356,6 +673,7 @@ mod tests {
                 if let Some(r) = self.det.update(&t) {
                     self.out.push(r);
                 }
+                self.outcomes.extend(self.det.take_outcome().map(|(o, _)| o));
             }
         }
     }
@@ -434,6 +752,33 @@ mod tests {
     }
 
     #[test]
+    fn ground_flag_flicker_under_0_3_s_is_one_contact() {
+        // 50 Hz-ish: the on-ground flag drops for 0.2 s twice (grass, one gear leg) – no bounce
+        let mut f = Feed::new(50);
+        f.run(70.0, air(1500.0, -700.0, 0.0));
+        f.run(2.0, air(10.0, -160.0, 0.0));
+        f.run(0.5, ground(120.0, 160.0));
+        f.run(0.2, air(0.5, -20.0, 160.0));
+        f.run(0.6, ground(118.0, 160.0));
+        f.run(0.25, air(0.5, -10.0, 160.0));
+        f.run(8.0, ground(100.0, 160.0));
+        assert_eq!(f.out.len(), 1, "{:?}", f.out);
+        let r = &f.out[0];
+        assert_eq!((r.bounces, r.touch_and_go), (0, false));
+        assert_eq!((r.landing_rate_fpm, r.landing_rate_source), (-160.0, LandingRateSource::Sim));
+        assert_eq!(r.vs_fpm_hardest, -160.0, "the flicker's V/S is no contact of its own");
+
+        // 0.3 s and more in the air is a bounce
+        let mut f = Feed::new(50);
+        f.run(70.0, air(1500.0, -700.0, 0.0));
+        f.run(2.0, air(10.0, -160.0, 0.0));
+        f.run(0.5, ground(120.0, 160.0));
+        f.run(0.35, air(1.5, -60.0, 160.0));
+        f.run(8.0, ground(100.0, 160.0));
+        assert_eq!(f.out[0].bounces, 1, "{:?}", f.out);
+    }
+
+    #[test]
     fn bounce_without_new_sim_value_keeps_the_sim_rate() {
         let mut f = Feed::new(50);
         f.run(70.0, air(1500.0, -700.0, 0.0));
@@ -494,5 +839,61 @@ mod tests {
         assert_eq!(f.out.len(), 1);
         assert!(f.out[0].touch_and_go);
         assert_eq!(f.out[0].landing_rate_fpm, -200.0);
+        assert_eq!(f.outcomes, vec![TouchdownOutcome::TouchAndGo]);
+    }
+
+    #[test]
+    fn outcome_follows_the_report_once() {
+        let mut f = Feed::new(250);
+        f.run(70.0, air(1500.0, -700.0, 0.0));
+        f.run(2.0, air(10.0, -150.0, 0.0));
+        f.run(8.0, ground(90.0, 150.0));
+        assert_eq!((f.out.len(), f.outcomes.len()), (1, 0), "reported, still rolling");
+        assert!(f.det.outcome_pending());
+        assert_eq!(f.det.debug().state, "rolling");
+        // a hop below 50 ft while rolling is neither a new touchdown nor a decision
+        f.run(1.0, air(20.0, 300.0, 0.0));
+        f.run(3.0, ground(60.0, 150.0));
+        assert_eq!((f.out.len(), f.outcomes.len()), (1, 0));
+        f.run(2.0, ground(25.0, 150.0));
+        assert_eq!(f.outcomes, vec![TouchdownOutcome::FullStop]);
+        assert!(!f.det.outcome_pending());
+        assert_eq!(f.det.take_outcome(), None, "handed out once");
+    }
+
+    #[test]
+    fn level_above_50_ft_for_10_s_is_a_touch_and_go_too() {
+        // synthetic: no climb at all after the lift-off, yet clearly flying again; the next
+        // landing must not be swallowed by a touchdown that never got its outcome
+        let mut f = Feed::new(250);
+        f.run(70.0, air(1500.0, -700.0, 0.0));
+        f.run(2.0, air(10.0, -150.0, 0.0));
+        f.run(8.0, ground(90.0, 150.0));
+        f.run(9.0, air(400.0, -100.0, 150.0));
+        assert!(f.outcomes.is_empty(), "level and sinking: not yet");
+        f.run(1.5, air(400.0, -100.0, 150.0));
+        assert_eq!(f.outcomes, vec![TouchdownOutcome::TouchAndGo]);
+        f.run(60.0, air(1500.0, -700.0, 150.0));
+        f.run(2.0, air(10.0, -120.0, 150.0));
+        f.run(8.0, ground(20.0, 121.0));
+        assert_eq!(f.out.len(), 2);
+        assert_eq!(f.outcomes, vec![TouchdownOutcome::TouchAndGo, TouchdownOutcome::FullStop]);
+    }
+
+    #[test]
+    fn reset_while_rolling_is_unknown() {
+        let mut f = Feed::new(250);
+        f.run(70.0, air(1500.0, -700.0, 0.0));
+        f.run(2.0, air(10.0, -150.0, 0.0));
+        f.run(7.0, ground(90.0, 150.0));
+        assert_eq!(f.det.reset(false), None, "already reported");
+        assert_eq!(f.det.take_outcome(), Some((TouchdownOutcome::Unknown, f.t_ms)));
+        // an unconfirmed contact is dropped without an outcome
+        let mut f = Feed::new(250);
+        f.run(70.0, air(1500.0, -700.0, 0.0));
+        f.run(2.0, air(10.0, -150.0, 0.0));
+        f.run(0.5, ground(120.0, 150.0));
+        assert_eq!(f.det.reset(false), None);
+        assert_eq!(f.det.take_outcome(), None);
     }
 }

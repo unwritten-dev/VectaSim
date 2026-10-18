@@ -39,6 +39,28 @@ export function retrySeconds(raw: string): number | null {
   return m ? Number(m[1]) : null;
 }
 
+/**
+ * What to do when SimConnect.dll is missing. MSFS itself does not ship the DLL where VectaSim
+ * can load it; it comes with the MSFS SDK – so this is not "MSFS is not installed". VectaSim
+ * downloads it on one click (Einstellungen → Simulator → „SimConnect herunterladen“).
+ */
+export const DLL_MISSING_TEXT = "SimConnect fehlt noch – unter Einstellungen → Simulator mit einem Klick herunterladen";
+
+/** Backend loader error: no SimConnect.dll on the search path (or none that loads). */
+export function isDllMissing(raw: string): boolean {
+  return /SimConnect\.dll not found|unloadable/i.test(raw);
+}
+
+/** Paths the loader tried, from "SimConnect.dll not found or unloadable (tried: a, b); last error: …". */
+export function triedDllPaths(raw: string): string[] {
+  const m = /\(tried: (.*?)\); last error:/s.exec(raw) ?? /\(tried: (.*)\)/s.exec(raw);
+  if (!m) return [];
+  return m[1]
+    .split(/,\s+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+}
+
 /** True for the SimConnect "sim not running yet" message, which is a state, not an error. */
 export function isWaitingForSim(raw: string): boolean {
   return /sim not reachable/i.test(raw);
@@ -49,10 +71,10 @@ export function userMessage(err: unknown, ctx?: ErrorContext, extra: { user?: st
   const m = (title: string, hint: string): UserMessage => ({ title, hint, detail });
 
   // ---- simulator / provider
-  if (/SimConnect\.dll not found|unloadable/i.test(detail))
+  if (isDllMissing(detail))
     return m(
-      "SimConnect wurde nicht gefunden.",
-      "Ist MSFS installiert? VectaSim sucht weiter, sobald du ihn installierst – zum Ausprobieren gibt es in den Einstellungen den Demo-Flug.",
+      "SimConnect fehlt noch.",
+      "Unter Einstellungen → Simulator mit einem Klick herunterladen (offizielles MSFS-SDK von Microsoft) oder dort die Datei wählen. Zum Ausprobieren: „Demo-Flug“ auf der Karte.",
     );
   if (isWaitingForSim(detail)) {
     const s = retrySeconds(detail);
@@ -97,6 +119,8 @@ export function userMessage(err: unknown, ctx?: ErrorContext, extra: { user?: st
     return m("Die Antwort konnte nicht gelesen werden.", "Versuche es später erneut. Bleibt der Fehler, melde ihn mit den Details unten.");
 
   // ---- local
+  if (/Pfad nicht erlaubt/i.test(detail))
+    return m("Dieser Speicherort ist nicht erlaubt.", "Wähle einen Ordner außerhalb von Windows- und Programmverzeichnissen, z. B. Dokumente oder den Desktop.");
   if (/Flug nicht gefunden/i.test(detail)) return m("Flug nicht gefunden.", "Er wurde vermutlich gelöscht. Die Liste wird aktualisiert.");
   if (/database is locked|SQLITE_BUSY/i.test(detail)) return m("Logbuch ist gerade belegt.", "Versuche es in ein paar Sekunden erneut.");
   if (/Access is denied|Zugriff verweigert|permission denied|os error 5\b|os error 13\b/i.test(detail))

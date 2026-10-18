@@ -76,12 +76,17 @@ pub fn active_airframe(store: State<Store>) -> Result<Option<Airframe>, String> 
     }
 }
 
-/// Manual create/edit (name, type, airline, notes).
+/// Manual create/edit (name, type, airline, notes, Vapp).
 #[tauri::command]
 pub fn upsert_airframe(edit: AirframeEdit, app: AppHandle, store: State<Store>) -> Result<Airframe, String> {
     reg_or_err(&edit.registration)?;
+    let before = edit.vapp_kt.is_some().then(|| store.get_airframe(&edit.registration).ok().flatten().and_then(|a| a.vapp_kt));
     let a = store.upsert_airframe(&edit, now()).map_err(err)?.ok_or("Registrierung ungültig")?;
     changed(&app, &a.registration);
+    // a new Vapp re-rates the approaches of this airframe: the strips reload their (recomputed) facts
+    if before.is_some_and(|b| b != a.vapp_kt) {
+        let _ = app.emit("approach:facts", a.registration.as_str());
+    }
     Ok(a)
 }
 

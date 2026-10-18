@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2">
+<Document>
+  <name>EDDF → EGLL · DLH4AB</name>
+  <description>A320neo &lt;Lufthansa&gt; &amp; &quot;Grüße&quot;, =Livery</description>
+  <Style id="track"><LineStyle><color>ffffc24c</color><width>3</width></LineStyle><IconStyle><Icon><href>http://maps.google.com/mapfiles/kml/shapes/airports.png</href></Icon></IconStyle></Style>
+  <Style id="airport"><IconStyle><Icon><href>http://maps.google.com/mapfiles/kml/paddle/wht-circle.png</href></Icon></IconStyle></Style>
+  <Style id="touchdown"><IconStyle><color>ff3c4ce7</color><Icon><href>http://maps.google.com/mapfiles/kml/shapes/target.png</href></Icon></IconStyle></Style>
+  <Placemark>
+    <name>Abflug EDDF</name>
+    <TimeStamp><when>2026-10-16T08:00:00Z</when></TimeStamp>
+    <styleUrl>#airport</styleUrl>
+    <Point><altitudeMode>clampToGround</altitudeMode><coordinates>8.5706000,50.0333000,0</coordinates></Point>
+  </Placemark>
+  <Placemark>
+    <name>Flugweg</name>
+    <styleUrl>#track</styleUrl>
+    <gx:Track>
+      <altitudeMode>absolute</altitudeMode>
+      <when>2026-10-16T08:00:00Z</when>
+      <when>2026-10-16T08:00:01Z</when>
+      <when>2026-10-16T08:00:02Z</when>
+      <when>2026-10-16T08:00:03.250Z</when>
+      <when>2026-10-16T08:00:04Z</when>
+      <when>2026-10-16T08:00:05Z</when>
+      <when>2026-10-16T08:00:06Z</when>
+      <when>2026-10-16T08:00:07Z</when>
+      <when>2026-10-16T08:00:08Z</when>
+      <when>2026-10-16T08:00:09Z</when>
+      <gx:coord>8.5706000 50.0333000 110.9</gx:coord>
+      <gx:coord>8.5691000 50.0343000 147.7</gx:coord>
+      <gx:coord>8.5676000 50.0353000 184.4</gx:coord>
+      <gx:coord>8.5661000 50.0363000 221.1</gx:coord>
+      <gx:coord>8.5646000 50.0373000 257.9</gx:coord>
+      <gx:coord>8.5631000 50.0383000 294.6</gx:coord>
+      <gx:coord>8.5616000 50.0393000 331.3</gx:coord>
+      <gx:coord>8.5601000 50.0403000 368.0</gx:coord>
+      <gx:coord>8.5586000 50.0413000 404.8</gx:coord>
+      <gx:coord>8.5571000 50.0423000 441.5</gx:coord>
+      <gx:angles>350.0 7.2 -1.5</gx:angles>
+      <gx:angles>249.8 7.2 -1.5</gx:angles>
+      <gx:angles>249.8 7.2 -1.5</gx:angles>
+      <gx:angles>249.8 7.2 -1.5</gx:angles>
+      <gx:angles>249.8 7.2 -1.5</gx:angles>
+      <gx:angles>249.8 7.2 -1.5</gx:angles>
+      <gx:angles>249.8 7.2 -1.5</gx:angles>
+      <gx:angles>249.8 7.2 -1.5</gx:angles>
+      <gx:angles>249.8 7.2 -1.5</gx:angles>
+      <gx:angles>249.8 7.2 -1.5</gx:angles>
+    </gx:Track>
+  </Placemark>
+  <Placemark>
+    <name>Aufsetzen 1</name>
+    <description>-142 fpm · 1.21 g · 132 kt · 1 Bounce</description>
+    <TimeStamp><when>2026-10-16T08:00:09Z</when></TimeStamp>
+    <styleUrl>#touchdown</styleUrl>
+    <Point><altitudeMode>clampToGround</altitudeMode><coordinates>-0.4619000,51.4706000,0</coordinates></Point>
+  </Placemark>
+  <Placemark>
+    <name>Ankunft EGLL</name>
+    <TimeStamp><when>2026-10-16T09:02:03Z</when></TimeStamp>
+    <styleUrl>#airport</styleUrl>
+    <Point><altitudeMode>clampToGround</altitudeMode><coordinates>-0.4619000,51.4706000,0</coordinates></Point>
+  </Placemark>
+</Document>
+</kml>

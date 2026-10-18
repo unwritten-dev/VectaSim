@@ -13,7 +13,7 @@
 //!   arrival and every touchdown.
 //! - JSON: the full `FlightDetail` plus the decoded track.
 
-use crate::store::{FlightDetail, FlightRow};
+use crate::store::{FlightDetail, FlightRow, Store};
 use crate::track::TrackSample;
 use serde::Serialize;
 use std::fmt::Write as _;
@@ -97,13 +97,65 @@ pub fn export_csv(samples: &[TrackSample]) -> String {
 }
 
 const LOGBOOK_CSV_HEADER: &str = "id,state,date_utc,off_block_utc,on_block_utc,dep,arr,callsign,aircraft,aircraft_type,\
-registration,block_time,flight_time,distance_nm,max_alt_ft,landing_vs_fpm,landings,fuel_start_kg,fuel_end_kg,\
+registration,block_time,air_time,distance_nm,max_alt_ft,landing_vs_fpm,landings,fuel_start_kg,fuel_end_kg,\
 fuel_used_kg,planned_dep,planned_arr,planned_block_time,planned_fuel_ramp_kg,planned_fuel_landing_kg,paused_s,\
-pause_count,slew,time_acceleration,max_sim_rate,crashed,fuel_increased_airborne,provider,sim";
+pause_count,slew,time_acceleration,max_sim_rate,crashed,fuel_increased_airborne,teleport,provider,sim,\
+sched_out,sched_in,delay_out_min,delay_in_min,planned_block_s,planned_trip_kg,notes,tags,rating";
+
+/// Plan values the logbook CSV reads from a flight's stored OFP (`ofp_json`, our camelCase
+/// serialisation of `vectasim_simbrief::Ofp`): schedule and trip fuel for the Δ columns.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct LogbookPlan {
+    pub sched_out_ms: Option<u64>,
+    pub sched_in_ms: Option<u64>,
+    pub trip_kg: Option<f64>,
+}
+
+impl LogbookPlan {
+    /// Lenient: an unreadable document or a missing/zero field gives `None` for that value.
+    pub fn from_ofp_json(json: &str) -> Self {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(json) else { return Self::default() };
+        let secs = |section: &str, key: &str| v[section][key].as_f64().filter(|s| *s > 0.0).map(|s| (s * 1000.0).round() as u64);
+        LogbookPlan {
+            sched_out_ms: secs("times", "schedOutS"),
+            sched_in_ms: secs("times", "schedInS"),
+            trip_kg: v["fuel"]["tripKg"].as_f64().filter(|kg| *kg > 0.0),
+        }
+    }
+}
+
+/// Signed whole minutes `actual − planned` (half a minute rounds away from zero).
+fn delay_min(actual_ms: Option<u64>, planned_ms: Option<u64>) -> Option<i64> {
+    let (a, p) = (actual_ms?, planned_ms?);
+    Some(((a as f64 - p as f64) / 60_000.0).round() as i64)
+}
+
+/// One row per flight, for spreadsheets, without the OFP-based Δ columns (they stay empty).
+pub fn export_logbook_csv(flights: &[FlightRow]) -> String {
+    export_logbook_csv_with_plans(flights, |_| None)
+}
+
+/// [`export_logbook_csv_with_plans`] with the OFP of every planned flight read from `store`.
+pub fn export_logbook_csv_from_store(store: &Store, flights: &[FlightRow]) -> String {
+    export_logbook_csv_with_plans(flights, |f| {
+        if !f.has_ofp {
+            return None;
+        }
+        let json = store.get_flight(&f.id).ok().flatten()?.ofp_json?;
+        Some(LogbookPlan::from_ofp_json(&json))
+    })
+}
+
+/// A correction of the pilot (v14) over the recorded value.
+fn effective<'a>(user: &'a Option<String>, recorded: &'a str) -> &'a str {
+    user.as_deref().filter(|u| !u.trim().is_empty()).unwrap_or(recorded)
+}
 
 /// One row per flight, for spreadsheets. Durations as `H:MM`, empty cells for unknowns.
-pub fn export_logbook_csv(flights: &[FlightRow]) -> String {
-    let mut out = String::with_capacity(512 + flights.len() * 256);
+/// Dep/arr, callsign, aircraft and registration show the pilot's corrections where set.
+/// `plan_of` gives the OFP plan of a flight for the schedule/delay/trip columns.
+pub fn export_logbook_csv_with_plans(flights: &[FlightRow], plan_of: impl Fn(&FlightRow) -> Option<LogbookPlan>) -> String {
+    let mut out = String::with_capacity(512 + flights.len() * 300);
     out.push_str(LOGBOOK_CSV_HEADER);
     out.push_str("\r\n");
     for f in flights {
@@ -111,23 +163,24 @@ pub fn export_logbook_csv(flights: &[FlightRow]) -> String {
         let block_ms = f.on_block_ms.zip(f.off_block_ms).map(|(on, off)| on.saturating_sub(off));
         let flight_ms = f.landing_ms.zip(f.takeoff_ms).map(|(l, t)| l.saturating_sub(t));
         let fuel_used = f.fuel_start_kg.zip(f.fuel_end_kg).map(|(s, e)| s - e);
-        let callsign = f.callsign.clone().filter(|c| !c.is_empty()).unwrap_or_else(|| {
+        let callsign = f.user_callsign.clone().filter(|c| !c.trim().is_empty()).or_else(|| f.callsign.clone()).filter(|c| !c.is_empty()).unwrap_or_else(|| {
             let airline = format!("{} {}", f.aircraft.atc_airline, f.aircraft.atc_flight_number).trim().to_owned();
             if airline.is_empty() { f.aircraft.atc_id.clone() } else { airline }
         });
         let i = &f.integrity;
-        let cells: [String; 34] = [
-            f.id.clone(),
-            f.state.clone(),
+        let plan = plan_of(f).unwrap_or_default();
+        let cells: [String; 44] = [
+            text(&f.id),
+            text(&f.state),
             iso_utc(start)[..10].to_owned(),
             f.off_block_ms.map(iso_utc).unwrap_or_default(),
             f.on_block_ms.map(iso_utc).unwrap_or_default(),
-            f.dep_icao.clone().unwrap_or_default(),
-            f.arr_icao.clone().unwrap_or_default(),
-            callsign,
-            f.aircraft.title.clone(),
-            f.aircraft.atc_model.clone(),
-            f.aircraft.atc_id.clone(),
+            text(effective(&f.user_dep_icao, f.dep_icao.as_deref().unwrap_or_default())),
+            text(effective(&f.user_arr_icao, f.arr_icao.as_deref().unwrap_or_default())),
+            text(&callsign),
+            text(effective(&f.user_aircraft_title, &f.aircraft.title)),
+            text(&f.aircraft.atc_model),
+            text(effective(&f.user_registration, &f.aircraft.atc_id)),
             block_ms.map(hmm).unwrap_or_default(),
             flight_ms.map(hmm).unwrap_or_default(),
             format!("{:.1}", f.distance_nm),
@@ -137,8 +190,8 @@ pub fn export_logbook_csv(flights: &[FlightRow]) -> String {
             num(f.fuel_start_kg, 0),
             num(f.fuel_end_kg, 0),
             num(fuel_used, 0),
-            f.planned_dep.clone().unwrap_or_default(),
-            f.planned_arr.clone().unwrap_or_default(),
+            text(f.planned_dep.as_deref().unwrap_or_default()),
+            text(f.planned_arr.as_deref().unwrap_or_default()),
             f.planned_block_s.map(|s| hmm(s * 1000)).unwrap_or_default(),
             num(f.planned_fuel_ramp_kg, 0),
             num(f.planned_fuel_landing_kg, 0),
@@ -149,8 +202,18 @@ pub fn export_logbook_csv(flights: &[FlightRow]) -> String {
             format!("{}", i.max_sim_rate),
             u8::from(i.crashed).to_string(),
             u8::from(i.fuel_increased_airborne).to_string(),
-            f.provider.clone().unwrap_or_default(),
-            f.sim_name.clone().unwrap_or_default(),
+            u8::from(i.teleport_detected).to_string(),
+            text(f.provider.as_deref().unwrap_or_default()),
+            text(f.sim_name.as_deref().unwrap_or_default()),
+            plan.sched_out_ms.map(iso_utc).unwrap_or_default(),
+            plan.sched_in_ms.map(iso_utc).unwrap_or_default(),
+            delay_min(f.off_block_ms, plan.sched_out_ms).map(|d| d.to_string()).unwrap_or_default(),
+            delay_min(f.on_block_ms, plan.sched_in_ms).map(|d| d.to_string()).unwrap_or_default(),
+            f.planned_block_s.map(|s| s.to_string()).unwrap_or_default(),
+            num(plan.trip_kg, 0),
+            text(f.notes.as_deref().unwrap_or_default()),
+            text(&f.tags.join("; ")),
+            f.rating.map(|r| r.to_string()).unwrap_or_default(),
         ];
         for (n, c) in cells.iter().enumerate() {
             if n > 0 {
@@ -161,6 +224,14 @@ pub fn export_logbook_csv(flights: &[FlightRow]) -> String {
         out.push_str("\r\n");
     }
     out
+}
+
+/// A free-text cell (aircraft title, callsign, ICAO … from the sim, SimBrief or VATSIM).
+/// Spreadsheets run a cell starting with `=`, `+`, `-`, `@`, tab or CR as a formula
+/// (CSV/formula injection, OWASP); a leading `'` makes it plain text. Numeric cells never
+/// go through here, so a landing rate of `-142` stays a number.
+fn text(s: &str) -> String {
+    if s.starts_with(['=', '+', '-', '@', '\t', '\r']) { format!("'{s}") } else { s.to_owned() }
 }
 
 fn push_csv_cell(out: &mut String, cell: &str) {
@@ -513,13 +584,84 @@ mod tests {
         let lines: Vec<&str> = csv.lines().collect();
         assert_eq!(lines.len(), 3);
         let header_cols = lines[0].split(',').count();
-        assert_eq!(header_cols, 34);
+        assert_eq!(header_cols, 44);
         assert!(lines[1].contains("\"A320 <Neo> & \"\"Friends\"\", Livery\""));
         assert!(lines[1].starts_with("f1,completed,2026-10-16,2026-10-16T08:00:00Z,"));
         // block 59 s → rounds to 0:01, fuel used 800
         assert!(lines[1].contains(",0:01,0:01,12.3,"));
         assert!(lines[1].contains(",5000,4200,800,"));
         assert!(lines[2].contains(",5000,,,"));
+    }
+
+    #[test]
+    fn logbook_csv_plan_columns() {
+        let f = flight();
+        let off = f.off_block_ms.unwrap();
+        let on = f.on_block_ms.unwrap();
+        let plan = LogbookPlan { sched_out_ms: Some(off - 4 * 60_000), sched_in_ms: Some(on + 90_000), trip_kg: Some(5300.4) };
+        let csv = export_logbook_csv_with_plans(&[f], |_| Some(plan));
+        let header: Vec<&str> = csv.lines().next().unwrap().split(',').collect();
+        let row: Vec<String> = csv.lines().nth(1).unwrap().split(',').map(str::to_owned).collect();
+        let cell = |name: &str| {
+            let i = header.iter().position(|h| *h == name).unwrap_or_else(|| panic!("column {name}"));
+            row[row.len() - (header.len() - i)].clone()
+        };
+        assert_eq!(cell("delay_out_min"), "4");
+        // 1.5 min early rounds away from zero
+        assert_eq!(cell("delay_in_min"), "-2");
+        assert_eq!(cell("planned_trip_kg"), "5300");
+        assert_eq!(cell("sched_out"), iso_utc(off - 4 * 60_000));
+        // without a plan the OFP columns stay empty
+        let plain = export_logbook_csv(&[flight()]);
+        assert!(plain.lines().nth(1).unwrap().ends_with(",,,,,"), "{plain}");
+    }
+
+    #[test]
+    fn logbook_csv_uses_corrections_and_user_columns() {
+        let mut f = flight();
+        f.aircraft.atc_id = "D-AINA".into();
+        f.user_dep_icao = Some("EDDM".into());
+        f.user_callsign = Some("DLH9X".into());
+        f.user_aircraft_title = Some("A321neo".into());
+        f.user_registration = Some("D-AIEA".into());
+        f.notes = Some("Gute Landung,\n=SUM(1)".into());
+        f.tags = vec!["vatsim".into(), "Event".into()];
+        f.rating = Some(4);
+        let csv = export_logbook_csv(&[f]);
+        let row = csv.split("\r\n").nth(1).unwrap();
+        assert!(row.starts_with("f1,completed,2026-10-16,2026-10-16T08:00:00Z,2026-10-16T08:00:59Z,EDDM,EGLL,DLH9X,A321neo,,D-AIEA,"), "{row}");
+        assert!(row.ends_with(",\"Gute Landung,\n=SUM(1)\",vatsim; Event,4"), "{row}");
+    }
+
+    #[test]
+    fn logbook_plan_from_ofp_json() {
+        let p = LogbookPlan::from_ofp_json(r#"{"times":{"schedOutS":1792207200,"schedInS":0},"fuel":{"tripKg":5300.0}}"#);
+        assert_eq!(p, LogbookPlan { sched_out_ms: Some(1_792_207_200_000), sched_in_ms: None, trip_kg: Some(5300.0) });
+        assert_eq!(LogbookPlan::from_ofp_json("not json"), LogbookPlan::default());
+        assert_eq!(LogbookPlan::from_ofp_json("{}"), LogbookPlan::default());
+    }
+
+    #[test]
+    fn logbook_csv_neutralises_formula_cells_but_not_numbers() {
+        let mut f = flight();
+        f.aircraft.title = "=HYPERLINK(\"http://x\",\"click\")".into();
+        f.callsign = Some("+DLH".into());
+        f.aircraft.atc_model = "-A20N".into();
+        f.aircraft.atc_id = "@D-AINA".into();
+        f.dep_icao = Some("\tEDDF".into());
+        f.sim_name = Some("\rMSFS".into());
+        f.landing_vs_fpm = Some(-142.0);
+        let csv = export_logbook_csv(&[f]);
+        let row = csv.lines().nth(1).unwrap();
+        assert!(row.contains(",\"'=HYPERLINK(\"\"http://x\"\",\"\"click\"\")\","), "{row}");
+        assert!(row.contains(",'+DLH,"), "{row}");
+        assert!(row.contains(",'-A20N,'@D-AINA,"), "{row}");
+        assert!(row.contains(",'\tEDDF,"), "{row}");
+        assert!(row.contains("\"'\rMSFS\""), "CR is quoted and neutralised: {row}");
+        // numbers keep their sign
+        assert!(row.contains(",-142,"), "{row}");
+        assert_eq!(text("A320"), "A320");
+        assert_eq!(text(""), "");
     }
 
     #[test]

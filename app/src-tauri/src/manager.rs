@@ -4,27 +4,86 @@
 //!
 //! Events emitted: `sim:status` (StatusSnapshot), `sim:telemetry` (Telemetry,
 //! throttled to 10 Hz), `sim:flight` (FlightSummary, with each telemetry emit
-//! and on every flight event), `sim:flight-event` (FlightEvent), `sim:aircraft`
+//! and on every flight event), `sim:flight-event` (FlightEvent, and the decided
+//! `TouchdownOutcomeEvent` of a touchdown – `kind: "touchdownOutcome"`), `sim:aircraft`
 //! (AircraftInfo), `sim:event` (SimEvent), `sim:stats` (Stats, 1 Hz: frame
 //! count and measured provider rate), `logbook:changed` (a flight was created
-//! or completed – the logbook view should refetch).
+//! or completed – the logbook view should refetch), `approach:facts` (flight id: the
+//! approach facts of a just completed flight are cached), `diag:raw` (DiagSnapshot, 2 Hz,
+//! while the Live-Rohdaten view is open or the Debug-Modus is on – see
+//! [`ProviderManager::set_diag_stream`] / [`ProviderManager::set_diag_debug`]).
+//!
+//! Hidden window (`set_ui_visible(false)`: minimised, in the tray or the tab hidden): the
+//! periodic streams drop to `sim:telemetry` (+ its `sim:flight`) 1 Hz and `sim:stats` 0.2 Hz,
+//! `diag:raw` pauses. Event-driven emits (status, flight events, aircraft) and the
+//! `FlightSession`/recorder run unchanged on the full stream.
+//!
+//! Sessions: every `start` is a new provider session with its own `FlightSession`,
+//! recorder and live-track buffer. The previous session is stopped first: its
+//! forwarder closes an open flight as interrupted, and both its threads are joined
+//! (with a timeout) before the new session touches the shared status. Within a
+//! session, sim events go to the `FlightSession` (reload, pause, menu – see
+//! `vectasim_core::flight`), and a `Connected` after `Disconnected`/`Error` resets the
+//! position context, so the first sample after a reconnect cannot be a landing.
+//!
+//! Resume after a crash: on the first evaluated sample after the session connected (without
+//! an open flight) and after a flight ended as interrupted, the forwarder asks the store for an
+//! interrupted flight the current position continues (`Store::resume_candidate`: last sample
+//! at most 30 min old, within 5 nm and 3 000 ft) while the aircraft is airborne or not parked
+//! (engines running / moving). If there is one it emits `flight:resumable` (ResumeCandidate);
+//! the pilot's "Fortsetzen" comes back as [`ProviderManager::resume_flight`] (command
+//! `resume_flight`), which the forwarder thread carries out: the session takes the old times
+//! (`FlightSession::resume_from`), the recorder continues the old flight row and folds in
+//! whatever it recorded since (`FlightRecorder::resume`); then `flight:resumed` (flight id).
+//! Never for demo / replay sessions.
 
 use serde::Serialize;
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
+use vectasim_core::diag::{RawDiag, SharedRawDiag};
+use vectasim_core::flight::TouchdownOutcomeEvent;
+use vectasim_core::touchdown::TouchdownOutcome;
 use vectasim_core::{
-    AircraftInfo, FlightEvent, FlightPhase, FlightSession, FlightState, FlightSummary, MockProvider, ProviderEvent, SimEvent, SimProvider,
-    Telemetry,
+    AircraftInfo, FlightDebug, FlightEvent, FlightPhase, FlightSession, FlightState, FlightSummary, MockProvider, ProviderEvent, SimProvider,
+    Telemetry, now_ms,
 };
-use vectasim_simconnect::SimConnectProvider;
+use vectasim_dump::{DumpRecorder, DumpStatus, RingConfig};
+use vectasim_simconnect::{ReplayConfig, ReplayProvider, SimConnectProvider};
 use vectasim_store::{AirportResolver, FlightRecorder, LiveTrack, MetarSlot, PlannedSlot, RecorderContext, Store, TrackSample};
 
-pub const PROVIDERS: &[&str] = &["simconnect", "mock"];
+pub const PROVIDERS: &[&str] = &["simconnect", "mock", "replay"];
 
 const TELEMETRY_EMIT_INTERVAL: Duration = Duration::from_millis(100);
+/// `sim:telemetry` while the window is hidden.
+const TELEMETRY_EMIT_INTERVAL_HIDDEN: Duration = Duration::from_secs(1);
+const STATS_INTERVAL: Duration = Duration::from_secs(1);
+/// `sim:stats` while the window is hidden.
+const STATS_INTERVAL_HIDDEN: Duration = Duration::from_secs(5);
+/// How often an idle forwarder looks at its stop flag.
+const FORWARDER_POLL: Duration = Duration::from_millis(100);
+/// Waiting for a stopped session's threads; past this they are left to finish on their own.
+const FORWARDER_JOIN_TIMEOUT: Duration = Duration::from_secs(3);
+const PROVIDER_JOIN_TIMEOUT: Duration = Duration::from_secs(2);
+/// `diag:raw` while the Live-Rohdaten view is open.
+const DIAG_EMIT_INTERVAL: Duration = Duration::from_millis(500);
+/// How often the forwarder copies the engine internals for the Diagnose view.
+const DEBUG_STATE_INTERVAL: Duration = Duration::from_millis(250);
+/// A `flight:resumable` offer can be accepted this long (the toast closes after 60 s, hovering pauses it).
+const RESUME_OFFER_TTL: Duration = Duration::from_secs(5 * 60);
+/// How long `resume_flight` waits for the forwarder thread.
+const RESUME_REPLY_TIMEOUT: Duration = Duration::from_secs(10);
+/// Providers whose flights are throwaway: never offered for resuming.
+const NO_RESUME_PROVIDERS: &[&str] = &["mock", "replay"];
+
+/// Requests from commands to the session's forwarder thread (it owns session and recorder).
+pub(crate) enum Control {
+    Resume { flight_id: String, reply: mpsc::Sender<Result<(), String>> },
+}
 
 #[derive(Clone, Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -41,6 +100,42 @@ pub struct StatusSnapshot {
     pub frames: u64,
 }
 
+/// Everything Einstellungen → Diagnose → Live-Rohdaten shows.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagSnapshot {
+    pub at_ms: u64,
+    pub provider: String,
+    pub state: String,
+    /// Raw definitions, event log and connection info; `None` for providers without raw data (mock).
+    pub raw: Option<RawDiag>,
+    /// Phase engine and touchdown detector internals of the running session.
+    pub engine: Option<FlightDebug>,
+    pub dump: DumpStatus,
+}
+
+/// Shared between the manager (commands) and the session's forwarder (2 Hz stream).
+pub(crate) struct DiagHub {
+    stream: AtomicBool,
+    /// Debug-Modus: stream regardless of the view.
+    debug: AtomicBool,
+    engine: Mutex<Option<FlightDebug>>,
+    raw: Mutex<Option<SharedRawDiag>>,
+    dump: Arc<DumpRecorder>,
+}
+
+impl DiagHub {
+    fn snapshot(&self, status: &Mutex<StatusSnapshot>) -> DiagSnapshot {
+        let at_ms = now_ms();
+        let (provider, state) = {
+            let s = lock(status);
+            (s.provider.clone(), s.state.clone())
+        };
+        let raw = lock(&self.raw).clone().map(|r| lock(&r).snapshot(at_ms));
+        DiagSnapshot { at_ms, provider, state, raw, engine: lock(&self.engine).clone(), dump: self.dump.status() }
+    }
+}
+
 #[derive(Clone, Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Stats {
@@ -48,19 +143,102 @@ pub struct Stats {
     pub rate_hz: f64,
 }
 
+/// Where the forwarder's output goes: the webview and the app's background jobs in the
+/// app, a recording fake in tests.
+pub(crate) trait Outbox: Send + 'static {
+    fn emit_value(&self, event: &str, payload: serde_json::Value);
+    /// A flight was closed (completed or interrupted): cache its approach facts.
+    fn flight_closed(&self, store: &Store, flight_id: &str);
+    /// Fetch the METAR for one end of a flight.
+    fn capture_metar(&self, store: &Store, flight_id: &str, slot: MetarSlot, lat: f64, lon: f64, at_ms: u64);
+    /// Windows notification (landing, flight saved, connection); the app decides whether it shows.
+    fn notify(&self, _kind: crate::notify::Kind, _title: &str, _body: &str) {}
+}
+
+impl Outbox for AppHandle {
+    fn emit_value(&self, event: &str, payload: serde_json::Value) {
+        let _ = self.emit(event, payload);
+    }
+
+    fn flight_closed(&self, store: &Store, flight_id: &str) {
+        crate::approach::spawn_store_facts(self.clone(), store.clone(), flight_id.to_owned());
+    }
+
+    fn capture_metar(&self, store: &Store, flight_id: &str, slot: MetarSlot, lat: f64, lon: f64, at_ms: u64) {
+        crate::online::capture_metar(self, store.clone(), flight_id.to_owned(), slot, lat, lon, at_ms);
+    }
+
+    fn notify(&self, kind: crate::notify::Kind, title: &str, body: &str) {
+        // focus check and toast go through the event loop: never hold up the forwarder for it
+        let (app, title, body) = (self.clone(), title.to_owned(), body.to_owned());
+        let _ = std::thread::Builder::new().name("notify".into()).spawn(move || {
+            crate::notify::send(&app, kind, &title, &body);
+        });
+    }
+}
+
+fn emit<T: Serialize + ?Sized>(out: &impl Outbox, event: &str, payload: &T) {
+    match serde_json::to_value(payload) {
+        Ok(v) => out.emit_value(event, v),
+        Err(e) => log::warn!("{event}: payload not serialisable: {e}"),
+    }
+}
+
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 struct Active {
     stop: Arc<AtomicBool>,
+    provider: JoinHandle<()>,
+    forwarder: JoinHandle<()>,
+    control: mpsc::Sender<Control>,
+}
+
+impl Active {
+    /// Stop both threads and wait for them; the forwarder closes an open flight on its way out.
+    fn shut_down(self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if !join_timeout(self.forwarder, FORWARDER_JOIN_TIMEOUT) {
+            log::warn!("provider forwarder did not finish within {FORWARDER_JOIN_TIMEOUT:?}; continuing without it");
+        }
+        if !join_timeout(self.provider, PROVIDER_JOIN_TIMEOUT) {
+            log::warn!("sim provider thread did not finish within {PROVIDER_JOIN_TIMEOUT:?}; continuing without it");
+        }
+    }
+}
+
+/// Join `h` unless it takes longer than `timeout` (then it is detached). True when joined.
+fn join_timeout(h: JoinHandle<()>, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    while !h.is_finished() {
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    if h.join().is_err() {
+        log::error!("a provider session thread panicked");
+    }
+    true
 }
 
 pub struct ProviderManager {
     active: Mutex<Option<Active>>,
     status: Arc<Mutex<StatusSnapshot>>,
-    /// 1 Hz samples of the flight being recorded; one buffer across provider restarts.
-    live: LiveTrack,
+    /// 1 Hz samples of the flight being recorded by the current session (a fresh buffer per session).
+    live: Mutex<LiveTrack>,
     /// Dispatch plan to attach to the next flight that starts.
     pub planned: PlannedSlot,
     /// True while a flight is open; the SimConnect provider keeps its reconnect backoff short otherwise.
     flight_active: Arc<AtomicBool>,
+    /// Logbook id of the flight the current session is recording.
+    current_flight: Arc<Mutex<Option<String>>>,
+    diag: Arc<DiagHub>,
+    /// What `select_provider("replay")` plays (initialised from `VECTASIM_REPLAY*`).
+    replay: Mutex<ReplayConfig>,
+    /// The window is visible (frontend `set_ui_visible`); false throttles the periodic emits.
+    ui_visible: Arc<AtomicBool>,
 }
 
 impl ProviderManager {
@@ -68,24 +246,109 @@ impl ProviderManager {
         Self {
             active: Mutex::new(None),
             status: Arc::new(Mutex::new(StatusSnapshot { state: "idle".into(), ..Default::default() })),
-            live: LiveTrack::default(),
+            live: Mutex::new(LiveTrack::default()),
             planned: PlannedSlot::default(),
             flight_active: Arc::new(AtomicBool::new(false)),
+            current_flight: Arc::default(),
+            diag: Arc::new(DiagHub {
+                stream: AtomicBool::new(false),
+                debug: AtomicBool::new(false),
+                engine: Mutex::new(None),
+                raw: Mutex::new(None),
+                dump: Arc::new(DumpRecorder::new(env!("CARGO_PKG_VERSION"), RingConfig::default())),
+            }),
+            replay: Mutex::new(ReplayConfig::from_env()),
+            ui_visible: Arc::new(AtomicBool::new(true)),
         }
     }
 
+    /// The frontend reports whether the window is visible (`visibilitychange`, minimise, tray).
+    /// Hidden: `sim:telemetry` 1 Hz, `sim:stats` 0.2 Hz, no `diag:raw`; recording is unaffected.
+    pub fn set_ui_visible(&self, visible: bool) {
+        if self.ui_visible.swap(visible, Ordering::Relaxed) != visible {
+            log::info!("ui {}: live emits {}", if visible { "visible" } else { "hidden" }, if visible { "at full rate" } else { "throttled" });
+        }
+    }
+
+    /// The raw recorder (RAM ring of the last 30 min, session files while switched on).
+    pub fn dump(&self) -> &Arc<DumpRecorder> {
+        &self.diag.dump
+    }
+
+    pub fn diagnostics(&self) -> DiagSnapshot {
+        self.diag.snapshot(&self.status)
+    }
+
+    /// The Live-Rohdaten view is open: the forwarder emits `diag:raw` at 2 Hz.
+    pub fn set_diag_stream(&self, on: bool) {
+        self.diag.stream.store(on, Ordering::Relaxed);
+    }
+
+    /// Debug-Modus: `diag:raw` streams at 2 Hz whether or not the view is open.
+    pub fn set_diag_debug(&self, on: bool) {
+        self.diag.debug.store(on, Ordering::Relaxed);
+    }
+
+    pub fn replay_config(&self) -> ReplayConfig {
+        lock(&self.replay).clone()
+    }
+
+    pub fn set_replay_config(&self, cfg: ReplayConfig) {
+        *lock(&self.replay) = cfg;
+    }
+
     pub fn snapshot(&self) -> StatusSnapshot {
-        self.status.lock().unwrap().clone()
+        lock(&self.status).clone()
     }
 
     pub fn live_track(&self) -> Vec<TrackSample> {
-        self.live.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        let live = lock(&self.live).clone();
+        lock(&live).clone()
+    }
+
+    /// Live-track samples strictly after `ts_ms` (`TrackSample::t_ms`), for incremental reloads.
+    /// The buffer is replaced per provider session and cleared when a new flight starts, so a
+    /// client that saw a newer `t_ms` than the buffer's last sample should reseed with `live_track`.
+    pub fn live_track_since(&self, ts_ms: u64) -> Vec<TrackSample> {
+        let live = lock(&self.live).clone();
+        let samples = lock(&live);
+        // samples are appended in non-decreasing t_ms order (the recorder's 1 Hz cadence)
+        let from = samples.partition_point(|s| s.t_ms <= ts_ms);
+        samples[from..].to_vec()
+    }
+
+    /// The flight this provider session is recording, if any – never one left over from
+    /// an earlier session (use this, not `Store::active_flight_id`, to attach things to
+    /// "the running flight").
+    pub fn current_flight_id(&self) -> Option<String> {
+        lock(&self.current_flight).clone()
+    }
+
+    /// "Fortsetzen" on a `flight:resumable` offer: the running session continues that flight.
+    /// Blocks until the forwarder thread did it (or failed); call off the main thread.
+    pub fn resume_flight(&self, flight_id: &str) -> Result<(), String> {
+        let control = lock(&self.active).as_ref().map(|a| a.control.clone()).ok_or("Kein Simulator verbunden.")?;
+        let (reply, rx) = mpsc::channel();
+        control
+            .send(Control::Resume { flight_id: flight_id.to_owned(), reply })
+            .map_err(|_| "Die Aufzeichnung läuft nicht mehr.".to_string())?;
+        rx.recv_timeout(RESUME_REPLY_TIMEOUT).map_err(|_| "Die Aufzeichnung hat nicht geantwortet.".to_string())?
     }
 
     fn make_provider(&self, kind: &str) -> Result<Box<dyn SimProvider>, String> {
         match kind {
             "mock" => Ok(Box::new(MockProvider::default())),
-            "simconnect" => Ok(Box::new(SimConnectProvider { flight_active: self.flight_active.clone(), ..Default::default() })),
+            "simconnect" => Ok(Box::new(SimConnectProvider {
+                flight_active: self.flight_active.clone(),
+                dump: Some(self.diag.dump.clone()),
+                ..Default::default()
+            })),
+            "replay" => Ok(Box::new(self.replay_config().provider()?)),
+            // `VECTASIM_PROVIDER=replay:<file>`
+            other if other.starts_with("replay:") => {
+                let cfg = self.replay_config();
+                Ok(Box::new(ReplayProvider::new(other["replay:".len()..].trim(), cfg.speed, cfg.loop_)))
+            }
             other => Err(format!("unknown provider '{other}'")),
         }
     }
@@ -93,172 +356,893 @@ impl ProviderManager {
     /// Stop whatever is running and start `kind`. A new provider gets a fresh flight session and recorder.
     pub fn start(&self, app: AppHandle, store: Store, resolver: Arc<dyn AirportResolver>, kind: &str) -> Result<(), String> {
         let provider = self.make_provider(kind)?;
-        // a new provider starts a new flight session
-        self.flight_active.store(false, Ordering::Relaxed);
-        let mut active = self.active.lock().unwrap();
+        self.start_with(app, store, resolver, provider)
+    }
+
+    pub(crate) fn start_with<O: Outbox + Clone>(
+        &self,
+        out: O,
+        store: Store,
+        resolver: Arc<dyn AirportResolver>,
+        provider: Box<dyn SimProvider>,
+    ) -> Result<(), String> {
+        let mut active = lock(&self.active);
         if let Some(old) = active.take() {
-            old.stop.store(true, Ordering::Relaxed);
+            // closes the old session's flight as interrupted before anything is shared with the new one
+            old.shut_down();
         }
+        self.flight_active.store(false, Ordering::Relaxed);
+        *lock(&self.current_flight) = None;
+        let live = LiveTrack::default();
+        *lock(&self.live) = live.clone();
 
         let stop = Arc::new(AtomicBool::new(false));
         let (tx, rx) = mpsc::channel::<ProviderEvent>();
         let provider_name = provider.name().to_string();
+        *lock(&self.diag.raw) = provider.raw_diag();
+        *lock(&self.diag.engine) = None;
         {
-            let mut s = self.status.lock().unwrap();
+            let mut s = lock(&self.status);
             *s = StatusSnapshot { provider: provider_name.clone(), state: "connecting".into(), ..Default::default() };
-            let _ = app.emit("sim:status", s.clone());
+            emit(&out, "sim:status", &*s);
         }
-        let _handle = provider.start(tx, stop.clone());
-        *active = Some(Active { stop: stop.clone() });
-
-        let status = self.status.clone();
-        let metar_store = store.clone();
-        let recorder = FlightRecorder::new(store, RecorderContext { provider: provider_name, ..Default::default() })
-            .with_live_track(self.live.clone())
+        let resume_allowed = !NO_RESUME_PROVIDERS.contains(&provider_name.as_str());
+        let recorder = FlightRecorder::new(store.clone(), RecorderContext { provider: provider_name, ..Default::default() })
+            .with_live_track(live)
             .with_resolver(resolver)
             .with_planned(self.planned.clone());
-        std::thread::Builder::new()
+        let fwd = Forwarder::new(
+            out,
+            self.status.clone(),
+            stop.clone(),
+            recorder,
+            store,
+            self.flight_active.clone(),
+            self.current_flight.clone(),
+        )
+        .with_diag(self.diag.clone())
+        .with_ui_visible(self.ui_visible.clone())
+        .with_resume(resume_allowed);
+        let (control, control_rx) = mpsc::channel();
+        let forwarder = std::thread::Builder::new()
             .name("provider-forwarder".into())
-            .spawn({
-                let flight_active = self.flight_active.clone();
-                move || forward(rx, app, status, stop, recorder, metar_store, flight_active)
-            })
+            .spawn(move || fwd.run(rx, control_rx))
             .map_err(|e| e.to_string())?;
+        let provider = provider.start(tx, stop.clone());
+        *active = Some(Active { stop, provider, forwarder, control });
         Ok(())
     }
 }
 
-fn forward(
-    rx: mpsc::Receiver<ProviderEvent>,
-    app: AppHandle,
+struct Forwarder<O: Outbox> {
+    out: O,
     status: Arc<Mutex<StatusSnapshot>>,
     stop: Arc<AtomicBool>,
-    mut recorder: FlightRecorder,
+    recorder: FlightRecorder,
     store: Store,
     flight_active: Arc<AtomicBool>,
-) {
-    let mut last_emit = Instant::now() - TELEMETRY_EMIT_INTERVAL;
-    let mut last_stats = Instant::now();
-    let mut frames_since_stats: u64 = 0;
-    let mut session = FlightSession::new();
-    while let Ok(ev) = rx.recv() {
-        // A superseded provider may still flush a few events after being told to stop.
-        if stop.load(Ordering::Relaxed) {
-            break;
+    current_flight: Arc<Mutex<Option<String>>>,
+    session: FlightSession,
+    last_emit: Instant,
+    last_stats: Instant,
+    frames_since_stats: u64,
+    /// `Disconnected`/`Error` seen since the last `Connected`.
+    link_lost: bool,
+    last_ts: Option<u64>,
+    diag: Option<Arc<DiagHub>>,
+    last_debug: Instant,
+    last_diag_emit: Instant,
+    /// Shared with the manager; false = window hidden, periodic emits throttled.
+    ui_visible: Arc<AtomicBool>,
+    /// Resume offers are possible in this session (not demo / replay).
+    resume_allowed: bool,
+    /// Look for a resumable flight with the next evaluated sample.
+    resume_check: bool,
+    /// The flight offered by `flight:resumable` and when.
+    resume_offer: Option<(String, Instant)>,
+    /// Flights offered in this session (each once).
+    resume_offered: HashSet<String>,
+}
+
+impl<O: Outbox> Forwarder<O> {
+    fn new(
+        out: O,
+        status: Arc<Mutex<StatusSnapshot>>,
+        stop: Arc<AtomicBool>,
+        recorder: FlightRecorder,
+        store: Store,
+        flight_active: Arc<AtomicBool>,
+        current_flight: Arc<Mutex<Option<String>>>,
+    ) -> Self {
+        Self {
+            out,
+            status,
+            stop,
+            recorder,
+            store,
+            flight_active,
+            current_flight,
+            session: FlightSession::new(),
+            // the first sample is emitted at once, visible or not
+            last_emit: Instant::now().checked_sub(TELEMETRY_EMIT_INTERVAL_HIDDEN).unwrap_or_else(Instant::now),
+            last_stats: Instant::now(),
+            frames_since_stats: 0,
+            link_lost: false,
+            last_ts: None,
+            diag: None,
+            last_debug: Instant::now() - DEBUG_STATE_INTERVAL,
+            last_diag_emit: Instant::now() - DIAG_EMIT_INTERVAL,
+            ui_visible: Arc::new(AtomicBool::new(true)),
+            resume_allowed: false,
+            resume_check: false,
+            resume_offer: None,
+            resume_offered: HashSet::new(),
         }
-        match ev {
-            ProviderEvent::Telemetry(t) => {
-                let events = session.update(&t);
-                if !events.is_empty() {
-                    flight_active.store(session.summary().state == FlightState::Active, Ordering::Relaxed);
-                }
-                if let Err(e) = recorder.on_telemetry(&t, session.summary(), &events) {
-                    log::error!("logbook write failed: {e}");
-                }
-                for fe in &events {
-                    log::info!("flight event: {fe:?}");
-                    capture_metar(&app, &store, &recorder, session.summary(), fe);
-                    let _ = app.emit("sim:flight-event", fe);
-                    if matches!(fe, FlightEvent::FlightStarted { .. } | FlightEvent::FlightEnded { .. }) {
-                        let _ = app.emit("logbook:changed", ());
-                    }
-                }
-                frames_since_stats += 1;
-                let mut s = status.lock().unwrap();
-                s.frames += 1;
-                let frames = s.frames;
-                s.last_telemetry = Some(t.clone());
-                if !events.is_empty() {
-                    s.flight = Some(session.summary().clone());
-                }
-                if s.state != "connected" {
-                    s.state = "connected".into();
-                    let _ = app.emit("sim:status", s.clone());
-                }
-                drop(s);
-                if !events.is_empty() {
-                    let _ = app.emit("sim:flight", session.summary());
-                }
-                if last_emit.elapsed() >= TELEMETRY_EMIT_INTERVAL {
-                    last_emit = Instant::now();
-                    let _ = app.emit("sim:telemetry", &t);
-                    if events.is_empty() {
-                        let _ = app.emit("sim:flight", session.summary());
-                    }
-                }
-                let since_stats = last_stats.elapsed();
-                if since_stats >= Duration::from_secs(1) {
-                    let rate_hz = frames_since_stats as f64 / since_stats.as_secs_f64();
-                    let _ = app.emit("sim:stats", Stats { frames, rate_hz });
-                    last_stats = Instant::now();
-                    frames_since_stats = 0;
-                }
+    }
+
+    fn with_resume(mut self, allowed: bool) -> Self {
+        self.resume_allowed = allowed;
+        self
+    }
+
+    fn with_ui_visible(mut self, visible: Arc<AtomicBool>) -> Self {
+        self.ui_visible = visible;
+        self
+    }
+
+    fn visible(&self) -> bool {
+        self.ui_visible.load(Ordering::Relaxed)
+    }
+
+    /// Keep the Diagnose view's engine internals and `diag:raw` stream up to date.
+    fn with_diag(mut self, diag: Arc<DiagHub>) -> Self {
+        self.diag = Some(diag);
+        self
+    }
+
+    fn superseded(&self) -> bool {
+        self.stop.load(Ordering::Relaxed)
+    }
+
+    fn run(mut self, rx: mpsc::Receiver<ProviderEvent>, control: mpsc::Receiver<Control>) {
+        loop {
+            match rx.recv_timeout(FORWARDER_POLL) {
+                // a superseded provider may still flush a few events after being told to stop
+                Ok(_) | Err(RecvTimeoutError::Timeout) if self.superseded() => break,
+                Ok(ev) => self.handle(ev),
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => break,
             }
+            while let Ok(c) = control.try_recv() {
+                self.control(c);
+            }
+            self.diag_tick();
+        }
+        // a request that came too late still gets an answer
+        while let Ok(Control::Resume { reply, .. }) = control.try_recv() {
+            let _ = reply.send(Err("Die Aufzeichnung wurde beendet.".into()));
+        }
+        self.close();
+    }
+
+    fn control(&mut self, c: Control) {
+        match c {
+            Control::Resume { flight_id, reply } => {
+                let r = self.resume(&flight_id);
+                if let Err(e) = &r {
+                    log::warn!("resume of flight {flight_id} refused: {e}");
+                }
+                let _ = reply.send(r);
+            }
+        }
+    }
+
+    /// First evaluated sample after connecting / after an interrupted flight: is there an
+    /// interrupted flight this position continues? Emits `flight:resumable` once per flight.
+    fn check_resumable(&mut self, t: &Telemetry) {
+        if !self.resume_check || !self.resume_allowed || t.paused || self.session.debug_state().sim_stopped {
+            return;
+        }
+        self.resume_check = false;
+        if !resume_position_plausible(t) {
+            return;
+        }
+        let found = match self.store.resume_candidate(t.latitude, t.longitude, t.altitude_msl_ft, t.timestamp_ms) {
+            Ok(c) => c,
+            Err(e) => {
+                log::warn!("resume check failed: {e}");
+                return;
+            }
+        };
+        let Some(c) = found.filter(|c| !self.resume_offered.contains(&c.flight_id)) else { return };
+        log::info!(
+            "flight {} looks resumable ({:.1} nm, {:+.0} ft, {} s since its last sample)",
+            c.flight_id,
+            c.distance_nm,
+            c.alt_diff_ft,
+            t.timestamp_ms.saturating_sub(c.last_ms) / 1000
+        );
+        self.resume_offered.insert(c.flight_id.clone());
+        self.resume_offer = Some((c.flight_id.clone(), Instant::now()));
+        emit(&self.out, "flight:resumable", &c);
+    }
+
+    /// Carry out an accepted offer (see the module doc).
+    fn resume(&mut self, flight_id: &str) -> Result<(), String> {
+        match &self.resume_offer {
+            Some((id, at)) if id == flight_id && at.elapsed() <= RESUME_OFFER_TTL => {}
+            _ => return Err("Dieser Flug kann nicht mehr fortgesetzt werden.".into()),
+        }
+        let t = lock(&self.status).last_telemetry.clone().ok_or("Noch keine Daten vom Simulator.")?;
+        let prev = self.store.flight_summary(flight_id).map_err(|e| e.to_string())?.ok_or("Flug nicht gefunden")?;
+        let last_old = self.store.get_track_preview(flight_id).map_err(|e| e.to_string())?.and_then(|p| p.last().map(|s| s.t_ms));
+        // first sample of what follows: the flight recorded since the restart, else now
+        let first_new = match self.recorder.current_flight_id() {
+            Some(_) => lock(&self.recorder.live_track()).first().map_or(t.timestamp_ms, |s| s.t_ms),
+            None => t.timestamp_ms,
+        };
+        let gap_ms = last_old.map_or(0, |last| first_new.saturating_sub(last));
+        let resumed = self.session.preview_resume(&prev, gap_ms);
+        self.recorder.resume(flight_id, &resumed, t.timestamp_ms).map_err(|e| e.to_string())?;
+        self.session.resume_from(&prev, gap_ms);
+        self.resume_offer = None;
+        log::info!("flight {flight_id} resumed after a gap of {} s", gap_ms / 1000);
+        let summary = self.session.summary().clone();
+        self.flight_active.store(true, Ordering::Relaxed);
+        *lock(&self.current_flight) = Some(flight_id.to_owned());
+        lock(&self.status).flight = Some(summary.clone());
+        emit(&self.out, "sim:flight", &summary);
+        emit(&self.out, "flight:resumed", flight_id);
+        emit(&self.out, "logbook:changed", &());
+        Ok(())
+    }
+
+    /// Engine internals for the Diagnose view (cheap; at most 4×/s), and the 2 Hz
+    /// `diag:raw` stream while the view is open.
+    fn diag_tick(&mut self) {
+        let Some(diag) = self.diag.as_ref().filter(|_| !self.superseded()) else { return };
+        if self.last_debug.elapsed() >= DEBUG_STATE_INTERVAL {
+            self.last_debug = Instant::now();
+            *lock(&diag.engine) = Some(self.session.debug_state());
+        }
+        // nobody can look at the raw view while the window is hidden
+        let streaming = self.visible() && (diag.stream.load(Ordering::Relaxed) || diag.debug.load(Ordering::Relaxed));
+        if streaming && self.last_diag_emit.elapsed() >= DIAG_EMIT_INTERVAL {
+            self.last_diag_emit = Instant::now();
+            emit(&self.out, "diag:raw", &diag.snapshot(&self.status));
+        }
+    }
+
+    fn handle(&mut self, ev: ProviderEvent) {
+        match ev {
+            ProviderEvent::Telemetry(t) => self.on_telemetry(t),
             ProviderEvent::Aircraft(info) => {
-                if let Err(e) = recorder.set_aircraft(info.clone()) {
+                if let Err(e) = self.recorder.set_aircraft(info.clone()) {
                     log::error!("logbook aircraft update failed: {e}");
                 }
-                status.lock().unwrap().aircraft = Some(info.clone());
-                let _ = app.emit("sim:aircraft", &info);
-                if recorder.current_flight_id().is_some() {
+                lock(&self.status).aircraft = Some(info.clone());
+                emit(&self.out, "sim:aircraft", &info);
+                if self.recorder.current_flight_id().is_some() {
                     // the ATC ID may just have booked the running flight onto an airframe
-                    let _ = app.emit("airframes:changed", info.atc_id.as_str());
+                    emit(&self.out, "airframes:changed", info.atc_id.as_str());
                 }
             }
             ProviderEvent::Sim(e) => {
-                if matches!(e, SimEvent::Crashed) {
-                    session.mark_crashed();
-                }
-                let _ = app.emit("sim:event", &e);
+                log::info!("sim event: {e:?}");
+                let events = self.session.on_sim_event(&e);
+                self.flight_events(events);
+                emit(&self.out, "sim:event", &e);
             }
-            ProviderEvent::Connecting => set_state(&app, &status, "connecting", String::new(), None),
+            ProviderEvent::Connecting => self.set_state("connecting", String::new(), None),
             ProviderEvent::Connected { sim_name, sim_version } => {
-                recorder.set_sim_name(Some(sim_name.clone()));
-                set_state(&app, &status, "connected", format!("{sim_name} {sim_version}"), Some((sim_name, sim_version)))
+                self.recorder.set_sim_name(Some(sim_name.clone()));
+                // a flight this session keeps recording is no candidate for a resume offer
+                if !self.session.has_open_flight() {
+                    self.resume_check = true;
+                }
+                if std::mem::take(&mut self.link_lost) {
+                    if self.session.has_open_flight() && !self.superseded() {
+                        self.out.notify(crate::notify::Kind::Connection, "Simulator wieder da", "Die Aufzeichnung läuft weiter.");
+                    }
+                    log::info!("reconnected: position context reset");
+                    let events = self.session.reset_position_context();
+                    self.flight_events(events);
+                }
+                self.set_state("connected", format!("{sim_name} {sim_version}"), Some((sim_name, sim_version)))
             }
-            ProviderEvent::Disconnected { reason } => set_state(&app, &status, "disconnected", reason, None),
-            ProviderEvent::Error { message } => set_state(&app, &status, "error", message, None),
+            ProviderEvent::Disconnected { reason } => {
+                self.link_lost_notice();
+                self.set_state("disconnected", reason, None)
+            }
+            ProviderEvent::Error { message } => {
+                self.link_lost_notice();
+                self.set_state("error", message, None)
+            }
         }
     }
-    // Provider gone (sim quit, provider switched): keep what we have of an open flight.
-    let last_ts = status.lock().unwrap().last_telemetry.as_ref().map(|t| t.timestamp_ms);
-    if let Some(ts) = last_ts
-        && let Err(e) = recorder.checkpoint(session.summary(), ts)
-    {
-        log::error!("logbook checkpoint failed: {e}");
-    }
-    log::info!("provider forwarder finished");
-}
 
-/// Weather at off-block and at the landing is kept with the flight (the debrief shows
-/// the wind of the landing, not today's).
-fn capture_metar(app: &AppHandle, store: &Store, recorder: &FlightRecorder, summary: &FlightSummary, ev: &FlightEvent) {
-    let Some(id) = recorder.current_flight_id() else { return };
-    let (slot, lat, lon, at_ms) = match ev {
-        FlightEvent::FlightStarted { timestamp_ms } => match summary.departure {
-            Some(p) => (MetarSlot::Departure, p.latitude, p.longitude, *timestamp_ms),
-            None => return,
-        },
-        FlightEvent::PhaseChanged(tr) if tr.to == FlightPhase::Landing => {
-            (MetarSlot::Arrival, tr.telemetry.latitude, tr.telemetry.longitude, tr.timestamp_ms)
+    /// Link to the sim gone: once per loss, and a notification while a flight is open.
+    fn link_lost_notice(&mut self) {
+        let was_connected = lock(&self.status).state == "connected";
+        self.link_lost = true;
+        if was_connected && self.session.has_open_flight() && !self.superseded() {
+            self.out.notify(
+                crate::notify::Kind::Connection,
+                "Verbindung zum Simulator verloren",
+                "Dein Flug ist gesichert und läuft weiter, sobald der Simulator zurück ist.",
+            );
         }
-        _ => return,
-    };
-    crate::online::capture_metar(app, store.clone(), id.to_string(), slot, lat, lon, at_ms);
+    }
+
+    fn on_telemetry(&mut self, t: Telemetry) {
+        self.last_ts = Some(t.timestamp_ms);
+        let events = self.session.update(&t);
+        // the recorder forgets the id when the flight ends
+        let closing = self.recorder.current_flight_id().map(str::to_owned);
+        if let Err(e) = self.recorder.on_telemetry(&t, self.session.summary(), &events) {
+            log::error!("logbook write failed: {e}");
+        }
+        let outcomes = self.record_outcomes();
+        self.announce(&events, closing);
+        self.announce_outcomes(&outcomes);
+        self.check_resumable(&t);
+
+        self.frames_since_stats += 1;
+        let mut s = lock(&self.status);
+        s.frames += 1;
+        let frames = s.frames;
+        s.last_telemetry = Some(t.clone());
+        if !events.is_empty() {
+            s.flight = Some(self.session.summary().clone());
+        }
+        if s.state != "connected" {
+            s.state = "connected".into();
+            emit(&self.out, "sim:status", &*s);
+        }
+        drop(s);
+        if !events.is_empty() {
+            emit(&self.out, "sim:flight", self.session.summary());
+        }
+        let visible = self.visible();
+        let (emit_every, stats_every) =
+            if visible { (TELEMETRY_EMIT_INTERVAL, STATS_INTERVAL) } else { (TELEMETRY_EMIT_INTERVAL_HIDDEN, STATS_INTERVAL_HIDDEN) };
+        if self.last_emit.elapsed() >= emit_every {
+            self.last_emit = Instant::now();
+            emit(&self.out, "sim:telemetry", &t);
+            if events.is_empty() {
+                emit(&self.out, "sim:flight", self.session.summary());
+            }
+        }
+        let since_stats = self.last_stats.elapsed();
+        if since_stats >= stats_every {
+            let rate_hz = self.frames_since_stats as f64 / since_stats.as_secs_f64();
+            emit(&self.out, "sim:stats", &Stats { frames, rate_hz });
+            self.last_stats = Instant::now();
+            self.frames_since_stats = 0;
+        }
+    }
+
+    /// Flight events that came without a sample (sim event, reconnect, provider stop).
+    /// A reset or reload can settle a pending touchdown (`Unknown`) without any flight event.
+    fn flight_events(&mut self, events: Vec<FlightEvent>) {
+        if events.is_empty() {
+            let outcomes = self.record_outcomes();
+            self.announce_outcomes(&outcomes);
+            return;
+        }
+        let ts = self.last_ts.unwrap_or_else(now_ms);
+        let closing = self.recorder.current_flight_id().map(str::to_owned);
+        if let Err(e) = self.recorder.on_events(self.session.summary(), &events, ts) {
+            log::error!("logbook write failed: {e}");
+        }
+        let outcomes = self.record_outcomes();
+        self.announce(&events, closing);
+        self.announce_outcomes(&outcomes);
+        if !self.superseded() {
+            lock(&self.status).flight = Some(self.session.summary().clone());
+            emit(&self.out, "sim:flight", self.session.summary());
+        }
+    }
+
+    /// Tell the UI and the background jobs about flight events the recorder has handled.
+    /// `closing`: the flight the recorder had open before these events.
+    fn announce(&mut self, events: &[FlightEvent], closing: Option<String>) {
+        for fe in events {
+            log::info!("flight event: {fe:?}");
+            self.capture_metar(fe);
+            emit(&self.out, "sim:flight-event", fe);
+            if matches!(fe, FlightEvent::FlightStarted { .. } | FlightEvent::FlightEnded { .. }) {
+                emit(&self.out, "logbook:changed", &());
+            }
+            // track is flushed and the flight closed by now: cache its approach facts
+            if let (FlightEvent::FlightEnded { .. }, Some(id)) = (fe, &closing) {
+                self.out.flight_closed(&self.store, id);
+            }
+            self.notify_event(fe, closing.as_deref());
+        }
+        // a flight cut off in this session (reload at the same spot) may be continued
+        if events.iter().any(|e| matches!(e, FlightEvent::FlightEnded { interrupted: true, .. })) {
+            self.resume_check = true;
+        }
+        if !events.is_empty() && !self.superseded() {
+            self.flight_active.store(self.session.summary().state == FlightState::Active, Ordering::Relaxed);
+            *lock(&self.current_flight) = self.recorder.current_flight_id().map(str::to_owned);
+        }
+    }
+
+    /// Drain the session's decided touchdown outcomes into the recorder (a touch-and-go
+    /// corrects its stored row). Called after the recorder saw the sample's events.
+    fn record_outcomes(&mut self) -> Vec<TouchdownOutcomeEvent> {
+        let outcomes = self.session.take_touchdown_outcomes();
+        if !outcomes.is_empty()
+            && let Err(e) = self.recorder.on_touchdown_outcomes(&outcomes)
+        {
+            log::error!("logbook touchdown outcome failed: {e}");
+        }
+        outcomes
+    }
+
+    /// Outcomes go out after the sample's flight events, so the UI always has the touchdown
+    /// before its outcome (a short-roll outcome comes in the same sample as its report).
+    fn announce_outcomes(&self, outcomes: &[TouchdownOutcomeEvent]) {
+        if outcomes.is_empty() {
+            return;
+        }
+        for o in outcomes {
+            log::info!("touchdown outcome: {o:?}");
+            emit(&self.out, "sim:flight-event", o);
+            self.notify_outcome(o);
+        }
+        if !self.superseded() {
+            lock(&self.status).flight = Some(self.session.summary().clone());
+            emit(&self.out, "sim:flight", self.session.summary());
+        }
+    }
+
+    /// The landing notification waits for the outcome: "Gelandet" on a full stop,
+    /// "Touch-and-go" on a touch-and-go, nothing when the stream broke off (`Unknown`).
+    fn notify_outcome(&self, o: &TouchdownOutcomeEvent) {
+        if self.superseded() {
+            return;
+        }
+        let touch_and_go = match o.outcome {
+            TouchdownOutcome::FullStop => false,
+            TouchdownOutcome::TouchAndGo => true,
+            TouchdownOutcome::Unknown | TouchdownOutcome::Pending => return,
+        };
+        let Some(td) = self.session.summary().touchdowns.get(o.index) else { return };
+        let (title, body) = crate::notify::landing_text(td.landing_rate_fpm, td.peak_g, td.bounces, touch_and_go);
+        self.out.notify(crate::notify::Kind::Landing, &title, &body);
+    }
+
+    /// Notification for a saved (completed) flight (the landing one: [`Self::notify_outcome`]).
+    fn notify_event(&self, fe: &FlightEvent, closing: Option<&str>) {
+        if self.superseded() || !matches!(fe, FlightEvent::FlightEnded { interrupted: false, .. }) {
+            return;
+        }
+        let row = closing.and_then(|id| self.store.get_flight(id).ok().flatten()).map(|d| d.flight);
+        let route = row
+            .as_ref()
+            .map(|f| format!("{} → {}", f.dep_icao.as_deref().unwrap_or("····"), f.arr_icao.as_deref().unwrap_or("····")))
+            .unwrap_or_default();
+        let body = if route.is_empty() { "Der Flug steht im Logbuch.".to_owned() } else { format!("{route} · steht im Logbuch.") };
+        self.out.notify(crate::notify::Kind::Saved, "Flug gespeichert", &body);
+    }
+
+    /// Provider gone (switched, or its thread ended): an open flight cannot go on.
+    fn close(&mut self) {
+        let ts = self.last_ts.unwrap_or_else(now_ms);
+        let events = self.session.interrupt(ts);
+        self.flight_events(events);
+        // a flight end that could not be written yet gets a last try
+        if let Err(e) = self.recorder.checkpoint(self.session.summary(), ts) {
+            log::error!("logbook checkpoint failed: {e}");
+        }
+        if !self.superseded() {
+            self.flight_active.store(false, Ordering::Relaxed);
+            *lock(&self.current_flight) = None;
+        }
+        log::info!("provider forwarder finished");
+    }
+
+    /// Weather at off-block and at the landing is kept with the flight (the debrief shows
+    /// the wind of the landing, not today's).
+    fn capture_metar(&self, ev: &FlightEvent) {
+        let Some(id) = self.recorder.current_flight_id() else { return };
+        let summary = self.session.summary();
+        let (slot, lat, lon, at_ms) = match ev {
+            FlightEvent::FlightStarted { timestamp_ms } => match summary.departure {
+                Some(p) => (MetarSlot::Departure, p.latitude, p.longitude, *timestamp_ms),
+                None => return,
+            },
+            FlightEvent::PhaseChanged(tr) if tr.to == FlightPhase::Landing => {
+                (MetarSlot::Arrival, tr.telemetry.latitude, tr.telemetry.longitude, tr.timestamp_ms)
+            }
+            _ => return,
+        };
+        self.out.capture_metar(&self.store, id, slot, lat, lon, at_ms);
+    }
+
+    fn set_state(&self, state: &str, detail: String, sim: Option<(String, String)>) {
+        let mut s = lock(&self.status);
+        s.state = state.into();
+        s.detail = detail;
+        if let Some((name, version)) = sim {
+            s.sim_name = Some(name);
+            s.sim_version = Some(version);
+        }
+        if state == "disconnected" {
+            s.sim_name = None;
+            s.sim_version = None;
+            s.aircraft = None;
+        }
+        emit(&self.out, "sim:status", &*s);
+    }
 }
 
-fn set_state(app: &AppHandle, status: &Mutex<StatusSnapshot>, state: &str, detail: String, sim: Option<(String, String)>) {
-    let mut s = status.lock().unwrap();
-    s.state = state.into();
-    s.detail = detail;
-    if let Some((name, version)) = sim {
-        s.sim_name = Some(name);
-        s.sim_version = Some(version);
+/// The aircraft is in a state a crashed flight can be continued from: airborne, or on the
+/// ground but not parked (engines running or moving). Parked and cold = a new flight.
+pub(crate) fn resume_position_plausible(t: &Telemetry) -> bool {
+    !t.on_ground || t.engines_running > 0 || t.ground_speed_kt > 1.0
+}
+
+/// Frontend → `invoke("set_ui_visible", { visible })` on `visibilitychange` / minimise / tray.
+#[tauri::command]
+pub(crate) fn set_ui_visible(visible: bool, manager: tauri::State<'_, ProviderManager>) {
+    manager.set_ui_visible(visible);
+}
+
+/// Frontend → `invoke("get_live_track_since", { tsMs })`: samples with `t_ms > tsMs`.
+/// Off the main thread: the recorder holds the buffer while it encodes a flush.
+#[tauri::command(async)]
+pub(crate) fn get_live_track_since(ts_ms: u64, manager: tauri::State<'_, ProviderManager>) -> Vec<TrackSample> {
+    manager.live_track_since(ts_ms)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicUsize;
+    use vectasim_core::{MockFlight, MockVariant, sleep_interruptible};
+
+    #[derive(Clone, Default)]
+    struct FakeOutbox {
+        emitted: Arc<Mutex<Vec<(String, serde_json::Value)>>>,
+        closed: Arc<Mutex<Vec<String>>>,
+        notified: Arc<Mutex<Vec<(crate::notify::Kind, String)>>>,
     }
-    if state == "disconnected" {
-        s.sim_name = None;
-        s.sim_version = None;
-        s.aircraft = None;
+
+    impl Outbox for FakeOutbox {
+        fn emit_value(&self, event: &str, payload: serde_json::Value) {
+            lock(&self.emitted).push((event.to_owned(), payload));
+        }
+        fn flight_closed(&self, _store: &Store, flight_id: &str) {
+            lock(&self.closed).push(flight_id.to_owned());
+        }
+        fn capture_metar(&self, _: &Store, _: &str, _: MetarSlot, _: f64, _: f64, _: u64) {}
+        fn notify(&self, kind: crate::notify::Kind, title: &str, _body: &str) {
+            lock(&self.notified).push((kind, title.to_owned()));
+        }
     }
-    let _ = app.emit("sim:status", s.clone());
+
+    struct NoAirports;
+    impl AirportResolver for NoAirports {
+        fn nearest_ident(&self, _: f64, _: f64, _: f64) -> Option<String> {
+            None
+        }
+    }
+
+    /// Plays `from_s..secs` of a mock variant as fast as possible (simulated 10 Hz), then idles.
+    /// `ts_offset_ms` shifts the timestamps (a restart later), `lat_shift` the positions.
+    struct FakeProvider {
+        name: &'static str,
+        variant: MockVariant,
+        from_s: f64,
+        secs: f64,
+        ts_offset_ms: u64,
+        lat_shift: f64,
+        sent: Arc<AtomicUsize>,
+    }
+
+    impl SimProvider for FakeProvider {
+        fn name(&self) -> &'static str {
+            self.name
+        }
+        fn start(self: Box<Self>, tx: mpsc::Sender<ProviderEvent>, stop: Arc<AtomicBool>) -> JoinHandle<()> {
+            std::thread::spawn(move || {
+                let _ = tx.send(ProviderEvent::Connected { sim_name: "Fake".into(), sim_version: "1".into() });
+                let mut flight = MockFlight::with_variant(self.variant);
+                for i in (self.from_s * 10.0) as u64 + 1..=(self.secs * 10.0) as u64 {
+                    let t_s = i as f64 / 10.0;
+                    for mut ev in flight.step(t_s, 1_700_000_000_000 + (t_s * 1000.0) as u64 + self.ts_offset_ms) {
+                        if let ProviderEvent::Telemetry(t) = &mut ev {
+                            t.latitude += self.lat_shift;
+                        }
+                        if stop.load(Ordering::Relaxed) || tx.send(ev).is_err() {
+                            return;
+                        }
+                    }
+                }
+                self.sent.store(1, Ordering::Relaxed);
+                while sleep_interruptible(Duration::from_millis(50), &stop) {}
+            })
+        }
+    }
+
+    fn wait_for(what: &str, mut f: impl FnMut() -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !f() {
+            assert!(Instant::now() < deadline, "timed out waiting for {what}");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    fn fake(variant: MockVariant, secs: f64) -> (Box<dyn SimProvider>, Arc<AtomicUsize>) {
+        fake_from("fake", variant, 0.0, secs, 0, 0.0)
+    }
+
+    fn fake_from(name: &'static str, variant: MockVariant, from_s: f64, secs: f64, ts_offset_ms: u64, lat_shift: f64) -> (Box<dyn SimProvider>, Arc<AtomicUsize>) {
+        let sent = Arc::new(AtomicUsize::new(0));
+        (Box::new(FakeProvider { name, variant, from_s, secs, ts_offset_ms, lat_shift, sent: sent.clone() }), sent)
+    }
+
+    /// Wait until the provider sent everything and the forwarder processed it.
+    fn settle(m: &ProviderManager, sent: &AtomicUsize, frames: u64) {
+        wait_for("provider", || sent.load(Ordering::Relaxed) == 1);
+        wait_for("forwarder", || m.snapshot().frames >= frames);
+    }
+
+    #[test]
+    fn provider_switch_interrupts_the_open_flight_and_starts_clean() {
+        let store = Store::open_in_memory().unwrap();
+        let out = FakeOutbox::default();
+        let m = ProviderManager::new();
+        let (p, sent) = fake(MockVariant::Standard, 150.0);
+        m.start_with(out.clone(), store.clone(), Arc::new(NoAirports), p).unwrap();
+        settle(&m, &sent, 1500);
+        let id = m.current_flight_id().expect("flight open after 150 s");
+        assert!(m.flight_active.load(Ordering::Relaxed));
+        assert!(m.live_track().len() > 100);
+
+        let (p, _) = fake(MockVariant::Standard, 0.0);
+        m.start_with(out.clone(), store.clone(), Arc::new(NoAirports), p).unwrap();
+        // start_with returns after the old session was shut down
+        let f = store.get_flight(&id).unwrap().unwrap();
+        assert_eq!(f.flight.state, "interrupted");
+        assert_eq!(store.active_flight_id().unwrap(), None);
+        assert_eq!(m.current_flight_id(), None);
+        assert!(!m.flight_active.load(Ordering::Relaxed));
+        assert!(m.live_track().is_empty(), "the new session has its own live track");
+        assert_eq!(m.snapshot().provider, "fake");
+        assert_eq!(m.snapshot().flight, None);
+        assert_eq!(lock(&out.closed).as_slice(), [id]);
+        let ended = lock(&out.emitted).iter().any(|(e, v)| e == "sim:flight-event" && v["kind"] == "flightEnded" && v["interrupted"] == true);
+        assert!(ended, "the UI heard about the interrupted flight");
+    }
+
+    #[test]
+    fn landing_notification_waits_for_the_full_stop_outcome() {
+        let store = Store::open_in_memory().unwrap();
+        let out = FakeOutbox::default();
+        let m = ProviderManager::new();
+        let secs = MockFlight::loop_seconds() + 10.0;
+        let (p, sent) = fake(MockVariant::Standard, secs);
+        m.start_with(out.clone(), store.clone(), Arc::new(NoAirports), p).unwrap();
+        settle(&m, &sent, (secs * 10.0) as u64);
+        wait_for("flight end", || lock(&out.emitted).iter().any(|(e, v)| e == "sim:flight-event" && v["kind"] == "flightEnded"));
+        let events: Vec<serde_json::Value> =
+            lock(&out.emitted).iter().filter(|(e, _)| e == "sim:flight-event").map(|(_, v)| v.clone()).collect();
+        let td = events.iter().position(|v| v["kind"] == "touchdown").expect("touchdown");
+        let outcome = events.iter().position(|v| v["kind"] == "touchdownOutcome").expect("outcome");
+        assert!(td < outcome, "the UI gets the touchdown before its outcome");
+        assert_eq!(events[outcome]["outcome"], "fullStop");
+        assert_eq!(events[outcome]["index"], 0);
+        assert_eq!(events[outcome]["touchdownMs"], events[td]["timestampMs"]);
+        // a summary goes out with the outcome (landing rate / time are set by it)
+        let summary = {
+            let em = lock(&out.emitted);
+            let at = em.iter().position(|(e, v)| e == "sim:flight-event" && v["kind"] == "touchdownOutcome").unwrap();
+            em[at..].iter().find(|(e, _)| e == "sim:flight").map(|(_, v)| v.clone())
+        };
+        assert!(summary.as_ref().is_some_and(|s| s["landingRateFpm"].is_number()), "{summary:?}");
+        let landings: Vec<String> =
+            lock(&out.notified).iter().filter(|(k, _)| *k == crate::notify::Kind::Landing).map(|(_, t)| t.clone()).collect();
+        assert_eq!(landings.len(), 1, "{landings:?}");
+        assert!(landings[0].starts_with("Gelandet · −"), "{landings:?}");
+    }
+
+    #[test]
+    fn replay_of_the_mock_fixture_records_one_landing() {
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates/vectasim-core/tests/fixtures/mock-circuit.vsdump");
+        let store = Store::open_in_memory().unwrap();
+        let out = FakeOutbox::default();
+        let m = ProviderManager::new();
+        m.set_diag_stream(true);
+        m.start_with(out.clone(), store.clone(), Arc::new(NoAirports), Box::new(ReplayProvider::new(fixture, 0.0, false))).unwrap();
+        wait_for("end of replay", || m.snapshot().state == "disconnected" && m.snapshot().frames > 4_000);
+        let touchdowns: Vec<serde_json::Value> = lock(&out.emitted)
+            .iter()
+            .filter(|(e, v)| e == "sim:flight-event" && v["kind"] == "touchdown")
+            .map(|(_, v)| v.clone())
+            .collect();
+        assert_eq!(touchdowns.len(), 1, "{touchdowns:?}");
+        let rate = touchdowns[0]["landingRateFpm"].as_f64().unwrap();
+        assert!((-200.0..=-100.0).contains(&rate), "{rate}");
+        // the fixture ends 20 s into the rollout, still fast: the outcome (and with it the
+        // "Gelandet" notification) is not decided yet
+        let landings: Vec<String> =
+            lock(&out.notified).iter().filter(|(k, _)| *k == crate::notify::Kind::Landing).map(|(_, t)| t.clone()).collect();
+        assert!(landings.is_empty(), "{landings:?}");
+        assert!(!lock(&out.emitted).iter().any(|(e, v)| e == "sim:flight-event" && v["kind"] == "touchdownOutcome"));
+        let snap = m.snapshot();
+        assert_eq!(snap.provider, "replay");
+        assert!(snap.detail.starts_with("Replay beendet"), "{}", snap.detail);
+
+        // diagnostics: raw definitions from the replay, engine internals from the forwarder
+        let d = m.diagnostics();
+        let raw = d.raw.expect("replay has raw definitions");
+        assert_eq!(raw.source, "replay");
+        assert_eq!(raw.defs.len(), 3);
+        assert_eq!(raw.defs[0].vars[0].name, "PLANE LATITUDE");
+        assert!(raw.defs[0].vars[0].raw.is_some());
+        wait_for("engine state", || m.diagnostics().engine.is_some_and(|e| e.touchdowns == 1));
+        assert!(lock(&out.emitted).iter().any(|(e, _)| e == "diag:raw"), "2 Hz stream while the view is open");
+        drop(m);
+    }
+
+    #[test]
+    fn mock_has_no_raw_diagnostics() {
+        let store = Store::open_in_memory().unwrap();
+        let m = ProviderManager::new();
+        let (p, sent) = fake(MockVariant::Standard, 5.0);
+        m.start_with(FakeOutbox::default(), store, Arc::new(NoAirports), p).unwrap();
+        settle(&m, &sent, 50);
+        let d = m.diagnostics();
+        assert!(d.raw.is_none());
+        assert_eq!(d.provider, "fake");
+        let v = serde_json::to_value(&d).unwrap();
+        assert!(v["raw"].is_null() && v["dump"]["ringLines"] == 0, "{v}");
+    }
+
+    #[test]
+    fn replay_needs_a_file() {
+        let m = ProviderManager::new();
+        m.set_replay_config(ReplayConfig::default());
+        assert!(m.make_provider("replay").is_err());
+        assert!(m.make_provider("replay:C:/x.vsdump").is_ok());
+        assert!(PROVIDERS.contains(&"replay"));
+    }
+
+    #[test]
+    fn reconnect_mid_approach_lands_once() {
+        let store = Store::open_in_memory().unwrap();
+        let out = FakeOutbox::default();
+        let m = ProviderManager::new();
+        let secs = MockVariant::Reconnect.loop_seconds() + 10.0;
+        let (p, sent) = fake(MockVariant::Reconnect, secs);
+        m.start_with(out.clone(), store.clone(), Arc::new(NoAirports), p).unwrap();
+        // the link is down for 10 s of the loop: 100 fewer samples
+        settle(&m, &sent, (secs * 10.0) as u64 - 100);
+        let flights = store.list_flights(10, 0).unwrap();
+        assert_eq!(flights.len(), 1);
+        assert_eq!((flights[0].state.as_str(), flights[0].landing_count), ("completed", 1));
+        assert!(flights[0].landing_vs_fpm.unwrap() < -100.0, "{:?}", flights[0].landing_vs_fpm);
+        let states: Vec<String> = lock(&out.emitted)
+            .iter()
+            .filter(|(e, _)| e == "sim:status")
+            .map(|(_, v)| v["state"].as_str().unwrap_or_default().to_owned())
+            .collect();
+        assert!(states.windows(2).any(|w| w == ["disconnected", "connected"]), "{states:?}");
+        drop(m); // threads stop with the process
+    }
+
+    /// The app (here: the provider session) died 250 s into the circuit; the next session
+    /// comes back 2 min later in the air. Offered only where the position fits and never for
+    /// demo flights; accepting continues the old flight.
+    #[test]
+    fn restart_near_the_interrupted_flight_offers_to_resume_it() {
+        let store = Store::open_in_memory().unwrap();
+        let out = FakeOutbox::default();
+        let m = ProviderManager::new();
+        let offers = |out: &FakeOutbox| -> Vec<serde_json::Value> {
+            lock(&out.emitted).iter().filter(|(e, _)| e == "flight:resumable").map(|(_, v)| v.clone()).collect()
+        };
+        let (p, sent) = fake(MockVariant::Standard, 250.0);
+        m.start_with(out.clone(), store.clone(), Arc::new(NoAirports), p).unwrap();
+        settle(&m, &sent, 2_500);
+        let a = m.current_flight_id().expect("flight open after 250 s");
+
+        // 0.2° further north (12 nm): no offer (the session interrupts flight a on start)
+        let (p, sent) = fake_from("fake", MockVariant::Standard, 250.0, 255.0, 120_000, 0.2);
+        m.start_with(out.clone(), store.clone(), Arc::new(NoAirports), p).unwrap();
+        settle(&m, &sent, 50);
+        assert_eq!(store.get_flight(&a).unwrap().unwrap().flight.state, "interrupted");
+        assert!(offers(&out).is_empty(), "too far: {:?}", offers(&out));
+
+        // right position, but a demo session: no offer either
+        let (p, sent) = fake_from("mock", MockVariant::Standard, 250.0, 255.0, 120_000, 0.0);
+        m.start_with(out.clone(), store.clone(), Arc::new(NoAirports), p).unwrap();
+        settle(&m, &sent, 50);
+        assert!(offers(&out).is_empty(), "demo: {:?}", offers(&out));
+
+        // right position, 2 min later: offered
+        let (p, sent) = fake_from("fake", MockVariant::Standard, 250.0, 260.0, 120_000, 0.0);
+        m.start_with(out.clone(), store.clone(), Arc::new(NoAirports), p).unwrap();
+        settle(&m, &sent, 100);
+        let offer = offers(&out);
+        assert_eq!(offer.len(), 1, "{offer:?}");
+        assert_eq!(offer[0]["flightId"], a.as_str());
+        assert!(offer[0]["distanceNm"].as_f64().unwrap() < 0.5, "{offer:?}");
+        assert!(offer[0]["lastMs"].as_u64().is_some() && offer[0]["offBlockMs"].as_u64().is_some());
+        let interim = m.current_flight_id().expect("the aircraft flew on: a new flight started");
+        assert_ne!(interim, a);
+
+        assert!(m.resume_flight("some-other-id").is_err());
+        m.resume_flight(&a).unwrap();
+        assert_eq!(m.current_flight_id().as_deref(), Some(a.as_str()));
+        let f = store.get_flight(&a).unwrap().unwrap().flight;
+        assert_eq!(f.state, "active");
+        assert!(f.integrity.gap_ms >= 120_000, "{}", f.integrity.gap_ms);
+        assert!(store.list_deleted_flights().unwrap().iter().any(|d| d.flight.id == interim), "interim flight in the Papierkorb");
+        assert!(lock(&out.emitted).iter().any(|(e, v)| e == "flight:resumed" && v == a.as_str()));
+        // an offer is accepted once
+        assert!(m.resume_flight(&a).is_err());
+        drop(m);
+    }
+
+    #[test]
+    fn resume_needs_a_parked_or_airborne_aircraft() {
+        let mut t = Telemetry { on_ground: true, ..Default::default() };
+        assert!(!resume_position_plausible(&t), "parked and cold");
+        t.engines_running = 2;
+        assert!(resume_position_plausible(&t));
+        t.engines_running = 0;
+        t.ground_speed_kt = 12.0;
+        assert!(resume_position_plausible(&t));
+        let t = Telemetry { on_ground: false, ..Default::default() };
+        assert!(resume_position_plausible(&t));
+    }
+
+    #[test]
+    fn hidden_window_throttles_live_emits_but_records_everything() {
+        let store = Store::open_in_memory().unwrap();
+        let out = FakeOutbox::default();
+        let m = ProviderManager::new();
+        m.set_diag_stream(true);
+        m.set_ui_visible(false);
+        assert!(!m.ui_visible.load(Ordering::Relaxed));
+        let started = Instant::now();
+        let (p, sent) = fake(MockVariant::Standard, 150.0);
+        m.start_with(out.clone(), store.clone(), Arc::new(NoAirports), p).unwrap();
+        settle(&m, &sent, 1500);
+        let wall_s = started.elapsed().as_secs_f64();
+        let count = |name: &str| lock(&out.emitted).iter().filter(|(e, _)| e == name).count();
+        // 1500 samples arrive within `wall_s`: hidden = at most one telemetry emit per second
+        let telemetry = count("sim:telemetry");
+        assert!(telemetry >= 1 && telemetry as f64 <= wall_s + 1.0, "{telemetry} emits in {wall_s:.2} s");
+        assert!(count("sim:stats") as f64 <= wall_s / 5.0 + 1.0, "stats at 0.2 Hz");
+        assert_eq!(count("diag:raw"), 0, "no raw stream while hidden");
+        // recording is not throttled
+        assert!(m.current_flight_id().is_some());
+        assert!(m.live_track().len() > 100);
+        assert!(lock(&out.emitted).iter().any(|(e, v)| e == "sim:flight-event" && v["kind"] == "flightStarted"));
+
+        // incremental live track
+        let all = m.live_track();
+        let mid = all[all.len() / 2].t_ms;
+        let tail = m.live_track_since(mid);
+        assert_eq!(tail.len(), all.len() - all.len() / 2 - 1);
+        assert!(tail.iter().all(|s| s.t_ms > mid));
+        assert_eq!(tail.first().map(|s| s.t_ms), all.get(all.len() / 2 + 1).map(|s| s.t_ms));
+        assert_eq!(m.live_track_since(0).len(), all.len());
+        assert!(m.live_track_since(u64::MAX).is_empty());
+
+        // visible again: full rate resumes with the next samples
+        m.set_ui_visible(true);
+        let before = count("sim:telemetry");
+        let (p, sent) = fake(MockVariant::Standard, 3.0);
+        m.start_with(out.clone(), store, Arc::new(NoAirports), p).unwrap();
+        wait_for("provider", || sent.load(Ordering::Relaxed) == 1);
+        wait_for("visible telemetry", || count("sim:telemetry") > before);
+    }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "vectasim-data"
-description = "Embedded aviation reference data (OurAirports, public domain): airports and runways with spatial lookup"
+description = "Embedded aviation reference data (OurAirports, Natural Earth; public domain): airports and runways with spatial lookup, countries with outlines"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,4 +9,11 @@ authors.workspace = true
 [dependencies]
 serde = { workspace = true }
 log = { workspace = true }
+csv = "1"
+# country outlines are embedded zstd-compressed (same crate as vectasim-dump/-store)
+zstd = "0.13"
+
+[build-dependencies]
+# build.rs includes src/source.rs + src/binfmt.rs to precompile the CSVs (see binfmt.rs)
+serde = { workspace = true }
 csv = "1"

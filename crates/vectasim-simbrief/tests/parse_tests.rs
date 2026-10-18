@@ -22,6 +22,16 @@ fn parses_a_v2_document() {
     assert_eq!(ofp.fuel.plan_ramp_kg, 8265.0);
     assert_eq!(ofp.fuel.plan_landing_kg, 2765.0);
     assert_eq!(ofp.weights.est_tow_kg, 66465.0);
+    // plan values for "Plan gegen Ist" and the PIREP
+    assert_eq!(ofp.times.taxi_out_s, 900);
+    assert_eq!(ofp.times.taxi_in_s, 600);
+    assert_eq!(ofp.times.sched_in_s, 1792214400);
+    assert_eq!(ofp.fuel.taxi_kg, 200.0);
+    assert_eq!(ofp.fuel.trip_kg, 5300.0);
+    assert_eq!(ofp.fuel.alternate_kg, 900.0);
+    assert_eq!(ofp.fuel.reserve_kg, 1100.0);
+    assert_eq!(ofp.cost_index, "25");
+    assert_eq!(ofp.source_units, "kgs");
     assert_eq!(ofp.navlog.len(), 6);
     // mixed string/number fields in the first fix
     let first = &ofp.navlog[0];
@@ -65,4 +75,19 @@ fn fetch_error_status_is_reported() {
     let err = parse_ofp_json(r#"{"fetch":{"status":"Error: Unknown UserID"}}"#).unwrap_err();
     assert!(err.to_string().contains("Unknown UserID"), "{err}");
     assert!(parse_ofp_json("not json").is_err());
+}
+
+#[test]
+fn serialises_plan_fields_in_camel_case_for_the_ui() {
+    // the UI type `Ofp` (app/src/types.ts) and the stored `ofp_json` read these names
+    let v = serde_json::to_value(parse_ofp_json(V2).expect("parse")).unwrap();
+    assert_eq!(v["times"]["taxiOutS"], 900);
+    assert_eq!(v["times"]["taxiInS"], 600);
+    assert_eq!(v["times"]["schedOutS"], 1792207200u64);
+    assert_eq!(v["fuel"]["taxiKg"], 200.0);
+    assert_eq!(v["fuel"]["tripKg"], 5300.0);
+    assert_eq!(v["fuel"]["alternateKg"], 900.0);
+    assert_eq!(v["fuel"]["reserveKg"], 1100.0);
+    assert_eq!(v["costIndex"], "25");
+    assert_eq!(v["sourceUnits"], "kgs");
 }

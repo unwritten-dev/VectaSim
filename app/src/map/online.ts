@@ -3,7 +3,7 @@
 // All three are plain GeoJSON sources refreshed from cached backend snapshots, so
 // panning only re-filters data in Rust; nothing here talks to the network directly.
 
-import maplibregl from "maplibre-gl";
+import * as maplibregl from "maplibre-gl";
 import type { Airport, Controller, Facility, LocatedController, Metar, Pilot } from "../types";
 import { fmt, fmtAltitude, fmtMetarLine, fmtWind } from "../format";
 import { CATEGORY_COLOR, COLOR, FACILITY_COLOR, TRAFFIC } from "../theme";
@@ -143,6 +143,20 @@ export function setGroupVisible(map: maplibregl.Map, group: OnlineLayerGroup, vi
   }
 }
 
+/**
+ * Cheap content key for a FeatureCollection (length + FNV-1a over its JSON). Lets callers skip
+ * `setData` – and the worker's re-tiling – when a poll or a pan yields the same features.
+ */
+export function geoJsonKey(fc: GeoJSON.FeatureCollection): string {
+  const json = JSON.stringify(fc.features);
+  let h = 0x811c9dc5;
+  for (let i = 0; i < json.length; i++) {
+    h ^= json.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return `${fc.features.length}:${json.length}:${(h >>> 0).toString(36)}`;
+}
+
 export function pilotsGeoJson(pilots: Pilot[]): GeoJSON.FeatureCollection {
   return {
     type: "FeatureCollection",
@@ -244,7 +258,8 @@ function attachPopups(map: maplibregl.Map) {
   hover("vatsim-atc-dot", (p) => {
     let stations: Array<Pick<Controller, "callsign" | "frequency" | "facility" | "atisCode">> = [];
     try {
-      stations = JSON.parse(String(p.stations));
+      // stored as a JSON string; MapLibre 6 keeps nested values as objects, so accept both
+      stations = Array.isArray(p.stations) ? p.stations : JSON.parse(String(p.stations));
     } catch {
       /* malformed property: show the airport only */
     }

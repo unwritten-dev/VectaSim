@@ -6,6 +6,7 @@
 import { useSyncExternalStore } from "react";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
+import { invoke } from "@tauri-apps/api/core";
 import { showToast } from "./ui/Toast";
 import { userMessage } from "./errors";
 
@@ -79,12 +80,42 @@ export async function checkForUpdate(opts: { silent?: boolean } = {}): Promise<U
   }
 }
 
-/** Download the pending update, install it and relaunch. */
+let recordingActive: () => boolean = () => false;
+
+/** App registers how to tell whether a flight is being recorded (installing restarts VectaSim). */
+export function setRecordingCheck(fn: () => boolean): void {
+  recordingActive = fn;
+}
+
+/** Download the pending update, install it and relaunch – never in the middle of a recorded flight. */
 export async function installUpdate(): Promise<void> {
   if (!pending) return;
+  if (recordingActive()) {
+    showToast({
+      id: "update",
+      tone: "warn",
+      title: "Aufzeichnung läuft – Update nach dem Flug",
+      body: `Die Installation startet VectaSim neu. Installiere Version ${state.version ?? ""} nach dem Flug unter Einstellungen → Updates.`,
+      durationMs: 8000,
+    });
+    return;
+  }
   let total = 0;
   let got = 0;
   set({ phase: "downloading", progress: 0 });
+  // safety copy of the logbook first (Einstellungen → Daten); a failure does not stop the update –
+  // a new schema version makes its own copy before migrating at the next start
+  try {
+    await invoke("create_backup", { kind: "update" });
+  } catch (e) {
+    showToast({
+      id: "update-backup",
+      tone: "warn",
+      title: "Sicherung vor dem Update fehlgeschlagen",
+      body: `${String(e)} – das Update läuft trotzdem.`,
+      durationMs: 8000,
+    });
+  }
   try {
     await pending.downloadAndInstall((ev) => {
       if (ev.event === "Started") total = ev.data.contentLength ?? 0;

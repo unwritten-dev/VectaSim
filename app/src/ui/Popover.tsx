@@ -15,7 +15,9 @@ interface Props {
 
 /**
  * Non-modal popover dialog anchored to a button. Focus moves into it on open,
- * Escape / outside click close it; Escape returns focus to the anchor.
+ * Escape / outside click / tabbing out close it; Escape returns focus to the anchor.
+ * Escape is handled on `document` (bubble) and stopped there, so a modal around it (the
+ * debrief listens on `window`) stays open: the innermost layer closes first.
  */
 export default function Popover({ open, onClose, anchorRef, label, placement = "right-end", id, className, children }: Props) {
   const ref = useRef<HTMLDivElement>(null);
@@ -48,14 +50,25 @@ export default function Popover({ open, onClose, anchorRef, label, placement = "
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       e.stopPropagation();
+      e.preventDefault();
       onCloseRef.current();
       anchorRef.current?.focus();
     };
+    // focus left popover and anchor (Tab past the last item): close instead of covering content;
+    // no related target = the window lost focus (pilot back in the sim), keep it open
+    const onFocusOut = (e: FocusEvent) => {
+      const next = e.relatedTarget as Node | null;
+      if (!next || ref.current?.contains(next) || anchorRef.current?.contains(next)) return;
+      onCloseRef.current();
+    };
+    const el = ref.current;
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
+    el?.addEventListener("focusout", onFocusOut);
     return () => {
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey);
+      el?.removeEventListener("focusout", onFocusOut);
     };
   }, [open, anchorRef]);
 

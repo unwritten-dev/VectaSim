@@ -17,18 +17,30 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 vectasim-core = { path = "../../crates/vectasim-core" }
 vectasim-simconnect = { path = "../../crates/vectasim-simconnect" }
+vectasim-dump = { path = "../../crates/vectasim-dump" }
 vectasim-store = { path = "../../crates/vectasim-store" }
 vectasim-data = { path = "../../crates/vectasim-data" }
 vectasim-simbrief = { path = "../../crates/vectasim-simbrief" }
 vectasim-online = { path = "../../crates/vectasim-online" }
 vectasim-photos = { path = "../../crates/vectasim-photos" }
-tauri = { version = "2", features = ["protocol-asset"] }
+tauri = { version = "2", features = ["protocol-asset", "tray-icon"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+tauri-plugin-log = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-window-state = "2"
+# Integrationen: Windows notifications (landing, flight saved, connection, update)
+tauri-plugin-notification = "2"
+# Integrationen: Discord Rich Presence over the local IPC pipe (MIT)
+discord-rich-presence = "1.1"
 serde = { workspace = true }
 serde_json = { workspace = true }
 log = { workspace = true }
-env_logger = "0.11"
 tokio = { version = "1", features = ["time"] }
+# Diagnosepaket: already in the tree via tauri-plugin-updater; only the flate2/zlib-rs deflate
+# backend (also already in the tree) – `deflate` would add zopfli for levels nobody uses here.
+zip = { version = "4.6", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+# read-only statistics connection for the Diagnosepaket (same version/features as vectasim-store)
+rusqlite = { version = "0.40", features = ["bundled"] }

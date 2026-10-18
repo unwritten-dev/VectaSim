@@ -8,15 +8,25 @@ export interface DebriefTarget {
   flightId: string;
   /** Touchdown index within the flight; null = the last one. */
   touchdownIndex: number | null;
+  /** Approach index within the flight (approach_analysis); null = the one of the shown touchdown, else the last. */
+  approachIndex: number | null;
 }
 
 let current: DebriefTarget | null = null;
 const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((l) => l());
 
-export function openDebrief(flightId: string, touchdownIndex: number | null = null) {
-  current = { flightId, touchdownIndex };
+export function openDebrief(flightId: string, touchdownIndex: number | null = null, approachIndex: number | null = null) {
+  current = { flightId, touchdownIndex, approachIndex };
   emit();
+}
+
+/**
+ * True while the debrief (the app's only modal) is open: global shortcuts (Ctrl+1/2/3,
+ * Ctrl+., Ctrl+F) check this and stay quiet, so nothing changes or takes focus behind it.
+ */
+export function isDebriefOpen(): boolean {
+  return current != null;
 }
 
 export function closeDebrief() {

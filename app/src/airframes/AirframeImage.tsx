@@ -4,6 +4,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import type { Airframe } from "../types";
 import { silhouettePath, wakeCategory } from "../map/aircraftIcons";
 import { usePrefs } from "../prefs";
+import { privacy } from "../format";
 import { needsPhotoLookup, photoCredit } from "./airframe";
 
 // One lazy lookup per registration and app session; the backend caches and rate-limits,
@@ -53,6 +54,8 @@ interface Props {
 /** Photo of an airframe (Planespotters or picked), else its type silhouette. Triggers the lazy lookup. */
 export default function AirframeImage({ airframe: a, size = "thumb", credit = false, className = "", fallbackType, fallbackTitle }: Props) {
   useLazyPhoto(a);
+  // re-render with the Streamer-Modus (alt text)
+  const { privacyMode } = usePrefs();
   const url = a ? src(a, size) : null;
   const [broken, setBroken] = useState(false);
   useEffect(() => setBroken(false), [url]);
@@ -70,7 +73,7 @@ export default function AirframeImage({ airframe: a, size = "thumb", credit = fa
     <figure className={`af-image af-${size} ${className}`}>
       <div className="af-frame">
         {show ? (
-          <img src={url} alt={a ? `Foto ${a.registration}` : ""} loading="lazy" onError={() => setBroken(true)} draggable={false} />
+          <img src={url} alt={a ? `Foto ${privacy(a.registration, "registration", privacyMode)}` : ""} loading="lazy" onError={() => setBroken(true)} draggable={false} />
         ) : (
           <AirframeSilhouette icaoType={a?.icaoType ?? fallbackType} title={a?.title ?? fallbackTitle} />
         )}

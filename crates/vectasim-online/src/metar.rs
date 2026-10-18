@@ -268,6 +268,61 @@ pub fn decode(raw: &str) -> Metar {
     m
 }
 
+// ---- observation time ---------------------------------------------------------------
+
+/// Days since 1970-01-01 of a proleptic Gregorian date (H. Hinnant's algorithm).
+fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let mp = (m as i64 + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + d as i64 - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+fn civil_from_days(z: i64) -> (i64, u32) {
+    let z = z + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    (yoe + era * 400 + i64::from(m <= 2), m)
+}
+
+/// Observation time of a report group "DDHHMMZ" as Unix ms. The group has no month or
+/// year, so the date with that day of the month nearest to `near_ms` (the landing) is
+/// taken: same, previous or next month. None for an unparsable group or an impossible date.
+pub fn observation_ms(time: &str, near_ms: u64) -> Option<u64> {
+    let t = time.strip_suffix('Z').unwrap_or(time);
+    if t.len() != 6 || !all_digits(t) {
+        return None;
+    }
+    let (dd, hh, mm): (u32, i64, i64) = (t[..2].parse().ok()?, t[2..4].parse().ok()?, t[4..].parse().ok()?);
+    if !(1..=31).contains(&dd) || hh > 23 || mm > 59 {
+        return None;
+    }
+    let (y, m) = civil_from_days((near_ms / 86_400_000) as i64);
+    let near = near_ms as i64;
+    let mut best: Option<i64> = None;
+    for dm in [-1i64, 0, 1] {
+        let idx = y * 12 + (m as i64 - 1) + dm;
+        let (cy, cm) = (idx.div_euclid(12), (idx.rem_euclid(12) + 1) as u32);
+        let days = days_from_civil(cy, cm, dd);
+        // day 31 in a 30-day month rolls over into the next month: not this month's date
+        if civil_from_days(days).1 != cm {
+            continue;
+        }
+        let ms = (days * 86_400 + hh * 3600 + mm * 60) * 1000;
+        if best.is_none_or(|b| (ms - near).abs() < (b - near).abs()) {
+            best = Some(ms);
+        }
+    }
+    best.and_then(|b| u64::try_from(b).ok())
+}
+
 // ---- client -------------------------------------------------------------------------
 
 #[derive(Deserialize)]

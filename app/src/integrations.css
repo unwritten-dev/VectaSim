@@ -1,0 +1,30 @@
+/* Einstellungen → Integrationen (IntegrationsPanel.tsx). Colours come from the theme tokens. */
+.integrations {
+  display: grid;
+  gap: var(--sp-4);
+}
+.integrations-group {
+  display: grid;
+  gap: var(--sp-2);
+}
+.integrations-group + .integrations-group {
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--hairline);
+}
+.integrations-title {
+  margin: 0;
+  font-size: var(--fs-base);
+  font-weight: var(--fw-title);
+  color: var(--text);
+}
+.integrations-sub {
+  display: grid;
+  gap: var(--sp-1);
+  padding-left: var(--sp-5);
+}
+.integrations-sub .check:has(input:disabled) {
+  color: var(--text-muted);
+}
+.integrations .setting-row input {
+  width: 220px;
+}

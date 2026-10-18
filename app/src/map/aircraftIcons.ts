@@ -1,14 +1,15 @@
 // Aircraft symbols for the map, sized by ICAO wake-turbulence category.
 //
 // Why categories: a C172 and an A380 drawn the same size make the map lie about
-// what is flying. We size by the ICAO wake class (Light ≤ 7 t, Medium ≤ 136 t,
-// Heavy, Super = A380/An-225) and pick a silhouette per class (single prop,
+// what is flying. We size by the ICAO wake class (Light ≤ 7 000 kg MTOM, Medium
+// > 7 000 and < 136 000 kg, Heavy ≥ 136 000 kg, Super = A380/An-225; ICAO Doc 8643,
+// classified by MTOM per ICAO Doc 8643) and pick a silhouette per class (single prop,
 // twin jet, wide-body). The class comes from the ICAO type designator when we
 // have one (VATSIM `aircraft_short`, MSFS `ATC MODEL` tokens like
 // `TT:ATCCOM.AC_MODEL_A20N.0.text`), else from the aircraft title, else from the
 // current weight as a last resort.
 
-import type maplibregl from "maplibre-gl";
+import type * as maplibregl from "maplibre-gl";
 import { COLOR, TRAFFIC, getMapTheme } from "../theme";
 
 export type WakeCategory = "light" | "medium" | "heavy" | "super";
@@ -23,7 +24,7 @@ const HEAVY = new Set([
   "A332", "A333", "A337", "A338", "A339", "A342", "A343", "A345", "A346", "A359", "A35K", "A3ST", "A124", "A400",
   "B741", "B742", "B743", "B744", "B748", "B74S", "B74R", "BLCF", "B762", "B763", "B764", "B772", "B773", "B77L", "B77W",
   "B778", "B779", "B788", "B789", "B78X", "MD11", "DC10", "L101", "IL96", "IL76", "C17", "C5M", "K35R", "E3CF", "E767",
-  "C130", "C30J", "A310", "A306", "A30B",
+  "A310", "A306", "A30B",
 ]);
 const MEDIUM = new Set([
   "A318", "A319", "A19N", "A320", "A20N", "A321", "A21N", "A221", "A223", "BCS1", "BCS3", "B712", "B721", "B722", "B731",
@@ -32,10 +33,12 @@ const MEDIUM = new Set([
   "E145", "E135", "E140", "CRJ1", "CRJ2", "CRJ7", "CRJ9", "CRJX", "AT43", "AT45", "AT72", "AT75", "AT76", "DH8A", "DH8B",
   "DH8C", "DH8D", "SF34", "SB20", "F50", "F70", "F100", "RJ85", "RJ1H", "B461", "B462", "B463", "A748", "C560", "C56X",
   "C680", "C68A", "C700", "C750", "CL30", "CL35", "CL60", "GLF4", "GLF5", "GLF6", "GL5T", "GL7T", "GLEX", "FA7X", "FA8X",
-  "F900", "F2TH", "LJ35", "LJ45", "LJ60", "LJ75", "E50P", "E55P", "E545", "E550", "H25B", "PRM1", "BE20", "B350", "PC24",
-  "C25A", "C25B", "C25C", "C525", "DC3", "DC6", "AN24", "AN26", "AN12", "TBM9", "PC12", "C208", "C408", "DHC6", "DHC2",
+  "F900", "F2TH", "LJ35", "LJ45", "LJ60", "LJ75", "E55P", "E545", "E550", "H25B", "PC24",
+  "C25C", "DC3", "DC6", "AN24", "AN26", "AN12", "C408", "C130", "C30J", "H60",
 ]);
-const LIGHT_PREFIX = ["C1", "C2", "P2", "PA", "SR2", "DA4", "DA2", "DA6", "BE3", "BE5", "BE9", "M20", "RV", "EVOT", "P46T", "PIVI", "ULAC", "GLID", "H60", "R22", "R44", "R66", "EC3", "EC45", "AS50", "B06", "B407", "B412", "EC35", "S76"];
+/** Light by MTOM (≤ 7 000 kg) although the designator looks like a "real" aircraft. */
+const LIGHT = new Set(["TBM9", "PC12", "C208", "DHC6", "DHC2", "BE20", "B350", "E50P", "C525", "C25A", "C25B", "PRM1"]);
+const LIGHT_PREFIX = ["C1", "C2", "P2", "PA", "SR2", "DA4", "DA2", "DA6", "BE3", "BE5", "BE9", "M20", "RV", "EVOT", "P46T", "PIVI", "ULAC", "GLID", "R22", "R44", "R66", "EC3", "EC45", "AS50", "B06", "B407", "B412", "EC35", "S76"];
 
 /** Clean up MSFS `ATC MODEL` values like `TT:ATCCOM.AC_MODEL_A20N.0.text` or `$$:A320neo` to a designator-ish token. */
 export function icaoFromAtcModel(raw: string | undefined | null): string {
@@ -49,8 +52,10 @@ export function icaoFromAtcModel(raw: string | undefined | null): string {
 function fromTitle(title: string): WakeCategory | null {
   const t = title.toUpperCase();
   if (/A380|A-380|AN-?225/.test(t)) return "super";
-  if (/A3(30|40|50)|747|767|777|787|MD-?11|DC-?10|A310|A300|C-?17|IL-?76|L-?1011|AN-?124|C-?130|HERCULES|BELUGA/.test(t)) return "heavy";
-  if (/A3(18|19|20|21)|A2(20|21)|737|757|727|717|MD-?8|MD-?90|CRJ|E-?JET|E1(70|75|90|95)|E2(90|95)|ERJ|ATR|DASH ?8|Q400|SAAB|FOKKER|BAE ?146|AVRO|CITATION|CHALLENGER|GLOBAL|GULFSTREAM|FALCON|LEARJET|PHENOM|PRAETOR|HAWKER|KING AIR|PC-?12|PC-?24|TBM|CARAVAN|TWIN OTTER|DC-?3|DC-?6|CONCORDE|LONGITUDE|LATITUDE|VISION ?JET/.test(t))
+  if (/A3(30|40|50)|747|767|777|787|MD-?11|DC-?10|A310|A300|C-?17|IL-?76|L-?1011|AN-?124|BELUGA|CONCORDE/.test(t)) return "heavy";
+  // light turboprops and very light jets before the medium families they share words with
+  if (/PC-?12|TBM|CARAVAN|TWIN OTTER|BEAVER|KING AIR|VISION ?JET|PHENOM ?100|CITATION ?(CJ[1-4]?|M2|MUSTANG)|PREMIER/.test(t)) return "light";
+  if (/A3(18|19|20|21)|A2(20|21)|737|757|727|717|MD-?8|MD-?90|CRJ|E-?JET|E1(70|75|90|95)|E2(90|95)|ERJ|ATR|DASH ?8|Q400|SAAB|FOKKER|BAE ?146|AVRO|CITATION|CHALLENGER|GLOBAL|GULFSTREAM|FALCON|LEARJET|PHENOM|PRAETOR|HAWKER|PC-?24|DC-?3|DC-?6|LONGITUDE|LATITUDE|C-?130|HERCULES|BLACK ?HAWK|UH-?60/.test(t))
     return "medium";
   if (/C172|CESSNA|PIPER|CIRRUS|DIAMOND|BONANZA|BARON|MOONEY|ROBIN|EXTRA|PITTS|CUB|HUSKY|KODIAK|ICON|SAVAGE|SLING|BEECH|GLIDER|ROBINSON|CABRI|H135|H145|EC135|BELL|HELI/.test(t))
     return "light";
@@ -66,6 +71,7 @@ export function wakeCategory(icaoType?: string | null, title?: string | null, we
   if (code) {
     if (SUPER.has(code)) return "super";
     if (HEAVY.has(code)) return "heavy";
+    if (LIGHT.has(code)) return "light";
     if (MEDIUM.has(code)) return "medium";
     if (LIGHT_PREFIX.some((p) => code.startsWith(p))) return "light";
   }
@@ -74,7 +80,7 @@ export function wakeCategory(icaoType?: string | null, title?: string | null, we
     if (t) return t;
   }
   if (weightKg != null && Number.isFinite(weightKg) && weightKg > 0) {
-    if (weightKg > 136_000) return "heavy";
+    if (weightKg >= 136_000) return "heavy";
     if (weightKg > 7_000) return "medium";
     return "light";
   }

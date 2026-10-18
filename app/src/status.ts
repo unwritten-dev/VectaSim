@@ -4,7 +4,7 @@
 // popover all show these texts. "Getrennt", "Verbinde …" and "Fehler" are not labels.
 
 import type { FlightSummary, StatusSnapshot } from "./types";
-import { isWaitingForSim, userMessage } from "./errors";
+import { DLL_MISSING_TEXT, isDllMissing, isWaitingForSim, userMessage } from "./errors";
 import { fmtClock } from "./format";
 
 export type RecKind = "waiting" | "ready" | "recording" | "suspended" | "demo";
@@ -29,20 +29,23 @@ export interface RecStatus {
 }
 
 export function isDemo(status: StatusSnapshot | null | undefined): boolean {
-  return status?.provider === "mock";
+  return status?.provider === "mock" || status?.provider === "replay";
 }
 
-/** SimConnect library missing: MSFS is probably not installed – a hint, not an error. */
+/**
+ * SimConnect.dll missing (not downloaded, no MSFS SDK, no file chosen) – a hint with a next step,
+ * not a red error: VectaSim keeps looking, and Einstellungen → Simulator downloads it on one click.
+ */
 export function isSimMissing(raw: string): boolean {
-  return /SimConnect\.dll not found|unloadable/i.test(raw);
+  return isDllMissing(raw);
 }
 
-/** Backend `state: "error"` that is not just "no sim installed". */
+/** Backend `state: "error"` that is not just "SimConnect.dll missing". */
 export function isRealSimError(status: StatusSnapshot | null | undefined): boolean {
   return status?.state === "error" && !isSimMissing(status.detail ?? "");
 }
 
-const SIM_LABEL: Record<string, string> = { simconnect: "MSFS 2020/2024", mock: "Demo-Flug" };
+const SIM_LABEL: Record<string, string> = { simconnect: "MSFS 2020/2024", mock: "Demo-Flug", replay: "Replay (Roh-Dump)" };
 
 /** Simulator name for UI text (UI wording: "Simulator", not "Quelle"/"Provider"). */
 export function providerLabel(provider: string | null | undefined): string {
@@ -50,11 +53,18 @@ export function providerLabel(provider: string | null | undefined): string {
   return SIM_LABEL[provider] ?? provider;
 }
 
+/** Map pill while waiting: says what starts (the recording), not "something starts". */
+export const WAITING_TEXT = "Warte auf MSFS – Aufzeichnung startet beim Losrollen";
+/** Short pill text while the Bereit card is on screen: the card carries the details and the demo. */
+export const WAITING_SHORT = "Warte auf MSFS";
+/** One name for the demo everywhere (buttons); "Ohne Simulator ausprobieren" only as a subtitle. */
+export const DEMO_LABEL = "Demo-Flug";
+
 function waitingHint(detail: string): string {
-  if (isSimMissing(detail)) return "MSFS scheint nicht installiert – VectaSim sucht weiter, sobald du ihn installierst.";
+  if (isSimMissing(detail)) return `${DLL_MISSING_TEXT}.`;
   if (/simulator quit/i.test(detail)) return "Simulator beendet. VectaSim verbindet sich automatisch, sobald er wieder läuft.";
-  if (isWaitingForSim(detail)) return "Starte MSFS – VectaSim verbindet sich automatisch, sobald das Hauptmenü erreicht ist.";
-  return "Starte MSFS – VectaSim verbindet sich automatisch. Du musst nichts starten.";
+  if (isWaitingForSim(detail)) return "MSFS läuft noch nicht. Sobald das Hauptmenü erreicht ist, verbindet sich VectaSim von selbst.";
+  return "Sobald MSFS läuft, verbindet sich VectaSim von selbst. Die Aufzeichnung startet beim Losrollen.";
 }
 
 export function recordingStatus(status: StatusSnapshot | null | undefined, flight: FlightSummary | null | undefined): RecStatus {
@@ -64,11 +74,20 @@ export function recordingStatus(status: StatusSnapshot | null | undefined, fligh
   const active = flight?.state === "active";
 
   if (isDemo(status)) {
+    const replay = status?.provider === "replay";
     return {
       kind: "demo",
-      label: "Demo-Flug",
-      text: active ? `Demo-Flug läuft · seit ${fmtClock(flight?.offBlockMs)}` : "Demo-Flug · simulierte Daten, ohne Simulator",
-      hint: "Ein simulierter Flug zum Ausprobieren. Für echte Flüge die Demo beenden – MSFS wird dann automatisch erkannt.",
+      label: replay ? "Replay" : "Demo-Flug",
+      text: replay
+        ? active
+          ? `Replay läuft · seit ${fmtClock(flight?.offBlockMs)}`
+          : "Replay · aufgezeichnete Rohdaten, ohne Simulator"
+        : active
+          ? `Demo-Flug läuft · seit ${fmtClock(flight?.offBlockMs)}`
+          : "Demo-Flug · simulierte Daten, ohne Simulator",
+      hint: replay
+        ? "Ein aufgezeichneter Dump wird abgespielt. Für echte Flüge das Replay beenden – MSFS wird dann automatisch erkannt."
+        : "Ein simulierter Flug zum Ausprobieren. Für echte Flüge den Demo-Flug beenden – MSFS wird dann automatisch erkannt.",
       color: "var(--info)",
       error: false,
       detail,
@@ -112,7 +131,7 @@ export function recordingStatus(status: StatusSnapshot | null | undefined, fligh
   return {
     kind: "waiting",
     label: "Warte auf Simulator",
-    text: "Warte auf MSFS – startet automatisch",
+    text: WAITING_TEXT,
     hint: realError ? `${userMessage(detail, "sim").title} ${userMessage(detail, "sim").hint}` : waitingHint(detail),
     color: realError ? "var(--err)" : "var(--text-muted)",
     error: realError,

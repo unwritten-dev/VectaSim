@@ -15,7 +15,19 @@ export interface LogTotals {
   avgLandingVsFpm: number | null;
 }
 
-export const isDemoRow = (f: Pick<FlightRow, "provider">) => f.provider === "mock";
+export const isDemoRow = (f: Pick<FlightRow, "provider">) => f.provider === "mock" || f.provider === "replay";
+
+/** Flights from a CSV import (`provider = "import:<preset>"`): no track, no touchdowns, no integrity data. */
+export const isImportedRow = (f: Pick<FlightRow, "provider">) => f.provider?.startsWith("import:") ?? false;
+
+const IMPORT_SOURCE: Record<string, string> = { vectasim: "VectaSim-CSV", volanta_import: "Volanta", simtoolkitpro: "SimToolkitPro", generic: "CSV" };
+
+/** Where an imported flight came from ("Volanta"); null for a recorded flight. */
+export function importSourceLabel(f: Pick<FlightRow, "provider">): string | null {
+  if (!isImportedRow(f)) return null;
+  const preset = (f.provider ?? "").slice("import:".length);
+  return IMPORT_SOURCE[preset] ?? (preset || "CSV");
+}
 
 /** Flights that count: all, or all but demo flights. */
 export function countedFlights<T extends Pick<FlightRow, "provider">>(rows: T[], showDemo: boolean): T[] {

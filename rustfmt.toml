@@ -1,0 +1,5 @@
+# Matches the existing code style (long lines, compact single-line closures and if/else).
+# The tree is not fully formatted with it yet, so CI does not run `cargo fmt --check`;
+# format new files with it and switch the check on after one workspace-wide `cargo fmt`.
+max_width = 140
+use_small_heuristics = "Max"

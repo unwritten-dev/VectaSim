@@ -1,6 +1,6 @@
 import { NNBSP } from "../format";
 import { describe, expect, it } from "vitest";
-import { MIN_RUNWAY_PX, TRACK_BEFORE_M, nearestByDist, niceDistanceStep, pathOf, referenceHeightFt, runwayLayout, sideLabel, stripeCount } from "./geometry";
+import { MIN_RUNWAY_PX, TRACK_BEFORE_M, UNKNOWN_WIDTH_DRAW_M, drawWidthM, nearestByDist, niceDistanceStep, pathOf, referenceHeightFt, runwayLayout, sideLabel, stripeCount } from "./geometry";
 
 describe("runwayLayout", () => {
   const base = { lengthM: 2000, widthM: 45, widthPx: 1000 };
@@ -75,9 +75,17 @@ describe("helpers", () => {
     expect(pathOf([{ x: 0, y: 0 }, { x: 1, y: 2 }], (p) => [p.x * 10, p.y * 10])).toBe("M0.0,0.0L10.0,20.0");
   });
 
+  it("draws an unknown width as 30 m", () => {
+    expect(drawWidthM(null)).toBe(UNKNOWN_WIDTH_DRAW_M);
+    expect(drawWidthM(0)).toBe(30);
+    expect(drawWidthM(45)).toBe(45);
+  });
+
   it("sideLabel", () => {
     expect(sideLabel(0.2)).toBe("auf der Mittellinie");
-    expect(sideLabel(3.04).split(NNBSP).join(" ")).toBe("3,0 m rechts");
+    // whole metres: the runway coordinates are only good to about ±5 m
+    expect(sideLabel(3.04).split(NNBSP).join(" ")).toBe("3 m rechts");
+    expect(sideLabel(-1.8).split(NNBSP).join(" ")).toBe("2 m links");
     expect(sideLabel(-580.4).split(NNBSP).join(" ")).toBe("580 m links");
   });
 });

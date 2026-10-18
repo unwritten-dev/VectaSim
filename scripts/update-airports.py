@@ -3,7 +3,9 @@
 
 Usage: python scripts/update-airports.py [download-dir]
 Downloads the nightly CSVs, keeps large/medium/small airports and seaplane bases, drops closed
-runways and unused columns, and rewrites the two embedded files.
+runways and unused columns (keeps the displaced threshold of each runway end), and rewrites the two embedded files.
+The CSVs stay the source of truth: crates/vectasim-data/build.rs precompiles them into the binary
+index (airports.vsad in OUT_DIR) on the next cargo build, so nothing else needs regenerating.
 """
 import csv
 import pathlib
@@ -59,14 +61,17 @@ def main() -> None:
     n = 0
     with open(src / "runways.csv", encoding="utf-8", newline="") as f, open(DST / "runways.csv", "w", encoding="utf-8", newline="") as out:
         w = csv.writer(out, lineterminator="\n")
-        w.writerow(["airport", "length_ft", "width_ft", "surface", "le_ident", "le_lat", "le_lon", "le_hdg", "he_ident", "he_lat", "he_lon", "he_hdg"])
+        w.writerow(["airport", "length_ft", "width_ft", "surface", "le_ident", "le_lat", "le_lon", "le_hdg", "he_ident", "he_lat", "he_lon", "he_hdg",
+                    "le_disp_ft", "he_disp_ft"])
         for row in csv.DictReader(f):
             ident = remap.get(row["airport_ident"])
             if not ident or ident not in idents or row["closed"] == "1":
                 continue
             w.writerow([ident, row["length_ft"], row["width_ft"], row["surface"][:12], row["le_ident"], num(row["le_latitude_deg"]),
                         num(row["le_longitude_deg"]), num(row["le_heading_degT"], 1), row["he_ident"], num(row["he_latitude_deg"]),
-                        num(row["he_longitude_deg"]), num(row["he_heading_degT"], 1)])
+                        num(row["he_longitude_deg"]), num(row["he_heading_degT"], 1),
+                        # displaced threshold per end (ft along the runway from that end); empty = none known
+                        row["le_displaced_threshold_ft"], row["he_displaced_threshold_ft"]])
             n += 1
     print(f"airports {len(idents)}, runways {n} -> {DST}")
 

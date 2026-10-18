@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Ofp } from "./types";
-import { fmt, fmtClock, fmtDateTime, fmtDuration } from "./format";
+import { fmt, fmtClock, fmtDateTime, fmtDuration, fmtWeight, fmtWeightNum } from "./format";
+import { usePrefs, usePrivacy } from "./prefs";
 import ErrorNotice from "./ErrorNotice";
 import Stat from "./ui/Stat";
 import EmptyState from "./ui/EmptyState";
@@ -17,6 +18,8 @@ const clockS = (s: number | undefined) => (s ? fmtClock(s * 1000) : "–");
 
 /** SimBrief flight plan (side panel → Flugplan): load the latest OFP for the saved pilot id. */
 export default function Dispatch({ ofp, onOfp }: Props) {
+  const { weightUnit } = usePrefs();
+  const priv = usePrivacy();
   const [user, setUser] = useState("");
   const [savedUser, setSavedUser] = useState("");
   const [editing, setEditing] = useState(false);
@@ -42,7 +45,7 @@ export default function Dispatch({ ofp, onOfp }: Props) {
         onOfp(o);
         setSavedUser(user.trim() || savedUser);
         setEditing(false);
-        showToast({ tone: "ok", title: "Flugplan geladen", body: `${o.callsign} · ${o.originIcao} → ${o.destinationIcao} · ${o.aircraftIcao}` });
+        showToast({ tone: "ok", title: "Flugplan geladen", body: `${priv.mask(o.callsign, "callsign")} · ${o.originIcao} → ${o.destinationIcao} · ${o.aircraftIcao}` });
       })
       .catch((e) => setError(String(e)))
       .finally(() => setBusy(false));
@@ -62,6 +65,9 @@ export default function Dispatch({ ofp, onOfp }: Props) {
           placeholder="SimBrief-Pilot-ID oder Benutzername"
           aria-label="SimBrief-Pilot-ID oder Benutzername"
           title="Deine Pilot-ID findest du auf simbrief.com unter Account. Sie wird gespeichert."
+          // Streamer-Modus: the SimBrief ID stays editable but unreadable
+          type={priv.on ? "password" : "text"}
+          autoComplete="off"
           value={user}
           onChange={(e) => setUser(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && !busy && load()}
@@ -104,8 +110,9 @@ export default function Dispatch({ ofp, onOfp }: Props) {
                 {ofp.originIcao} → {ofp.destinationIcao}
               </div>
               <div className="detail">
-                {ofp.callsign}
-                {ofp.flightNumber ? ` (${ofp.airlineIcao}${ofp.flightNumber})` : ""} · {ofp.aircraftIcao} {ofp.registration}
+                {priv.mask(ofp.callsign, "callsign")}
+                {ofp.flightNumber ? ` (${priv.on ? priv.mask(ofp.flightNumber, "callsign") : `${ofp.airlineIcao}${ofp.flightNumber}`})` : ""} · {ofp.aircraftIcao}{" "}
+                {priv.mask(ofp.registration, "registration")}
               </div>
             </div>
           </div>
@@ -116,9 +123,22 @@ export default function Dispatch({ ofp, onOfp }: Props) {
             <Stat size="sm" label="Ausweichflughafen" value={ofp.alternateIcao || "–"} sub={ofp.alternateName} />
             <Stat size="sm" label="Reiseflughöhe" value={`FL${Math.round(ofp.cruiseAltitudeFt / 100)}`} sub={`CI ${ofp.costIndex} · ${fmt(ofp.routeDistanceNm, 0, "nm")}`} />
             <Stat size="sm" label="Off-Block / On-Block (Plan)" value={`${clockS(ofp.times.schedOutS)} / ${clockS(ofp.times.schedInS)}`} />
-            <Stat size="sm" label="Blockzeit / Flugzeit" value={fmtDuration(ofp.times.blockS * 1000)} sub={`Flugzeit ${fmtDuration(ofp.times.enrouteS * 1000)}`} />
-            <Stat size="sm" label="Treibstoff Rampe" value={fmt(ofp.fuel.planRampKg, 0)} unit="kg" sub={`Trip ${fmt(ofp.fuel.tripKg, 0, "kg")} · Landung ${fmt(ofp.fuel.planLandingKg, 0, "kg")}`} />
-            <Stat size="sm" label="TOW" value={fmt(ofp.weights.estTowKg, 0)} unit="kg" sub={`ZFW ${fmt(ofp.weights.estZfwKg, 0, "kg")} · ${ofp.passengers} PAX`} />
+            <Stat size="sm" label="Blockzeit / Luftzeit" value={fmtDuration(ofp.times.blockS * 1000)} sub={`Luftzeit ${fmtDuration(ofp.times.enrouteS * 1000)}`} />
+            <Stat size="sm" label="Treibstoff Rampe" value={fmtWeightNum(ofp.fuel.planRampKg)} unit={weightUnit} sub={`Trip ${fmtWeight(ofp.fuel.tripKg)} · Landung ${fmtWeight(ofp.fuel.planLandingKg)}`} />
+            <Stat
+              size="sm"
+              label="Taxi out / in (Plan)"
+              value={`${ofp.times.taxiOutS ? Math.round(ofp.times.taxiOutS / 60) : "–"} / ${ofp.times.taxiInS ? Math.round(ofp.times.taxiInS / 60) : "–"} min`}
+              sub={ofp.fuel.taxiKg ? `Taxi-Treibstoff ${fmtWeight(ofp.fuel.taxiKg)}` : undefined}
+            />
+            <Stat
+              size="sm"
+              label="Reserve / Alternate"
+              value={fmtWeightNum(ofp.fuel.reserveKg)}
+              unit={weightUnit}
+              sub={`Alternate ${fmtWeight(ofp.fuel.alternateKg)} · Contingency ${fmtWeight(ofp.fuel.contingencyKg)}`}
+            />
+            <Stat size="sm" label="TOW"value={fmtWeightNum(ofp.weights.estTowKg)} unit={weightUnit} sub={`ZFW ${fmtWeight(ofp.weights.estZfwKg)} · ${ofp.passengers} PAX`} />
           </div>
           <div className="side-group">
             <div className="side-group-title">Route</div>

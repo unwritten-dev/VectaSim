@@ -1,9 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
+import { niceStep, ticks, useWidth } from "./chartUtils";
 import { useThemeId } from "../themes";
 import { NNBSP, fmt, fmtNum, fmtSigned } from "../format";
 import { PROFILE } from "../theme";
-import { M_PER_FT, M_PER_NM, nearestByDist, referenceHeightFt } from "./geometry";
-import type { LandingAnalysis } from "./types";
+import { M_PER_FT, M_PER_NM, referenceHeightFt } from "./geometry";
+import { sampleAt, timeAtValue, useReplayCursor, useReplayStore } from "./replayStore";
+import type { ApproachAnalysis } from "./approachTypes";
+import ApproachProfile from "./ApproachProfile";
+import type { ApproachPoint, LandingAnalysis } from "./types";
 
 /**
  * Approach profile: height above touchdown over the distance to the threshold, with the
@@ -14,34 +18,20 @@ import type { LandingAnalysis } from "./types";
 const HEIGHT = 280;
 const M = { top: 26, right: 96, bottom: 30, left: 52 };
 
-function niceStep(range: number, count: number): number {
-  if (range <= 0) return 1;
-  const raw = range / count;
-  const mag = 10 ** Math.floor(Math.log10(raw));
-  const f = raw / mag;
-  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * mag;
+/**
+ * The debrief's approach profile: with an approach analysis the long profile with range
+ * switch (ApproachProfile.tsx), otherwise the landing's final-only profile.
+ */
+export default function ApproachChart({ analysis, approach }: { analysis?: LandingAnalysis | null; approach?: ApproachAnalysis | null }) {
+  if (approach && approach.samples.length >= 2) return <ApproachProfile a={approach} />;
+  if (analysis) return <LandingProfile analysis={analysis} />;
+  return <div className="ac empty detail">Zu wenige Trackpunkte für ein Anflugprofil.</div>;
 }
 
-function ticks(min: number, max: number, count: number): number[] {
-  const step = niceStep(max - min, count);
-  const out: number[] = [];
-  for (let v = Math.ceil(min / step) * step; v <= max + step * 1e-6; v += step) out.push(Math.round(v * 1e6) / 1e6);
-  return out;
-}
-
-export default function ApproachChart({ analysis: a }: { analysis: LandingAnalysis }) {
+function LandingProfile({ analysis: a }: { analysis: LandingAnalysis }) {
   useThemeId(); // colours come from the active theme
-  const [wrap, setWrap] = useState<HTMLDivElement | null>(null);
-  const [width, setWidth] = useState(900);
-  const [hover, setHover] = useState<number | null>(null);
-  useEffect(() => {
-    if (!wrap) return;
-    const measure = () => setWidth(Math.max(360, Math.floor(wrap.clientWidth)));
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(wrap);
-    return () => ro.disconnect();
-  }, [wrap]);
+  const [setWrap, width] = useWidth();
+  const store = useReplayStore();
 
   const samples = a.samples;
   const withRunway = a.distanceRef === "threshold";
@@ -123,23 +113,11 @@ export default function ApproachChart({ analysis: a }: { analysis: LandingAnalys
 
   const tdDist = withRunway ? -(a.touchdownPoint?.distanceM ?? 0) : 0;
   const gates = a.gates.filter((g) => g.sample).map((g) => ({ ft: g.gateFt, d: g.sample!.distM, h: g.sample!.hatFt }));
-  const hs = hover != null ? samples[hover] : null;
-  const onMove = (e: React.MouseEvent<SVGRectElement>) => {
+  const timeAt = (e: React.MouseEvent<SVGRectElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const d = dMax - ((e.clientX - rect.left) / rect.width) * (dMax - dMin);
-    setHover(nearestByDist(samples, d));
+    return timeAtValue(samples, (s) => s.distM, d);
   };
-  const tipX = hs ? x(hs.distM) : 0;
-  const tipLeft = tipX > M.left + plotW - 170;
-  const tipRows = hs
-    ? [
-        [PROFILE.alt, `Höhe ${fmt(hs.hatFt, 0, "ft")} über Aufsetzpunkt`],
-        [PROFILE.gs, `IAS ${fmt(hs.iasKt, 0, "kt")} · GS ${fmt(hs.groundSpeedKt, 0, "kt")}`],
-        [PROFILE.vs, `V/S ${fmtSigned(Math.round(hs.vsFpm), 0, "fpm")}`],
-        ...(hs.glidepathDevDeg != null ? [["var(--text-muted)", `Gleitpfad ${fmt(hs.glidepathDeg, 2, "°")} (${fmtSigned(hs.glidepathDevDeg, 2, "°")})`]] : []),
-        ...(hs.onGround ? [["var(--text-muted)", "am Boden"]] : []),
-      ]
-    : [];
 
   return (
     <div ref={setWrap} className="ac">
@@ -227,27 +205,60 @@ export default function ApproachChart({ analysis: a }: { analysis: LandingAnalys
           </text>
         </g>
 
-        {hs && (
-          <g pointerEvents="none">
-            <line x1={tipX} x2={tipX} y1={M.top} y2={M.top + plotH} className="pc-cross" />
-            <circle cx={tipX} cy={yH(hs.hatFt)} r={3.5} fill={PROFILE.alt} />
-            {!hs.onGround && <circle cx={tipX} cy={yIas(hs.iasKt)} r={3} fill={PROFILE.gs} />}
-            {!hs.onGround && <circle cx={tipX} cy={yVs(hs.vsFpm)} r={3} fill={PROFILE.vs} />}
-            <g transform={`translate(${tipLeft ? tipX - 208 : tipX + 8},${M.top + 4})`}>
-              <rect width={200} height={22 + tipRows.length * 14} rx={6} className="pc-tip" />
-              <text x={8} y={16} className="pc-tip-head">
-                {fmt(Math.abs(hs.distM) / M_PER_NM, 2, "nm")} {hs.distM >= 0 ? (withRunway ? "vor der Schwelle" : "vor dem Aufsetzen") : withRunway ? "hinter der Schwelle" : "nach dem Aufsetzen"}
-              </text>
-              {tipRows.map(([c, t], i) => (
-                <text key={i} x={8} y={31 + i * 14} className="pc-tip-text" fill={c}>
-                  {t}
-                </text>
-              ))}
-            </g>
-          </g>
-        )}
-        <rect x={M.left} y={M.top} width={plotW} height={plotH} fill="transparent" onMouseMove={onMove} onMouseLeave={() => setHover(null)} />
+        <LandingCursor samples={samples} withRunway={withRunway} scales={{ x, yH, yIas, yVs, plotW, plotH }} />
+        <rect
+          x={M.left}
+          y={M.top}
+          width={plotW}
+          height={plotH}
+          fill="transparent"
+          className="replay-hit"
+          onMouseMove={(e) => store.hover(timeAt(e))}
+          onMouseLeave={() => store.hover(null)}
+          onClick={(e) => {
+            store.pause();
+            store.setCursor(timeAt(e));
+          }}
+        />
       </svg>
     </div>
+  );
+}
+
+type Scales = { x: (d: number) => number; yH: (h: number) => number; yIas: (v: number) => number; yVs: (v: number) => number; plotW: number; plotH: number };
+
+/** The shared cursor: vertical line plus the values at that time (own component: cheap playback frames). */
+function LandingCursor({ samples, withRunway, scales }: { samples: ApproachPoint[]; withRunway: boolean; scales: Scales }) {
+  const tMs = useReplayCursor();
+  const hs = sampleAt(samples, tMs);
+  if (!hs) return null;
+  const { x, yH, yIas, yVs, plotW, plotH } = scales;
+  const tipX = x(hs.distM);
+  const tipLeft = tipX > M.left + plotW - 170;
+  const tipRows: Array<[string, string]> = [
+    [PROFILE.alt, `Höhe ${fmt(hs.hatFt, 0, "ft")} über Aufsetzpunkt`],
+    [PROFILE.gs, `IAS ${fmt(hs.iasKt, 0, "kt")} · GS ${fmt(hs.groundSpeedKt, 0, "kt")}`],
+    [PROFILE.vs, `V/S ${fmtSigned(Math.round(hs.vsFpm), 0, "fpm")}`],
+    ...(hs.glidepathDevDeg != null ? [["var(--text-muted)", `Gleitpfad ${fmt(hs.glidepathDeg, 2, "°")} (${fmtSigned(hs.glidepathDevDeg, 2, "°")})`] as [string, string]] : []),
+    ...(hs.onGround ? [["var(--text-muted)", "am Boden"] as [string, string]] : []),
+  ];
+  return (
+    <g pointerEvents="none" aria-hidden="true" className="replay-cursor">
+      <line x1={tipX} x2={tipX} y1={M.top} y2={M.top + plotH} className="pc-cross" />
+      <circle cx={tipX} cy={yH(hs.hatFt)} r={3.5} fill={PROFILE.alt} />
+      {!hs.onGround && <circle cx={tipX} cy={yIas(hs.iasKt)} r={3} fill={PROFILE.gs} />}
+      {!hs.onGround && <circle cx={tipX} cy={yVs(hs.vsFpm)} r={3} fill={PROFILE.vs} />}
+      <g transform={`translate(${tipLeft ? tipX - 208 : tipX + 8},${M.top + 4})`}>
+        <rect width={200} height={22 + tipRows.length * 14} rx={6} className="pc-tip" />
+        <text x={8} y={16} className="pc-tip-head">
+          {fmt(Math.abs(hs.distM) / M_PER_NM, 2, "nm")} {hs.distM >= 0 ? (withRunway ? "vor der Schwelle" : "vor dem Aufsetzen") : withRunway ? "hinter der Schwelle" : "nach dem Aufsetzen"}
+        </text>
+        {tipRows.map(([c, t], i) => (
+          <text key={i} x={8} y={31 + i * 14} className="pc-tip-text" fill={c}>
+            {t}
+          </text>
+        ))}
+      </g>
+    </g>
   );
 }

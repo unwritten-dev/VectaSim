@@ -4,13 +4,13 @@ import { open } from "@tauri-apps/plugin-dialog";
 import type { AirframeEdit, AirframeRow, FlightRow } from "./types";
 import { fmt, fmtDate, fmtDuration } from "./format";
 import ErrorNotice from "./ErrorNotice";
-import { setPref, usePrefs } from "./prefs";
+import { setPref, usePrefs, usePrivacy } from "./prefs";
 import Stat from "./ui/Stat";
 import EmptyState from "./ui/EmptyState";
 import { showToast } from "./ui/Toast";
 import AirframeImage from "./airframes/AirframeImage";
 import AirframePicker from "./airframes/AirframePicker";
-import { airframeName, matchesAirframe, normalizeRegistration } from "./airframes/airframe";
+import { VAPP_MAX_KT, VAPP_MIN_KT, airframeName, matchesAirframe, normalizeRegistration, parseVapp, shownAirframeName } from "./airframes/airframe";
 import { useAirframes } from "./airframes/hooks";
 import { navigate } from "./airframes/navigation";
 
@@ -28,6 +28,7 @@ interface Props {
 /** Fleet: one entry per airframe (registration) with photo, hours and landings; detail on the right. */
 export default function Fleet({ focus }: Props) {
   const { showDemo } = usePrefs();
+  const priv = usePrivacy();
   const { rows, error, refresh } = useAirframes(showDemo);
   const [selected, setSelected] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -137,6 +138,7 @@ export default function Fleet({ focus }: Props) {
             {shown.map((r) => {
               const sel = r.registration === selected;
               const name = airframeName(r);
+              const shownName = shownAirframeName(r, priv.on);
               return (
                 <div
                   key={r.registration}
@@ -158,11 +160,11 @@ export default function Fleet({ focus }: Props) {
                   <AirframeImage airframe={r} />
                   <div className="af-item-text">
                     <div className="fi-line1">
-                      <strong className="num">{r.registration}</strong>
+                      <strong className="num">{priv.mask(r.registration, "registration")}</strong>
                       {r.icaoType && <span className="badge badge-inline">{r.icaoType}</span>}
-                      <span className="fi-aircraft detail" title={name}>
-                        {name !== r.registration ? name : ""}
-                        {r.airline && name !== r.airline && !name.includes(r.airline) ? ` · ${r.airline}` : ""}
+                      <span className="fi-aircraft detail" title={shownName}>
+                        {name !== r.registration ? shownName : ""}
+                        {r.airline && name !== r.airline && !name.includes(r.airline) ? ` · ${priv.mask(r.airline, "airline")}` : ""}
                       </span>
                     </div>
                     <div className="fi-line2 detail num">
@@ -171,9 +173,9 @@ export default function Fleet({ focus }: Props) {
                       </span>
                       <span>{fmtDuration(r.blockTimeMs, { seconds: false })} Block</span>
                       <span>{fmt(r.landings)} Ldg.</span>
-                      <span title="Ø Landerate">Ø {fmt(r.avgLandingVsFpm, 0, "fpm")}</span>
+                      <span className="af-avg" title="Ø Landerate">Ø {fmt(r.avgLandingVsFpm, 0, "fpm")}</span>
                       <span className="spacer" />
-                      <span>{r.lastFlownMs ? fmtDate(r.lastFlownMs) : "nie geflogen"}</span>
+                      <span className="af-last">{r.lastFlownMs ? fmtDate(r.lastFlownMs) : "nie geflogen"}</span>
                     </div>
                   </div>
                 </div>
@@ -191,7 +193,17 @@ export default function Fleet({ focus }: Props) {
 }
 
 function AirframeDetail({ row: a, onSelect }: { row: AirframeRow; onSelect: (reg: string | null) => void }) {
-  const [form, setForm] = useState({ customName: a.customName ?? "", icaoType: a.icaoType ?? "", airline: a.airline ?? "", notes: a.notes ?? "" });
+  const priv = usePrivacy();
+  /** The registration as shown (D-•••• in the Streamer-Modus). */
+  const reg = priv.mask(a.registration, "registration");
+  const initial = () => ({
+    customName: a.customName ?? "",
+    icaoType: a.icaoType ?? "",
+    airline: a.airline ?? "",
+    notes: a.notes ?? "",
+    vappKt: a.vappKt != null ? String(Math.round(a.vappKt)) : "",
+  });
+  const [form, setForm] = useState(initial);
   const [flights, setFlights] = useState<FlightRow[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [merging, setMerging] = useState(false);
@@ -204,12 +216,20 @@ function AirframeDetail({ row: a, onSelect }: { row: AirframeRow; onSelect: (reg
       .catch(() => setFlights([]));
   }, [a.registration, a.totalFlights]);
 
-  const dirty =
-    form.customName !== (a.customName ?? "") || form.icaoType !== (a.icaoType ?? "") || form.airline !== (a.airline ?? "") || form.notes !== (a.notes ?? "");
-  const save = () =>
-    invoke("upsert_airframe", { edit: { registration: a.registration, ...form } satisfies AirframeEdit })
-      .then(() => showToast({ tone: "ok", title: `${a.registration} gespeichert` }))
+  const start = initial();
+  const dirty = (Object.keys(start) as Array<keyof typeof start>).some((k) => form[k] !== start[k]);
+  const save = () => {
+    const vapp = parseVapp(form.vappKt);
+    if (vapp === undefined) {
+      showToast({ tone: "warn", title: "Vapp nicht gespeichert", body: `Bitte eine Geschwindigkeit zwischen ${VAPP_MIN_KT} und ${VAPP_MAX_KT} kt eintragen – oder das Feld leeren.` });
+      return;
+    }
+    const { customName, icaoType, airline, notes } = form;
+    // 0 clears the stored Vapp (the backend's convention)
+    invoke("upsert_airframe", { edit: { registration: a.registration, customName, icaoType, airline, notes, vappKt: vapp ?? 0 } satisfies AirframeEdit })
+      .then(() => showToast({ tone: "ok", title: `${reg} gespeichert` }))
       .catch((e) => showToast({ tone: "err", title: "Nicht gespeichert", body: String(e) }));
+  };
 
   const refreshPhoto = () => {
     setBusy(true);
@@ -218,7 +238,7 @@ function AirframeDetail({ row: a, onSelect }: { row: AirframeRow; onSelect: (reg
         showToast(
           r?.imageSource === "planespotters"
             ? { tone: "ok", title: "Foto aktualisiert", body: r.imageCredit ? `© ${r.imageCredit} · Planespotters.net` : undefined }
-            : { tone: "info", title: "Kein Foto gefunden", body: `Planespotters.net kennt kein Foto von ${a.registration}.` },
+            : { tone: "info", title: "Kein Foto gefunden", body: `Planespotters.net kennt kein Foto von ${reg}.` },
         ),
       )
       .catch((e) => showToast({ tone: "err", title: "Foto nicht geladen", body: String(e) }))
@@ -239,7 +259,7 @@ function AirframeDetail({ row: a, onSelect }: { row: AirframeRow; onSelect: (reg
     invoke<{ registration: string }>("merge_airframes", { from: a.registration, into })
       .then((r) => {
         onSelect(r.registration);
-        showToast({ tone: "ok", title: `${a.registration} mit ${r.registration} zusammengeführt`, body: `${a.totalFlights} Flüge umgebucht.` });
+        showToast({ tone: "ok", title: `${reg} mit ${priv.mask(r.registration, "registration")} zusammengeführt`, body: `${a.totalFlights} Flüge umgebucht.` });
       })
       .catch((e) => showToast({ tone: "err", title: "Nicht zusammengeführt", body: String(e) }));
   };
@@ -248,7 +268,7 @@ function AirframeDetail({ row: a, onSelect }: { row: AirframeRow; onSelect: (reg
     invoke("delete_airframe", { registration: a.registration })
       .then(() => {
         onSelect(null);
-        showToast({ tone: "ok", title: `${a.registration} entfernt`, body: "Die Flüge bleiben im Logbuch, ohne Flugzeug-Zuordnung." });
+        showToast({ tone: "ok", title: `${reg} entfernt`, body: "Die Flüge bleiben im Logbuch, ohne Flugzeug-Zuordnung." });
       })
       .catch((e) => showToast({ tone: "err", title: "Nicht entfernt", body: String(e) }));
 
@@ -260,11 +280,13 @@ function AirframeDetail({ row: a, onSelect }: { row: AirframeRow; onSelect: (reg
   );
 
   return (
-    <article className="flight-detail af-detail" aria-label={`Flugzeug ${a.registration}`}>
+    <article className="flight-detail af-detail" aria-label={`Flugzeug ${reg}`}>
       <header className="detail-head">
         <div className="detail-title">
-          <h2 className="num">{a.registration}</h2>
-          <div className="detail">{[airframeName(a) !== a.registration ? airframeName(a) : null, a.icaoType, a.airline].filter(Boolean).join(" · ") || "Typ unbekannt"}</div>
+          <h2 className="num">{reg}</h2>
+          <div className="detail">
+            {[airframeName(a) !== a.registration ? shownAirframeName(a, priv.on) : null, a.icaoType, priv.mask(a.airline, "airline")].filter(Boolean).join(" · ") || "Typ unbekannt"}
+          </div>
         </div>
         <div className="detail-actions">
           <button onClick={refreshPhoto} disabled={busy} title={airframePhotos ? "Foto bei Planespotters.net neu suchen" : "Planespotters-Fotos sind in den Einstellungen aus – manuell trotzdem suchen"}>
@@ -279,7 +301,7 @@ function AirframeDetail({ row: a, onSelect }: { row: AirframeRow; onSelect: (reg
       <div className="stat-grid detail-grid">
         <Stat size="sm" label="Flüge" value={fmt(a.flights)} sub={a.totalFlights !== a.flights ? `${a.totalFlights} mit Demo` : undefined} />
         <Stat size="sm" label="Blockzeit" value={fmtDuration(a.blockTimeMs, { seconds: false })} />
-        <Stat size="sm" label="Flugzeit" value={fmtDuration(a.flightTimeMs, { seconds: false })} />
+        <Stat size="sm" label="Luftzeit" title="Abheben bis Aufsetzen" value={fmtDuration(a.flightTimeMs, { seconds: false })} />
         <Stat size="sm" label="Distanz" value={fmt(a.distanceNm, 0)} unit="nm" />
         <Stat size="sm" label="Landungen" value={fmt(a.landings)} />
         <Stat size="sm" label="Ø Landerate" value={fmt(a.avgLandingVsFpm, 0)} unit="fpm" />
@@ -291,7 +313,13 @@ function AirframeDetail({ row: a, onSelect }: { row: AirframeRow; onSelect: (reg
         <div className="af-form">
           {field("customName", "Eigener Name", { placeholder: "z. B. „Kranich“" })}
           {field("icaoType", "ICAO-Typ", { placeholder: "z. B. A20N", maxLength: 4, className: "mono" })}
-          {field("airline", "Airline", { placeholder: "z. B. DLH oder Lufthansa" })}
+          {field("airline", "Airline", { placeholder: "z. B. DLH oder Lufthansa", ...(priv.on ? { type: "password", autoComplete: "off", title: "Im Streamer-Modus verdeckt" } : {}) })}
+          {field("vappKt", "Vapp (kt) – für die Anflugbewertung", {
+            placeholder: "leer = geflogener Wert",
+            inputMode: "numeric",
+            className: "num",
+            title: "Anfluggeschwindigkeit dieses Flugzeugs. Leer: VectaSim nimmt den Median der geflogenen IAS als Referenz.",
+          })}
           <label className="af-field af-notes">
             <span className="stat-label">Notizen</span>
             <textarea rows={3} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
@@ -302,7 +330,7 @@ function AirframeDetail({ row: a, onSelect }: { row: AirframeRow; onSelect: (reg
           <button className="btn-primary" onClick={save} disabled={!dirty}>
             Speichern
           </button>
-          {dirty && <button onClick={() => setForm({ customName: a.customName ?? "", icaoType: a.icaoType ?? "", airline: a.airline ?? "", notes: a.notes ?? "" })}>Verwerfen</button>}
+          {dirty && <button onClick={() => setForm(initial())}>Verwerfen</button>}
           <span className="spacer" />
           <button className="btn-sm" onClick={() => setMerging(!merging)} aria-expanded={merging} title="Alle Flüge auf ein anderes Flugzeug umbuchen und dieses entfernen">
             Zusammenführen …
@@ -325,14 +353,14 @@ function AirframeDetail({ row: a, onSelect }: { row: AirframeRow; onSelect: (reg
         </div>
         {merging && (
           <div className="af-merge">
-            <div className="detail">Flüge von {a.registration} umbuchen auf:</div>
+            <div className="detail">Flüge von {reg} umbuchen auf:</div>
             <AirframePicker current={a.registration} onPick={merge} onCancel={() => setMerging(false)} />
           </div>
         )}
       </div>
 
       <div className="detail-section">
-        <h3>Flüge mit {a.registration}</h3>
+        <h3>Flüge mit {reg}</h3>
         {flights === null ? (
           <div className="detail">Lädt …</div>
         ) : flights.length === 0 ? (

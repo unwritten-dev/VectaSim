@@ -1,0 +1,205 @@
+/* "Einordnung" (HistoryPanel.tsx), "Verlauf" (Trends.tsx) and the circuits section of the
+   logbook detail. Tokens only; the trend lines use the accent (cyan), never violet. */
+
+.hist {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  background: var(--surface-2);
+  border-radius: var(--r-md);
+  margin-bottom: var(--sp-3);
+  min-width: 0;
+}
+.hist-empty {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.hist-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+.hist-scope button.chip {
+  height: 24px;
+  padding: 0 10px;
+  font-size: var(--fs-xs);
+}
+.hist-sentence {
+  margin: 0;
+  font-size: var(--fs-base);
+  font-weight: var(--fw-strong);
+}
+.hist-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--sp-3);
+}
+.hist-tile {
+  border-top: 1px solid var(--hairline);
+  padding-top: var(--sp-2);
+  min-width: 0;
+}
+.hist-tile-value {
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-strong);
+  line-height: 1.3;
+  white-space: nowrap;
+}
+.hist-n {
+  color: var(--text-faint);
+}
+.hist-delta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-sm);
+  color: var(--text);
+  margin-top: 2px;
+}
+.hist-arrow {
+  fill: var(--accent);
+  flex: none;
+}
+.after-history {
+  font-size: var(--fs-sm);
+}
+
+/* ---- Verlauf ---- */
+
+.tr {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+.tr-chips {
+  row-gap: var(--sp-1);
+}
+.tr-toolbar {
+  display: flex;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+}
+.tr-month {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.tr-month-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: var(--sp-3);
+}
+.tr-charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: var(--sp-3) var(--sp-4);
+  min-width: 0;
+}
+.tr-chart {
+  margin: 0;
+  min-width: 0;
+}
+.tr-chart svg {
+  display: block;
+  overflow: visible;
+}
+.tr-chart-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-1);
+}
+.tr-chart-title {
+  font-weight: var(--fw-strong);
+}
+.tr-chart-now {
+  color: var(--accent);
+  font-weight: var(--fw-strong);
+}
+.tr-grid {
+  stroke: var(--hairline);
+  stroke-width: 1;
+}
+.tr-ref {
+  stroke: var(--text-faint);
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+}
+.tr-label {
+  fill: var(--text-muted);
+  font-size: var(--fs-xs);
+  font-family: var(--font-num);
+}
+.tr-dot {
+  fill: var(--text-muted);
+  opacity: 0.75;
+}
+.tr-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.tr-iqr {
+  fill: color-mix(in srgb, var(--accent) 14%, transparent);
+  stroke: none;
+}
+.tr-swatch {
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+.tr-swatch.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+.tr-swatch.line {
+  width: 16px;
+  height: 2px;
+  background: var(--accent);
+}
+.tr-swatch.iqr {
+  width: 14px;
+  height: 10px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+/* ---- Platzrunden (FlightDetail.tsx) ---- */
+
+.circuits-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-2);
+}
+.circuits-spark {
+  display: block;
+  flex: none;
+}
+.circuits-spark .tr-line {
+  stroke-width: 1.5;
+}
+.circuits-pt {
+  cursor: pointer;
+}
+.circuits-pt .tg {
+  fill: var(--surface-2);
+  stroke-width: 2;
+}
+.circuits-pt:hover circle:last-child {
+  stroke: var(--text);
+  stroke-width: 2;
+}
+table.mini-table tr.circuits-best td:first-child {
+  box-shadow: inset 2px 0 0 var(--accent);
+}

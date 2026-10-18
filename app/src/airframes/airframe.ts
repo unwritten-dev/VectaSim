@@ -2,6 +2,7 @@
 // rules in crates/vectasim-store/src/airframe.rs, see airframe.test.ts.
 
 import type { Airframe } from "../types";
+import { maskRegistration, maskTitle } from "../format";
 
 const PLACEHOLDER_IDS = new Set(["ASXGS", "ASOBO", "N12345", "NONE", "UNKNOWN", "TEST", "XXXX", "XXXXX", "ABC", "ABCD", "ABCDE"]);
 
@@ -38,6 +39,14 @@ export function airframeName(a: Pick<Airframe, "registration" | "customName" | "
   return combo || a.registration;
 }
 
+/** airframeName for display: in the Streamer-Modus (`hide`) without registration and airline. */
+export function shownAirframeName(a: Pick<Airframe, "registration" | "customName" | "title" | "airline" | "icaoType">, hide: boolean): string {
+  const name = airframeName(a);
+  if (!hide) return name;
+  if (name === a.registration) return maskRegistration(name);
+  return maskTitle(name, { registration: a.registration, airline: a.airline }, true);
+}
+
 /** Credit line for the photo; Planespotters requires photographer + source. */
 export function photoCredit(a: Pick<Airframe, "imageSource" | "imageCredit">): string | null {
   if (a.imageSource === "planespotters") return a.imageCredit ? `© ${a.imageCredit} · Planespotters.net` : "© Planespotters.net";
@@ -67,4 +76,17 @@ export function pickerOptions<T extends Pick<Airframe, "registration" | "customN
   const reg = normalizeRegistration(query);
   const newReg = reg && !all.some((a) => a.registration === reg) ? reg : null;
   return { matches, newReg };
+}
+
+/** Plausible Vapp range (kt); the backend refuses values outside it. */
+export const VAPP_MIN_KT = 40;
+export const VAPP_MAX_KT = 250;
+
+/** Vapp field → knots; null = empty (use the flown value), undefined = not a plausible number. */
+export function parseVapp(raw: string): number | null | undefined {
+  const t = raw.trim().replace(",", ".");
+  if (!t) return null;
+  const v = Number(t);
+  if (!Number.isFinite(v) || v < VAPP_MIN_KT || v > VAPP_MAX_KT) return undefined;
+  return Math.round(v);
 }

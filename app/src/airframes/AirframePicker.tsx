@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { AirframeRow } from "../types";
-import { airframeName, pickerOptions } from "./airframe";
+import { airframeName, pickerOptions, shownAirframeName } from "./airframe";
+import { usePrivacy } from "../prefs";
 import AirframeImage from "./AirframeImage";
 
 interface Props {
@@ -13,6 +14,7 @@ interface Props {
 
 /** Search existing airframes or type a new registration. Enter takes the first option. */
 export default function AirframePicker({ current, onPick, onCancel }: Props) {
+  const priv = usePrivacy();
   const [all, setAll] = useState<AirframeRow[]>([]);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
@@ -74,9 +76,9 @@ export default function AirframePicker({ current, onPick, onCancel }: Props) {
               <>
                 <AirframeImage airframe={o.row} className="af-mini" />
                 <span className="af-option-text">
-                  <strong className="num">{o.reg}</strong>
+                  <strong className="num">{priv.mask(o.reg, "registration")}</strong>
                   <span className="detail">
-                    {[airframeName(o.row) !== o.reg ? airframeName(o.row) : null, o.row.icaoType, `${o.row.totalFlights} Flüge`].filter(Boolean).join(" · ")}
+                    {[airframeName(o.row) !== o.reg ? shownAirframeName(o.row, priv.on) : null, o.row.icaoType, `${o.row.totalFlights} Flüge`].filter(Boolean).join(" · ")}
                   </span>
                 </span>
                 {o.reg === current && <span className="badge badge-inline">aktuell</span>}

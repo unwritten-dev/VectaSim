@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isRealSimError, recordingStatus } from "./status";
+import { DEMO_LABEL, WAITING_SHORT, WAITING_TEXT, isRealSimError, isSimMissing, recordingStatus } from "./status";
 import type { FlightSummary, StatusSnapshot } from "./types";
 
 const snap = (s: Partial<StatusSnapshot>): StatusSnapshot => ({ provider: "simconnect", state: "idle", detail: "", frames: 0, ...s }) as StatusSnapshot;
@@ -12,7 +12,8 @@ describe("recordingStatus", () => {
       const r = recordingStatus(s, null);
       expect(r.kind).toBe("waiting");
       expect(r.label).toBe("Warte auf Simulator");
-      expect(r.text).toBe("Warte auf MSFS – startet automatisch");
+      expect(r.text).toBe("Warte auf MSFS – Aufzeichnung startet beim Losrollen");
+      expect(r.text).toBe(WAITING_TEXT);
       expect(r.error).toBe(false);
     }
   });
@@ -22,7 +23,9 @@ describe("recordingStatus", () => {
     const r = recordingStatus(s, null);
     expect(r.kind).toBe("waiting");
     expect(r.error).toBe(false);
-    expect(r.hint).toMatch(/nicht installiert/);
+    expect(r.hint).toBe("SimConnect fehlt noch – unter Einstellungen → Simulator mit einem Klick herunterladen.");
+    expect(r.hint).not.toMatch(/nicht installiert/);
+    expect(isSimMissing(s.detail)).toBe(true);
     expect(isRealSimError(s)).toBe(false);
   });
 
@@ -59,6 +62,21 @@ describe("recordingStatus", () => {
   it("the mock provider is the demo flight", () => {
     expect(recordingStatus(snap({ provider: "mock", state: "connected" }), null).kind).toBe("demo");
     expect(recordingStatus(snap({ provider: "mock", state: "connected" }), flight("active")).label).toBe("Demo-Flug");
+  });
+
+  it("the waiting hint does not contradict itself", () => {
+    for (const detail of ["", "sim not reachable; retry in 8s", "simulator quit"]) {
+      const r = recordingStatus(snap({ state: "disconnected", detail }), null);
+      expect(r.hint).not.toMatch(/nichts starten/);
+      expect(r.hint).not.toMatch(/^Starte MSFS/);
+    }
+    expect(recordingStatus(snap({ state: "idle" }), null).hint).toMatch(/von selbst/);
+  });
+
+  it("one demo name, a short pill text for the Bereit card", () => {
+    expect(DEMO_LABEL).toBe("Demo-Flug");
+    expect(WAITING_SHORT).toBe("Warte auf MSFS");
+    expect(recordingStatus(snap({ provider: "mock", state: "connected" }), null).hint).toMatch(/Demo-Flug beenden/);
   });
 
   it("never uses the old connection labels", () => {

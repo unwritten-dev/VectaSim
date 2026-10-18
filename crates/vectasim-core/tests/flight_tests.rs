@@ -232,9 +232,12 @@ fn mock_flight_drives_one_complete_flight() {
     }
     assert_eq!(phases, vec![Preflight, TaxiOut, Takeoff, Climb, Cruise, Descent, Approach, Final, Landing, TaxiIn, Shutdown]);
     assert_eq!((started, ended, touchdowns), (1, 1, 1));
+    let outcomes: Vec<_> = session.take_touchdown_outcomes().into_iter().map(|o| (o.index, o.outcome)).collect();
+    assert_eq!(outcomes, vec![(0, vectasim_core::touchdown::TouchdownOutcome::FullStop)]);
     let s = session.summary();
     assert_eq!(s.state, FlightState::Completed);
     assert_eq!(s.landing_rate_fpm, Some(s.touchdowns[0].landing_rate_fpm));
+    assert_eq!(s.landing_ms, Some(s.touchdowns[0].timestamp_ms), "the full stop's first contact");
     assert!(s.block_time_ms().unwrap() > s.flight_time_ms().unwrap());
     assert!(s.distance_nm > 5.0, "distance {}", s.distance_nm);
     assert!(s.max_altitude_msl_ft > 2_700.0, "max alt {}", s.max_altitude_msl_ft);
@@ -252,6 +255,8 @@ fn flight_landing_rate_is_the_last_full_stop_not_a_touch_and_go() {
     let sim_value = |v: f64, mut f: Box<dyn FnMut(&mut Telemetry)>| move |t: &mut Telemetry| {
         f(t);
         t.touchdown_vs_fpm = v;
+        // the scripted AGL steps would be altitude jumps (teleports) on MSL
+        t.altitude_msl_ft = 400.0;
     };
     sim.run(70.0, sim_value(0.0, Box::new(air(1500.0, -700.0, 140.0))), &mut feed);
     sim.run(2.0, sim_value(0.0, Box::new(air(10.0, -450.0, 130.0))), &mut feed);

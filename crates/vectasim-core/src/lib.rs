@@ -5,6 +5,9 @@
 //! `ProviderEvent`s at their native rate over a channel; consumers
 //! (recorder, phase engine, UI) downsample as they see fit.
 
+pub mod approach;
+pub mod clock;
+pub mod diag;
 pub mod flight;
 pub mod landing;
 pub mod mock;
@@ -12,11 +15,12 @@ pub mod phase;
 pub mod telemetry;
 pub mod touchdown;
 
-pub use flight::{FlightEvent, FlightSession, FlightState, FlightSummary, IntegrityFlags};
+pub use clock::MonoClock;
+pub use flight::{CandidateDebug, FlightDebug, FlightEvent, FlightSession, FlightState, FlightSummary, IntegrityFlags};
 pub use mock::{MockFlight, MockProvider, MockVariant};
 pub use phase::{FlightPhase, PhaseEngine, PhaseTransition, SkipReason};
 pub use telemetry::{AircraftInfo, Lights, Telemetry};
-pub use touchdown::{LandingRateSource, TouchdownDetector, TouchdownReport};
+pub use touchdown::{DetectorDebug, LandingRateSource, TouchdownDetector, TouchdownReport};
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -52,6 +56,11 @@ pub enum ProviderEvent {
 pub trait SimProvider: Send {
     fn name(&self) -> &'static str;
     fn start(self: Box<Self>, tx: Sender<ProviderEvent>, stop: Arc<AtomicBool>) -> JoinHandle<()>;
+    /// Raw-value diagnostics this provider keeps up to date (none for providers without
+    /// raw sim definitions, e.g. the mock).
+    fn raw_diag(&self) -> Option<diag::SharedRawDiag> {
+        None
+    }
 }
 
 /// Sleep in small slices so a stop request is noticed quickly.

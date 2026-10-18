@@ -1,7 +1,7 @@
 //! The mock flight's landing as the landing debrief sees it: straight-in on EDDF 25C,
 //! touchdown in the touchdown zone beside the centreline, stabilised approach.
 
-use vectasim_core::landing::{self, CheckStatus, LandingConfig, LandingSample, RunwayFrame};
+use vectasim_core::landing::{self, CheckStatus, LandingConfig, LandingSample, RunwayFrame, SpeedReferenceSource};
 use vectasim_core::{FlightEvent, FlightSession, MockFlight, MockVariant, Telemetry, TouchdownReport};
 
 fn to_sample(t: &Telemetry) -> LandingSample {
@@ -68,7 +68,15 @@ fn mock_landing_is_a_stabilised_straight_in_to_25c() {
         let p = a.touchdown_point.as_ref().expect("touchdown point");
         assert!((330.0..=380.0).contains(&p.distance_m), "loop {n}: touchdown {} m past the threshold", p.distance_m);
         assert!(p.lateral_m.abs() <= 5.0, "loop {n}: {} m beside the centreline", p.lateral_m);
+        // zone from the threshold (0 … 900 m on 4 000 m); 400 m is the aiming point
         assert!(p.in_tdz);
+        assert_eq!((p.tdz_start_m, p.tdz_end_m, p.aiming_point_m), (0.0, 900.0, 400.0));
+        assert_eq!(m.width_m, Some(60.0));
+
+        // speed reference: the flown median 500 → 100 ft (no Vapp known), not IAS@500 itself
+        assert_eq!(a.reference_speed_source, SpeedReferenceSource::Flown);
+        let vref = a.reference_speed_kt.expect("reference speed");
+        assert!((120.0..=135.0).contains(&vref), "loop {n}: reference {vref}");
 
         let thr = a.threshold.as_ref().expect("threshold crossing");
         assert!((40.0..=60.0).contains(&thr.height_ft), "loop {n}: TCH {}", thr.height_ft);

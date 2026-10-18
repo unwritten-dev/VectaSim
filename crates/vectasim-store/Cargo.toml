@@ -9,14 +9,17 @@ authors.workspace = true
 [dependencies]
 vectasim-core = { path = "../vectasim-core" }
 serde = { workspace = true }
-serde_json = { workspace = true }
+# float_roundtrip: REAL columns survive the .vectasim export bit for bit
+serde_json = { workspace = true, features = ["float_roundtrip"] }
 log = { workspace = true }
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 zstd = "0.13"
 uuid = { version = "1", features = ["v4"] }
 thiserror = "2"
+# .vectasim bundles (same version/features as the app's Diagnosepaket)
+zip = { version = "4.6", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [dev-dependencies]
 tempfile = "3"
 quick-xml = "0.42"
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }

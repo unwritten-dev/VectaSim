@@ -3,7 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import type { FlightRow } from "../types";
 import { icaoFromAtcModel } from "../map/aircraftIcons";
 import { showToast } from "../ui/Toast";
-import { airframeName } from "./airframe";
+import { airframeName, shownAirframeName } from "./airframe";
+import { usePrivacy } from "../prefs";
 import AirframeImage from "./AirframeImage";
 import AirframePicker from "./AirframePicker";
 import { useAirframe } from "./hooks";
@@ -12,13 +13,14 @@ import { useAirframe } from "./hooks";
 export default function AirframeCard({ flight: f, onOpenFleet }: { flight: FlightRow; onOpenFleet?: (registration: string) => void }) {
   const a = useAirframe(f.airframeReg);
   const [picking, setPicking] = useState(false);
+  const priv = usePrivacy();
 
   const pick = (registration: string | null) => {
     setPicking(false);
     if (registration === (f.airframeReg ?? null)) return;
     invoke<boolean>("set_flight_airframe", { flightId: f.id, registration })
       .then(() =>
-        showToast({ tone: "ok", title: registration ? `Flug auf ${registration} gebucht` : "Flugzeug-Zuordnung entfernt" }),
+        showToast({ tone: "ok", title: registration ? `Flug auf ${priv.mask(registration, "registration")} gebucht` : "Flugzeug-Zuordnung entfernt" }),
       )
       .catch((e) => showToast({ tone: "err", title: "Flugzeug nicht geändert", body: String(e) }));
   };
@@ -30,8 +32,13 @@ export default function AirframeCard({ flight: f, onOpenFleet }: { flight: Fligh
       <div className="af-card-text">
         {f.airframeReg ? (
           <>
-            <strong className="num">{f.airframeReg}</strong>
-            <span className="detail">{[a ? airframeName(a) : null, type, a?.airline].filter((s, i, all) => s && all.indexOf(s) === i && s !== f.airframeReg).join(" · ") || "–"}</span>
+            <strong className="num">{priv.mask(f.airframeReg, "registration")}</strong>
+            <span className="detail">
+              {[a ? airframeName(a) : null, type, a?.airline]
+                .filter((s, i, all) => s && all.indexOf(s) === i && s !== f.airframeReg)
+                .map((s) => (s === a?.airline ? priv.mask(s, "airline") : a && s === airframeName(a) ? shownAirframeName(a, priv.on) : s))
+                .join(" · ") || "–"}
+            </span>
           </>
         ) : (
           <>

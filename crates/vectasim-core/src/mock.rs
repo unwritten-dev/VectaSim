@@ -17,10 +17,23 @@
 //!
 //! `MockFlight` is the deterministic generator (also used by tests);
 //! `MockProvider` runs it on a thread at a fixed rate. `VECTASIM_MOCK=bounce`
-//! selects a variant with one bounce.
+//! selects a variant with one bounce, `VECTASIM_MOCK=goaround` one that goes around
+//! from 300 ft on the first final, flies the circuit again and lands (longer loop).
+//!
+//! Discontinuity variants (UI checks of the session reset without a sim; the provider
+//! takes its events from [`MockFlight::step`]):
+//! - `VECTASIM_MOCK=teleport`: 5 s into the descending end of the downwind the sim
+//!   "loads a new flight": a `FlightLoaded` event, then the aircraft sits parked at the
+//!   stand (engines off) until the loop restarts at 300 s. The open flight must end as
+//!   interrupted, without a touchdown.
+//! - `VECTASIM_MOCK=reconnect`: 5 s into the base turn (~1 800 ft AGL) the link drops:
+//!   `Disconnected`, 10 s without telemetry, then `Connected` + aircraft again while the
+//!   aircraft flew on. The flight continues and lands normally (one touchdown).
+
+
 
 use crate::landing::{RunwayEnd, RunwayFrame};
-use crate::{AircraftInfo, Lights, ProviderEvent, SimProvider, Telemetry, now_ms, sleep_interruptible};
+use crate::{AircraftInfo, Lights, ProviderEvent, SimEvent, SimProvider, Telemetry, now_ms, sleep_interruptible};
 use std::f64::consts::{FRAC_PI_2, PI};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -37,6 +50,20 @@ const ELEVATION_FT: f64 = 364.0;
 const VARIATION_DEG: f64 = 3.0;
 /// One loop of the flight; the end is padded with "parked, engines off".
 const LOOP_S: f64 = 600.0;
+/// Loop of the go-around variant (two circuits).
+const LOOP_GA_S: f64 = 1_080.0;
+/// Loop of the teleport variant: the flight is cut short by the reload.
+const LOOP_TP_S: f64 = 300.0;
+/// Teleport variant: seconds into the descending end of the downwind.
+const TELEPORT_INTO_LEG_S: f64 = 5.0;
+/// Reconnect variant: seconds into the base turn, and the length of the link loss.
+const RECONNECT_INTO_LEG_S: f64 = 5.0;
+pub const RECONNECT_GAP_S: f64 = 10.0;
+/// Leg indices (standard circuit) the discontinuity variants refer to.
+const LEG_DOWNWIND_DESCENT: usize = 9;
+const LEG_BASE_TURN: usize = 10;
+/// Go-around variant: the first final is flown down to where the glide path is 300 ft.
+const GO_AROUND_FT: f64 = 300.0;
 const DT: f64 = 0.1;
 
 const KT: f64 = 0.514_444; // m/s per kt
@@ -58,16 +85,37 @@ pub enum MockVariant {
     Standard,
     /// A firm first contact, ~4 ft back into the air, second contact ~2.5 s later.
     Bounce,
+    /// Go-around from 300 ft on the first final, second circuit, normal landing.
+    GoAround,
+    /// Mid-flight reload at the stand: `FlightLoaded` + position jump (see module doc).
+    Teleport,
+    /// Link loss in the approach: `Disconnected`, 10 s gap, `Connected` (see module doc).
+    Reconnect,
 }
 
 impl MockVariant {
-    /// `VECTASIM_MOCK=bounce` selects the bounce variant.
+    /// `VECTASIM_MOCK=bounce|goaround|teleport|reconnect` selects the variant.
     pub fn from_env() -> Self {
         std::env::var("VECTASIM_MOCK").map(|v| Self::parse(&v)).unwrap_or_default()
     }
 
     pub fn parse(s: &str) -> Self {
-        if s.trim().eq_ignore_ascii_case("bounce") { MockVariant::Bounce } else { MockVariant::Standard }
+        match s.trim().to_ascii_lowercase().as_str() {
+            "bounce" => MockVariant::Bounce,
+            "goaround" | "go-around" | "ga" => MockVariant::GoAround,
+            "teleport" => MockVariant::Teleport,
+            "reconnect" => MockVariant::Reconnect,
+            _ => MockVariant::Standard,
+        }
+    }
+
+    /// Length of one loop of this variant, seconds.
+    pub fn loop_seconds(self) -> f64 {
+        match self {
+            MockVariant::GoAround => LOOP_GA_S,
+            MockVariant::Teleport => LOOP_TP_S,
+            _ => LOOP_S,
+        }
     }
 }
 
@@ -174,7 +222,9 @@ impl Params {
     fn for_loop(variant: MockVariant, n: u64) -> Self {
         let i = (n % 4) as usize;
         let td_fpm = match variant {
-            MockVariant::Standard => [150.0, 120.0, 185.0, 140.0][i],
+            MockVariant::Standard | MockVariant::GoAround | MockVariant::Teleport | MockVariant::Reconnect => {
+                [150.0, 120.0, 185.0, 140.0][i]
+            }
             MockVariant::Bounce => [330.0, 290.0, 360.0, 310.0][i],
         };
         Self { variant, td_fpm, lateral_m: [-1.8, 2.4, -0.6, 3.1][i] }
@@ -225,6 +275,8 @@ struct Builder {
     bounce_t0: Option<f64>,
     /// Where the first contact happened (s).
     touchdown_s: Option<f64>,
+    /// Start time of each leg, seconds into the loop.
+    leg_starts: Vec<f64>,
 }
 
 impl Builder {
@@ -242,6 +294,7 @@ impl Builder {
             flare: None,
             bounce_t0: None,
             touchdown_s: None,
+            leg_starts: Vec::new(),
         }
     }
 
@@ -251,6 +304,32 @@ impl Builder {
         use Vert::*;
         let climb = Ctrl { target: CIRCUIT_AGL_FT, fpm: 2_500.0 };
         let downwind_len = CROSSWIND_S - FINAL_S;
+        let circuit = [
+            // crosswind/downwind turn (left), level-off at 2 500 ft
+            Leg::new(Arc { radius: CIRCUIT_R_M, sweep: -PI }, To(215.0), climb).gear_up(),
+            Leg::new(Line { len: downwind_len * 0.7 }, To(215.0), climb).gear_up(),
+            // descending end of the downwind and base turn (left) onto a 9 km final
+            Leg::new(Line { len: downwind_len * 0.3 }, To(200.0), Ctrl { target: INTERCEPT_AGL_FT, fpm: 900.0 }).gear_up(),
+            Leg::new(Arc { radius: CIRCUIT_R_M, sweep: -PI }, To(146.0), Ctrl { target: INTERCEPT_AGL_FT, fpm: 900.0 }).flaps(2),
+        ];
+        let mut legs = Self::departure(climb);
+        legs.extend(circuit);
+        if variant == MockVariant::GoAround {
+            // first final down to 300 ft on the glide path, then climb straight ahead into a second circuit
+            let ga_s = -(GO_AROUND_FT - TCH_FT) / (GLIDE_DEG.to_radians().tan() * FT_PER_M);
+            legs.push(Leg::new(Line { len: ga_s - FINAL_S }, To(132.0), Glide).flaps(4));
+            legs.push(Leg::new(Line { len: CROSSWIND_S - ga_s }, To(185.0), Ctrl { target: CIRCUIT_AGL_FT, fpm: 2_000.0 }).flaps(2).gear_up());
+            legs.extend(circuit);
+        }
+        legs.extend(Self::arrival(variant));
+        legs
+    }
+
+    /// Start-up, taxi, take-off and the climb-out to the crosswind turn.
+    fn departure(climb: Vert) -> Vec<Leg> {
+        use Path::*;
+        use Speed::*;
+        use Vert::*;
         vec![
             Leg::hold(10.0, 0),
             Leg::hold(6.0, 2),
@@ -261,12 +340,15 @@ impl Builder {
             // rolling take-off, liftoff at 150 kt
             Leg::new(Line { len: 1_350.0 }, To(150.0), Ground).flaps(1).runway(),
             Leg::new(Line { len: CROSSWIND_S - 1_420.0 }, To(185.0), climb).flaps(1).gear_up(),
-            // crosswind/downwind turn (left), level-off at 2 500 ft
-            Leg::new(Arc { radius: CIRCUIT_R_M, sweep: -PI }, To(215.0), climb).gear_up(),
-            Leg::new(Line { len: downwind_len * 0.7 }, To(215.0), climb).gear_up(),
-            // descending end of the downwind and base turn (left) onto a 9 km final
-            Leg::new(Line { len: downwind_len * 0.3 }, To(200.0), Ctrl { target: INTERCEPT_AGL_FT, fpm: 900.0 }).gear_up(),
-            Leg::new(Arc { radius: CIRCUIT_R_M, sweep: -PI }, To(146.0), Ctrl { target: INTERCEPT_AGL_FT, fpm: 900.0 }).flaps(2),
+        ]
+    }
+
+    /// Final, flare, (bounce,) rollout, vacate and park.
+    fn arrival(variant: MockVariant) -> Vec<Leg> {
+        use Path::*;
+        use Speed::*;
+        use Vert::*;
+        vec![
             Leg::new(Line { len: -FINAL_S }, To(126.0), Glide).flaps(4),
             Leg::new(Line { len: f64::INFINITY }, Accel(-1.2), Flare).flaps(4).runway(),
             Leg::new(Line { len: if variant == MockVariant::Bounce { f64::INFINITY } else { 0.0 } }, Accel(-1.5), Bounce)
@@ -284,6 +366,7 @@ impl Builder {
 
     fn run(mut self) -> Self {
         for leg in Self::legs(self.p.variant) {
+            self.leg_starts.push(self.cur.t);
             self.fly(leg);
         }
         self
@@ -293,6 +376,11 @@ impl Builder {
         if let Vert::Ctrl { target, fpm } = leg.vert {
             self.target_agl = target;
             self.max_fpm = fpm;
+            // after a glide-path leg (go-around) the controller resumes from where the aircraft is
+            if (self.ctrl_agl - self.cur.agl).abs() > 1.0 {
+                self.ctrl_agl = self.cur.agl;
+                self.ctrl_vs = self.cur.vs_fpm;
+            }
         }
         if let Path::Hold = leg.path {
             let n = (leg.dur / DT).round() as usize;
@@ -517,13 +605,28 @@ fn position(path: Path, (s0, x0): (f64, f64), theta0: f64, d: f64) -> ((f64, f64
 struct Track {
     pts: Vec<Pt>,
     touchdown_s: f64,
+    /// Teleport variant: loop time of the reload.
+    teleport_s: f64,
+    /// Reconnect variant: loop time the link drops.
+    reconnect_s: f64,
+}
+
+impl Track {
+    fn of(b: Builder) -> Self {
+        let leg = |i: usize| b.leg_starts.get(i).copied().unwrap_or(f64::INFINITY);
+        Track {
+            touchdown_s: b.touchdown_s.unwrap_or(f64::NAN),
+            teleport_s: leg(LEG_DOWNWIND_DESCENT) + TELEPORT_INTO_LEG_S,
+            reconnect_s: leg(LEG_BASE_TURN) + RECONNECT_INTO_LEG_S,
+            pts: b.pts,
+        }
+    }
 }
 
 fn build(p: Params) -> Track {
     if p.variant == MockVariant::Bounce {
         // a late, short flare from 25 ft: firm contact a little before the aim point
-        let b = Builder::new(p, 25.0).run();
-        return Track { touchdown_s: b.touchdown_s.unwrap_or(f64::NAN), pts: b.pts };
+        return Track::of(Builder::new(p, 25.0).run());
     }
     // flare height so the first contact is TOUCHDOWN_AIM_M past the threshold (monotonic: higher flare → longer)
     let (mut lo, mut hi) = (5.0, 60.0);
@@ -545,8 +648,7 @@ fn build(p: Params) -> Track {
             break;
         }
     }
-    let b = best.expect("built");
-    Track { touchdown_s: b.touchdown_s.unwrap_or(f64::NAN), pts: b.pts }
+    Track::of(best.expect("built"))
 }
 
 /// Deterministic scripted flight. Call `sample(t_s)` with monotonically
@@ -557,6 +659,10 @@ pub struct MockFlight {
     loop_n: u64,
     track: Track,
     frame: RunwayFrame,
+    /// Loop number and loop time of the previous `step` (event edges).
+    last_step: Option<(u64, f64)>,
+    /// Reconnect variant: the link is currently "down".
+    link_down: bool,
 }
 
 impl Default for MockFlight {
@@ -571,9 +677,62 @@ impl MockFlight {
     }
 
     pub fn with_variant(variant: MockVariant) -> Self {
-        Self { variant, loop_n: 0, track: build(Params::for_loop(variant, 0)), frame: RunwayFrame::new(&Self::runway()) }
+        Self {
+            variant,
+            loop_n: 0,
+            track: build(Params::for_loop(variant, 0)),
+            frame: RunwayFrame::new(&Self::runway()),
+            last_step: None,
+            link_down: false,
+        }
     }
 
+    /// Loop time of the reload (teleport variant), seconds.
+    pub fn teleport_seconds(&self) -> f64 {
+        self.track.teleport_s
+    }
+
+    /// Loop time the link drops (reconnect variant), seconds.
+    pub fn reconnect_seconds(&self) -> f64 {
+        self.track.reconnect_s
+    }
+
+    /// Everything the provider sends for the tick at `t_s`: usually one telemetry sample,
+    /// plus the discontinuity events of the teleport / reconnect variants, or nothing
+    /// while the reconnect variant's link is down.
+    pub fn step(&mut self, t_s: f64, timestamp_ms: u64) -> Vec<ProviderEvent> {
+        let loop_s = self.variant.loop_seconds();
+        let n = (t_s / loop_s).floor().max(0.0) as u64;
+        let lt = t_s - n as f64 * loop_s;
+        let crossed = |at: f64, last: Option<(u64, f64)>| last.is_some_and(|(ln, l)| ln == n && l < at) && lt >= at;
+        let last = self.last_step.replace((n, lt));
+        let mut out = Vec::new();
+        match self.variant {
+            MockVariant::Teleport if crossed(self.track.teleport_s, last) => {
+                out.push(ProviderEvent::Sim(SimEvent::FlightLoaded { path: "mock/stand.FLT".into() }));
+            }
+            MockVariant::Reconnect => {
+                let rc = self.track.reconnect_s;
+                let down = (rc..rc + RECONNECT_GAP_S).contains(&lt);
+                if down {
+                    if !self.link_down {
+                        self.link_down = true;
+                        out.push(ProviderEvent::Disconnected { reason: "mock: connection lost".into() });
+                    }
+                    return out;
+                }
+                if std::mem::take(&mut self.link_down) {
+                    out.push(ProviderEvent::Connected { sim_name: "VectaSim Mock".into(), sim_version: "0.1".into() });
+                    out.push(ProviderEvent::Aircraft(Self::aircraft()));
+                }
+            }
+            _ => {}
+        }
+        out.push(ProviderEvent::Telemetry(self.sample(t_s, timestamp_ms)));
+        out
+    }
+
+    /// Loop length of the standard and bounce variants (see [`MockVariant::loop_seconds`]).
     pub fn loop_seconds() -> f64 {
         LOOP_S
     }
@@ -591,6 +750,7 @@ impl MockFlight {
             length_m: 0.0,
             width_m: 60.0,
             surface: "ASP".into(),
+            elevation_ft: Some(ELEVATION_FT),
         }
     }
 
@@ -617,6 +777,10 @@ impl MockFlight {
 
     fn point_at(&self, t: f64) -> Pt {
         let pts = &self.track.pts;
+        if self.variant == MockVariant::Teleport && t >= self.track.teleport_s {
+            // reloaded at the stand: parked, cold and dark until the loop restarts
+            return Pt { t, engines: 0, brake: true, ..pts[0] };
+        }
         let i = pts.partition_point(|p| p.t <= t);
         if i == 0 {
             return pts[0];
@@ -651,12 +815,13 @@ impl MockFlight {
 
     /// Telemetry at `t_s` seconds since start; `timestamp_ms` is stamped as given.
     pub fn sample(&mut self, t_s: f64, timestamp_ms: u64) -> Telemetry {
-        let n = (t_s / LOOP_S).floor().max(0.0) as u64;
+        let loop_s = self.variant.loop_seconds();
+        let n = (t_s / loop_s).floor().max(0.0) as u64;
         if n != self.loop_n {
             self.loop_n = n;
             self.track = build(Params::for_loop(self.variant, n));
         }
-        let t = t_s - n as f64 * LOOP_S;
+        let t = t_s - n as f64 * loop_s;
         let p = self.point_at(t);
 
         let (lat, lon) = self.frame.unproject(p.s, p.x);
@@ -700,7 +865,8 @@ impl MockFlight {
                 landing: !on_ground && msl < 10_000.0 || p.on_runway && p.gs_kt > 40.0,
                 taxi: on_ground && moving && !p.on_runway,
             },
-            transponder_code: 0o2000,
+            // decimal digits, as the providers decode the sim's BCD squawk
+            transponder_code: 2000,
         }
     }
 }
@@ -742,9 +908,10 @@ fn run(cfg: MockProvider, tx: Sender<ProviderEvent>, stop: Arc<AtomicBool>) {
     let start = Instant::now();
     let mut flight = MockFlight::with_variant(cfg.variant);
     while !stop.load(Ordering::Relaxed) {
-        let telemetry = flight.sample(start.elapsed().as_secs_f64(), now_ms());
-        if tx.send(ProviderEvent::Telemetry(telemetry)).is_err() {
-            return;
+        for ev in flight.step(start.elapsed().as_secs_f64(), now_ms()) {
+            if tx.send(ev).is_err() {
+                return;
+            }
         }
         std::thread::sleep(period);
     }
@@ -757,13 +924,14 @@ mod tests {
 
     #[test]
     fn every_loop_fits_and_aims_at_350_m() {
-        for variant in [MockVariant::Standard, MockVariant::Bounce] {
+        // (teleport / reconnect fly the standard path)
+        for variant in [MockVariant::Standard, MockVariant::Bounce, MockVariant::GoAround] {
             for n in 0..4 {
                 let tr = build(Params::for_loop(variant, n));
                 let end = tr.pts.last().unwrap().t;
                 // the rest of the loop is parked with engines off (shutdown dwell)
-                assert!(end <= LOOP_S - 15.0, "{variant:?}/{n}: path takes {end:.0} s");
-                let tol = if variant == MockVariant::Standard { 2.0 } else { 60.0 };
+                assert!(end <= variant.loop_seconds() - 15.0, "{variant:?}/{n}: path takes {end:.0} s");
+                let tol = if variant == MockVariant::Bounce { 60.0 } else { 2.0 };
                 assert!((tr.touchdown_s - TOUCHDOWN_AIM_M).abs() < tol, "{variant:?}/{n}: {}", tr.touchdown_s);
                 assert!(tr.pts.windows(2).all(|w| w[1].t > w[0].t));
             }
@@ -775,5 +943,21 @@ mod tests {
         assert_eq!(MockVariant::parse(" Bounce "), MockVariant::Bounce);
         assert_eq!(MockVariant::parse(""), MockVariant::Standard);
         assert_eq!(MockVariant::parse("other"), MockVariant::Standard);
+        assert_eq!(MockVariant::parse("GoAround"), MockVariant::GoAround);
+        assert_eq!(MockVariant::parse("teleport"), MockVariant::Teleport);
+        assert_eq!(MockVariant::parse("Reconnect"), MockVariant::Reconnect);
+    }
+
+    #[test]
+    fn discontinuity_variants_happen_where_documented() {
+        let tp = build(Params::for_loop(MockVariant::Teleport, 0));
+        let p = |tr: &Track, t: f64| tr.pts[tr.pts.partition_point(|p| p.t <= t)];
+        assert!(p(&tp, tp.teleport_s).agl > 2_000.0, "teleport from the downwind at {:.0} s", tp.teleport_s);
+        assert!(tp.teleport_s + 20.0 < LOOP_TP_S, "{}", tp.teleport_s);
+        let rc = build(Params::for_loop(MockVariant::Reconnect, 0));
+        for t in [rc.reconnect_s, rc.reconnect_s + RECONNECT_GAP_S] {
+            let pt = p(&rc, t);
+            assert!(pt.agl > 1_000.0, "link loss above 1 000 ft AGL: {:.0} ft at {t:.0} s", pt.agl);
+        }
     }
 }

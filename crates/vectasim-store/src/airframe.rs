@@ -92,6 +92,10 @@ pub struct Airframe {
     pub image_source: Option<String>,
     /// When the photo lookup last ran (hit or miss).
     pub image_fetched_ms: Option<u64>,
+    /// Pilot's approach speed for this airframe, KIAS (schema v11). The approach and landing
+    /// assessment take it as the reference speed (`AircraftRef::vapp_kt`); `None` = the flown median.
+    #[serde(default)]
+    pub vapp_kt: Option<f64>,
     pub created_ms: u64,
     pub updated_ms: u64,
 }
@@ -124,7 +128,15 @@ pub struct AirframeEdit {
     pub airline: Option<String>,
     pub custom_name: Option<String>,
     pub notes: Option<String>,
+    /// Vapp in KIAS: `None` leaves it, `Some(v)` with v <= 0 clears it, otherwise
+    /// [`VAPP_MIN_KT`]..=[`VAPP_MAX_KT`] (anything else is refused).
+    #[serde(default)]
+    pub vapp_kt: Option<f64>,
 }
+
+/// Plausible range of a manually entered Vapp, KIAS.
+pub const VAPP_MIN_KT: f64 = 40.0;
+pub const VAPP_MAX_KT: f64 = 250.0;
 
 /// The photo facts the store keeps; written by `set_airframe_photo`.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -157,8 +169,11 @@ ALTER TABLE flights ADD COLUMN airframe_reg TEXT;
 CREATE INDEX IF NOT EXISTS flights_airframe ON flights(airframe_reg);
 "#;
 
+/// v11: the pilot's Vapp per airframe (KIAS), reference speed of the approach assessment.
+pub(crate) const MIGRATION_V11: &str = "ALTER TABLE airframes ADD COLUMN vapp_kt REAL;";
+
 const AIRFRAME_COLS: &str = "a.registration, a.icao_type, a.title, a.airline, a.custom_name, a.notes, a.image_url,
-    a.image_thumb_url, a.image_credit, a.image_link, a.image_source, a.image_fetched_ms, a.created_ms, a.updated_ms";
+    a.image_thumb_url, a.image_credit, a.image_link, a.image_source, a.image_fetched_ms, a.created_ms, a.updated_ms, a.vapp_kt";
 
 const DEMO_F2: &str = "(?1 OR COALESCE(f2.provider, '') <> 'mock')";
 
@@ -178,6 +193,7 @@ fn row_to_airframe(r: &Row<'_>) -> rusqlite::Result<Airframe> {
         image_fetched_ms: r.get::<_, Option<i64>>(11)?.map(|v| v as u64),
         created_ms: r.get::<_, i64>(12)? as u64,
         updated_ms: r.get::<_, i64>(13)? as u64,
+        vapp_kt: r.get(14)?,
     })
 }
 
@@ -290,12 +306,13 @@ impl Store {
                 COALESCE(SUM(CASE WHEN f.landing_ms IS NOT NULL AND f.takeoff_ms IS NOT NULL THEN f.landing_ms - f.takeoff_ms END), 0),
                 COALESCE(SUM(f.distance_nm), 0),
                 (SELECT COUNT(*) FROM touchdowns t JOIN flights f2 ON f2.id = t.flight_id
-                    WHERE f2.airframe_reg = a.registration AND t.touch_and_go = 0 AND {DEMO_F2}),
+                    WHERE f2.airframe_reg = a.registration AND f2.deleted_ms IS NULL AND t.touch_and_go = 0 AND {DEMO_F2}),
                 (SELECT AVG({LANDING_RATE_SQL}) FROM touchdowns t JOIN flights f2 ON f2.id = t.flight_id
-                    WHERE f2.airframe_reg = a.registration AND t.touch_and_go = 0 AND {DEMO_F2}),
+                    WHERE f2.airframe_reg = a.registration AND f2.deleted_ms IS NULL AND t.touch_and_go = 0 AND {DEMO_F2}),
                 MAX(COALESCE(f.off_block_ms, f.created_ms)),
-                (SELECT COUNT(*) FROM flights f3 WHERE f3.airframe_reg = a.registration)
-             FROM airframes a LEFT JOIN flights f ON f.airframe_reg = a.registration AND (?1 OR COALESCE(f.provider, '') <> 'mock')
+                (SELECT COUNT(*) FROM flights f3 WHERE f3.airframe_reg = a.registration AND f3.deleted_ms IS NULL)
+             FROM airframes a LEFT JOIN flights f ON f.airframe_reg = a.registration AND f.deleted_ms IS NULL
+                AND (?1 OR COALESCE(f.provider, '') <> 'mock')
              GROUP BY a.registration
              ORDER BY MAX(COALESCE(f.off_block_ms, f.created_ms)) IS NULL, MAX(COALESCE(f.off_block_ms, f.created_ms)) DESC,
                 a.registration"
@@ -303,14 +320,14 @@ impl Store {
         let rows = stmt.query_map(params![include_demo], |r| {
             Ok(AirframeRow {
                 airframe: row_to_airframe(r)?,
-                flights: r.get::<_, i64>(14)? as u64,
-                total_flights: r.get::<_, i64>(21)? as u64,
-                block_time_ms: r.get::<_, i64>(15)?.max(0) as u64,
-                flight_time_ms: r.get::<_, i64>(16)?.max(0) as u64,
-                distance_nm: r.get(17)?,
-                landings: r.get::<_, i64>(18)? as u64,
-                avg_landing_vs_fpm: r.get(19)?,
-                last_flown_ms: r.get::<_, Option<i64>>(20)?.map(|v| v as u64),
+                flights: r.get::<_, i64>(15)? as u64,
+                total_flights: r.get::<_, i64>(22)? as u64,
+                block_time_ms: r.get::<_, i64>(16)?.max(0) as u64,
+                flight_time_ms: r.get::<_, i64>(17)?.max(0) as u64,
+                distance_nm: r.get(18)?,
+                landings: r.get::<_, i64>(19)? as u64,
+                avg_landing_vs_fpm: r.get(20)?,
+                last_flown_ms: r.get::<_, Option<i64>>(21)?.map(|v| v as u64),
             })
         })?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
@@ -330,9 +347,19 @@ impl Store {
         Ok(self.list_airframes(include_demo)?.into_iter().find(|a| a.airframe.registration == reg))
     }
 
-    /// Manual create/edit. Returns `None` for a registration that fails validation.
+    /// Manual create/edit. Returns `None` for a registration that fails validation; an
+    /// implausible Vapp is refused ([`crate::StoreError::Invalid`]) before anything is written.
     pub fn upsert_airframe(&self, edit: &AirframeEdit, now_ms: u64) -> Result<Option<Airframe>> {
         let Some(reg) = normalize_registration(&edit.registration) else { return Ok(None) };
+        // Some(Some(v)) = set, Some(None) = clear, None = leave
+        let vapp: Option<Option<f64>> = match edit.vapp_kt {
+            None => None,
+            Some(v) if !v.is_finite() || v <= 0.0 => Some(None),
+            Some(v) if (VAPP_MIN_KT..=VAPP_MAX_KT).contains(&v) => Some(Some(v)),
+            Some(v) => {
+                return Err(crate::StoreError::Invalid(format!("Vapp {v} kt liegt außerhalb von {VAPP_MIN_KT}–{VAPP_MAX_KT} kt")));
+            }
+        };
         {
             let conn = self.conn();
             conn.execute(
@@ -358,8 +385,30 @@ impl Store {
             set("airline", &edit.airline)?;
             set("custom_name", &edit.custom_name)?;
             set("notes", &edit.notes)?;
+            if let Some(v) = vapp {
+                let before: Option<f64> = conn.query_row("SELECT vapp_kt FROM airframes WHERE registration = ?1", params![reg], |r| r.get(0))?;
+                if before != v {
+                    conn.execute("UPDATE airframes SET vapp_kt = ?2, updated_ms = ?3 WHERE registration = ?1", params![reg, v, now_ms as i64])?;
+                    // the cached approach facts were assessed against the old reference: recomputed lazily
+                    conn.execute(
+                        "DELETE FROM approach_facts WHERE flight_id IN (SELECT id FROM flights WHERE airframe_reg = ?1)",
+                        params![reg],
+                    )?;
+                }
+            }
         }
         self.get_airframe(&reg)
+    }
+
+    /// The registration the recorder would book a flight onto (OFP, else a registration-like
+    /// ATC ID), ignoring any correction or manual booking.
+    pub(crate) fn original_flight_registration(&self, flight_id: &str) -> Result<Option<String>> {
+        let conn = self.conn();
+        let facts = conn.query_row(&format!("{FLIGHT_FACTS_SQL} WHERE id = ?1"), params![flight_id], row_to_facts).optional()?;
+        Ok(facts.and_then(|f| {
+            let (ofp_reg, _) = f.hint();
+            resolve_registration(ofp_reg.as_deref(), f.atc_id.as_deref())
+        }))
     }
 
     /// Manually (re)book a flight; `None` removes it from any airframe. Errors on an invalid registration.
@@ -412,6 +461,7 @@ impl Store {
                     airline = COALESCE(airline, (SELECT airline FROM airframes WHERE registration = ?1)),
                     custom_name = COALESCE(custom_name, (SELECT custom_name FROM airframes WHERE registration = ?1)),
                     notes = COALESCE(notes, (SELECT notes FROM airframes WHERE registration = ?1)),
+                    vapp_kt = COALESCE(vapp_kt, (SELECT vapp_kt FROM airframes WHERE registration = ?1)),
                     created_ms = MIN(created_ms, (SELECT created_ms FROM airframes WHERE registration = ?1)),
                     updated_ms = ?3
                  WHERE registration = ?2",
@@ -462,6 +512,19 @@ impl Store {
             };
         }
         self.get_airframe(&reg)
+    }
+
+    /// The Vapp (KIAS) of the airframe a flight is booked onto, if the pilot entered one.
+    pub fn flight_vapp_kt(&self, flight_id: &str) -> Result<Option<f64>> {
+        Ok(self
+            .conn()
+            .query_row(
+                "SELECT a.vapp_kt FROM flights f JOIN airframes a ON a.registration = f.airframe_reg WHERE f.id = ?1",
+                params![flight_id],
+                |r| r.get::<_, Option<f64>>(0),
+            )
+            .optional()?
+            .flatten())
     }
 
     /// Flights booked onto an airframe, newest first.

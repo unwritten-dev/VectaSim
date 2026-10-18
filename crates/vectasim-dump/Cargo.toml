@@ -1,0 +1,16 @@
+[package]
+name = "vectasim-dump"
+description = "Raw telemetry dump (.vsdump): zstd-compressed NDJSON of SimConnect messages before interpretation, file writer, RAM ring and reader"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true, features = ["float_roundtrip"] }
+log = { workspace = true }
+zstd = "0.13"
+
+[dev-dependencies]
+tempfile = "3"

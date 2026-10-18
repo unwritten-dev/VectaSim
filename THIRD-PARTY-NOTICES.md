@@ -2,7 +2,7 @@
 
 VectaSim selbst steht unter der [MIT-Lizenz](LICENSE). Dieses Dokument listet die Bibliotheken, Schriften, Daten und Dienste Dritter, die die App zur Laufzeit verwendet, mit ihren Lizenzen. Die Lizenztexte der Pakete liegen jeweils im Paket selbst (npm: `node_modules/<paket>/LICENSE`, Rust: crates.io-Quelle).
 
-Erzeugt aus `npx license-checker-rseidelsohn --production` (in `app/`) und `cargo tree --workspace -e normal --target x86_64-pc-windows-msvc` (Stand: Version 0.1.0). Bei einer Lizenzangabe mit „OR“ wählt VectaSim die MIT-Variante, sofern vorhanden.
+Erzeugt aus `npx license-checker-rseidelsohn --production` (in `app/`) und `cargo tree --workspace -e normal --target x86_64-pc-windows-msvc` (Stand: Version 0.2.0). Bei einer Lizenzangabe mit „OR“ wählt VectaSim die MIT-Variante, sofern vorhanden.
 
 ## Daten und Dienste
 
@@ -11,12 +11,18 @@ Erzeugt aus `npx license-checker-rseidelsohn --production` (in `app/`) und `carg
 | © [OpenStreetMap](https://www.openstreetmap.org/copyright)-Mitwirkende | Kartendaten der Basemap | [ODbL 1.0](https://opendatacommons.org/licenses/odbl/1-0/); Attribution bleibt auf der Karte sichtbar |
 | [OpenMapTiles](https://openmaptiles.org) | Vektortile-Schema der Basemap | Schema [CC-BY 4.0](https://github.com/openmaptiles/openmaptiles/blob/master/LICENSE.md); © OpenMapTiles |
 | [OpenFreeMap](https://openfreemap.org) | Tile-Hosting und Kartenstil (`dark`), in der App je Theme umgefärbt | Dienst kostenlos ohne Schlüssel; Stil aus [openfreemap-styles](https://github.com/hyperknot/openfreemap-styles), abgeleitet von den OpenMapTiles-Styles (Code BSD-3-Clause, Design CC-BY 4.0); Daten ODbL |
-| [OurAirports](https://ourairports.com/data/) | Flughäfen und Runways, eingebettet in `crates/vectasim-data/data` | Public Domain |
+| [OurAirports](https://ourairports.com/data/) | Flughäfen und Runways, eingebettet in `crates/vectasim-data/data`; Kontinent je Land (`countries.csv`) | Public Domain |
+| [Natural Earth](https://www.naturalearthdata.com/) | Ländergrenzen 1:110m (Admin-0 Countries) für die Ansicht *Länder*, vereinfacht eingebettet in `crates/vectasim-data/data/countries.geojson.zst` (`scripts/update-countries.py`) | Public Domain ([Nutzungsbedingungen](https://www.naturalearthdata.com/about/terms-of-use/)); Quelle wird auf der Karte genannt |
+| [Unicode CLDR](https://cldr.unicode.org/) | Deutsche und englische Ländernamen in `crates/vectasim-data/data/countries.csv` | [Unicode License v3](https://www.unicode.org/license.txt) – © 1991–2026 Unicode, Inc. |
 | NOAA / [aviationweather.gov](https://aviationweather.gov) | METAR-Wetter | US-Regierungswerk, Public Domain |
 | [VATSIM](https://vatsim.net) data feed v3 | Online-Verkehr und ATC (nur wenn „Verkehr“ eingeschaltet) | VATSIM-Datennutzungsbedingungen; Abruf höchstens alle 15 s |
 | [SimBrief](https://www.simbrief.com) (Navigraph) | OFP-Abruf auf Knopfdruck | Navigraph/SimBrief-Nutzungsbedingungen |
 | [Planespotters.net](https://www.planespotters.net) | Flugzeugfotos zur Registrierung | Foto © jeweiliger Fotograf; Credit und Link zur Fotoseite werden bei jedem Foto angezeigt |
-| Microsoft Flight Simulator SDK | `SimConnect.dll`, zur Laufzeit geladen, **nicht** mitgeliefert | MSFS SDK EULA |
+| Microsoft Flight Simulator SDK | `SimConnect.dll`, zur Laufzeit geladen, **nicht** mitgeliefert; auf Klick des Nutzers aus dem offiziellen SDK-Download (`sdk.flightsimulator.com`, MSFS 2020 SDK Core 0.24.6.0) nach `%LOCALAPPDATA%\io.vectasim.app\simconnect\` geladen | [MSFS SDK EULA](https://docs.flightsimulator.com/html/Introduction/SDK_EULA.htm), siehe unten |
+
+### Microsoft Flight Simulator SDK – SimConnect.dll
+
+Die `SimConnect.dll` ist Eigentum der Microsoft Corporation und wird **nicht** mit VectaSim verteilt (weder im Repository noch im Installer). Die Schaltfläche *SimConnect herunterladen* lädt das offizielle SDK-Archiv von Microsofts Server, prüft es per SHA-256 und behält davon nur die DLL. Für diese Datei gelten allein die „Microsoft Software License Terms“ des Microsoft Flight Simulator SDK (Microsoft Corporation): https://docs.flightsimulator.com/html/Introduction/SDK_EULA.htm (MSFS 2024: https://docs.flightsimulator.com/msfs2024/html/1_Introduction/SDK_EULA.htm). Die MIT-Lizenz von VectaSim gilt für sie nicht.
 
 ## Schriften
 
@@ -46,63 +52,49 @@ Die Wortmarke im Logo verwendet Inter (© The Inter Project Authors, SIL OFL 1.1
 | `@fontsource/b612` | 5.3.0 | OFL-1.1 |
 | `@fontsource/ibm-plex-mono` | 5.3.0 | OFL-1.1 |
 | `@fontsource/ibm-plex-sans-condensed` | 5.3.0 | OFL-1.1 |
-| `@mapbox/geojson-rewind` | 0.5.2 | ISC |
 | `@mapbox/jsonlint-lines-primitives` | 2.0.3 | MIT |
-| `@mapbox/point-geometry` | 0.1.0 | ISC |
+| `@mapbox/point-geometry` | 1.1.0 | ISC |
 | `@mapbox/tiny-sdf` | 2.3.0 | BSD-2-Clause |
-| `@mapbox/unitbezier` | 0.0.1 | BSD-2-Clause |
-| `@mapbox/vector-tile` | 1.3.1 | BSD-3-Clause |
-| `@mapbox/whoots-js` | 3.1.0 | ISC |
-| `@maplibre/maplibre-gl-style-spec` | 23.3.0 | ISC |
+| `@mapbox/unitbezier` | 1.0.0 | BSD-2-Clause |
+| `@mapbox/vector-tile` | 3.0.0 | BSD-3-Clause |
+| `@maplibre/geojson-vt` | 6.3.0 | ISC |
+| `@maplibre/maplibre-gl-style-spec` | 26.4.4 | ISC |
+| `@maplibre/mlt` | 1.3.0 | (MIT OR Apache-2.0) |
+| `@maplibre/vt-pbf` | 4.3.2 | MIT |
 | `@tauri-apps/api` | 2.12.4 | Apache-2.0 OR MIT |
 | `@tauri-apps/plugin-dialog` | 2.8.3 | MIT OR Apache-2.0 |
 | `@tauri-apps/plugin-opener` | 2.7.2 | MIT OR Apache-2.0 |
 | `@tauri-apps/plugin-process` | 2.4.0 | MIT OR Apache-2.0 |
 | `@tauri-apps/plugin-updater` | 2.14.0 | MIT OR Apache-2.0 |
-| `@types/geojson-vt` | 3.2.5 | MIT |
 | `@types/geojson` | 7946.0.16 | MIT |
-| `@types/mapbox__point-geometry` | 0.1.4 | MIT |
-| `@types/mapbox__vector-tile` | 1.3.4 | MIT |
-| `@types/pbf` | 3.0.5 | MIT |
-| `@types/supercluster` | 7.1.3 | MIT |
+| `bidi-js` | 1.1.0 | MIT |
 | `earcut` | 3.2.4 | ISC |
-| `geojson-vt` | 4.0.3 | ISC |
-| `get-stream` | 6.0.1 | MIT |
 | `gl-matrix` | 3.4.4 | MIT |
-| `global-prefix` | 4.0.0 | MIT |
-| `ieee754` | 1.2.1 | BSD-3-Clause |
-| `ini` | 4.1.3 | ISC |
-| `isexe` | 3.1.5 | BlueOak-1.0.0 |
 | `json-stringify-pretty-compact` | 4.0.0 | MIT |
 | `kdbush` | 4.1.0 | ISC |
-| `kind-of` | 6.0.3 | MIT |
-| `maplibre-gl` | 5.6.0 | BSD-3-Clause |
+| `maplibre-gl` | 6.12.0 | BSD-3-Clause |
 | `minimist` | 1.2.8 | MIT |
 | `murmurhash-js` | 1.0.0 | MIT |
-| `pbf` | 3.3.0 | BSD-3-Clause |
+| `pbf` | 5.1.2 | BSD-3-Clause |
 | `potpack` | 2.1.0 | ISC |
 | `protocol-buffers-schema` | 3.6.1 | MIT |
 | `quickselect` | 3.0.0 | ISC |
 | `react-dom` | 19.3.1 | MIT |
 | `react` | 19.3.1 | MIT |
+| `require-from-string` | 2.0.2 | MIT |
 | `resolve-protobuf-schema` | 2.1.0 | MIT |
-| `rw` | 1.3.3 | BSD-3-Clause |
 | `scheduler` | 0.28.0 | MIT |
-| `supercluster` | 8.0.1 | ISC |
 | `tinyqueue` | 3.0.0 | ISC |
-| `vt-pbf` | 3.1.3 | MIT |
-| `which` | 4.0.0 | ISC |
 
 Zusammenfassung: 20× MIT, 13× ISC, 10× OFL-1.1, 5× BSD-3-Clause, 4× MIT OR Apache-2.0, 2× BSD-2-Clause, 1× Apache-2.0 OR MIT, 1× BlueOak-1.0.0.
 
 ## Rust-Crates (Backend, Windows-Build)
 
-Die mitgelieferte SQLite-Bibliothek (über `libsqlite3-sys`, Feature `bundled`) ist Public Domain.
+Die mitgelieferte SQLite-Bibliothek (3.53.2, über `libsqlite3-sys`, Feature `bundled`) ist Public Domain.
 
 | Crate | Version | Lizenz |
 |---|---|---|
 | `adler2` | 2.0.1 | 0BSD OR MIT OR Apache-2.0 |
-| `ahash` | 0.8.12 | MIT OR Apache-2.0 |
 | `aho-corasick` | 1.1.5 | Unlicense OR MIT |
 | `alloc-no-stdlib` | 3.0.0 | BSD-3-Clause |
 | `alloc-stdlib` | 0.3.0 | BSD-3-Clause |
@@ -153,6 +145,7 @@ Die mitgelieferte SQLite-Bibliothek (über `libsqlite3-sys`, Feature `bundled`) 
 | `digest` | 0.10.7 | MIT OR Apache-2.0 |
 | `dirs` | 7.0.0 | MIT OR Apache-2.0 |
 | `dirs-sys` | 0.5.0 | MIT OR Apache-2.0 |
+| `discord-rich-presence` | 1.1.0 | MIT |
 | `displaydoc` | 0.2.7 | MIT OR Apache-2.0 |
 | `dom_query` | 0.28.0 | MIT |
 | `dpi` | 0.1.2 | Apache-2.0 AND MIT |
@@ -184,9 +177,8 @@ Die mitgelieferte SQLite-Bibliothek (über `libsqlite3-sys`, Feature `bundled`) 
 | `getrandom` | 0.4.3 | MIT OR Apache-2.0 |
 | `glob` | 0.3.4 | MIT OR Apache-2.0 |
 | `hashbrown` | 0.12.3 | MIT OR Apache-2.0 |
-| `hashbrown` | 0.14.5 | MIT OR Apache-2.0 |
 | `hashbrown` | 0.17.1 | MIT OR Apache-2.0 |
-| `hashlink` | 0.9.1 | MIT OR Apache-2.0 |
+| `hashlink` | 0.12.2 | MIT OR Apache-2.0 |
 | `heck` | 0.5.0 | MIT OR Apache-2.0 |
 | `html5ever` | 0.39.0 | MIT OR Apache-2.0 |
 | `http` | 1.5.0 | MIT OR Apache-2.0 |
@@ -221,7 +213,7 @@ Die mitgelieferte SQLite-Bibliothek (über `libsqlite3-sys`, Feature `bundled`) 
 | `keyboard-types` | 0.8.3 | MIT OR Apache-2.0 |
 | `libc` | 0.2.190 | MIT OR Apache-2.0 |
 | `libloading` | 0.8.9 | ISC |
-| `libsqlite3-sys` | 0.30.1 | MIT |
+| `libsqlite3-sys` | 0.38.2 | MIT |
 | `litemap` | 0.8.3 | Unicode-3.0 |
 | `lock_api` | 0.4.14 | MIT OR Apache-2.0 |
 | `log` | 0.4.34 | MIT OR Apache-2.0 |
@@ -234,6 +226,7 @@ Die mitgelieferte SQLite-Bibliothek (über `libsqlite3-sys`, Feature `bundled`) 
 | `mio` | 1.2.4 | MIT |
 | `muda` | 0.20.0 | Apache-2.0 OR MIT |
 | `new_debug_unreachable` | 1.0.6 | MIT |
+| `notify-rust` | 4.18.2 | MIT OR Apache-2.0 |
 | `num-conv` | 0.2.2 | MIT OR Apache-2.0 |
 | `once_cell` | 1.21.4 | MIT OR Apache-2.0 |
 | `once_cell_polyfill` | 1.70.2 | MIT OR Apache-2.0 |
@@ -252,10 +245,14 @@ Die mitgelieferte SQLite-Bibliothek (über `libsqlite3-sys`, Feature `bundled`) 
 | `png` | 0.18.1 | MIT OR Apache-2.0 |
 | `potential_utf` | 0.1.6 | Unicode-3.0 |
 | `powerfmt` | 0.2.1 | MIT OR Apache-2.0 |
+| `ppv-lite86` | 0.2.21 | MIT OR Apache-2.0 |
 | `precomputed-hash` | 0.1.1 | MIT |
 | `proc-macro2` | 1.0.107 | MIT OR Apache-2.0 |
 | `quick-xml` | 0.42.0 | MIT |
 | `quote` | 1.0.47 | MIT OR Apache-2.0 |
+| `rand` | 0.9.5 | MIT OR Apache-2.0 |
+| `rand_chacha` | 0.9.0 | MIT OR Apache-2.0 |
+| `rand_core` | 0.9.5 | MIT OR Apache-2.0 |
 | `raw-window-handle` | 0.6.2 | MIT OR Apache-2.0 OR Zlib |
 | `regex` | 1.13.1 | MIT OR Apache-2.0 |
 | `regex-automata` | 0.4.18 | MIT OR Apache-2.0 |
@@ -264,7 +261,7 @@ Die mitgelieferte SQLite-Bibliothek (über `libsqlite3-sys`, Feature `bundled`) 
 | `reqwest` | 0.13.5 | MIT OR Apache-2.0 |
 | `rfd` | 0.16.0 | MIT |
 | `ring` | 0.17.14 | Apache-2.0 AND ISC |
-| `rusqlite` | 0.32.1 | MIT |
+| `rusqlite` | 0.40.2 | MIT |
 | `rustc-hash` | 2.1.3 | Apache-2.0 OR MIT |
 | `rustls` | 0.23.46 | Apache-2.0 OR ISC OR MIT |
 | `rustls-pki-types` | 1.15.1 | MIT OR Apache-2.0 |
@@ -312,12 +309,14 @@ Die mitgelieferte SQLite-Bibliothek (über `libsqlite3-sys`, Feature `bundled`) 
 | `tauri-macros` | 2.7.3 | Apache-2.0 OR MIT |
 | `tauri-plugin-dialog` | 2.8.3 | Apache-2.0 OR MIT |
 | `tauri-plugin-fs` | 2.7.1 | Apache-2.0 OR MIT |
+| `tauri-plugin-notification` | 2.7.0 | Apache-2.0 OR MIT |
 | `tauri-plugin-opener` | 2.7.2 | Apache-2.0 OR MIT |
 | `tauri-plugin-process` | 2.4.0 | Apache-2.0 OR MIT |
 | `tauri-plugin-updater` | 2.14.0 | Apache-2.0 OR MIT |
 | `tauri-runtime` | 2.12.2 | Apache-2.0 OR MIT |
 | `tauri-runtime-wry` | 2.12.2 | Apache-2.0 OR MIT |
 | `tauri-utils` | 2.10.2 | Apache-2.0 OR MIT |
+| `tauri-winrt-notification` | 0.8.1 | MIT OR Apache-2.0 |
 | `tempfile` | 3.27.0 | MIT OR Apache-2.0 |
 | `tendril` | 0.5.1 | MIT OR Apache-2.0 |
 | `thiserror` | 2.0.21 | MIT OR Apache-2.0 |
@@ -340,6 +339,7 @@ Die mitgelieferte SQLite-Bibliothek (über `libsqlite3-sys`, Feature `bundled`) 
 | `tower-service` | 0.3.3 | MIT |
 | `tracing` | 0.1.44 | MIT |
 | `tracing-core` | 0.1.36 | MIT |
+| `tray-icon` | 0.25.1 | MIT OR Apache-2.0 |
 | `try-lock` | 0.2.5 | MIT |
 | `typeid` | 1.0.3 | MIT OR Apache-2.0 |
 | `typenum` | 1.20.1 | MIT OR Apache-2.0 |
@@ -351,6 +351,7 @@ Die mitgelieferte SQLite-Bibliothek (über `libsqlite3-sys`, Feature `bundled`) 
 | `utf8_iter` | 1.0.4 | Apache-2.0 OR MIT |
 | `utf8parse` | 0.2.2 | Apache-2.0 OR MIT |
 | `uuid` | 1.28.0 | Apache-2.0 OR MIT |
+| `uuid` | 0.8.2 | Apache-2.0 OR MIT |
 | `walkdir` | 2.5.0 | Unlicense/MIT |
 | `want` | 0.3.2 | MIT |
 | `web-time` | 1.1.0 | MIT OR Apache-2.0 |
@@ -396,11 +397,11 @@ Die mitgelieferte SQLite-Bibliothek (über `libsqlite3-sys`, Feature `bundled`) 
 | `zstd-safe` | 7.3.0 | BSD-3-Clause |
 | `zstd-sys` | 2.1.2+zstd.1.5.7 | BSD-3-Clause |
 
-Zusammenfassung: 143× MIT OR Apache-2.0, 56× MIT, 29× Apache-2.0 OR MIT, 18× Unicode-3.0, 6× Unlicense OR MIT, 6× MIT/Apache-2.0, 5× BSD-3-Clause, 5× MPL-2.0, 4× Unlicense/MIT, 3× ISC, 2× Apache-2.0 OR ISC OR MIT, 2× MIT OR Zlib OR Apache-2.0, 2× Apache-2.0, 1× 0BSD OR MIT OR Apache-2.0, 1× BSD-3-Clause AND MIT, 1× BSD-3-Clause/MIT, 1× Apache-2.0 AND MIT, 1× CC0-1.0 OR MIT-0 OR Apache-2.0, 1× Apache-2.0 / MIT, 1× Zlib, 1× MIT OR Apache-2.0 OR Zlib, 1× Apache-2.0 AND ISC, 1× Apache-2.0 OR BSL-1.0, 1× (MIT OR Apache-2.0) AND Unicode-3.0, 1× CDLA-Permissive-2.0, 1× BSD-2-Clause OR Apache-2.0 OR MIT.
+Zusammenfassung: 141× MIT OR Apache-2.0, 56× MIT, 29× Apache-2.0 OR MIT, 18× Unicode-3.0, 6× Unlicense OR MIT, 6× MIT/Apache-2.0, 5× BSD-3-Clause, 5× MPL-2.0, 4× Unlicense/MIT, 3× ISC, 2× Apache-2.0 OR ISC OR MIT, 2× MIT OR Zlib OR Apache-2.0, 2× Apache-2.0, 1× 0BSD OR MIT OR Apache-2.0, 1× BSD-3-Clause AND MIT, 1× BSD-3-Clause/MIT, 1× Apache-2.0 AND MIT, 1× CC0-1.0 OR MIT-0 OR Apache-2.0, 1× Apache-2.0 / MIT, 1× Zlib, 1× MIT OR Apache-2.0 OR Zlib, 1× Apache-2.0 AND ISC, 1× Apache-2.0 OR BSL-1.0, 1× (MIT OR Apache-2.0) AND Unicode-3.0, 1× CDLA-Permissive-2.0, 1× BSD-2-Clause OR Apache-2.0 OR MIT.
 
 ## MapLibre GL JS – Lizenztext
 
-MapLibre GL JS (BSD-3-Clause) verlangt die Weitergabe des folgenden Hinweises mit jeder Binärverteilung:
+MapLibre GL JS 6.12.0 (BSD-3-Clause) verlangt die Weitergabe des folgenden Hinweises mit jeder Binärverteilung (Text aus `node_modules/maplibre-gl/LICENSE.txt`):
 
 ```text
 Copyright (c) 2023, MapLibre contributors

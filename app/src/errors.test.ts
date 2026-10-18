@@ -1,14 +1,26 @@
 import { describe, expect, it } from "vitest";
-import { userMessage } from "./errors";
+import { DLL_MISSING_TEXT, isDllMissing, triedDllPaths, userMessage } from "./errors";
 import { computeTotals, countedFlights } from "./totals";
 import type { FlightRow } from "./types";
 
 describe("userMessage", () => {
   it("SimConnect.dll missing", () => {
     const m = userMessage("SimConnect.dll not found or unloadable (tried: a, b); last error: x");
-    expect(m.title).toBe("SimConnect wurde nicht gefunden.");
-    expect(m.hint).toMatch(/MSFS installiert/);
+    expect(m.title).toBe("SimConnect fehlt noch.");
+    expect(m.hint).toContain("Einstellungen → Simulator mit einem Klick herunterladen");
+    expect(m.hint).toContain("Datei wählen");
+    expect(m.hint).not.toMatch(/SDK-Installer|Entwicklermodus/);
+    expect(m.hint).not.toMatch(/MSFS installiert/);
     expect(m.detail).toMatch(/SimConnect\.dll/);
+  });
+  it("DLL texts and searched paths", () => {
+    const raw =
+      "SimConnect.dll not found or unloadable (tried: D:\\SDK\\SimConnect.dll, C:\\Program Files\\VectaSim\\SimConnect.dll, SimConnect.dll); last error: LoadLibraryExW failed";
+    expect(isDllMissing(raw)).toBe(true);
+    expect(isDllMissing("sim not reachable; retry in 8s")).toBe(false);
+    expect(triedDllPaths(raw)).toEqual(["D:\\SDK\\SimConnect.dll", "C:\\Program Files\\VectaSim\\SimConnect.dll", "SimConnect.dll"]);
+    expect(triedDllPaths("unknown provider 'xplane'")).toEqual([]);
+    expect(DLL_MISSING_TEXT).toBe("SimConnect fehlt noch – unter Einstellungen → Simulator mit einem Klick herunterladen");
   });
   it("sim not reachable is a waiting state with retry time", () => {
     const m = userMessage("sim not reachable (SimConnect_Open hr=0x80004005); retry in 8s", "sim");

@@ -3,12 +3,15 @@ import { useThemeId } from "./themes";
 import type { PhaseEventRow, TouchdownReport, TrackSample } from "./types";
 import { PHASE_LABEL, fmt, fmtClock, fmtNum, fmtSigned } from "./format";
 import { PROFILE } from "./theme";
+import { minMaxBucketIndices } from "./map/downsample";
+import { sampleAt, useReplayCursor, useReplayStore } from "./landing/replayStore";
 
 /**
  * Altitude / speed profile of a recorded flight, plain SVG.
  * Altitude MSL is the filled area on the left axis; ground speed and V/S are
  * thin lines on two right axes. Phase changes and touchdowns are vertical
- * markers; hovering shows a crosshair with the values at that moment.
+ * markers. The crosshair is the shared replay cursor (landing/replayStore.ts): hovering
+ * previews a time, a click pins it, and the track map beside it shows the same moment.
  */
 
 const HEIGHT = 240;
@@ -48,24 +51,12 @@ function kfmt(v: number): string {
   return `${fmtNum(k, Number.isInteger(k) ? 0 : 1)}k`;
 }
 
-/** First index with tMs >= t. */
-function lowerBound(samples: TrackSample[], t: number): number {
-  let lo = 0;
-  let hi = samples.length;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (samples[mid].tMs < t) lo = mid + 1;
-    else hi = mid;
-  }
-  return lo;
-}
-
 export default function ProfileChart({ samples, phases, touchdowns }: Props) {
   useThemeId(); // colours come from the active theme
   // callback ref: the wrapper element changes between the empty and the chart state
   const [wrap, setWrap] = useState<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(800);
-  const [hover, setHover] = useState<number | null>(null);
+  const store = useReplayStore();
 
   useEffect(() => {
     if (!wrap) return;
@@ -108,6 +99,18 @@ export default function ProfileChart({ samples, phases, touchdowns }: Props) {
     return { t0, t1, altLo, altHi, altTicks, gsHi, gsTicks, vsHi, vsTicks };
   }, [samples]);
 
+  // Min/max per pixel column for all three series: keeps spikes (touchdown V/S) that a fixed
+  // stride would skip, and bounds the path size by the chart width instead of the flight length.
+  // Memoised so hovering (state change per mouse move) does not rescan a 10-h track.
+  const pts = useMemo(() => {
+    const idx = minMaxBucketIndices(samples.length, Math.max(1, plotW), (i) => samples[i].tMs, [
+      (i) => samples[i].altitudeMslFt,
+      (i) => samples[i].groundSpeedKt,
+      (i) => samples[i].verticalSpeedFpm,
+    ]);
+    return idx.map((i) => samples[i]);
+  }, [samples, plotW]);
+
   if (!model) {
     return (
       <div ref={setWrap} className="profile-chart empty detail">
@@ -121,12 +124,6 @@ export default function ProfileChart({ samples, phases, touchdowns }: Props) {
   const yAlt = (a: number) => M.top + plotH - ((a - altLo) / (altHi - altLo)) * plotH;
   const yGs = (g: number) => M.top + plotH - (g / gsHi) * plotH;
   const yVs = (v: number) => M.top + plotH / 2 - (v / vsHi) * (plotH / 2);
-
-  // ~2 points per pixel is plenty for the lines
-  const stride = Math.max(1, Math.floor(samples.length / (plotW * 2)));
-  const pts: TrackSample[] = [];
-  for (let i = 0; i < samples.length; i += stride) pts.push(samples[i]);
-  if (pts[pts.length - 1] !== samples[samples.length - 1]) pts.push(samples[samples.length - 1]);
 
   const line = (y: (s: TrackSample) => number) =>
     pts.map((s, i) => `${i ? "L" : "M"}${x(s.tMs).toFixed(1)},${y(s).toFixed(1)}`).join("");
@@ -156,20 +153,10 @@ export default function ProfileChart({ samples, phases, touchdowns }: Props) {
 
   const tdMarks = touchdowns.filter((t) => t.timestampMs >= t0 - 5000 && t.timestampMs <= t1 + 5000);
 
-  const hoverSample = hover !== null ? samples[hover] : null;
-  const onMove = (e: React.MouseEvent<SVGRectElement>) => {
+  const timeAt = (e: React.MouseEvent<SVGRectElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    const t = t0 + ((e.clientX - rect.left) / rect.width) * (t1 - t0);
-    let i = lowerBound(samples, t);
-    if (i > 0 && (i >= samples.length || t - samples[i - 1].tMs < samples[i].tMs - t)) i -= 1;
-    setHover(Math.min(i, samples.length - 1));
+    return t0 + Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width)) * (t1 - t0);
   };
-  const hoverPhase = hoverSample
-    ? [...phases].reverse().find((p) => p.timestampMs <= hoverSample.tMs)
-    : undefined;
-
-  const tipX = hoverSample ? x(hoverSample.tMs) : 0;
-  const tipLeft = tipX > M.left + plotW - 150;
 
   return (
     <div ref={setWrap} className="profile-chart">
@@ -256,37 +243,8 @@ export default function ProfileChart({ samples, phases, touchdowns }: Props) {
           );
         })}
 
-        {/* hover crosshair */}
-        {hoverSample && (
-          <g pointerEvents="none">
-            <line x1={tipX} x2={tipX} y1={M.top} y2={M.top + plotH} className="pc-cross" />
-            <circle cx={tipX} cy={yAlt(hoverSample.altitudeMslFt)} r={3.5} fill={PROFILE.alt} />
-            <circle cx={tipX} cy={yGs(hoverSample.groundSpeedKt)} r={3} fill={PROFILE.gs} />
-            <circle cx={tipX} cy={yVs(hoverSample.verticalSpeedFpm)} r={3} fill={PROFILE.vs} />
-            <g transform={`translate(${tipLeft ? tipX - 144 : tipX + 8},${M.top + 4})`}>
-              <rect width={136} height={hoverPhase ? 78 : 64} rx={6} className="pc-tip" />
-              <text x={8} y={16} className="pc-tip-head">
-                {clock(hoverSample.tMs, true)}
-              </text>
-              {hoverPhase && (
-                <text x={8} y={30} className="pc-tip-text">
-                  {PHASE_LABEL[hoverPhase.to]}
-                </text>
-              )}
-              <g transform={`translate(0,${hoverPhase ? 14 : 0})`}>
-                <text x={8} y={32} className="pc-tip-text" fill={PROFILE.alt}>
-                  Höhe {fmt(hoverSample.altitudeMslFt, 0, "ft")}
-                </text>
-                <text x={8} y={46} className="pc-tip-text" fill={PROFILE.gs}>
-                  GS {fmt(hoverSample.groundSpeedKt, 0, "kt")}
-                </text>
-                <text x={8} y={60} className="pc-tip-text" fill={PROFILE.vs}>
-                  V/S {fmtSigned(Math.round(hoverSample.verticalSpeedFpm), 0, "fpm")}
-                </text>
-              </g>
-            </g>
-          </g>
-        )}
+        {/* shared cursor */}
+        <ProfileCursor samples={samples} phases={phases} x={x} yAlt={yAlt} yGs={yGs} yVs={yVs} plotW={plotW} plotH={plotH} />
 
         <rect
           x={M.left}
@@ -294,10 +252,66 @@ export default function ProfileChart({ samples, phases, touchdowns }: Props) {
           width={plotW}
           height={plotH}
           fill="transparent"
-          onMouseMove={onMove}
-          onMouseLeave={() => setHover(null)}
+          className="replay-hit"
+          onMouseMove={(e) => store.hover(timeAt(e))}
+          onMouseLeave={() => store.hover(null)}
+          onClick={(e) => {
+            store.pause();
+            store.setCursor(timeAt(e));
+          }}
         />
       </svg>
     </div>
+  );
+}
+
+interface CursorProps {
+  samples: TrackSample[];
+  phases: PhaseEventRow[];
+  x: (t: number) => number;
+  yAlt: (a: number) => number;
+  yGs: (g: number) => number;
+  yVs: (v: number) => number;
+  plotW: number;
+  plotH: number;
+}
+
+/** Crosshair with the values at the cursor time (own component: a cursor move re-renders only this). */
+function ProfileCursor({ samples, phases, x, yAlt, yGs, yVs, plotW, plotH }: CursorProps) {
+  const tMs = useReplayCursor();
+  const s = sampleAt(samples, tMs);
+  if (!s) return null;
+  const phase = [...phases].reverse().find((p) => p.timestampMs <= s.tMs);
+  const tipX = x(s.tMs);
+  const tipLeft = tipX > M.left + plotW - 150;
+  return (
+    <g pointerEvents="none" aria-hidden="true" className="replay-cursor">
+      <line x1={tipX} x2={tipX} y1={M.top} y2={M.top + plotH} className="pc-cross" />
+      <circle cx={tipX} cy={yAlt(s.altitudeMslFt)} r={3.5} fill={PROFILE.alt} />
+      <circle cx={tipX} cy={yGs(s.groundSpeedKt)} r={3} fill={PROFILE.gs} />
+      <circle cx={tipX} cy={yVs(s.verticalSpeedFpm)} r={3} fill={PROFILE.vs} />
+      <g transform={`translate(${tipLeft ? tipX - 144 : tipX + 8},${M.top + 4})`}>
+        <rect width={136} height={phase ? 78 : 64} rx={6} className="pc-tip" />
+        <text x={8} y={16} className="pc-tip-head">
+          {clock(s.tMs, true)}
+        </text>
+        {phase && (
+          <text x={8} y={30} className="pc-tip-text">
+            {PHASE_LABEL[phase.to]}
+          </text>
+        )}
+        <g transform={`translate(0,${phase ? 14 : 0})`}>
+          <text x={8} y={32} className="pc-tip-text" fill={PROFILE.alt}>
+            Höhe {fmt(s.altitudeMslFt, 0, "ft")}
+          </text>
+          <text x={8} y={46} className="pc-tip-text" fill={PROFILE.gs}>
+            GS {fmt(s.groundSpeedKt, 0, "kt")}
+          </text>
+          <text x={8} y={60} className="pc-tip-text" fill={PROFILE.vs}>
+            V/S {fmtSigned(Math.round(s.verticalSpeedFpm), 0, "fpm")}
+          </text>
+        </g>
+      </g>
+    </g>
   );
 }

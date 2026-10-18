@@ -2,7 +2,7 @@
 // gates from the basemap's OpenMapTiles `aeroway` layer, plus runway designators (and a
 // runway fallback for fields OSM doesn't cover) from the embedded OurAirports runways.
 
-import maplibregl from "maplibre-gl";
+import * as maplibregl from "maplibre-gl";
 import { invoke } from "@tauri-apps/api/core";
 import type { Airport, Runway } from "../types";
 import { COLOR, DIAGRAM } from "../theme";
@@ -82,6 +82,8 @@ export function addAirportDiagramLayers(map: maplibregl.Map): () => void {
 
   const cache = new Map<string, Runway[]>();
   let seq = 0;
+  // airports whose runways are on the source now: panning within one airport sends nothing
+  let shownKey = "";
   const refresh = () => {
     if (map.getZoom() < OURAIRPORTS_FROM_ZOOM) return;
     const mySeq = ++seq;
@@ -109,6 +111,9 @@ export function addAirportDiagramLayers(map: maplibregl.Map): () => void {
             ),
         );
         if (mySeq !== seq) return;
+        const key = [...idents].sort().join(",");
+        if (key === shownKey) return;
+        shownKey = key;
         const runways = idents.flatMap((id) => cache.get(id) ?? []);
         (map.getSource(THR_SOURCE) as maplibregl.GeoJSONSource | undefined)?.setData(runwaysGeoJson(runways));
       })

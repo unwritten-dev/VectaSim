@@ -1,5 +1,5 @@
 import { useEffect, useState, type RefObject } from "react";
-import type maplibregl from "maplibre-gl";
+import type * as maplibregl from "maplibre-gl";
 import { invoke } from "@tauri-apps/api/core";
 import type { Airport, NearestAirport, Runway } from "../types";
 import { DIAGRAM_FROM_ZOOM } from "./airportDiagram";

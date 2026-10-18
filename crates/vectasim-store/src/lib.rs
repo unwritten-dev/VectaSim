@@ -4,18 +4,32 @@
 //! flown track. The track is stored as a zstd-compressed, delta-encoded
 //! columnar blob (see `track`), plus a sparse preview for fast map thumbnails.
 //! `FlightRecorder` turns the live `FlightSession` stream into rows and flushes
-//! the track once a minute so a crash loses at most a minute of path.
+//! the track every 15 s so a crash loses at most 15 s of path; `merge` resumes or joins
+//! a flight a crash cut in two.
 
 pub mod airframe;
+pub mod backup;
+pub mod bundle;
+pub mod csvimport;
 pub mod export;
+pub mod merge;
 pub mod recorder;
 pub mod store;
 pub mod track;
 
-pub use airframe::{Airframe, AirframeEdit, AirframePhoto, AirframeRow, icao_from_atc_model, normalize_registration, resolve_registration};
+pub use backup::{BackupEntry, BackupKind, RestoreCheck};
+pub use bundle::{BundleManifest, ExportOptions, ExportReport, ImportMode, ImportOptions, ImportReport};
+pub use airframe::{
+    Airframe, AirframeEdit, AirframePhoto, AirframeRow, VAPP_MAX_KT, VAPP_MIN_KT, icao_from_atc_model, normalize_registration, resolve_registration,
+};
+pub use csvimport::{ColumnMapping, CsvField, CsvImportOptions, CsvImportReport, CsvPreset, CsvPreview, CsvProfile, ParsedFlight};
 pub use export::ExportFormat;
+pub use merge::{MergeCandidate, MergeReport, ResumeCandidate};
 pub use recorder::{FlightRecorder, LiveTrack, PlannedSlot, RecorderContext};
-pub use store::{FlightDetail, FlightRow, MetarSlot, PhaseEventRow, PlannedFlight, Store, Totals};
+pub use store::{
+    APPROACH_FACTS_VERSION, ApproachFactDetail, ApproachFactRow, DeletedFlight, FlightCounts, FlightDetail, FlightRow, FlightUserEdit, MetarSlot, PhaseEventRow, PlannedFlight,
+    NOTES_MAX_CHARS, RecentApproaches, RunwayRefinement, SCHEMA_VERSION, Store, TAG_MAX_CHARS, TAGS_MAX, TRASH_RETENTION_DAYS, TagCount, Totals, UserRunway, UserRunwayEdit, UserRunwaySource, normalize_tags,
+};
 pub use track::{TrackSample, decode_track, encode_track};
 
 /// Names the airport a position belongs to. Implemented by the app over the
@@ -36,10 +50,39 @@ pub enum StoreError {
     Json(#[from] serde_json::Error),
     #[error("{0}")]
     Invalid(String),
+    /// The file was written by a newer VectaSim (downgrade); it is left untouched.
+    #[error("database schema v{found} is newer than this version supports (v{supported})")]
+    NewerSchema { found: i64, supported: i64 },
+    /// One migration step failed and was rolled back; the file keeps schema v`from`.
+    #[error("migration v{from} -> v{to} failed (rolled back): {message}")]
+    Migration { from: i64, to: i64, message: String, backup: Option<std::path::PathBuf> },
+    /// A safety copy could not be written (nothing was changed).
+    #[error("backup failed: {0}")]
+    Backup(String),
+}
+
+impl StoreError {
+    /// The safety copy written before the failed operation, if any.
+    pub fn backup_path(&self) -> Option<&std::path::Path> {
+        match self {
+            StoreError::Migration { backup, .. } => backup.as_deref(),
+            _ => None,
+        }
+    }
 }
 
 pub type Result<T> = std::result::Result<T, StoreError>;
 
 pub(crate) fn now_ms_i64() -> i64 {
     vectasim_core::now_ms() as i64
+}
+
+#[cfg(test)]
+mod tests {
+    /// The bundled SQLite must carry the fix for CVE-2025-6965 (3.50.2+).
+    #[test]
+    fn bundled_sqlite_is_new_enough() {
+        println!("bundled SQLite {}", rusqlite::version());
+        assert!(rusqlite::version_number() >= 3_050_002, "SQLite {} < 3.50.2", rusqlite::version());
+    }
 }

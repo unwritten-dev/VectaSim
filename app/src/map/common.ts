@@ -1,10 +1,11 @@
 // Shared MapLibre helpers: basemap style, aircraft icon, track → GeoJSON, airport layers.
 
-import maplibregl from "maplibre-gl";
+import * as maplibregl from "maplibre-gl";
 import type { Airport, NavFix, TrackSample } from "../types";
 import { DIAGRAM_FROM_ZOOM } from "./airportDiagram";
 import { AIRPORT_DOT, COLOR, TRACK_RAMP } from "../theme";
 import { loadAircraftIcons } from "./aircraftIcons";
+import { lerpHeading, lowerBoundT, sampleAt, trackBearingAt } from "../landing/replayStore";
 
 /** OpenFreeMap: free vector tiles, no API key. OSM attribution is mandatory and left enabled. */
 export { BASEMAP_URL as BASEMAP_STYLE } from "./basemap";
@@ -50,28 +51,86 @@ export function trackColorExpr(): maplibregl.ExpressionSpecification {
   return ["interpolate", ["linear"], ["coalesce", ["get", "alt"], 0], ...TRACK_RAMP.flat()] as unknown as maplibregl.ExpressionSpecification;
 }
 
-export function addTrackLayers(map: maplibregl.Map, sourceId: string, before?: string) {
+/**
+ * Track source(s) plus casing and altitude-coloured line. With several sources (live map:
+ * history + open block) all casings go below all lines, so the joint between them is seamless.
+ */
+export function addTrackLayers(map: maplibregl.Map, sourceIds: string | string[], before?: string) {
+  const ids = Array.isArray(sourceIds) ? sourceIds : [sourceIds];
+  for (const id of ids) map.addSource(id, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  for (const id of ids)
+    map.addLayer(
+      {
+        id: `${id}-casing`,
+        type: "line",
+        source: id,
+        paint: { "line-color": COLOR.halo, "line-width": 6.5, "line-opacity": 0.85 },
+        layout: { "line-cap": "round", "line-join": "round" },
+      },
+      before,
+    );
+  for (const id of ids)
+    map.addLayer(
+      {
+        id: `${id}-line`,
+        type: "line",
+        source: id,
+        paint: { "line-color": trackColorExpr(), "line-width": 3.5 },
+        layout: { "line-cap": "round", "line-join": "round" },
+      },
+      before,
+    );
+}
+
+/** Default camera pitch of the 3D view (degrees). */
+export const PITCH_3D = 58;
+
+/**
+ * 3D track: a translucent wall from the ground to the flown altitude and a solid ribbon at
+ * the top (two fill-extrusion layers over one polygon source, geometry from
+ * trackChunks.curtainGeoJson). Hidden until the 3D view is switched on.
+ */
+export function addCurtainLayers(map: maplibregl.Map, sourceId: string, before?: string) {
   map.addSource(sourceId, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   map.addLayer(
     {
-      id: `${sourceId}-casing`,
-      type: "line",
+      id: `${sourceId}-wall`,
+      type: "fill-extrusion",
       source: sourceId,
-      paint: { "line-color": COLOR.halo, "line-width": 4.5, "line-opacity": 0.7 },
-      layout: { "line-cap": "round", "line-join": "round" },
+      layout: { visibility: "none" },
+      paint: {
+        "fill-extrusion-color": trackColorExpr(),
+        "fill-extrusion-base": 0,
+        "fill-extrusion-height": ["get", "hM"],
+        "fill-extrusion-opacity": 0.22,
+      },
     },
     before,
   );
   map.addLayer(
     {
-      id: `${sourceId}-line`,
-      type: "line",
+      id: `${sourceId}-ribbon`,
+      type: "fill-extrusion",
       source: sourceId,
-      paint: { "line-color": trackColorExpr(), "line-width": 2.5 },
-      layout: { "line-cap": "round", "line-join": "round" },
+      layout: { visibility: "none" },
+      paint: {
+        "fill-extrusion-color": trackColorExpr(),
+        "fill-extrusion-base": ["-", ["get", "hM"], ["get", "ribbonM"]],
+        "fill-extrusion-height": ["get", "hM"],
+        "fill-extrusion-opacity": 0.95,
+      },
     },
     before,
   );
+}
+
+export function setCurtainVisible(map: maplibregl.Map, sourceId: string, on: boolean) {
+  for (const l of [`${sourceId}-wall`, `${sourceId}-ribbon`]) if (map.getLayer(l)) map.setLayoutProperty(l, "visibility", on ? "visible" : "none");
+}
+
+/** Tilt the camera for the 3D view or lay it flat again (bearing kept). */
+export function setPitched(map: maplibregl.Map, on: boolean, duration = 500) {
+  map.easeTo({ pitch: on ? PITCH_3D : 0, duration });
 }
 
 /** Kept for callers that only need "some plane": loads the whole categorised set. */
@@ -180,4 +239,24 @@ export function routeGeoJson(fixes: NavFix[]): GeoJSON.FeatureCollection {
     });
   }
   return { type: "FeatureCollection", features };
+}
+
+/**
+ * Position and heading of a recorded track at `tMs` (the shared replay cursor), interpolated
+ * between the samples; heading circularly, from the positions when the samples carry none
+ * (headingTrueDeg 0 on both sides, e.g. the debrief's rebuilt samples). Null outside the track.
+ */
+export function trackPoseAt(samples: TrackSample[], tMs: number | null): { lon: number; lat: number; headingDeg: number | null } | null {
+  const s = sampleAt(samples, tMs);
+  if (!s || tMs == null) return null;
+  const i = Math.min(samples.length - 1, Math.max(1, lowerBoundT(samples, tMs)));
+  const a = samples[i - 1];
+  const b = samples[i];
+  let headingDeg: number | null;
+  if (a.headingTrueDeg === 0 && b.headingTrueDeg === 0) headingDeg = trackBearingAt(samples, tMs);
+  else {
+    const span = b.tMs - a.tMs;
+    headingDeg = lerpHeading(a.headingTrueDeg, b.headingTrueDeg, span > 0 ? Math.min(1, Math.max(0, (tMs - a.tMs) / span)) : 0);
+  }
+  return { lon: s.longitude, lat: s.latitude, headingDeg };
 }
