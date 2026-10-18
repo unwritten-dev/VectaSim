@@ -2,9 +2,9 @@
 
 use vectasim_core::approach::{
     self, AircraftRef, ApproachAnalysis, ApproachBand, ApproachConfig, ApproachOutcome, ApproachSample, ElevationSource, GateKind, GoAroundSource,
-    MarkerKind, PhaseMark, VappSource,
+    LateralBand, MarkerKind, PhaseMark, VappSource,
 };
-use vectasim_core::landing::{CheckStatus, CriterionKind, M_PER_FT, M_PER_NM, RunwayEnd, RunwayFrame};
+use vectasim_core::landing::{CheckStatus, CriterionKind, M_PER_FT, M_PER_NM, RunwayEnd, RunwayFrame, RunwayGeometry, RunwayGeometrySource};
 use vectasim_core::{FlightEvent, FlightSession, LandingRateSource, MockFlight, MockVariant, Telemetry, TouchdownReport};
 
 fn to_sample(t: &Telemetry) -> ApproachSample {
@@ -201,6 +201,11 @@ fn runway09() -> RunwayEnd {
 /// 3° straight-in from 6 nm at 1 Hz. `speed(hat, current)` gives the next IAS (= GS, no wind).
 /// `go_around_ft`: climb away at 1500 fpm once the path is this low, no touchdown.
 fn straight_in(speed: impl Fn(f64, f64) -> f64, go_around_ft: Option<f64>) -> (Vec<ApproachSample>, Vec<TouchdownReport>) {
+    straight_in_y(speed, go_around_ft, |_| 0.0)
+}
+
+/// [`straight_in`] with a lateral offset `y(x)` (m, + = right) along the runway axis.
+fn straight_in_y(speed: impl Fn(f64, f64) -> f64, go_around_ft: Option<f64>, y_of: impl Fn(f64) -> f64) -> (Vec<ApproachSample>, Vec<TouchdownReport>) {
     let f = RunwayFrame::new(&runway09());
     let tan = 3f64.to_radians().tan();
     let gpip = 50.0 * M_PER_FT / tan;
@@ -233,7 +238,7 @@ fn straight_in(speed: impl Fn(f64, f64) -> f64, go_around_ft: Option<f64>) -> (V
             kt = speed(h_ft, kt);
         }
         let vs = if on_ground && prev_h <= 0.0 { 0.0 } else { (h_ft - prev_h) * 60.0 };
-        let (lat, lon) = f.unproject(x, 0.0);
+        let (lat, lon) = f.unproject(x, y_of(x));
         let s = ApproachSample {
             t_ms: 1_000_000 + t * 1000,
             latitude: lat,
@@ -341,6 +346,121 @@ fn without_runway_path_criteria_are_not_measurable() {
     }
     assert_eq!(a.band, Some(ApproachBand::Stable));
     assert!(a.stability.gp_rms_dots.is_none() && a.stability.lat_rms_m.is_none());
+}
+
+// ---- lateral guidance (extended centreline) ------------------------------------------------
+
+fn lateral_of(y_of: impl Fn(f64) -> f64) -> ApproachAnalysis {
+    let (track, tds) = straight_in_y(|_, _| 140.0, None, y_of);
+    assert_eq!(tds.len(), 1);
+    approach::analyze_flight(&track, &[], &tds, &both_ends(runway09()), &AircraftRef::default(), &ApproachConfig::default()).remove(0)
+}
+
+#[test]
+fn lateral_on_the_centreline_is_its_own_clean_band() {
+    let a = lateral_of(|_| 0.0);
+    let l = &a.lateral;
+    assert!(l.measurable);
+    assert_eq!(l.lateral_band, Some(LateralBand::OnCentreline), "{l:?}");
+    assert!(l.loc_max_dots.unwrap().abs() < 0.05, "{l:?}");
+    assert!(l.lat_at_500_m.unwrap().abs() < 1.0 && l.lat_at_threshold_m.unwrap().abs() < 1.0, "{l:?}");
+    assert!(l.loc_at_500_dots.unwrap().abs() < 0.05);
+    assert_eq!(l.lateral_reversals, Some(0));
+    assert_eq!(l.intercept_overshoot_m, None);
+    assert_eq!(a.stability.loc_rms_dots.map(|r| r < 0.05), Some(true));
+}
+
+#[test]
+fn constant_offset_right_is_a_marked_band_with_signed_values() {
+    let a = lateral_of(|_| 100.0);
+    let l = &a.lateral;
+    assert_eq!(l.lateral_band, Some(LateralBand::Marked), "{l:?}");
+    assert!((l.lat_at_500_m.unwrap() - 100.0).abs() < 1.0, "{l:?}");
+    assert!((l.lat_at_threshold_m.unwrap() - 100.0).abs() < 1.0, "{l:?}");
+    assert!(l.loc_max_dots.unwrap() > 1.0, "{l:?}");
+    assert_eq!(l.lateral_reversals, Some(0));
+    // flown in from the right and stayed there: no overshoot
+    assert_eq!(l.intercept_overshoot_m, None);
+    // the localizer gate criterion (±1 dot) fails at 500 ft
+    assert_eq!(status(&a, GateKind::Ft500, CriterionKind::Localizer), CheckStatus::Fail);
+}
+
+#[test]
+fn intercept_from_the_left_overshoots_to_the_right() {
+    // 20° intercept from the left until 30 m left at x = −9000 m, then 0.15 m/m to 150 m
+    // right (overshoot) and back to the centreline with 0.1 m/m – all above 1000 ft
+    let x1 = -9000.0;
+    let y = move |x: f64| {
+        let u = x - x1;
+        if u < 0.0 {
+            -30.0 + 20f64.to_radians().tan() * u
+        } else if u < 1200.0 {
+            -30.0 + 0.15 * u
+        } else {
+            (150.0 - 0.1 * (u - 1200.0)).max(0.0)
+        }
+    };
+    let a = lateral_of(y);
+    let est = a.established.as_ref().expect("established");
+    assert!(est.dist_nm < 9000.0 / M_PER_NM + 0.1 && est.dist_nm > 4.0, "established at {} nm", est.dist_nm);
+    let l = &a.lateral;
+    let m = l.intercept_overshoot_m.expect("overshoot");
+    assert!((140.0..=151.0).contains(&m), "{l:?}");
+    assert!(l.intercept_overshoot_dots.unwrap() > 0.5, "{l:?}");
+    // the band window (1000 → 50 ft) is clean again
+    assert_eq!(l.lateral_band, Some(LateralBand::OnCentreline), "{l:?}");
+}
+
+#[test]
+fn s_turns_are_counted_as_reversals() {
+    // ±50 m with a 2 km wavelength: several side changes between 1000 and 100 ft
+    let a = lateral_of(|x| if x < -200.0 { 50.0 * (2.0 * std::f64::consts::PI * x / 2000.0).sin() } else { 0.0 });
+    let l = &a.lateral;
+    assert!(l.lateral_reversals.unwrap() >= 3, "{l:?}");
+    assert!(matches!(l.lateral_band, Some(LateralBand::Slight | LateralBand::Marked)), "{l:?}");
+    assert!(a.stability.loc_rms_dots.unwrap() > 0.3, "{:?}", a.stability);
+}
+
+#[test]
+fn lateral_is_not_measurable_without_runway_or_with_a_derived_one() {
+    let (track, tds) = straight_in(|_, _| 140.0, None);
+    let a = &approach::analyze_flight(&track, &[], &tds, &[], &AircraftRef::default(), &ApproachConfig::default())[0];
+    assert!(!a.lateral.measurable);
+    assert_eq!(a.lateral.lateral_band, None);
+    assert!(a.lateral.loc_max_dots.is_none() && a.lateral.lat_at_500_m.is_none() && a.lateral.lat_at_threshold_m.is_none());
+    assert!(a.lateral.lateral_reversals.is_none() && a.lateral.intercept_overshoot_m.is_none());
+
+    let mut b = lateral_of(|_| 0.0);
+    assert_eq!(b.lateral.lateral_band, Some(LateralBand::OnCentreline));
+    approach::apply_runway_geometry(&mut b, &RunwayGeometry { source: RunwayGeometrySource::Derived, ..Default::default() });
+    assert!(!b.lateral.measurable);
+    assert_eq!(b.lateral.lateral_band, None);
+    assert_eq!(b.runway.as_ref().unwrap().geometry.source, RunwayGeometrySource::Derived);
+    // database / user geometry keeps the band
+    let mut c = lateral_of(|_| 0.0);
+    approach::apply_runway_geometry(&mut c, &RunwayGeometry { source: RunwayGeometrySource::User, ..Default::default() });
+    assert_eq!(c.lateral.lateral_band, Some(LateralBand::OnCentreline));
+}
+
+#[test]
+fn lateral_band_thresholds() {
+    let cfg = ApproachConfig::default();
+    assert_eq!(approach::lateral_band_of(0.3, 0.5, &cfg), LateralBand::OnCentreline);
+    assert_eq!(approach::lateral_band_of(0.2, 0.7, &cfg), LateralBand::Slight);
+    assert_eq!(approach::lateral_band_of(0.6, 1.0, &cfg), LateralBand::Slight);
+    assert_eq!(approach::lateral_band_of(0.4, 1.2, &cfg), LateralBand::Marked);
+    assert_eq!(approach::lateral_band_of(0.7, 0.9, &cfg), LateralBand::Marked);
+}
+
+#[test]
+fn mock_circuit_lateral_guidance() {
+    let f = fly_loop(MockVariant::Standard, 0);
+    let all = approach::analyze_flight(&f.track, &f.phases, &f.touchdowns, &both_ends(MockFlight::runway()), &AircraftRef::default(), &ApproachConfig::default());
+    let l = &all[0].lateral;
+    assert!(l.measurable);
+    assert_eq!(l.lateral_band, Some(LateralBand::OnCentreline), "{l:?}");
+    assert!(l.lat_at_500_m.unwrap().abs() < 15.0 && l.lat_at_threshold_m.unwrap().abs() < 15.0, "{l:?}");
+    assert_eq!(l.lateral_reversals, Some(0), "{l:?}");
 }
 
 #[test]

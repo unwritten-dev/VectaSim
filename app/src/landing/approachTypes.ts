@@ -355,6 +355,16 @@ export interface ApproachConfig {
   locS1Dots: number;
   locS2Dots: number;
   locDurationS: number;
+  /** Lateral band thresholds (dots; VectaSim convention below the FSF ±1 dot gate), optional in older payloads. */
+  latBandOnRmsDots?: number;
+  latBandOnMaxDots?: number;
+  latBandSlightRmsDots?: number;
+  latBandSlightMaxDots?: number;
+  latReversalDots?: number;
+  latReversalFloorFt?: number;
+  latInterceptWindowS?: number;
+  latInterceptLookbackS?: number;
+  latOvershootMinDots?: number;
   speedS1AboveKt: number;
   speedS1BelowKt: number;
   speedS2AboveKt: number;
@@ -417,6 +427,32 @@ export interface ApproachConfig {
 }
 
 /** One approach of a flight (result of `approach_analysis`, time order). */
+/**
+ * Lateral band 1000 → 50 ft (VectaSim convention): onCentreline = RMS ≤ 0.3 dot and
+ * |max| ≤ 0.5 dot, slight = RMS ≤ 0.6 dot and |max| ≤ 1 dot (FSF gate), marked beyond.
+ */
+export type LateralBand = "onCentreline" | "slight" | "marked";
+
+/** Lateral guidance (extended centreline); offsets + = right. RMS: `stability.latRmsM` / `locRmsDots`. */
+export interface LateralStats {
+  /** Runway with known centreline (database / pilot); false without runway or with a runway derived from the own track. */
+  measurable: boolean;
+  /** Largest |localizer deviation| 1000 → 50 ft, sign kept, dots. */
+  locMaxDots: number | null;
+  /** Offset at the 500 ft gate, m / dots. */
+  latAt500M: number | null;
+  locAt500Dots: number | null;
+  /** Offset over the threshold (landing without crossing: last airborne sample; go-around: null), m. */
+  latAtThresholdM: number | null;
+  /** Largest offset on the far side within 20 s after "established" (null = clean intercept). */
+  interceptOvershootM: number | null;
+  interceptOvershootDots: number | null;
+  /** Side changes beyond 0.3 dot between 1000 and 100 ft ("S-Kurven"). */
+  lateralReversals: number | null;
+  /** null: not measurable (no runway, derived runway, too few samples). */
+  lateralBand: LateralBand | null;
+}
+
 export interface ApproachAnalysis {
   /** 0-based within the flight. */
   index: number;
@@ -438,6 +474,8 @@ export interface ApproachAnalysis {
   /** null: never below 1000 ft. */
   band: ApproachBand | null;
   stability: StabilityStats;
+  /** Lateral guidance; missing in payloads from before it existed. */
+  lateral?: LateralStats;
   energy: EnergyStats | null;
   goAround: GoAround | null;
   automation: AutomationStats | null;
@@ -508,6 +546,9 @@ export interface ApproachFact {
   goAroundDetectedBy: GoAroundSource | null;
   /** Where the runway geometry comes from (null: no runway, or cached before v3). */
   runwaySource?: RunwayGeometrySource | null;
+  /** Localizer RMS 1000 → 50 ft, dots (null: not measurable, derived runway, cached before v4). */
+  locRmsDots?: number | null;
+  lateralBand?: LateralBand | null;
   aircraftIcaoType: string | null;
   aircraftTitle: string | null;
   registration: string | null;

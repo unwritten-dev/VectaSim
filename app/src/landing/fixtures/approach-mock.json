@@ -448,6 +448,17 @@
   "bankRmsDeg": 0.8,
   "timeOutside": []
  },
+ "lateral": {
+  "measurable": true,
+  "locMaxDots": 0.09,
+  "latAt500M": 1.6,
+  "locAt500Dots": 0.02,
+  "latAtThresholdM": 1.5,
+  "interceptOvershootM": null,
+  "interceptOvershootDots": null,
+  "lateralReversals": 0,
+  "lateralBand": "onCentreline"
+ },
  "energy": {
   "tasSource": "derived",
   "atTenNm": null,

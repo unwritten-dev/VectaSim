@@ -8,7 +8,7 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
-use vectasim_core::approach::{self, ApproachAnalysis, ApproachBand, ElevationSource, FafReason, GateKind, GoAroundSource, MarkerKind, Severity};
+use vectasim_core::approach::{self, ApproachAnalysis, ApproachBand, ElevationSource, FafReason, GateKind, GoAroundSource, LateralBand, MarkerKind, Severity};
 use vectasim_core::landing::{CriterionKind, RunwayEnd, RunwayFrame, RunwayGeometrySource, angle_diff_deg, blend_runway, opposite_ident};
 use vectasim_core::{AircraftInfo, FlightPhase, FlightSummary, IntegrityFlags, LandingRateSource, TouchdownReport};
 
@@ -245,7 +245,8 @@ const MIGRATION_V14_COLUMNS: &[(&str, &str)] = &[
 /// `vectasim_core::approach` (or the row mapping below) change, so old rows are recomputed.
 /// 2: displaced thresholds move the runway geometry (glidepath origin, distances).
 /// 3: runways derived from the track / remembered in `user_runways` (fields without coordinates).
-pub const APPROACH_FACTS_VERSION: u32 = 3;
+/// 4: lateral guidance (localizer RMS and lateral band in the detail).
+pub const APPROACH_FACTS_VERSION: u32 = 4;
 
 /// Which end of a flight a stored METAR describes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -914,6 +915,11 @@ pub struct ApproachFactDetail {
     /// Where the matched runway's geometry comes from (None: rows before v3 / no runway).
     #[serde(default)]
     pub runway_source: Option<RunwayGeometrySource>,
+    /// Localizer RMS 1000 → 50 ft, dots; only with a known centreline (None: derived runway / before v4).
+    #[serde(default)]
+    pub loc_rms_dots: Option<f64>,
+    #[serde(default)]
+    pub lateral_band: Option<LateralBand>,
 }
 
 impl ApproachFactRow {
@@ -939,6 +945,8 @@ impl ApproachFactRow {
             threshold_height_ft: a.markers.iter().find(|m| m.kind == MarkerKind::Threshold).map(|m| m.hat_ft),
             go_around_detected_by: a.go_around.as_ref().map(|g| g.detected_by),
             runway_source: a.runway.as_ref().map(|r| r.geometry.source),
+            loc_rms_dots: a.stability.loc_rms_dots.filter(|_| a.lateral.measurable),
+            lateral_band: a.lateral.lateral_band,
         };
         Self {
             approach_index: a.index as u32,

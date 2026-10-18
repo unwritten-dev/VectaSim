@@ -38,7 +38,7 @@ VectaSim läuft neben Microsoft Flight Simulator 2020/2024, erkennt deinen Flug 
   <img src="docs/screenshots/debrief.png" alt="Landeauswertung: Kernsatz, Landerate, Aufsetzpunkt, g-Last und Anflugbewertung mit „stabil ab“" width="900">
 </p>
 
-- **Der ganze Anflug zählt**, nicht nur das Aufsetzen: Gleitpfad und Grundlinie in Dots, Speed gegen die geflogene Referenz, Sinkrate, Bank und Konfiguration an jedem Gate – nach den EASA-Kriterien für stabilisierte Anflüge, in vier Bändern von „stabil“ bis „instabil unter 500 ft“.
+- **Der ganze Anflug zählt**, nicht nur das Aufsetzen: Gleitpfad und Grundlinie in Dots, Speed gegen die geflogene Referenz, Sinkrate, Bank und Konfiguration an jedem Gate – nach den EASA-Kriterien für stabilisierte Anflüge, in vier Bändern von „stabil“ bis „instabil unter 500 ft“; die Grundlinie bekommt dazu eine eigene Kennzahl mit eigenem Band (RMS und max. in Dots, Ablage bei 500 ft und über der Schwelle, Überschießen beim Eindrehen, S-Kurven).
 - **Landerate nach festen, dokumentierten Regeln:** Sim-Wert mit Rückfall auf die letzte Sinkrate in der Luft, härtester Kontakt bei Bounces, kein Flug-Peak. Jede Zahl zeigt ihre Herkunft (Sim · gemessen · abgeleitet).
 - **Pisten-Draufsicht** mit Aufsetzpunkt, Mittellinien-Versatz, Aufsetzzone und Zielpunkt, **Anflugprofil** gegen den 3°-Gleitpfad mit Replay-Cursor, Abfangen, Rollout und der Wind aus dem METAR zum Landezeitpunkt.
 - **Durchstarten ist eine Entscheidung:** Ein Go-around bekommt seinen eigenen Debrief mit tiefstem Punkt, der abgebrochene Anflug wird vollständig bewertet.
@@ -98,7 +98,7 @@ Updates meldet VectaSim beim Start und installiert sie nach Bestätigung. Mehr D
 
 ## Status
 
-Alpha 0.2 – MSFS 2020/2024 über SimConnect. In Arbeit: X-Plane, englische Oberfläche, Volanta-Import aus dem JSON-Export, Code-Signing. Was sich geändert hat, steht im [CHANGELOG](CHANGELOG.md).
+Alpha 0.3 – MSFS 2020/2024 über SimConnect. In Arbeit: X-Plane, englische Oberfläche, Volanta-Import aus dem JSON-Export, Code-Signing. Was sich geändert hat, steht im [CHANGELOG](CHANGELOG.md).
 
 ## Mitmachen
 

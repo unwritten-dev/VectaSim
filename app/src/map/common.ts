@@ -88,7 +88,8 @@ export const PITCH_3D = 58;
 /**
  * 3D track: a translucent wall from the ground to the flown altitude and a solid ribbon at
  * the top (two fill-extrusion layers over one polygon source, geometry from
- * trackChunks.curtainGeoJson). Hidden until the 3D view is switched on.
+ * trackChunks.curtainGeoJson). Hidden until the 3D view is switched on. Inserted below the
+ * first symbol layer when `before` is given, so airport and place labels stay readable.
  */
 export function addCurtainLayers(map: maplibregl.Map, sourceId: string, before?: string) {
   map.addSource(sourceId, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
@@ -102,7 +103,7 @@ export function addCurtainLayers(map: maplibregl.Map, sourceId: string, before?:
         "fill-extrusion-color": trackColorExpr(),
         "fill-extrusion-base": 0,
         "fill-extrusion-height": ["get", "hM"],
-        "fill-extrusion-opacity": 0.22,
+        "fill-extrusion-opacity": 0.14,
       },
     },
     before,
@@ -118,10 +119,17 @@ export function addCurtainLayers(map: maplibregl.Map, sourceId: string, before?:
         "fill-extrusion-base": ["-", ["get", "hM"], ["get", "ribbonM"]],
         "fill-extrusion-height": ["get", "hM"],
         "fill-extrusion-opacity": 0.95,
+        // flat colour: the ribbon reads as the line at altitude, not as a shaded box
+        "fill-extrusion-vertical-gradient": false,
       },
     },
     before,
   );
+}
+
+/** Id of the first symbol layer of the current style (labels), to insert 3D layers below it. */
+export function firstSymbolLayer(map: maplibregl.Map): string | undefined {
+  return map.getStyle().layers?.find((l) => l.type === "symbol")?.id;
 }
 
 export function setCurtainVisible(map: maplibregl.Map, sourceId: string, on: boolean) {

@@ -9,7 +9,7 @@
 
 import { DASH, NNBSP, fmt, fmtClock, fmtNum, fmtSigned } from "../format";
 import { sideLabel } from "./geometry";
-import type { ApproachAnalysis, ApproachBand, ApproachCriterion, ApproachCriterionKind, ApproachGate, Exceedance, GateKind } from "./approachTypes";
+import type { ApproachAnalysis, ApproachBand, ApproachCriterion, ApproachCriterionKind, ApproachGate, Exceedance, GateKind, LateralBand } from "./approachTypes";
 import {
   isDerivedSource,
   type Band,
@@ -856,6 +856,117 @@ function fafNote(a: ApproachAnalysis): string | null {
   return null;
 }
 
+// ---- lateral guidance (extended centreline) ----------------------------------------------
+// Bands are a VectaSim convention (crates/vectasim-core/src/approach.rs, `lat_band_*`): FSF
+// ALAR only uses ±1 dot as the gate limit.
+
+export const LATERAL_BAND_LABEL: Record<LateralBand, string> = {
+  onCentreline: "auf der Grundlinie",
+  slight: "leichte Abweichung",
+  marked: "deutliche Abweichung",
+};
+
+/** Why the lateral guidance has no band: no runway, a runway derived from the own track, too few samples; null = assessed. */
+export function lateralUnmeasurableReason(a: ApproachAnalysis): string | null {
+  if (!a.runway) return "ohne Piste nicht messbar";
+  if (isDerivedRunway(a.runway) || a.lateral?.measurable === false) return "Piste aus Rollspur – nicht bewertbar";
+  if (!a.lateral || a.lateral.lateralBand == null) return "zu wenige Samples";
+  return null;
+}
+
+/** Largest |localizer deviation| below 500 ft (down to the band window bottom), from the profile; null without values. */
+export function maxLocBelow500(a: ApproachAnalysis): number | null {
+  let best: number | null = null;
+  for (const p of a.samples) {
+    if (p.onGround || p.locDots == null || p.hatFt >= 500 || p.hatFt < a.config.windowBottomFt) continue;
+    if (best == null || Math.abs(p.locDots) > Math.abs(best)) best = p.locDots;
+  }
+  return best;
+}
+
+/** Hero sub-line: "max. +0,4 Dots · bei 500 ft 12 m rechts · Schwelle 3 m links". */
+export function lateralSubLine(a: ApproachAnalysis): string {
+  const why = lateralUnmeasurableReason(a);
+  const l = a.lateral;
+  if (!l || (why && why !== "zu wenige Samples")) return why ?? "nicht messbar";
+  const parts: string[] = [];
+  if (l.locMaxDots != null) parts.push(`max. ${fmtSigned(l.locMaxDots, 1)}${NNBSP}Dots`);
+  if (l.latAt500M != null) parts.push(`bei 500${NNBSP}ft ${sideLabel(l.latAt500M)}`);
+  if (l.latAtThresholdM != null) parts.push(`Schwelle ${sideLabel(l.latAtThresholdM)}`);
+  return parts.join(" · ") || "zu wenige Samples";
+}
+
+/** "Grundlinie" line of the facts block: band, intercept overshoot, S-turns. */
+export function lateralFactText(a: ApproachAnalysis): string {
+  const why = lateralUnmeasurableReason(a);
+  const l = a.lateral;
+  if (!l || l.lateralBand == null || why) return why ?? "nicht messbar";
+  const parts = [LATERAL_BAND_LABEL[l.lateralBand]];
+  parts.push(
+    l.interceptOvershootM != null
+      ? `beim Eindrehen ${fmt(Math.abs(l.interceptOvershootM), 0, "m")} (${fmtNum(Math.abs(l.interceptOvershootDots ?? 0), 1)}${NNBSP}Dots) übergeschossen`
+      : "ohne Überschießen eingedreht",
+  );
+  if (l.lateralReversals != null) parts.push(l.lateralReversals === 0 ? "keine S-Kurven" : `${fmtNum(l.lateralReversals)} Seitenwechsel (S-Kurven)`);
+  return parts.join(" · ");
+}
+
+/** Key-sentence clause when the lateral band is not "on the centreline": "bei 500 ft 40 m rechts der Grundlinie". */
+function lateralClause(a: ApproachAnalysis): string | null {
+  const l = a.lateral;
+  if (!l || l.lateralBand == null || l.lateralBand === "onCentreline" || lateralUnmeasurableReason(a)) return null;
+  if (l.latAt500M != null && Math.abs(l.latAt500M) >= 0.5) return `bei 500${NNBSP}ft ${fmt(Math.abs(l.latAt500M), 0, "m")} ${l.latAt500M > 0 ? "rechts" : "links"} der Grundlinie`;
+  return `${LATERAL_BAND_LABEL[l.lateralBand]} von der Grundlinie${l.locMaxDots != null ? ` (max. ${fmtSigned(l.locMaxDots, 1)}${NNBSP}Dots)` : ""}`;
+}
+
+/** Lateral observations: intercept overshoot, S-turns, offset below 500 ft, over the threshold, not assessable. */
+export function lateralHints(a: ApproachAnalysis): Hint[] {
+  const out: Hint[] = [];
+  if (!a.runway) return out; // the "Keine Piste zugeordnet" hint already names it
+  const l = a.lateral;
+  if (isDerivedRunway(a.runway) || l?.measurable === false) {
+    out.push({ tone: "info", text: "Piste aus deiner Rollspur abgeleitet – Querablage zur Grundlinie nicht bewertbar" });
+    return out;
+  }
+  if (!l) return out;
+  const od = l.interceptOvershootDots;
+  if (l.interceptOvershootM != null && od != null && Math.abs(od) > 0.5) {
+    out.push({
+      tone: "warn",
+      text: `Beim Eindrehen ${fmt(Math.abs(l.interceptOvershootM), 0, "m")} (${fmtNum(Math.abs(od), 1)}${NNBSP}Dots) über die Grundlinie nach ${l.interceptOvershootM > 0 ? "rechts" : "links"} hinausgeschossen`,
+    });
+  }
+  const rev = l.lateralReversals;
+  if (rev != null && rev >= 2) {
+    const dots = fmtNum(a.config.latReversalDots ?? 0.3, 1);
+    const floor = fmt(a.config.latReversalFloorFt ?? 100, 0, "ft");
+    out.push({
+      tone: rev >= 3 ? "warn" : "info",
+      text: `${fmtNum(rev)} Seitenwechsel um die Grundlinie zwischen ${fmtNum(a.config.windowTopFt)} und ${floor} (S-Kurven, Ablage über ${dots}${NNBSP}Dots)`,
+    });
+  }
+  const low = maxLocBelow500(a);
+  if (low != null && Math.abs(low) > 0.5) {
+    out.push({ tone: "warn", text: `Unter 500${NNBSP}ft bis ${fmtNum(Math.abs(low), 1)}${NNBSP}Dots ${low > 0 ? "rechts" : "links"} der Grundlinie – über 0,5${NNBSP}Dots` });
+  }
+  const thr = l.latAtThresholdM;
+  if (thr != null && a.outcome.kind !== "goAround" && Math.abs(thr) > 10) {
+    const w = a.runway.widthM;
+    const warn = w != null && w > 0 && Math.abs(thr) > w / 4;
+    out.push({
+      tone: warn ? "warn" : "info",
+      text: `Über der Schwelle ${sideLabel(thr)} der Mittellinie${warn ? ` – mehr als ein Viertel der Pistenbreite (${fmt(w, 0, "m")})` : ""}`,
+    });
+  }
+  if (l.lateralBand === "onCentreline" && out.length === 0) {
+    out.push({
+      tone: "ok",
+      text: `Grundlinie ${fmtNum(a.config.windowTopFt)} → ${fmt(a.config.windowBottomFt, 0, "ft")} gehalten (RMS ${fmtNum(a.stability.locRmsDots ?? 0, 2)}${NNBSP}Dots)`,
+    });
+  }
+  return out;
+}
+
 /**
  * The sentence the approach section opens with. Landing: where the aircraft was established,
  * from where it stayed stable, then the main exceedance or a notable FAF offset –
@@ -875,6 +986,8 @@ export function approachKeySentence(a: ApproachAnalysis): string {
   else first.push("Nicht stabil auf der verlängerten Mittellinie eingedreht");
   const sf = a.stability.stableFromFt;
   if (a.band != null) first.push(sf != null ? `stabil ab ${fmt(sf, 0, "ft")}` : "bis 50 ft nie durchgehend stabil");
+  const lat = lateralClause(a);
+  if (lat) first.push(lat);
   let out = `${first.join(", ")}.`;
   const main = mainExceedance(a);
   if (main) {
@@ -921,8 +1034,8 @@ export function approachCardLine(a: ApproachAnalysis): string {
   return parts.join(" · ");
 }
 
-/** Provenance of the three approach hero values. */
-export function approachProvenance(a: ApproachAnalysis): { stable: Provenance; glidepath: Provenance; speed: Provenance } {
+/** Provenance of the four approach hero values. */
+export function approachProvenance(a: ApproachAnalysis): { stable: Provenance; glidepath: Provenance; lateral: Provenance; speed: Provenance } {
   const st = a.stability;
   const ref = a.reference;
   const c = a.config;
@@ -934,6 +1047,14 @@ export function approachProvenance(a: ApproachAnalysis): { stable: Provenance; g
     glidepath: {
       kind: "derived",
       detail: `Höhe gegen einen angenommenen ${fmt(ref.glidepathDeg, 0, "°")}-Pfad über ${fmt(ref.tchFt, 0, "ft")} Schwellenhöhe, aus Position und Schwellen-Koordinaten berechnet (keine Verfahrensdaten). 1 Dot = ${fmtNum(c.gsDotDeg, 2)}°. RMS über ${fmtNum(c.windowTopFt)} → ${fmt(c.gsFloorFt, 0, "ft")}.`,
+    },
+    lateral: {
+      kind: "derived",
+      detail: !a.runway
+        ? "Keine Piste zugeordnet – die Querablage zur verlängerten Mittellinie ist nicht messbar."
+        : isDerivedRunway(a.runway) || a.lateral?.measurable === false
+          ? `${LATERAL_REASON} Die Querablage im Anflug ist deshalb nicht bewertbar.`
+          : `Querablage zur verlängerten Mittellinie aus Position und Schwellen-Koordinaten. Dots geometrisch: Winkel von einer virtuellen Antenne ${fmt(c.locAntennaBeyondEndM, 0, "m")} hinter dem Pistenende, 1 Dot = ${fmt(c.locDotMAtThreshold, 0, "m")} an der Schwelle. RMS über ${fmtNum(c.windowTopFt)} → ${fmt(c.windowBottomFt, 0, "ft")}. Band nach VectaSim-Konvention: auf der Grundlinie RMS ≤ ${fmtNum(c.latBandOnRmsDots ?? 0.3, 1)} und max. ≤ ${fmtNum(c.latBandOnMaxDots ?? 0.5, 1)}${NNBSP}Dots, leichte Abweichung RMS ≤ ${fmtNum(c.latBandSlightRmsDots ?? 0.6, 1)} und max. ≤ ${fmtNum(c.latBandSlightMaxDots ?? 1, 1)}${NNBSP}Dots (FSF-Gate ±1${NNBSP}Dot), darüber deutlich.`,
     },
     speed: {
       kind: "measured",
@@ -970,6 +1091,7 @@ export function approachHints(a: ApproachAnalysis): Hint[] {
   } else {
     out.push({ tone: "info", text: "Keine Piste zugeordnet – Gleitpfad, Kurs, Höhe zum Pfad und Energie entfallen" });
   }
+  out.push(...lateralHints(a));
 
   if (ref.vappSource === "flown") {
     out.push({

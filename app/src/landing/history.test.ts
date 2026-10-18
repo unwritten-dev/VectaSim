@@ -273,6 +273,17 @@ describe("trendSeries", () => {
     expect(s.tdz[1].rolling).toBe(0.75);
     expect(s.centerline.map((p) => p.value)).toEqual([null, 1]);
     expect(s.stableFrom.map((p) => p.value)).toEqual([null, 900]);
+    // lateral RMS only where measurable (known centreline)
+    const l = trendSeries(facts, "month", {
+      approaches: [
+        af({ endedMs: sep, stableFromFt: 1000, locRmsDots: 0.2 }),
+        af({ endedMs: sep + 1, approachIndex: 1, stableFromFt: 1000, locRmsDots: 0.4 }),
+        af({ endedMs: T0, stableFromFt: 900, locRmsDots: 0.9, runwaySource: "derived" }),
+        af({ endedMs: T0, approachIndex: 2, stableFromFt: 900, locRmsDots: null }),
+      ],
+    });
+    expect(l.lateral.map((p) => [p.key, p.n])).toEqual([["2026-09", 2]]);
+    expect(l.lateral[0].value).toBeCloseTo(0.3);
   });
 
   it("ISO weeks start on Monday", () => {

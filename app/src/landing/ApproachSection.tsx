@@ -9,6 +9,9 @@ import {
   approachProvenance,
   exceedanceRange,
   gateMark,
+  lateralFactText,
+  lateralSubLine,
+  lateralUnmeasurableReason,
   valueText,
 } from "./facts";
 import { Hero } from "./Hero";
@@ -52,8 +55,8 @@ function configEventText(e: ConfigEvent): string {
 }
 
 /**
- * Section "Anflug": key sentence, band, three hero values (stable from, glidepath RMS, speed
- * spread), established point, configuration events and the exceedances 1000 → 50 ft. For a
+ * Section "Anflug": key sentence, band, four hero values (stable from, glidepath RMS, lateral
+ * RMS on the extended centreline, speed spread), established point, lateral band, configuration events and the exceedances 1000 → 50 ft. For a
  * go-around also the lowest point.
  */
 export default function ApproachSection({ status, title = "Anflug" }: { status: ApproachStatus; title?: string }) {
@@ -95,6 +98,13 @@ function ApproachBody({ a, title }: { a: ApproachAnalysis; title: string }) {
     st.gpMaxAboveDots != null || st.gpMaxBelowDots != null
       ? `max. ${fmtSigned(st.gpMaxAboveDots ?? 0, 1)} / ${fmtSigned(st.gpMaxBelowDots ?? 0, 1)}${NNBSP}Dots`
       : null;
+
+  // lateral guidance: dots, metres as the fallback; nothing with a derived runway / without one
+  const latWhy = lateralUnmeasurableReason(a);
+  const latShown = latWhy == null || latWhy === "zu wenige Samples";
+  const latValue = !latShown ? "–" : st.locRmsDots != null ? fmtNum(st.locRmsDots, 2) : st.latRmsM != null ? fmt(st.latRmsM, 0) : "–";
+  const latUnit = !latShown ? undefined : st.locRmsDots != null ? "Dots" : st.latRmsM != null ? "m" : undefined;
+  const latRmsM = latShown && st.locRmsDots != null && st.latRmsM != null ? `RMS ${fmt(st.latRmsM, 0, "m")}` : null;
 
   const speedSub2 =
     ref.vappSource === "flown"
@@ -143,6 +153,18 @@ function ApproachBody({ a, title }: { a: ApproachAnalysis; title: string }) {
           }
         />
         <Hero
+          label="Grundlinie (RMS)"
+          value={latValue}
+          unit={latUnit}
+          source={src.lateral}
+          sub={
+            <>
+              <div>{lateralSubLine(a)}</div>
+              {latRmsM && <div>{latRmsM}</div>}
+            </>
+          }
+        />
+        <Hero
           label="Speed (MAD)"
           value={st.iasMadKt != null ? fmtNum(st.iasMadKt, 1) : "–"}
           unit="kt"
@@ -161,6 +183,8 @@ function ApproachBody({ a, title }: { a: ApproachAnalysis; title: string }) {
       <dl className="approach-facts">
         <dt>Eingedreht ab</dt>
         <dd className="num">{est ? `${fmt(est.distNm, 1, "nm")} · ${fmt(est.hatFt, 0, "ft")}` : a.runway ? "nicht stabil eingedreht" : "ohne Piste nicht bestimmbar"}</dd>
+        <dt>Grundlinie</dt>
+        <dd className="num">{lateralFactText(a)}</dd>
         <dt>Konfiguration</dt>
         <dd className="num">{a.configEvents.length ? a.configEvents.map(configEventText).join(" · ") : "keine Änderung im Anflug"}</dd>
         <dt>Referenz</dt>

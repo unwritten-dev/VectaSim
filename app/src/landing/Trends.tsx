@@ -41,7 +41,7 @@ function options(xs: string[]): Array<{ key: string; count: number }> {
 }
 
 interface ChartDef {
-  id: "rate" | "distance" | "stableFrom" | "tdz";
+  id: "rate" | "distance" | "stableFrom" | "lateral" | "tdz";
   title: string;
   unit: string;
   /** Value → display number (TDZ 0..1 → %). */
@@ -52,12 +52,15 @@ interface ChartDef {
   /** Reference lines (band limits). */
   refs?: number[];
   note: string;
+  /** Decimals of values / axis labels (default 0). */
+  digits?: number;
 }
 
 const CHARTS: ChartDef[] = [
   { id: "rate", title: "Landerate", unit: "fpm", scale: (v) => v, floor: 0, refs: [150, 300, 600], note: "Betrag, kleiner ist weicher" },
   { id: "distance", title: "Aufsetzdistanz", unit: "m", scale: (v) => v, floor: 0, note: "hinter der Schwelle" },
   { id: "stableFrom", title: "Stabil ab", unit: "ft", scale: (v) => v, floor: 0, refs: [500, 1000], note: "aus der Anflugbewertung; nie stabil zählt nicht" },
+  { id: "lateral", title: "Grundlinie (RMS)", unit: "Dots", scale: (v) => v, floor: 0, refs: [0.3, 0.6], digits: 2, note: "Lokalizer-RMS 1000 → 50 ft, nur mit bekannter Mittellinie" },
   { id: "tdz", title: "Aufsetzzone", unit: "%", scale: (v) => v * 100, floor: 0, ceil: 100, note: "Anteil in der Aufsetzzone" },
 ];
 
@@ -71,7 +74,7 @@ function TrendChart({ def, points, bucket, width }: { def: ChartDef; points: Tre
   const vals = points.filter((p) => p.value != null);
   const last = [...points].reverse().find((p) => p.rolling != null);
   const first = points.find((p) => p.rolling != null);
-  const fmtV = (v: number | null | undefined) => (v == null ? DASH : fmt(def.scale(v), 0, def.unit));
+  const fmtV = (v: number | null | undefined) => (v == null ? DASH : fmt(def.scale(v), def.digits ?? 0, def.unit));
   const label = `${def.title} ${BUCKET_LABEL[bucket]}: ${vals.length} Werte${first && last && first !== last ? `, gleitender Median von ${fmtV(first.rolling)} auf ${fmtV(last.rolling)}` : last ? `, ${fmtV(last.rolling)}` : ""} – Werte in der Tabelle unten`;
   if (vals.length === 0) {
     return (
@@ -134,7 +137,7 @@ function TrendChart({ def, points, bucket, width }: { def: ChartDef; points: Tre
           <g key={t}>
             <line x1={PAD_L} x2={width - PAD_R} y1={Y(t)} y2={Y(t)} className="tr-grid" />
             <text x={PAD_L - 6} y={Y(t) + 4} textAnchor="end" className="tr-label">
-              {fmtNum(t, 0)}
+              {fmtNum(t, def.digits ? 1 : 0)}
             </text>
           </g>
         ))}
@@ -421,7 +424,8 @@ function TrendTable({ facts, approaches, bucket, series }: { facts: HistLanding[
   const cl = byKey(series.centerline);
   const stab = byKey(series.stableFrom);
   const tdz = byKey(series.tdz);
-  const keys = [...new Set([...series.rate.map((p) => p.key), ...series.stableFrom.map((p) => p.key)])].sort().reverse();
+  const lat = byKey(series.lateral);
+  const keys = [...new Set([...series.rate.map((p) => p.key), ...series.stableFrom.map((p) => p.key), ...series.lateral.map((p) => p.key)])].sort().reverse();
   const rate = byKey(series.rate);
   return (
     <details className="dp-table">
@@ -450,11 +454,14 @@ function TrendTable({ facts, approaches, bucket, series }: { facts: HistLanding[
               <th scope="col" className="num-col">
                 Stabil ab
               </th>
+              <th scope="col" className="num-col">
+                Grundlinie
+              </th>
             </tr>
           </thead>
           <tbody>
             {keys.map((k) => {
-              const p = rate.get(k) ?? stab.get(k)!;
+              const p = rate.get(k) ?? stab.get(k) ?? lat.get(k)!;
               const t = tdz.get(k)?.value;
               return (
                 <tr key={k}>
@@ -465,6 +472,7 @@ function TrendTable({ facts, approaches, bucket, series }: { facts: HistLanding[
                   <td className="num num-col">{fmt(cl.get(k)?.value, 0, "m")}</td>
                   <td className="num num-col">{t != null ? `${fmtNum(t * 100, 0)}${NNBSP}%` : DASH}</td>
                   <td className="num num-col">{fmt(stab.get(k)?.value, 0, "ft")}</td>
+                  <td className="num num-col">{fmt(lat.get(k)?.value, 2, "Dots")}</td>
                 </tr>
               );
             })}

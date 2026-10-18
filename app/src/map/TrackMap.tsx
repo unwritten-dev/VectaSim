@@ -5,7 +5,7 @@ import { loadBasemapStyle } from "./basemap";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./maplibreWorker";
 import type { TouchdownReport, TrackSample } from "../types";
-import { addCurtainLayers, addTrackLayers, pointFeature, samplesToPoints, setCurtainVisible, setPitched, trackPoseAt } from "./common";
+import { addCurtainLayers, addTrackLayers, firstSymbolLayer, pointFeature, samplesToPoints, setCurtainVisible, setPitched, trackPoseAt } from "./common";
 import { useReplayStore } from "../landing/replayStore";
 import { bandedTrackGeoJson, curtainGeoJson, thinPoints } from "./trackChunks";
 import { addAirportDiagramLayers } from "./airportDiagram";
@@ -69,7 +69,7 @@ export default function TrackMap({ samples, touchdowns, departure, arrival }: Pr
         diagramOff?.();
         diagramOff = addAirportDiagramLayers(map);
         addTrackLayers(map, "track");
-        addCurtainLayers(map, "track-3d");
+        addCurtainLayers(map, "track-3d", firstSymbolLayer(map));
         setCurtainVisible(map, "track-3d", view3dRef.current);
         map.addSource("markers", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
         map.addLayer({

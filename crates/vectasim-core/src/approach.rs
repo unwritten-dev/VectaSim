@@ -155,6 +155,35 @@ pub struct ApproachConfig {
     pub loc_s1_dots: f64,
     pub loc_s2_dots: f64,
     pub loc_duration_s: f64,
+    /// Lateral guidance band ([`LateralBand`]) over the band window 1000 → 50 ft, in
+    /// localizer dots. FSF ALAR uses ±1 dot only as the gate limit; the finer steps are a
+    /// VectaSim convention: "on the centreline" = RMS ≤ `lat_band_on_rms_dots` and
+    /// |max| ≤ `lat_band_on_max_dots`; "slight" = RMS ≤ `lat_band_slight_rms_dots` and
+    /// |max| ≤ `lat_band_slight_max_dots` (the FSF gate); "marked" beyond.
+    #[serde(default = "d_lat_on_rms")]
+    pub lat_band_on_rms_dots: f64,
+    #[serde(default = "d_lat_on_max")]
+    pub lat_band_on_max_dots: f64,
+    #[serde(default = "d_lat_slight_rms")]
+    pub lat_band_slight_rms_dots: f64,
+    #[serde(default = "d_lat_slight_max")]
+    pub lat_band_slight_max_dots: f64,
+    /// "S-turns": sign changes of the lateral offset between `window_top_ft` and this HAT,
+    /// counting only offsets beyond `lat_reversal_dots` (VectaSim convention).
+    #[serde(default = "d_lat_reversal_dots")]
+    pub lat_reversal_dots: f64,
+    #[serde(default = "d_lat_reversal_floor")]
+    pub lat_reversal_floor_ft: f64,
+    /// Intercept overshoot: the largest offset on the far side within this many seconds
+    /// after "established"; the side flown in from is the last offset beyond
+    /// `lat_reversal_dots` up to `lat_intercept_lookback_s` before it. Below
+    /// `lat_overshoot_min_dots` it counts as a clean intercept (None).
+    #[serde(default = "d_lat_intercept_window")]
+    pub lat_intercept_window_s: f64,
+    #[serde(default = "d_lat_intercept_lookback")]
+    pub lat_intercept_lookback_s: f64,
+    #[serde(default = "d_lat_overshoot_min")]
+    pub lat_overshoot_min_dots: f64,
     /// Speed window around the reference speed, kt (S1/S2 above and below).
     pub speed_s1_above_kt: f64,
     pub speed_s1_below_kt: f64,
@@ -258,6 +287,15 @@ impl Default for ApproachConfig {
             loc_s1_dots: 1.0,
             loc_s2_dots: 1.5,
             loc_duration_s: 5.0,
+            lat_band_on_rms_dots: d_lat_on_rms(),
+            lat_band_on_max_dots: d_lat_on_max(),
+            lat_band_slight_rms_dots: d_lat_slight_rms(),
+            lat_band_slight_max_dots: d_lat_slight_max(),
+            lat_reversal_dots: d_lat_reversal_dots(),
+            lat_reversal_floor_ft: d_lat_reversal_floor(),
+            lat_intercept_window_s: d_lat_intercept_window(),
+            lat_intercept_lookback_s: d_lat_intercept_lookback(),
+            lat_overshoot_min_dots: d_lat_overshoot_min(),
             speed_s1_above_kt: 20.0,
             speed_s1_below_kt: 5.0,
             speed_s2_above_kt: 35.0,
@@ -319,6 +357,35 @@ impl Default for ApproachConfig {
             min_stat_samples: 5,
         }
     }
+}
+
+// serde defaults of the lateral thresholds (configs serialised before they existed)
+fn d_lat_on_rms() -> f64 {
+    0.3
+}
+fn d_lat_on_max() -> f64 {
+    0.5
+}
+fn d_lat_slight_rms() -> f64 {
+    0.6
+}
+fn d_lat_slight_max() -> f64 {
+    1.0
+}
+fn d_lat_reversal_dots() -> f64 {
+    0.3
+}
+fn d_lat_reversal_floor() -> f64 {
+    100.0
+}
+fn d_lat_intercept_window() -> f64 {
+    20.0
+}
+fn d_lat_intercept_lookback() -> f64 {
+    60.0
+}
+fn d_lat_overshoot_min() -> f64 {
+    0.1
 }
 
 // ---- output ---------------------------------------------------------------------------
@@ -603,6 +670,44 @@ pub struct StabilityStats {
     pub time_outside: Vec<TimeOutside>,
 }
 
+/// Lateral guidance over the band window (thresholds: `ApproachConfig::lat_band_*`,
+/// VectaSim convention below the FSF ±1 dot gate).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LateralBand {
+    /// RMS ≤ 0.3 dot and |max| ≤ 0.5 dot.
+    OnCentreline,
+    /// RMS ≤ 0.6 dot and |max| ≤ 1 dot.
+    Slight,
+    Marked,
+}
+
+/// Lateral guidance (extended centreline) as its own dimension next to the glidepath.
+/// Offsets in metres / localizer dots, positive = right of the centreline. RMS values are
+/// [`StabilityStats::lat_rms_m`] / [`StabilityStats::loc_rms_dots`]. All `None` without a
+/// runway; with a runway derived from the own track (`measurable` false) the band is `None`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct LateralStats {
+    /// A runway from the database or set by the pilot: the centreline is known.
+    pub measurable: bool,
+    /// Largest |localizer deviation| 1000 → 50 ft, sign kept, dots.
+    pub loc_max_dots: Option<f64>,
+    /// Offset where the 500 ft gate was passed.
+    pub lat_at_500_m: Option<f64>,
+    pub loc_at_500_dots: Option<f64>,
+    /// Offset over the threshold (landing without a threshold crossing: last airborne
+    /// sample; go-around: None).
+    pub lat_at_threshold_m: Option<f64>,
+    /// Largest offset on the far side within `lat_intercept_window_s` after "established";
+    /// None = clean intercept, no intercept seen, or not established.
+    pub intercept_overshoot_m: Option<f64>,
+    pub intercept_overshoot_dots: Option<f64>,
+    /// Sign changes of the offset (beyond `lat_reversal_dots`) between 1000 and 100 ft.
+    pub lateral_reversals: Option<u32>,
+    pub lateral_band: Option<LateralBand>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum TasSource {
@@ -754,6 +859,9 @@ pub struct ApproachAnalysis {
     /// None when the approach never got below 1000 ft (nothing to assess).
     pub band: Option<ApproachBand>,
     pub stability: StabilityStats,
+    /// Lateral guidance (extended centreline).
+    #[serde(default)]
+    pub lateral: LateralStats,
     pub energy: Option<EnergyStats>,
     pub go_around: Option<GoAround>,
     pub automation: Option<AutomationStats>,
@@ -1326,6 +1434,99 @@ fn band_of(ex: &[Exceedance]) -> ApproachBand {
     }
 }
 
+/// Lateral band from the RMS and the largest |deviation| (dots), see `ApproachConfig::lat_band_*`.
+pub fn lateral_band_of(rms_dots: f64, max_abs_dots: f64, cfg: &ApproachConfig) -> LateralBand {
+    if rms_dots <= cfg.lat_band_on_rms_dots && max_abs_dots <= cfg.lat_band_on_max_dots {
+        LateralBand::OnCentreline
+    } else if rms_dots <= cfg.lat_band_slight_rms_dots && max_abs_dots <= cfg.lat_band_slight_max_dots {
+        LateralBand::Slight
+    } else {
+        LateralBand::Marked
+    }
+}
+
+/// Applies the provenance of the matched runway's geometry (resolved by the caller). With
+/// geometry derived from the own track the "centreline" is the pilot's own line: the lateral
+/// band is not assessable (`measurable` false, band None; the raw offsets stay).
+pub fn apply_runway_geometry(a: &mut ApproachAnalysis, g: &RunwayGeometry) {
+    let Some(r) = a.runway.as_mut() else { return };
+    r.apply_geometry(g);
+    if g.source.is_derived() {
+        a.lateral.measurable = false;
+        a.lateral.lateral_band = None;
+    }
+}
+
+struct LateralCtx<'a> {
+    measurable: bool,
+    band_lo: usize,
+    bottom: Option<usize>,
+    air_end: usize,
+    landed: bool,
+    established_l: Option<usize>,
+    g500: Option<&'a ApproachGateSample>,
+}
+
+fn lateral_stats(pts: &[ApproachProfilePoint], c: LateralCtx<'_>, st: &StabilityStats, cfg: &ApproachConfig) -> LateralStats {
+    if !c.measurable || pts.is_empty() {
+        return LateralStats::default();
+    }
+    let mut out = LateralStats { measurable: true, ..Default::default() };
+    if let Some(b) = c.bottom.filter(|&b| c.band_lo <= b) {
+        let win: Vec<&ApproachProfilePoint> = pts[c.band_lo..=b].iter().filter(|q| !q.on_ground).collect();
+        let dots: Vec<f64> = win.iter().filter_map(|q| q.loc_dots).collect();
+        if dots.len() >= cfg.min_stat_samples {
+            out.loc_max_dots = dots.iter().copied().max_by(|a, b| a.abs().total_cmp(&b.abs()));
+        }
+        // S-turns: side changes beyond the dead band, 1000 → 100 ft
+        let rev: Vec<f64> = win.iter().filter(|q| q.hat_ft >= cfg.lat_reversal_floor_ft).filter_map(|q| q.loc_dots).collect();
+        if rev.len() >= cfg.min_stat_samples {
+            let (mut side, mut n) = (0.0f64, 0u32);
+            for d in rev.into_iter().filter(|d| d.abs() > cfg.lat_reversal_dots) {
+                if side != 0.0 && d.signum() != side {
+                    n += 1;
+                }
+                side = d.signum();
+            }
+            out.lateral_reversals = Some(n);
+        }
+    }
+    out.lateral_band = st.loc_rms_dots.zip(out.loc_max_dots).map(|(r, m)| lateral_band_of(r, m.abs(), cfg));
+    out.lat_at_500_m = c.g500.and_then(|s| s.y_m);
+    out.loc_at_500_dots = c.g500.and_then(|s| s.loc_dots);
+
+    // over the threshold (last crossing while airborne), else the last airborne sample of a landing
+    let air = &pts[..=c.air_end.min(pts.len() - 1)];
+    let crossing = (0..air.len().saturating_sub(1)).rev().find_map(|l| match (air[l].x_m, air[l + 1].x_m, air[l].y_m, air[l + 1].y_m) {
+        (Some(x0), Some(x1), Some(y0), Some(y1)) if x0 < 0.0 && x1 >= 0.0 => Some(lerp(y0, y1, -x0 / (x1 - x0))),
+        _ => None,
+    });
+    out.lat_at_threshold_m = crossing.or_else(|| if c.landed { air.last().and_then(|q| q.y_m) } else { None });
+
+    // intercept overshoot: far side within the first seconds after "established"
+    if let Some(k) = c.established_l.filter(|&k| k < air.len()) {
+        let tk = pts[k].t_ms;
+        let look = (cfg.lat_intercept_lookback_s * 1000.0) as u64;
+        let side = (0..=k)
+            .rev()
+            .take_while(|&l| pts[l].t_ms + look >= tk)
+            .find_map(|l| pts[l].loc_dots.filter(|d| d.abs() > cfg.lat_reversal_dots).map(f64::signum));
+        if let Some(side) = side {
+            let lim = tk + (cfg.lat_intercept_window_s * 1000.0) as u64;
+            let far = (k..air.len())
+                .take_while(|&l| pts[l].t_ms <= lim)
+                .filter_map(|l| pts[l].loc_dots.zip(pts[l].y_m))
+                .filter(|(d, _)| d * side < 0.0)
+                .max_by(|a, b| a.0.abs().total_cmp(&b.0.abs()));
+            if let Some((d, y)) = far.filter(|(d, _)| d.abs() >= cfg.lat_overshoot_min_dots) {
+                out.intercept_overshoot_m = Some(y);
+                out.intercept_overshoot_dots = Some(d);
+            }
+        }
+    }
+    out
+}
+
 fn analyze_attempt(inp: &Input, a: &ApproachAttempt, lower: usize, index: usize) -> Option<ApproachAnalysis> {
     let (track, cfg) = (inp.track, inp.cfg);
     let end = a.end_index;
@@ -1723,6 +1924,9 @@ fn analyze_attempt(inp: &Input, a: &ApproachAttempt, lower: usize, index: usize)
         }
     }
 
+    // lateral guidance (extended centreline)
+    let lateral = lateral_stats(pts, LateralCtx { measurable: frame.is_some(), band_lo, bottom, air_end, landed, established_l, g500: g500.as_ref() }, &st, cfg);
+
     // energy
     let energy = (frame.is_some() && vapp.is_some()).then(|| {
         let split = |s: &ApproachGateSample| {
@@ -1813,6 +2017,7 @@ fn analyze_attempt(inp: &Input, a: &ApproachAttempt, lower: usize, index: usize)
         exceedances: exceed,
         band,
         stability: st,
+        lateral,
         energy,
         go_around,
         automation: None,

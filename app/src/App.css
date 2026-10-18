@@ -281,8 +281,8 @@ input[type="checkbox"] {
   display: flex;
   align-items: stretch;
   height: var(--titlebar-h);
-  background: var(--surface-1);
-  border-bottom: 1px solid var(--hairline);
+  /* part of the canvas, not a separate strip: same background as sidebar and content, no rule */
+  background: var(--bg);
   color: var(--text-muted);
   user-select: none;
   -webkit-user-select: none;
@@ -339,7 +339,7 @@ input[type="checkbox"] {
   shape-rendering: geometricPrecision;
 }
 .titlebar button.titlebar-btn:hover:not(:disabled) {
-  background: var(--surface-3);
+  background: var(--surface-2);
   color: var(--text);
 }
 .titlebar button.titlebar-btn:active:not(:disabled) {

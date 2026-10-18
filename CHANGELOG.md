@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## 0.3.0 – 2026-10-18 (Alpha)
+
+Zweite Alpha: Grundlinie als eigene Dimension der Anflugbewertung, überarbeitete 3D-Ansicht.
+
+### Karte
+
+- 3D-Ansicht überarbeitet: Das Band in Flughöhe folgt jetzt Abtastung für Abtastung statt in 200-ft-Stufen zu springen, keine Lücken oder Sägezähne mehr an den Abschnittsgrenzen; der Vorhang ist dezenter (14 % statt 22 %) und liegt unter den Beschriftungen von Flughäfen und Orten
+
+### Anflug
+- **Grundlinie als eigene Kennzahl** neben dem Gleitpfad: vierte Hero-Kennzahl *Grundlinie (RMS)* im Debrief (Dots, sonst Meter; Herkunft ABGEL.) mit größter Ablage, Ablage bei 500 ft und über der Schwelle (+ = rechts); Zeile *Grundlinie* mit Band, Überschießen beim Eindrehen und S-Kurven
+- Neue Werte der Anflugbewertung (`lateral`): `locMaxDots` (größte Ablage 1000 → 50 ft), `latAt500M`/`locAt500Dots`, `latAtThresholdM`, `interceptOvershootM`/`-Dots` (Gegenseite in den ersten 20 s nach „eingedreht“), `lateralReversals` (Seitenwechsel über 0,3 Dot zwischen 1000 und 100 ft) und `lateralBand` – „auf der Grundlinie“ (RMS ≤ 0,3 und max. ≤ 0,5 Dot), „leichte Abweichung“ (RMS ≤ 0,6 und max. ≤ 1 Dot = FSF-Gate), „deutlich“ darüber; die feineren Stufen sind VectaSim-Konvention, Schwellen in `ApproachConfig`. Ohne Piste oder mit aus der Rollspur abgeleiteter Piste nicht bewertet
+- Kernsatz nennt die Ablage bei 500 ft, wenn der Anflug nicht auf der Grundlinie lag; neue Hinweise zu Überschießen (> 0,5 Dot), S-Kurven (ab 2/3), Ablage unter 500 ft (> 0,5 Dot), Ablage über der Schwelle (> 10 m / > ¼ Pistenbreite) und zu nicht bewertbarer Querablage
+- Streubild: Kachel *Grundlinie 500 ft* (Ø |Ablage|); Verlauf: Reihe *Grundlinie (RMS)* in Dots. Die gecachten Anflug-Fakten werden einmal neu berechnet (Version 4)
+
+### Oberfläche
+- Die Titelleiste ist Teil der Fläche: gleicher Hintergrund wie Sidebar und Inhalt, keine Trennlinie mehr darunter; die Fensterknöpfe heben sich nur noch beim Überfahren ab
+
 ## 0.2.0 – 2026-10-18 (Alpha)
 
 Erste öffentliche Vorabversion. Alles unten ist seit 0.1.0 dazugekommen; die Oberfläche ist deutsch, Flugphasen englisch.

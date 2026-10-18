@@ -24,6 +24,10 @@ describe("ApproachSection", () => {
     expect(h).toContain("Gleitpfad (RMS)");
     expect(h).toContain("0,08");
     expect(h).toContain("3°-Annahme");
+    expect(h).toContain("Grundlinie (RMS)");
+    expect(h).toContain("0,05");
+    expect(h).toContain("max. +0,1 Dots · bei 500 ft 2 m rechts · Schwelle 2 m rechts");
+    expect(h).toContain("auf der Grundlinie · ohne Überschießen eingedreht · keine S-Kurven");
     expect(h).toContain("Speed (MAD)");
     expect(h).toContain("geflogene Referenz ≈ 128 kt – misst die Stabilität, nicht den Absolutwert");
     expect(h).toContain(">GEM.<");
@@ -67,6 +71,14 @@ describe("ApproachSection", () => {
     expect(h).toContain("Tiefster Punkt");
     expect(h).toContain("284 ft über Platzhöhe (648 ft MSL) · 0,8 nm vor der Schwelle");
     expect(h).toContain("+620 ft in 60 s");
+  });
+
+  it("lateral hero without a value when the runway was derived from the track", () => {
+    const a: ApproachAnalysis = { ...mock, runway: { ...mock.runway!, source: "derived" }, lateral: { ...mock.lateral!, measurable: false, lateralBand: null } };
+    const h = html(a);
+    expect(h).toContain("Grundlinie (RMS)");
+    expect(h).toContain("Piste aus Rollspur – nicht bewertbar");
+    expect(h).not.toContain("0,05");
   });
 
   it("shows a reason when the approach cannot be assessed", () => {

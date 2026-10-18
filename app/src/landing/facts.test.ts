@@ -17,6 +17,10 @@ import {
   indexText,
   keySentence,
   landingIndex,
+  lateralFactText,
+  lateralHints,
+  lateralSubLine,
+  approachProvenance,
   limitText,
   measuredText,
   metarAgeNote,
@@ -547,5 +551,74 @@ describe("runway derived from the ground roll (R2)", () => {
     expect(i.value).toBeNull();
     expect(i.parts.find((p) => p.key === "centreline")!.points).toBeNull();
     expect(indexText(i)).toBe("nicht vergleichbar (Querablage nicht messbar)");
+  });
+});
+
+// ---- lateral guidance (extended centreline) ------------------------------------------------
+
+describe("lateral guidance", () => {
+  const lat = (over: Partial<NonNullable<ApproachAnalysis["lateral"]>>, a: Partial<ApproachAnalysis> = {}): ApproachAnalysis => {
+    const b = approach(a);
+    b.lateral = { ...b.lateral!, ...over };
+    return b;
+  };
+  const hints = (a: ApproachAnalysis) => lateralHints(a).map((h) => [h.tone, N(h.text)]);
+
+  it("on the centreline: facts line, sub-line and an ok hint, sentence unchanged", () => {
+    expect(N(lateralFactText(mock))).toBe("auf der Grundlinie · ohne Überschießen eingedreht · keine S-Kurven");
+    expect(N(lateralSubLine(mock))).toBe("max. +0,1 Dots · bei 500 ft 2 m rechts · Schwelle 2 m rechts");
+    expect(hints(mock)).toEqual([["ok", "Grundlinie 1 000 → 50 ft gehalten (RMS 0,05 Dots)"]]);
+    expect(N(approachKeySentence(mock))).not.toContain("rechts der Grundlinie");
+  });
+
+  it("names the offset at 500 ft in the key sentence when not on the centreline", () => {
+    const a = lat({ lateralBand: "slight", latAt500M: 40, locMaxDots: 0.8 });
+    expect(N(approachKeySentence(a))).toBe("Auf der Grundlinie ab 5,0 nm, stabil ab 1 500 ft, bei 500 ft 40 m rechts der Grundlinie. Bei FAF 16 kt schneller als die geflogene Referenz.");
+    const b = lat({ lateralBand: "marked", latAt500M: null, locMaxDots: -1.4 });
+    expect(N(approachKeySentence(b))).toContain("stabil ab 1 500 ft, deutliche Abweichung von der Grundlinie (max. −1,4 Dots).");
+  });
+
+  it("warns about an intercept overshoot above 0.5 dot only", () => {
+    expect(hints(lat({ interceptOvershootM: -150, interceptOvershootDots: -0.8 }))).toContainEqual(["warn", "Beim Eindrehen 150 m (0,8 Dots) über die Grundlinie nach links hinausgeschossen"]);
+    expect(hints(lat({ interceptOvershootM: 60, interceptOvershootDots: 0.4 })).some(([t]) => t === "warn")).toBe(false);
+    expect(N(lateralFactText(lat({ interceptOvershootM: 60, interceptOvershootDots: 0.4 })))).toContain("beim Eindrehen 60 m (0,4 Dots) übergeschossen");
+  });
+
+  it("S-turns: info from 2, warn from 3 side changes", () => {
+    expect(hints(lat({ lateralReversals: 1 })).length).toBe(1); // only the ok line
+    expect(hints(lat({ lateralReversals: 2 }))).toContainEqual(["info", "2 Seitenwechsel um die Grundlinie zwischen 1 000 und 100 ft (S-Kurven, Ablage über 0,3 Dots)"]);
+    expect(hints(lat({ lateralReversals: 3 }))[0][0]).toBe("warn");
+    expect(N(lateralFactText(lat({ lateralReversals: 3 })))).toContain("3 Seitenwechsel (S-Kurven)");
+  });
+
+  it("warns about more than 0.5 dot below 500 ft (from the profile)", () => {
+    const a = approach();
+    const i = a.samples.findIndex((p) => !p.onGround && p.locDots != null && p.hatFt < 500 && p.hatFt >= 50);
+    expect(i).toBeGreaterThanOrEqual(0);
+    a.samples[i] = { ...a.samples[i], locDots: -0.7 };
+    expect(hints(a)).toContainEqual(["warn", "Unter 500 ft bis 0,7 Dots links der Grundlinie – über 0,5 Dots"]);
+  });
+
+  it("over the threshold: info above 10 m, warn above a quarter of the runway width", () => {
+    expect(hints(lat({ latAtThresholdM: 11 }))).toContainEqual(["info", "Über der Schwelle 11 m rechts der Mittellinie"]);
+    expect(hints(lat({ latAtThresholdM: -15 }))).toContainEqual(["warn", "Über der Schwelle 15 m links der Mittellinie – mehr als ein Viertel der Pistenbreite (45 m)"]);
+    const noWidth = lat({ latAtThresholdM: -15 }, { runway: { ...mock.runway!, widthM: null } });
+    expect(hints(noWidth)).toContainEqual(["info", "Über der Schwelle 15 m links der Mittellinie"]);
+    expect(hints(lat({ latAtThresholdM: 30 }, { outcome: { kind: "goAround" } })).some(([, t]) => t.startsWith("Über der Schwelle"))).toBe(false);
+  });
+
+  it("derived runway or no runway: not assessable, said so", () => {
+    const derived = lat({ measurable: false, lateralBand: null }, { runway: { ...mock.runway!, source: "derived" } });
+    expect(hints(derived)).toEqual([["info", "Piste aus deiner Rollspur abgeleitet – Querablage zur Grundlinie nicht bewertbar"]]);
+    expect(N(lateralFactText(derived))).toBe("Piste aus Rollspur – nicht bewertbar");
+    expect(N(lateralSubLine(derived))).toBe("Piste aus Rollspur – nicht bewertbar");
+    expect(approachProvenance(derived).lateral.detail).toContain("nicht bewertbar");
+    expect(N(approachKeySentence(lat({ lateralBand: null, latAt500M: 40 }, { runway: { ...mock.runway!, source: "derived" } })))).not.toContain("Grundlinie.");
+    const none = approach({ runway: null, lateral: { ...mock.lateral!, measurable: false, lateralBand: null } });
+    expect(lateralHints(none)).toEqual([]);
+    expect(N(lateralFactText(none))).toBe("ohne Piste nicht messbar");
+    expect(approachProvenance(none).lateral.detail).toMatch(/^Keine Piste zugeordnet/);
+    expect(approachProvenance(mock).lateral).toMatchObject({ kind: "derived" });
+    expect(approachProvenance(mock).lateral.detail).toContain("VectaSim-Konvention");
   });
 });

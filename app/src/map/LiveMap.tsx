@@ -12,6 +12,7 @@ import {
   addAirportLayers,
   addRouteLayers,
   addCurtainLayers,
+  firstSymbolLayer,
   addTrackLayers,
   setCurtainVisible,
   setPitched,
@@ -254,7 +255,7 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
         addAirportLayers(map);
         addRouteLayers(map, "route");
         addTrackLayers(map, [TRACK_HISTORY, TRACK_LIVE]);
-        addCurtainLayers(map, TRACK_3D);
+        addCurtainLayers(map, TRACK_3D, firstSymbolLayer(map));
         setCurtainVisible(map, TRACK_3D, view3dRef.current);
         await addOnlineLayers(map);
         for (const g of Object.keys(layersRef.current) as OnlineLayerGroup[]) setGroupVisible(map, g, groupVisible(g));
@@ -290,6 +291,8 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
       map.on("load", async () => {
         await addOwnLayers();
         readyRef.current = true;
+        // a remembered 3D view starts tilted, not flat until the next toggle
+        if (view3dRef.current) setPitched(map, true, 0);
         setRouteReady(true);
         refreshAirports();
         refreshOnline();

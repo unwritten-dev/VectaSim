@@ -122,38 +122,41 @@ describe("ChunkedTrack", () => {
 });
 
 describe("curtainRuns (3D view)", () => {
-  it("one closed polygon per altitude band, extruded to the band's altitude in metres", () => {
+  it("one closed convex rectangle per consecutive pair, extruded to the pair's mean altitude in metres", () => {
     const pts = Array.from({ length: 50 }, (_, i) => pt(i, 35000));
     const f = curtainRuns(pts);
-    expect(f).toHaveLength(1);
+    expect(f).toHaveLength(49);
     const ring = (f[0].geometry as GeoJSON.Polygon).coordinates[0];
-    expect(ring).toHaveLength(2 * 50 + 1);
-    expect(ring[0]).toEqual(ring[ring.length - 1]);
-    const altFt = (Math.floor(35000 / ALT_BAND_FT) + 0.5) * ALT_BAND_FT;
-    expect(f[0].properties?.alt).toBe(altFt);
-    expect(f[0].properties?.hM).toBeCloseTo(altFt * 0.3048, 3);
+    expect(ring).toHaveLength(5);
+    expect(ring[0]).toEqual(ring[4]);
+    expect(f[0].properties?.alt).toBe(35000);
+    expect(f[0].properties?.hM).toBeCloseTo(35000 * 0.3048, 3);
     expect(f[0].properties?.ribbonM).toBeGreaterThan(0);
   });
 
-  it("is a thin strip: ±3 m around the line, on both sides", () => {
-    const f = curtainRuns([pt(0, 1000), pt(1, 1000), pt(2, 1000)]);
-    const ring = (f[0].geometry as GeoJSON.Polygon).coordinates[0];
-    // the line runs east–west at lat 50: the offset is purely in latitude, 3 m ≈ 2.7e-5°
-    for (const [, lat] of ring) expect(Math.abs(lat - 50)).toBeCloseTo(3 / 111_320, 7);
-    expect(ring.some(([, lat]) => lat > 50) && ring.some(([, lat]) => lat < 50)).toBe(true);
+  it("follows the altitude sample by sample instead of stepping per band", () => {
+    const f = curtainRuns([pt(0, 1000), pt(1, 1100), pt(2, 1200)]);
+    expect(f.map((g) => g.properties?.alt)).toEqual([1050, 1150]);
   });
 
-  it("splits at band changes and never emits a run shorter than two points", () => {
-    const pts = Array.from({ length: 41 }, (_, i) => pt(i, i * 50));
-    const f = curtainRuns(pts);
-    expect(f.length).toBeGreaterThan(5);
-    for (const g of f) expect((g.geometry as GeoJSON.Polygon).coordinates[0].length).toBeGreaterThanOrEqual(5);
+  it("is a thin strip: ±3 m around the line, on both sides, and neighbours share their end points", () => {
+    const f = curtainRuns([pt(0, 1000), pt(1, 1000), pt(2, 1000)]);
+    const r0 = (f[0].geometry as GeoJSON.Polygon).coordinates[0];
+    const r1 = (f[1].geometry as GeoJSON.Polygon).coordinates[0];
+    // the line runs east–west at lat 50: the offset is purely in latitude, 3 m ≈ 2.7e-5°
+    for (const [, lat] of r0) expect(Math.abs(lat - 50)).toBeCloseTo(3 / 111_320, 7);
+    expect(r0.some(([, lat]) => lat > 50) && r0.some(([, lat]) => lat < 50)).toBe(true);
+    expect(r1[0]).toEqual(r0[1]);
+    expect(r1[3]).toEqual(r0[2]);
+  });
+
+  it("skips a pair without movement", () => {
+    expect(curtainRuns([pt(0, 1000), pt(0, 1000), pt(1, 1000)])).toHaveLength(1);
   });
 
   it("curtainGeoJson thins a long track and copes with an empty one", () => {
     expect(curtainGeoJson([]).features).toHaveLength(0);
     const pts = Array.from({ length: 20000 }, (_, i) => pt(i, 30000 + (i % 2) * 1000));
-    const ring = (curtainGeoJson(pts, 1000).features[0].geometry as GeoJSON.Polygon).coordinates[0];
-    expect(ring.length).toBeLessThan(2 * 1000 + 2);
+    expect(curtainGeoJson(pts, 1000).features).toHaveLength(999);
   });
 });

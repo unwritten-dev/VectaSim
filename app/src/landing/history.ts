@@ -8,6 +8,7 @@
 
 import type { LandingFact, TouchdownReport } from "../types";
 import type { ApproachFact } from "./approachTypes";
+import { isDerivedSource } from "./types";
 import { NNBSP } from "../format";
 
 /** A landing fact whose centreline offset may be missing. */
@@ -288,6 +289,8 @@ export interface TrendSeries {
   centerline: TrendPoint[];
   /** "stabil ab" ft (approach facts; empty without). */
   stableFrom: TrendPoint[];
+  /** Lateral guidance: localizer RMS 1000 → 50 ft, dots (approach facts with a known centreline; empty without). */
+  lateral: TrendPoint[];
   /** TDZ quota 0..1. */
   tdz: TrendPoint[];
 }
@@ -363,6 +366,14 @@ export function trendSeries(facts: HistLanding[], bucket: Bucket = "flight", opt
     centerline: series(raw((f) => (isNum(f.centerlineOffsetM) ? Math.abs(f.centerlineOffsetM) : null)), bucket, window, "median"),
     stableFrom: series(
       approaches.map((a) => ({ key: `${a.flightId}#a${a.approachIndex}`, tMs: a.endedMs, v: a.stableFromFt })),
+      bucket,
+      window,
+      "median",
+    ),
+    lateral: series(
+      approaches
+        .filter((a) => a.locRmsDots != null && !isDerivedSource(a.runwaySource))
+        .map((a) => ({ key: `${a.flightId}#a${a.approachIndex}`, tMs: a.endedMs, v: a.locRmsDots ?? null })),
       bucket,
       window,
       "median",

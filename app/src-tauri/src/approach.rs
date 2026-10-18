@@ -14,7 +14,7 @@ use serde::Serialize;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 use vectasim_core::approach::{
-    self, ApproachAnalysis, ApproachBand, ApproachConfig, ApproachSample, ElevationSource, GoAroundSource, PhaseMark,
+    self, ApproachAnalysis, ApproachBand, ApproachConfig, ApproachSample, ElevationSource, GoAroundSource, LateralBand, PhaseMark,
 };
 use vectasim_core::landing::{CriterionKind, LandingSample, RunwayEnd, RunwayGeometry, RunwayGeometrySource};
 use vectasim_data::AirportIndex;
@@ -83,10 +83,11 @@ pub(crate) fn analyze(store: &Store, airports: &AirportIndex, flight_id: &str, l
     let aircraft = aircraft_ref(store, flight_id);
     let mut out = approach::analyze_flight(&samples, &phases, &detail.touchdowns, &ends, &aircraft, &cfg);
     for a in &mut out {
-        if let Some(r) = a.runway.as_mut()
+        if let Some(r) = a.runway.as_ref()
             && let Some(i) = ends.iter().position(|e| e.airport == r.airport && e.ident == r.ident)
         {
-            r.apply_geometry(&geometry[i]);
+            // derived geometry: the lateral band is not assessable
+            approach::apply_runway_geometry(a, &geometry[i]);
         }
     }
     Ok(out)
@@ -147,6 +148,9 @@ pub struct ApproachFact {
     pub go_around_detected_by: Option<GoAroundSource>,
     /// Where the runway geometry comes from (None: no runway, or cached before v3).
     pub runway_source: Option<RunwayGeometrySource>,
+    /// Localizer RMS 1000 → 50 ft, dots (None: not measurable, derived runway, or cached before v4).
+    pub loc_rms_dots: Option<f64>,
+    pub lateral_band: Option<LateralBand>,
     pub aircraft_icao_type: Option<String>,
     pub aircraft_title: Option<String>,
     pub registration: Option<String>,
@@ -175,6 +179,8 @@ fn to_fact(f: &FlightRow, row: ApproachFactRow) -> ApproachFact {
         threshold_height_ft: d.as_ref().and_then(|d| d.threshold_height_ft),
         go_around_detected_by: d.as_ref().and_then(|d| d.go_around_detected_by),
         runway_source: d.as_ref().and_then(|d| d.runway_source),
+        loc_rms_dots: d.as_ref().and_then(|d| d.loc_rms_dots),
+        lateral_band: d.as_ref().and_then(|d| d.lateral_band),
         aircraft_icao_type: icao_from_atc_model(&f.aircraft.atc_model),
         aircraft_title: non_empty(&f.aircraft.title),
         registration: f.airframe_reg.as_deref().and_then(normalize_registration).or_else(|| resolve_registration(None, Some(&f.aircraft.atc_id))),

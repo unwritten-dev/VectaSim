@@ -151,10 +151,17 @@ export interface ApproachSummary {
   neverStable: number;
   gate1000: PassRate;
   gate500: PassRate;
+  /** Mean |lateral offset| at 500 ft over the approaches where it is measurable, m. */
+  meanAbsLat500M: number | null;
+  lat500N: number;
 }
 
 export function approachSummary(facts: ApproachFact[]): ApproachSummary {
   const s = meanOf(facts.map((f) => f.stableFromFt));
+  const lat = meanOf(facts.map((f) => {
+    const v = lateralAt(f, "ft500");
+    return v == null ? null : Math.abs(v);
+  }));
   return {
     count: facts.length,
     goArounds: facts.filter(isGoAround).length,
@@ -163,6 +170,8 @@ export function approachSummary(facts: ApproachFact[]): ApproachSummary {
     neverStable: facts.filter((f) => f.band != null && f.stableFromFt == null).length,
     gate1000: gatePassRate(facts, "ft1000"),
     gate500: gatePassRate(facts, "ft500"),
+    meanAbsLat500M: lat.mean,
+    lat500N: lat.n,
   };
 }
 

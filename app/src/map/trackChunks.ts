@@ -69,62 +69,43 @@ const M_PER_FT = 0.3048;
 const CURTAIN_HALF_W_M = 3;
 
 /**
- * 3D "curtain" of the track for a pitched map: one thin polygon per altitude-banded run,
- * extruded from the ground to the run's altitude (`hM`) – the wall – with a solid ribbon of
- * `ribbonM` metres at the top (fill-extrusion base/height, map/common.ts). Each polygon
- * is the run's line offset ±CURTAIN_HALF_W_M along the local normal, so the wall stays thin
- * from above and the 2D line keeps drawing the ground trace.
+ * 3D "curtain" of the track for a pitched map: one thin rectangle per consecutive pair of
+ * points, extruded from the ground to the pair's mean altitude (`hM`) – the wall – with a
+ * solid ribbon of `ribbonM` metres at the top (fill-extrusion base/height, map/common.ts).
+ * Per pair, not per altitude band: fill-extrusion has one height per feature, so a band
+ * would step at its edges; neighbouring rectangles share their end points, the height
+ * changes by one sample's climb only, and each polygon is convex (no self-intersections).
  */
-export function curtainRuns(points: TrackPoint[], bandFt = ALT_BAND_FT): GeoJSON.Feature[] {
+export function curtainRuns(points: TrackPoint[]): GeoJSON.Feature[] {
   const out: GeoJSON.Feature[] = [];
-  let run: TrackPoint[] | null = null;
-  let curBand = 0;
-  const flush = () => {
-    if (!run || run.length < 2) {
-      run = null;
-      return;
-    }
-    const altFt = (curBand + 0.5) * bandFt;
-    const hM = Math.max(1, altFt * M_PER_FT);
-    const left: number[][] = [];
-    const right: number[][] = [];
-    for (let i = 0; i < run.length; i++) {
-      const p = run[i];
-      const a = run[Math.max(0, i - 1)];
-      const b = run[Math.min(run.length - 1, i + 1)];
-      const cosLat = Math.max(0.05, Math.cos((p.lat * Math.PI) / 180));
-      // direction in local metres, then its left normal back to degrees
-      const dx = (b.lon - a.lon) * cosLat;
-      const dy = b.lat - a.lat;
-      const len = Math.hypot(dx, dy) || 1;
-      const nx = (-dy / len) * CURTAIN_HALF_W_M;
-      const ny = (dx / len) * CURTAIN_HALF_W_M;
-      const dLon = nx / (111_320 * cosLat);
-      const dLat = ny / 111_320;
-      left.push([p.lon + dLon, p.lat + dLat]);
-      right.push([p.lon - dLon, p.lat - dLat]);
-    }
-    const ring = [...left, ...right.reverse(), left[0]];
-    out.push({
-      type: "Feature",
-      properties: { alt: altFt, hM, ribbonM: Math.max(25, hM * 0.025) },
-      geometry: { type: "Polygon", coordinates: [ring] },
-    });
-    run = null;
-  };
   for (let i = 1; i < points.length; i++) {
     const a = points[i - 1];
     const b = points[i];
-    const bd = band((a.altFt + b.altFt) / 2, bandFt);
-    if (run && bd === curBand) {
-      run.push(b);
-    } else {
-      flush();
-      curBand = bd;
-      run = [a, b];
-    }
+    const altA = Number.isFinite(a.altFt) ? a.altFt : 0;
+    const altB = Number.isFinite(b.altFt) ? b.altFt : 0;
+    const altFt = (altA + altB) / 2;
+    const hM = Math.max(1, altFt * M_PER_FT);
+    const cosLat = Math.max(0.05, Math.cos(((a.lat + b.lat) / 2) * (Math.PI / 180)));
+    // segment direction in local metres, then its left normal back to degrees
+    const dx = (b.lon - a.lon) * cosLat;
+    const dy = b.lat - a.lat;
+    const len = Math.hypot(dx, dy);
+    if (len === 0) continue;
+    const dLon = ((-dy / len) * CURTAIN_HALF_W_M) / (111_320 * cosLat);
+    const dLat = ((dx / len) * CURTAIN_HALF_W_M) / 111_320;
+    const ring = [
+      [a.lon + dLon, a.lat + dLat],
+      [b.lon + dLon, b.lat + dLat],
+      [b.lon - dLon, b.lat - dLat],
+      [a.lon - dLon, a.lat - dLat],
+      [a.lon + dLon, a.lat + dLat],
+    ];
+    out.push({
+      type: "Feature",
+      properties: { alt: altFt, hM, ribbonM: Math.max(15, hM * 0.02) },
+      geometry: { type: "Polygon", coordinates: [ring] },
+    });
   }
-  flush();
   return out;
 }
 

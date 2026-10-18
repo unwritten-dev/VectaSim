@@ -303,7 +303,7 @@ export default function ApproachDispersion({ limit = 20 }: { limit?: number }) {
     pen = true;
   });
 
-  const sumText = `stabil ab Ø ${fmt(summary.meanStableFromFt, 0, "ft")} · Gate 1000 ${summary.gate1000.passed}/${summary.gate1000.total} · Gate 500 ${summary.gate500.passed}/${summary.gate500.total} · Go-arounds ${summary.goArounds}`;
+  const sumText = `stabil ab Ø ${fmt(summary.meanStableFromFt, 0, "ft")} · Gate 1000 ${summary.gate1000.passed}/${summary.gate1000.total} · Gate 500 ${summary.gate500.passed}/${summary.gate500.total} · Grundlinie 500 ft Ø |Ablage| ${fmt(summary.meanAbsLat500M, 0, "m")} · Go-arounds ${summary.goArounds}`;
 
   const chip = (key: string, label: ReactNode, pressed: boolean, onClick: () => void, title?: string) => (
     <button key={key} className={`chip${pressed ? " active" : ""}`} aria-pressed={pressed} title={title} onClick={onClick}>
@@ -460,6 +460,16 @@ export default function ApproachDispersion({ limit = 20 }: { limit?: number }) {
               {summary.gate500.passed}/{summary.gate500.total}
             </div>
             <div className="detail">alle messbaren Kriterien erfüllt</div>
+          </div>
+          <div className="tile">
+            <div className="tile-label">Grundlinie 500{NNBSP}ft</div>
+            <div className="tile-value num">
+              <span className="dp-sd">Ø |Ablage| </span>
+              {fmt(summary.meanAbsLat500M, 0, "m")}
+            </div>
+            <div className="detail">
+              aus {summary.lat500N} Anflug{summary.lat500N === 1 ? "" : "en"} mit bekannter Mittellinie
+            </div>
           </div>
           <div className="tile">
             <div className="tile-label">Go-arounds</div>

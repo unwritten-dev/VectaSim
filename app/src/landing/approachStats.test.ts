@@ -132,6 +132,17 @@ describe("meanOf / approachSummary", () => {
     expect(s.gate1000).toMatchObject({ passed: 1, total: 3 });
     expect(s.gate500).toMatchObject({ passed: 2, total: 3 });
   });
+  it("averages |lateral offset| at 500 ft, without derived runways", () => {
+    const s = approachSummary([
+      fact({ g500LatDevM: -20 }),
+      fact({ g500LatDevM: 10 }),
+      fact({ g500LatDevM: 90, runwaySource: "derived" }),
+      fact({ g500LatDevM: null }),
+    ]);
+    expect(s.meanAbsLat500M).toBe(15);
+    expect(s.lat500N).toBe(2);
+    expect(approachSummary([fact({ g500LatDevM: null })]).meanAbsLat500M).toBeNull();
+  });
 });
 
 describe("filter", () => {
