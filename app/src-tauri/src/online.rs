@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
 use vectasim_data::{Airport, AirportIndex, haversine_nm};
-use vectasim_online::{Controller, FeedStatus, Metar, MetarClient, NearbyPilot, Network, OnlineFeed, Pilot};
+use vectasim_online::{Controller, FeedStatus, Metar, MetarClient, NearbyPilot, Network, OnlineFeed, Pilot, TrackFix};
 use vectasim_store::{MetarSlot, Store};
 
 pub const SETTING_VATSIM: &str = "online_vatsim";
@@ -395,6 +395,14 @@ pub fn online_pilot(cid: u64, network: Option<String>, online: State<OnlineState
         Some(n) => online.feed(n).pilot(cid),
         None => online.feeds().iter().find_map(|f| f.pilot(cid)),
     })
+}
+
+/// The flown track of one pilot as the feed reported it since the app (or the network) started:
+/// at most two hours / 480 fixes, oldest first (vectasim_online::history). The live map draws the
+/// selected aircraft's altitude curtain from it.
+#[tauri::command]
+pub fn traffic_track(network: String, cid: u64, online: State<OnlineState>) -> Result<Vec<TrackFix>, String> {
+    Ok(online.feed(parse_network(&network)?).track(cid))
 }
 
 #[tauri::command]

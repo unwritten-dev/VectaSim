@@ -1,7 +1,8 @@
-# Startet VectaSim im Entwicklungsmodus mit dem Mock-Provider (ohne Simulator).
-#   powershell -File scripts\dev-mock.ps1            # Standard-Platzrunde
-#   powershell -File scripts\dev-mock.ps1 goaround   # Varianten: bounce | goaround | teleport | reconnect
-#   powershell -File scripts\dev-mock.ps1 -Sim       # echter Simulator statt Mock
+# Starts VectaSim in development mode with the mock provider (no simulator needed).
+#   powershell -File scripts\dev-mock.ps1            # default demo: approach into EDDF 25C, starting in the air on the downwind
+#   powershell -File scripts\dev-mock.ps1 goaround   # variants: circuit | bounce | goaround | teleport | reconnect
+#   powershell -File scripts\dev-mock.ps1 -Sim       # real simulator instead of the mock
+# circuit = full circuit from the stand (start-up, taxi, take-off); see crates/vectasim-core/src/mock.rs
 param(
   [string]$Variant = "",
   [switch]$Sim

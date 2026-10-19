@@ -14,12 +14,13 @@
 import type { FlightRow } from "../types";
 import type { ApproachFact } from "../landing/approachTypes";
 import type { Band, RunwayFact } from "../landing/types";
+import { isRated } from "../landing/rated";
 import type { CountryVisit } from "../countries/countries";
 import { vsBandOf } from "../landing/facts";
 import { median } from "../landing/history";
 import { approachSummary } from "../landing/approachStats";
 import { tdzRate } from "../landing/dispersionStats";
-import { countedFlights, isDemoRow, isImportedRow } from "../totals";
+import { countedFlights, isImportedRow } from "../totals";
 import { effectiveAircraftTitle, effectiveArr, effectiveDep, effectiveRegistration } from "../logbookFilter";
 import { LOCALE, getLanguage, t, tIn, type Language } from "../i18n";
 
@@ -413,7 +414,8 @@ export function buildReview(input: ReviewInput, period: Period): YearReview {
   const regList = [...regs.values()].sort((a, b) => byHoursThenFlights(a, b) || a.key.localeCompare(b.key)).slice(0, TOP_N);
 
   // ---- landings (measured only)
-  const facts = input.landings.filter((x) => measuredFact(x.provider, showDemo) && inPeriod(x.timestampMs, period));
+  // unrated touchdowns (slewed down, rate ≈ 0) are no landings to rank – the backend leaves them out too
+  const facts = input.landings.filter((x) => measuredFact(x.provider, showDemo) && isRated(x) && inPeriod(x.timestampMs, period));
   const factFlights = new Set(facts.map((x) => x.flightId));
   const rateOnly = rows.filter((f) => !isImportedRow(f) && f.landingVsFpm != null && !factFlights.has(f.id));
   const picks: LandingPick[] = [
@@ -565,5 +567,5 @@ export function flagStats(rows: FlightRow[]): FlagYear {
   return out;
 }
 
-/** Demo flights the review leaves out (hint below the cards). */
-export const demoLeftOut = (rows: FlightRow[], showDemo: boolean): number => (showDemo ? 0 : rows.filter(isDemoRow).length);
+/** Demo flights the review leaves out (hint below the cards); only ones that would count. */
+export { demoLeftOut } from "../totals";

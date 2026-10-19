@@ -9,7 +9,8 @@
 //            max altitude) and, when given, the track (fuel at takeoff and at the landing).
 // Deltas are always actual minus plan.
 
-import type { FlightDetail, FlightRow, FlightSummary, IntegrityFlags, Ofp, Telemetry, TouchdownReport, TrackSample } from "./types";
+import type { FlightDetail, FlightRow, FlightSummary, IntegrityFlags, LandingRateSource, Ofp, Telemetry, TouchdownReport, TrackSample } from "./types";
+import { isRated } from "./landing/rated";
 import type { ApproachBand } from "./landing/approachTypes";
 import { haversineNm, type WeightUnit } from "./format";
 import { DASH, SEPARATORS, fmt, fmtAltitude, fmtClock, fmtDate, fmtDeltaKg, fmtDeltaMin, fmtDuration, fmtSigned, fmtWeight } from "./i18n/number";
@@ -461,7 +462,8 @@ export interface PirepJson {
   };
   landing: {
     rateFpm: number | null;
-    rateSource: "sim" | "measured" | null;
+    /** `unrated`: slewed / fast-forwarded down – `rateFpm` is null then. */
+    rateSource: LandingRateSource | null;
     maxG: number | null;
     bounces: number | null;
     touchdowns: number;
@@ -571,7 +573,8 @@ export function buildPirep(detail: FlightDetail, plan: Ofp | null, landing?: Pir
       plannedLanding: round(L.landingFuel?.plan),
     },
     landing: {
-      rateFpm: round(row.landingVsFpm ?? td?.landingRateFpm),
+      // an unrated touchdown has no landing rate (never "0 fpm")
+      rateFpm: round(row.landingVsFpm ?? (td && isRated(td) ? td.landingRateFpm : null)),
       rateSource: td?.landingRateSource ?? null,
       maxG: round(td?.peakG, 2),
       bounces: td ? td.bounces : null,
@@ -650,7 +653,7 @@ function pirepText(p: PirepJson, pva: PlanVsActual, unit: WeightUnit, lang: Lang
       "Trip Fuel",
       `${f.trip != null ? (f.tripEstimated ? tr("logbook.pirep.approx", { value: `${w(f.trip)} ${unit}` }) : `${w(f.trip)} ${unit}`) : "-"}${f.plannedTrip != null ? plan(`${w(f.plannedTrip)} ${unit}`) : ""}`,
     ],
-    [tr("logbook.pirep.landingRate"), `${l.rateFpm != null ? `${l.rateFpm} fpm` : "-"} | max. ${l.maxG != null ? l.maxG.toFixed(2) : "-"} g | Bounces ${l.bounces ?? "-"}`],
+    [tr("logbook.pirep.landingRate"), `${l.rateFpm != null ? `${l.rateFpm} fpm` : l.rateSource === "unrated" ? tr("band.unrated") : "-"} | max. ${l.maxG != null ? l.maxG.toFixed(2) : "-"} g | Bounces ${l.bounces ?? "-"}`],
   );
   if (p.gLoad) lines.push([tr("gload.label"), `max. ${p.gLoad.maxG?.toFixed(2) ?? "-"} g | min. ${p.gLoad.minG?.toFixed(2) ?? "-"} g`]);
   if (l.stableFromFt !== null || l.approachBand)

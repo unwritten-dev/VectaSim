@@ -33,7 +33,7 @@ export function cardFileName(d: LandingDebriefData): string {
   const rwy = safe(a.runway?.ident ?? "");
   const ms = a.touchdown.timestampMs;
   const date = Number.isFinite(ms) && ms > 0 ? new Date(ms).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
-  return ["VectaSim", icao || "Landung", rwy, date].filter(Boolean).join("_") + ".png";
+  return ["VectaSim", icao || safe(t("landingCard.landing")), rwy, date].filter(Boolean).join("_") + ".png";
 }
 
 const p2 = (n: number) => String(n).padStart(2, "0");
@@ -44,9 +44,9 @@ export function autoCardFileName(d: LandingDebriefData, nowMs: number = Date.now
   const icao = safe(a.runway?.airport ?? d.airport?.ident ?? "");
   const rwy = safe(a.runway?.ident ?? "");
   const ms = a.touchdown.timestampMs;
-  const t = new Date(Number.isFinite(ms) && ms > 0 ? ms : nowMs);
-  const stamp = `${t.getUTCFullYear()}-${p2(t.getUTCMonth() + 1)}-${p2(t.getUTCDate())}_${p2(t.getUTCHours())}${p2(t.getUTCMinutes())}`;
-  return ["VectaSim", icao || "Landung", rwy, stamp].filter(Boolean).join("_") + ".png";
+  const at = new Date(Number.isFinite(ms) && ms > 0 ? ms : nowMs);
+  const stamp = `${at.getUTCFullYear()}-${p2(at.getUTCMonth() + 1)}-${p2(at.getUTCDate())}_${p2(at.getUTCHours())}${p2(at.getUTCMinutes())}`;
+  return ["VectaSim", icao || safe(t("landingCard.landing")), rwy, stamp].filter(Boolean).join("_") + ".png";
 }
 
 /** Registration masked on the card: Streamer-Modus or „Landekarte ohne Kennzeichen“. */

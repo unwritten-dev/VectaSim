@@ -9,6 +9,7 @@ import AirframeImage from "./AirframeImage";
 import AirframePicker from "./AirframePicker";
 import { useAirframe } from "./hooks";
 import { useT } from "../i18n";
+import { errorToast } from "../ui/errorToast";
 
 /** Flight detail: which airframe the flight is booked onto, with "Flugzeug ändern". */
 export default function AirframeCard({ flight: f, onOpenFleet }: { flight: FlightRow; onOpenFleet?: (registration: string) => void }) {
@@ -24,7 +25,7 @@ export default function AirframeCard({ flight: f, onOpenFleet }: { flight: Fligh
       .then(() =>
         showToast({ tone: "ok", title: registration ? t("logbook.airframe.booked", { reg: priv.mask(registration, "registration") }) : t("logbook.airframe.unassigned") }),
       )
-      .catch((e) => showToast({ tone: "err", title: t("logbook.airframe.changeFailed"), body: String(e) }));
+      .catch((e) => showToast({ tone: "err", ...errorToast(t("logbook.airframe.changeFailed"), e, "logbook") }));
   };
 
   const type = a?.icaoType || icaoFromAtcModel(f.aircraft.atcModel);

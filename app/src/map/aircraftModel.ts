@@ -192,6 +192,7 @@ uniform float u_vratio;     // vertical / horizontal metres per model unit (flat
 out vec3 v_normal;
 out float v_tone;
 out float v_depth;
+out float v_clip;
 void main() {
   // contour: inflated along the normal averaged over every face at that position (closed hull)
   vec3 p = a_pos + a_outline * u_outline;
@@ -204,6 +205,15 @@ void main() {
   // turns against the face (open intakes, thin edges: nacelle hulls poked through the wing) it
   // painted dark patches over the body, worst on the grounded model.
   v_depth = dot(vec3(w.xy, w.z * u_vratio), u_view) - u_outline;
+#ifdef GLOBE
+  // projectTileFor3D keeps the depth (and the model writes its own): behind the globe's horizon
+  // the whole aircraft, its shadow and plumb line are hidden, judged at its reference point
+  v_clip = u_projection_transition > 0.2
+    ? dot(projectToSphere(u_origin, u_origin) * (1.0 + u_alt / GLOBE_RADIUS), u_projection_clipping_plane.xyz) + u_projection_clipping_plane.w
+    : 1.0;
+#else
+  v_clip = 1.0;
+#endif
   if (u_mode > 1.5) {
     gl_Position = projectTileFor3D(u_origin, a_pos.z * u_alt);
     return;
@@ -218,6 +228,7 @@ precision highp float;
 in vec3 v_normal;
 in float v_tone;
 in float v_depth;
+in float v_clip;
 uniform vec3 u_color;
 uniform vec3 u_dark;
 uniform vec3 u_view;
@@ -229,6 +240,7 @@ uniform float u_mode;
 out vec4 fragColor;
 ${LIGHT_GLSL}
 void main() {
+  if (v_clip < 0.0) discard;
   vec3 c = u_shade > 0.5 ? shadeModel(u_color, u_dark, v_normal, u_view, v_tone, u_light_scheme) : u_color;
   fragColor = vec4(c * u_alpha, u_alpha);
   // The model is only ~60 px but metres to kilometres away: its parts (and the contour hull

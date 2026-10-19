@@ -43,6 +43,10 @@
       "shortcut": "{action} (Strg+.)",
       "aria": "Flugdetails"
     },
+    "section": {
+      "overview": "Flug & Flugzeug",
+      "lightsOn": "{on} von {total} an"
+    },
     "tabs": {
       "flight": "Flug",
       "dispatch": "Dispatch"
@@ -255,6 +259,11 @@
         "file": "Datei",
         "simFromDump": "Simulator (aus dem Dump)",
         "interface": "Schnittstelle"
+      },
+      "units": {
+        "count": "Anzahl",
+        "needle": "Nadel",
+        "index": "Index"
       }
     }
   }

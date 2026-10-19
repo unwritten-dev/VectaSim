@@ -113,8 +113,12 @@ export interface TouchdownReport {
   touchAndGo: boolean;
   /** Headline landing rate of the event: worst contact, sim value preferred (touchdown.rs). */
   landingRateFpm: number;
-  landingRateSource: "sim" | "measured";
+  /** `unrated`: slewed / fast-forwarded down, no airborne sample – `landingRateFpm` is no landing rate. */
+  landingRateSource: LandingRateSource;
 }
+
+/** Where a touchdown's headline rate comes from (touchdown.rs LandingRateSource). */
+export type LandingRateSource = "sim" | "measured" | "unrated";
 
 export interface IntegrityFlags {
   pausedMs: number;
@@ -133,8 +137,14 @@ export interface GeoPoint {
   longitude: number;
 }
 
+/**
+ * State of a flight (core flight.rs FlightState). `discarded`: a ground session that never took
+ * off (no take-off, no touchdown) – kept in the Papierkorb, never counted in statistics.
+ */
+export type FlightState = "idle" | "active" | "completed" | "interrupted" | "discarded";
+
 export interface FlightSummary {
-  state: "idle" | "active" | "completed";
+  state: FlightState;
   phase: FlightPhase;
   offBlockMs?: number | null;
   takeoffMs?: number | null;
@@ -185,6 +195,12 @@ export type FlightEvent =
   | ({ kind: "phaseChanged" } & PhaseTransition)
   | ({ kind: "touchdown" } & TouchdownReport)
   | { kind: "flightEnded"; timestampMs: number; interrupted?: boolean }
+  /**
+   * The `flightEnded` with the same `timestampMs` ended a ground session (core flight.rs
+   * FlightDiscardedEvent): it never took off, is stored as `discarded` in the Papierkorb and
+   * does not count. `shutDown`: it reached Shutdown rather than being cut off.
+   */
+  | { kind: "flightDiscarded"; timestampMs: number; offBlockMs: number | null; shutDown: boolean }
   /**
    * Decided outcome of an earlier `touchdown` (core flight.rs TouchdownOutcomeEvent): after the
    * rollout (< 30 kt), the climb-out, a 120 s timeout, or `unknown` when the stream broke off.
@@ -250,7 +266,7 @@ export interface TrackSample {
 
 export interface FlightRow {
   id: string;
-  state: "active" | "completed" | "interrupted" | string;
+  state: Exclude<FlightState, "idle"> | (string & {});
   phase: FlightPhase;
   createdMs: number;
   updatedMs: number;
@@ -637,7 +653,7 @@ export interface LandingFact {
   registration?: string | null;
   /** Headline landing rate, fpm, negative = descending. */
   landingRateFpm: number;
-  landingRateSource: "sim" | "measured";
+  landingRateSource: LandingRateSource;
   peakG: number;
   bounces: number;
   /** Metres along the runway from the threshold (negative = before it). */

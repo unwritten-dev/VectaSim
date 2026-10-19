@@ -171,3 +171,49 @@ fn unusable_staged_restore_is_set_aside_and_the_logbook_stays() {
     assert!(!backup::pending_restore_path(&db).exists());
     assert!(dir.path().join("vectasim.db.restore-failed").is_file());
 }
+
+/// The configured backup folder is unreachable (USB stick pulled, NAS offline): the copy before
+/// a migration goes to the default folder instead of the logbook not opening at all.
+#[test]
+fn unreachable_backup_folder_falls_back_to_the_default_for_the_pre_migration_copy() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("vectasim.db");
+    let blocker = dir.path().join("not-a-folder");
+    std::fs::write(&blocker, b"x").unwrap();
+    {
+        let store = Store::open(&path).unwrap();
+        store.set_setting(vectasim_store::backup::SETTING_BACKUP_DIR, &blocker.join("backups").display().to_string()).unwrap();
+    }
+    rusqlite::Connection::open(&path).unwrap().execute("UPDATE schema_version SET version = ?1", [SCHEMA_VERSION - 1]).unwrap();
+    let default = dir.path().join("backups");
+    let store = Store::open_with_backup_dir(&path, &default).expect("opens with the default folder");
+    assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
+    let list = vectasim_store::backup::list_backups(&default).unwrap();
+    assert_eq!(list.len(), 1, "{list:?}");
+    assert!(list[0].file_name.starts_with(&format!("vectasim-pre-v{}-", SCHEMA_VERSION - 1)), "{}", list[0].file_name);
+}
+
+/// A staged restore that cannot be put in place (another process holds the file without
+/// delete sharing, e.g. a virus scanner) does not block the start: the current logbook opens.
+#[cfg(windows)]
+#[test]
+fn a_staged_restore_that_cannot_be_applied_does_not_block_the_start() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("vectasim.db");
+    let backups = dir.path().join("backups");
+    let store = Store::open(&db).unwrap();
+    record_mock_flight(&store);
+    let snapshot = store.create_backup_at(&backups, BackupKind::Regular, T0).unwrap();
+    record_mock_flight(&store);
+    store.restore_from(&snapshot, &backups).unwrap();
+    store.close_for_restart().unwrap();
+    drop(store);
+    let pending = backup::pending_restore_path(&db);
+    // readable (inspect passes), but neither renamed nor deleted while this handle is open
+    const FILE_SHARE_READ: u32 = 1;
+    let lock = std::fs::OpenOptions::new().read(true).share_mode(FILE_SHARE_READ).open(&pending).unwrap();
+    let store = Store::open(&db).expect("the current logbook opens");
+    assert_eq!(count(&store), 2, "the current logbook, not the staged one");
+    drop((store, lock));
+}

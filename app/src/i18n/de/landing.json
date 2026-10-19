@@ -173,6 +173,8 @@
     "metarAfter": "METAR von {at} (über {age} nach der Landung)",
     "key": {
       "sentence": "{head} {clauses}.",
+      "headUnrated": "Landung ohne bewertbare Landerate",
+      "headTouchAndGoUnrated": "Touch-and-go ohne bewertbare Landerate",
       "head": {
         "smooth": "Sanfte Landung",
         "normal": "Normale Landung",
@@ -234,6 +236,7 @@
       "widthUnknown": "Breite unbekannt",
       "lateralUnmeasurable": "Querablage nicht messbar",
       "noGate": "ohne erreichtes Gate",
+      "unrated": "Landerate nicht bewertbar",
       "notComparable": "nicht vergleichbar ({why})",
       "bandPoints": "{band} {points}",
       "formula": {
@@ -556,7 +559,8 @@
     "state": {
       "retry": "Erneut versuchen",
       "loading": "Landung wird ausgewertet …",
-      "noApproachForLanding": "zu dieser Landung wurde im Track kein Anflug gefunden"
+      "noApproachForLanding": "zu dieser Landung wurde im Track kein Anflug gefunden",
+      "noLanding": "Für diesen Flug wurde keine Landung aufgezeichnet."
     },
     "card": {
       "save": "Landekarte speichern",

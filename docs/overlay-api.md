@@ -31,7 +31,7 @@ All responses are `application/json` with `Cache-Control: no-store`. Field names
 ### `GET /api/v1/status`
 
 ```json
-{"apiVersion":1,"app":"VectaSim","version":"0.3.0","provider":"mock","connection":"connected","detail":"Demo","simName":"Demo","simVersion":null,"recording":true,"streamerMode":false,"serverTimeMs":1792342722583,"lang":"de"}
+{"apiVersion":1,"app":"VectaSim","version":"0.5.1","provider":"mock","connection":"connected","detail":"Demo","simName":"Demo","simVersion":null,"recording":true,"streamerMode":false,"serverTimeMs":1792342722583,"lang":"de"}
 ```
 
 `lang`: the app language (`de` | `en`) – the language of `bandLabel` and the default for the overlay pages.
@@ -56,7 +56,7 @@ The latest telemetry, `null` when not connected.
 
 ### `GET /api/v1/landing`
 
-The latest touchdown of the current flight, otherwise the latest landing (excluding touch-and-gos) from the logbook; `null` if there is none. `band`: `smooth` (< 150 fpm) · `normal` (< 300) · `firm` (< 600) · `hard`; `gBand` by `peakG`: < 1.25 · < 1.5 · < 2.0 · above. `bandLabel` is the label of `band` in the app language (`status.lang`: `sanft/normal/fest/hart` or `smooth/normal/firm/hard`) – overlays should translate `band` (the code) themselves.
+The latest touchdown of the current flight, otherwise the latest landing (excluding touch-and-gos) from the logbook; `null` if there is none. `band`: `smooth` (< 150 fpm) · `normal` (< 300) · `firm` (< 600) · `hard`, or `null` when the touchdown is unrated (`landingRateSource: "unrated"`: reached by slewing or time acceleration without a sim touchdown value; `bandLabel` then says “unrated”/“unbewertet”, and the logbook fallback skips such touchdowns); `gBand` by `peakG`: < 1.25 · < 1.5 · < 2.0 · above. `bandLabel` is the label of `band` in the app language (`status.lang`: `sanft/normal/fest/hart` or `smooth/normal/firm/hard`) – overlays should translate `band` (the code) themselves.
 
 ```json
 {"flightId":"demo-flight","touchdownIndex":0,"timestampMs":1792342751179,"landingRateFpm":-142.0,"landingRateSource":"sim","band":"smooth","bandLabel":"sanft","peakG":1.18,"gBand":"smooth","bounces":0,"touchAndGo":false,"pitchDeg":3.1,"bankDeg":0.4,"groundSpeedKt":131.0,"airport":"EGLL","runway":"27L","touchdownDistanceM":412.0,"centerlineOffsetM":-1.4,"inTouchdownZone":true,"stableFromFt":1000.0,"approachBand":"stable","aircraft":{"title":"Airbus A320neo Lufthansa D-AINA","icaoType":"A20N","registration":"D-AINA","airline":"Lufthansa"},"live":false}

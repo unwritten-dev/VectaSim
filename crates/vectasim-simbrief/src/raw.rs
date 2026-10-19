@@ -61,8 +61,27 @@ pub struct RawOfp {
     pub fuel: Option<Fuel>,
     pub times: Option<Times>,
     pub weights: Option<Weights>,
-    pub navlog: Option<Navlog>,
+    pub navlog: Option<NavlogDoc>,
     pub atc: Option<Atc>,
+}
+
+/// `navlog` is a bare list of fixes in JSON v2 and `{ "fix": [...] }` (or a single fix) in v1.
+/// `List` must come first: a derived struct also accepts a sequence (fields by position) and
+/// would swallow the first fix and then fail on the rest with "trailing characters".
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum NavlogDoc {
+    List(Vec<Fix>),
+    Object(Box<Navlog>),
+}
+
+impl NavlogDoc {
+    fn into_vec(self) -> Vec<Fix> {
+        match self {
+            NavlogDoc::List(v) => v,
+            NavlogDoc::Object(n) => n.fix.map(|f| f.into_vec()).unwrap_or_default(),
+        }
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -207,8 +226,7 @@ impl From<RawOfp> for Ofp {
 
         let navlog = r
             .navlog
-            .and_then(|n| n.fix)
-            .map(|f| f.into_vec())
+            .map(|n| n.into_vec())
             .unwrap_or_default()
             .into_iter()
             .map(|f| NavFix {

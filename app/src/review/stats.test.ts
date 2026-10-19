@@ -118,6 +118,18 @@ describe("buildReview: totals", () => {
     expect(buildReview(input(fs, { showDemo: true }), Y2026).flights).toBe(2);
   });
 
+  it("leaves out discarded ground sessions and recorded flights that never took off (countsInStats)", () => {
+    const fs = [
+      flight({ when: "2026-05-01T08:00:00Z" }),
+      flight({ when: "2026-05-02T08:00:00Z", state: "discarded", takeoffMs: null, landingMs: null, landingCount: 0 }),
+      flight({ when: "2026-05-03T08:00:00Z", takeoffMs: null, landingMs: null, landingCount: 0 }),
+      // an import carries its own facts: counts without take-off or touchdowns
+      flight({ when: "2026-05-04T08:00:00Z", provider: "import:volanta_import", takeoffMs: null, landingCount: 0 }),
+    ];
+    expect(buildReview(input(fs), Y2026).flights).toBe(2);
+    expect(yearsWithFlights([fs[1], fs[2]], false, false)).toEqual([]);
+  });
+
   it("uses the pilot's corrections for airports and falls back to air time without block times", () => {
     const f = flight({ when: "2026-05-01T08:00:00Z", userArrIcao: "EGKK", offBlockMs: null, onBlockMs: null });
     const r = buildReview(input([f]), Y2026);

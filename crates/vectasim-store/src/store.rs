@@ -285,6 +285,20 @@ pub(crate) const LANDING_RATE_SQL: &str =
     "COALESCE(landing_rate_fpm, ROUND(CASE WHEN ABS(vs_fpm_sim) >= 1 THEN vs_fpm_sim ELSE vs_fpm_measured END))";
 const LANDING_SOURCE_SQL: &str =
     "COALESCE(landing_rate_source, CASE WHEN ABS(vs_fpm_sim) >= 1 THEN 'sim' ELSE 'measured' END)";
+/// [`LANDING_RATE_SQL`] for averages: NULL for an unrated touchdown (`landing_rate_source =
+/// 'unrated'`: slewed or fast-forwarded down, its rate is ~0 and must not count; `AVG` skips it).
+pub(crate) const RATED_LANDING_RATE_SQL: &str = "CASE WHEN COALESCE(landing_rate_source, '') <> 'unrated' THEN \
+     COALESCE(landing_rate_fpm, ROUND(CASE WHEN ABS(vs_fpm_sim) >= 1 THEN vs_fpm_sim ELSE vs_fpm_measured END)) END";
+
+/// Whether the flight row `alias` counts in statistics (counters, airports, countries, fleet):
+/// not a discarded ground session, and – for recorded flights (imports carry their own facts) –
+/// it took off or touched down. Rows from before 0.5.1 that only taxied fall out this way.
+pub(crate) fn counts_in_stats_sql(alias: &str) -> String {
+    format!(
+        "({alias}.state <> 'discarded' AND ({alias}.takeoff_ms IS NOT NULL OR COALESCE({alias}.provider, '') LIKE 'import:%' \
+          OR EXISTS (SELECT 1 FROM touchdowns tc WHERE tc.flight_id = {alias}.id)))"
+    )
+}
 
 /// What the store keeps of a dispatch plan, independent of where it came from
 /// (SimBrief today). `ofp_json` is the full document for the detail view.
@@ -548,6 +562,15 @@ pub struct FlightRow {
     /// derived from the 1 Hz track.
     #[serde(default)]
     pub g_load: Option<GLoadStats>,
+}
+
+impl FlightRow {
+    /// Same rule as `counts_in_stats_sql`: not discarded, and a recorded flight took off or
+    /// touched down (imports always count).
+    pub fn counts_in_stats(&self) -> bool {
+        self.state != "discarded"
+            && (self.takeoff_ms.is_some() || self.landing_count > 0 || self.provider.as_deref().is_some_and(|p| p.starts_with("import:")))
+    }
 }
 
 /// Longest note [`Store::update_flight_user`] accepts (characters).
@@ -1163,8 +1186,18 @@ impl Store {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
-        let backup_dir = default_backup_dir.map(|d| configured_backup_dir(&conn).unwrap_or_else(|| d.to_path_buf()));
-        Self::migrate(&conn, backup_dir.as_deref())?;
+        // the configured folder first; if that is unreachable (USB stick, NAS offline) the default one
+        let backup_dirs: Vec<PathBuf> = match default_backup_dir {
+            Some(d) => {
+                let mut v: Vec<PathBuf> = configured_backup_dir(&conn).into_iter().collect();
+                if !v.iter().any(|c| c == d) {
+                    v.push(d.to_path_buf());
+                }
+                v
+            }
+            None => Vec::new(),
+        };
+        Self::migrate(&conn, &backup_dirs)?;
         // A flight left 'active' means the app died mid-flight; keep it, but say so.
         let now = vectasim_core::now_ms() as i64;
         conn.execute(
@@ -1175,11 +1208,12 @@ impl Store {
     }
 
     /// Apply the schema steps newer than what the file has. Before the first step on an
-    /// existing file a full copy goes to `backup_dir` (`vectasim-pre-v<old>-<stamp>.db`) –
+    /// existing file a full copy goes to the first of `backup_dirs` that works
+    /// (`vectasim-pre-v<old>-<stamp>.db`; the configured folder, else the default one) –
     /// no copy, no migration. Each step runs in its own `BEGIN IMMEDIATE … COMMIT` together
     /// with its `schema_version` bump, so a failure (or crash) leaves the file at the last
     /// complete version, never half-applied. A file from a newer app is refused untouched.
-    fn migrate(conn: &Connection, backup_dir: Option<&Path>) -> Result<()> {
+    fn migrate(conn: &Connection, backup_dirs: &[PathBuf]) -> Result<()> {
         let found = file_schema_version(conn)?;
         if found > SCHEMA_VERSION {
             return Err(StoreError::NewerSchema { found, supported: SCHEMA_VERSION });
@@ -1194,14 +1228,32 @@ impl Store {
             log::info!("logbook schema version {found}");
             return Ok(());
         }
-        let backup = match (found, backup_dir) {
-            (1.., Some(dir)) => {
-                let kind = crate::backup::BackupKind::PreMigration(found);
-                let target = crate::backup::create_backup_from(conn, dir, kind, vectasim_core::now_ms())?;
-                log::info!("logbook copy before migrating from v{found}: {}", target.display());
-                Some(target)
+        let backup = if found >= 1 && !backup_dirs.is_empty() {
+            let kind = crate::backup::BackupKind::PreMigration(found);
+            let mut last_err = None;
+            let mut target = None;
+            for dir in backup_dirs {
+                match crate::backup::create_backup_from(conn, dir, kind, vectasim_core::now_ms()) {
+                    Ok(t) => {
+                        target = Some(t);
+                        break;
+                    }
+                    Err(e) => {
+                        log::warn!("logbook copy before migrating: backup folder {} not usable: {e}", dir.display());
+                        last_err = Some(e);
+                    }
+                }
             }
-            _ => None,
+            match (target, last_err) {
+                (Some(t), _) => {
+                    log::info!("logbook copy before migrating from v{found}: {}", t.display());
+                    Some(t)
+                }
+                (None, Some(e)) => return Err(e),
+                (None, None) => None,
+            }
+        } else {
+            None
         };
         for step in MIGRATIONS.iter().filter(|m| m.to > found) {
             conn.execute_batch("BEGIN IMMEDIATE")?;
@@ -1710,6 +1762,16 @@ impl Store {
             > 0)
     }
 
+    /// A recording that never flew (`FlightState::Discarded`): state `discarded` and into the
+    /// Papierkorb at `now_ms` (restorable like any trashed flight; statistics skip it even then).
+    /// False if the flight is unknown.
+    pub fn discard_flight_at(&self, id: &str, now_ms: u64) -> Result<bool> {
+        Ok(self.conn().execute(
+            "UPDATE flights SET state = 'discarded', deleted_ms = COALESCE(deleted_ms, ?2) WHERE id = ?1",
+            params![id, now_ms as i64],
+        )? > 0)
+    }
+
     /// Take a flight out of the Papierkorb. False if it is not in it.
     pub fn restore_flight(&self, id: &str) -> Result<bool> {
         Ok(self.conn().execute("UPDATE flights SET deleted_ms = NULL WHERE id = ?1 AND deleted_ms IS NOT NULL", params![id])? > 0)
@@ -1796,8 +1858,8 @@ impl Store {
         Ok(n)
     }
 
-    /// Full-stop touchdowns (no touch-and-go) of completed flights, newest first, with their
-    /// cached facts if any. Demo (mock) flights only with `include_demo`.
+    /// Full-stop touchdowns (no touch-and-go, no unrated rate) of completed flights, newest
+    /// first, with their cached facts if any. Demo (mock) flights only with `include_demo`.
     pub fn recent_landings(&self, limit: u32, include_demo: bool) -> Result<Vec<RecentLanding>> {
         let conn = self.conn();
         let mut stmt = conn.prepare(&format!(
@@ -1817,6 +1879,7 @@ impl Store {
              JOIN flights f ON f.id = td.flight_id
              LEFT JOIN landing_facts lf ON lf.flight_id = td.flight_id AND lf.touchdown_index = td.idx
              WHERE f.state = 'completed' AND f.deleted_ms IS NULL AND td.touch_and_go = 0
+               AND COALESCE(td.landing_rate_source, '') <> 'unrated'
                AND (?2 OR COALESCE(f.provider, '') <> 'mock')
              ORDER BY td.timestamp_ms DESC, td.id DESC
              LIMIT ?1"
@@ -2186,20 +2249,21 @@ impl Store {
 
     pub fn totals(&self) -> Result<Totals> {
         let conn = self.conn();
+        let counts = counts_in_stats_sql("flights");
         let (flights, completed, block, flight, distance): (i64, i64, i64, i64, f64) = conn.query_row(
-            "SELECT COUNT(*),
+            &format!("SELECT COUNT(*),
                     SUM(state = 'completed'),
                     COALESCE(SUM(CASE WHEN on_block_ms IS NOT NULL AND off_block_ms IS NOT NULL THEN on_block_ms - off_block_ms END), 0),
                     COALESCE(SUM(CASE WHEN landing_ms IS NOT NULL AND takeoff_ms IS NOT NULL THEN landing_ms - takeoff_ms END), 0),
                     COALESCE(SUM(distance_nm), 0)
-             FROM flights WHERE deleted_ms IS NULL",
+             FROM flights WHERE deleted_ms IS NULL AND {counts}"),
             [],
             |r| Ok((r.get(0)?, r.get::<_, Option<i64>>(1)?.unwrap_or(0), r.get(2)?, r.get(3)?, r.get(4)?)),
         )?;
         let (landings, avg): (i64, Option<f64>) = conn.query_row(
             &format!(
-                "SELECT COUNT(*), AVG({LANDING_RATE_SQL}) FROM touchdowns
-                 WHERE touch_and_go = 0 AND flight_id IN (SELECT id FROM flights WHERE deleted_ms IS NULL)"
+                "SELECT COUNT(*), AVG({RATED_LANDING_RATE_SQL}) FROM touchdowns
+                 WHERE touch_and_go = 0 AND flight_id IN (SELECT id FROM flights WHERE deleted_ms IS NULL AND {counts})"
             ),
             [],
             |r| Ok((r.get(0)?, r.get(1)?)),
@@ -2226,7 +2290,8 @@ pub(crate) const FLIGHT_COLS: &str = "f.id, f.state, f.phase, f.created_ms, f.up
     f.crashed, f.fuel_increased_airborne, f.dep_icao, f.arr_icao,
     f.callsign, f.planned_dep, f.planned_arr, f.planned_block_s, f.planned_fuel_ramp_kg, f.planned_fuel_landing_kg,
     (f.ofp_json IS NOT NULL),
-    (SELECT COALESCE(t.landing_rate_fpm, ROUND(CASE WHEN ABS(t.vs_fpm_sim) >= 1 THEN t.vs_fpm_sim ELSE t.vs_fpm_measured END))
+    (SELECT CASE WHEN COALESCE(t.landing_rate_source, '') <> 'unrated' THEN
+            COALESCE(t.landing_rate_fpm, ROUND(CASE WHEN ABS(t.vs_fpm_sim) >= 1 THEN t.vs_fpm_sim ELSE t.vs_fpm_measured END)) END
        FROM touchdowns t WHERE t.flight_id = f.id AND t.touch_and_go = 0 ORDER BY t.timestamp_ms DESC LIMIT 1),
     (SELECT COUNT(*) FROM touchdowns t WHERE t.flight_id = f.id),
     f.dep_metar, f.dep_metar_ms, f.arr_metar, f.arr_metar_ms, f.airframe_reg, f.teleport_detected, f.gap_ms,

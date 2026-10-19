@@ -688,12 +688,21 @@ fn write_image(images_dir: &Path, reg: &str, entry: &str, bytes: &[u8]) -> Resul
     if !IMAGE_EXTENSIONS.contains(&ext.as_str()) {
         return Err(invalid(Invalid::NotAnImage { entry: entry.to_string() }));
     }
+    // the registration comes from the bundle: only a normalised one becomes a file name, and the
+    // file has to land directly in `images_dir` (no `..`, no absolute path, no separators)
+    let stem = match crate::airframe::normalize_registration(reg) {
+        Some(n) if n == reg => n.replace('-', "_"),
+        _ => return Err(invalid(Invalid::InvalidRegistration { registration: reg.to_string() })),
+    };
+    let name = format!("{stem}.{ext}");
+    let dest = images_dir.join(&name);
+    if dest.parent() != Some(images_dir) || dest.file_name().and_then(|n| n.to_str()) != Some(name.as_str()) {
+        return Err(invalid(Invalid::InvalidRegistration { registration: reg.to_string() }));
+    }
     std::fs::create_dir_all(images_dir)?;
-    let stem = reg.replace('-', "_");
     for old in IMAGE_EXTENSIONS {
         let _ = std::fs::remove_file(images_dir.join(format!("{stem}.{old}")));
     }
-    let dest = images_dir.join(format!("{stem}.{ext}"));
     std::fs::write(&dest, bytes)?;
     Ok(dest)
 }
@@ -762,6 +771,13 @@ fn import_airframes<R: Read + Seek>(
             report.warnings.push(opts.lang.tr("Flugzeug ohne Registrierung übergangen", "Aircraft without registration skipped").into());
             continue;
         };
+        // registrations here are always normalised; anything else (lower case, `..\x`, a path)
+        // is not one of ours and would become the file name of its picture
+        if crate::airframe::normalize_registration(reg).as_deref() != Some(reg) {
+            let lang = opts.lang;
+            report.warnings.push(ltr!(lang, "Flugzeug mit ungültiger Registrierung {reg:?} übergangen", "Aircraft with invalid registration {reg:?} skipped"));
+            continue;
+        }
         let existing = dump_rows(tx, "SELECT * FROM airframes WHERE registration = ?1", params![reg])?.into_iter().next();
         match existing {
             None => {
@@ -1136,6 +1152,20 @@ mod tests {
         assert_eq!(image_entry("D-AIBL", "jpg").as_deref(), Some("images/D-AIBL.jpg"));
         assert_eq!(image_entry("../x", "jpg"), None);
         assert_eq!(image_entry("D-AIBL", "exe"), None);
+    }
+
+    #[test]
+    fn pictures_only_land_in_the_picture_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let images = dir.path().join("img");
+        let abs = dir.path().join("x").display().to_string();
+        for bad in [r"..\x", "../x", abs.as_str(), "d-aibl", "D-AIBL/x", "C:x"] {
+            assert!(write_image(&images, bad, "images/a.png", b"png").is_err(), "{bad} accepted");
+        }
+        assert!(!dir.path().join("x.png").exists());
+        let ok = write_image(&images, "D-AIBL", "images/D-AIBL.png", b"png").unwrap();
+        assert_eq!(ok, images.join("D_AIBL.png"));
+        assert_eq!(std::fs::read(ok).unwrap(), b"png");
     }
 
     #[test]

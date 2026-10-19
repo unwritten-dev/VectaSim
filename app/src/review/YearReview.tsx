@@ -18,6 +18,7 @@ import { FACTS_WINDOW, buildReview, demoLeftOut, flightTimeMs, inPeriod, periodL
 import { cardTitle, formatLabel, type CardFormat } from "./text";
 import ReviewLightbox from "./ReviewLightbox";
 import { reviewGridLayout, type GridLayout } from "./layout";
+import { latestOnly } from "../latest";
 import "./review.css";
 
 interface RunwayFactsResult {
@@ -133,6 +134,7 @@ export default function YearReview() {
   const prefs = usePrefs();
   const { showDemo, timeLocal, privacyMode, cardHideReg, theme } = prefs;
   const [data, setData] = useState<Data | null>(null);
+  const [latest] = useState(latestOnly);
   const [stat, setStat] = useState<StaticData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [coordsRev, setCoordsRev] = useState(0);
@@ -159,6 +161,7 @@ export default function YearReview() {
   }, []);
 
   const refresh = useCallback(async () => {
+    const isLatest = latest();
     try {
       const [flights, landings, approaches, visited] = await Promise.all([
         invoke<FlightRow[]>("list_flights", { limit: 100000 }),
@@ -168,12 +171,13 @@ export default function YearReview() {
           .catch(() => []),
         invoke<VisitedCountries>("visited_countries", { includeDemo: showDemo }),
       ]);
+      if (!isLatest()) return;
       setData({ flights, landings, approaches, visited });
       setError(null);
     } catch (e) {
-      setError(String(e));
+      if (isLatest()) setError(String(e));
     }
-  }, [showDemo]);
+  }, [showDemo, latest]);
 
   useEffect(() => {
     void refresh();

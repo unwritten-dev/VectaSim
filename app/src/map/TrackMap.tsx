@@ -32,6 +32,9 @@ import { WAKE_SIZE, icaoFromAtcModel, wakeCategory } from "./aircraftIcons";
 import MapStyleToggle from "./MapStyleToggle";
 import { followSatellite } from "./satellite";
 import { altToCurtainM } from "./trackChunks";
+import { pointsBounds } from "./geo";
+import { addLayerOnce, addSourceOnce, replaceCustomLayer } from "./styleOnce";
+import MapUnavailable from "./MapUnavailable";
 
 /** First draw of a long track: this many points at most; the full line follows once idle. */
 const QUICK_POINTS = 1500;
@@ -78,6 +81,8 @@ export default function TrackMap({ samples, touchdowns, departure, arrival, airc
   const fittedRef = useRef("");
   /** 3D view: pitched camera, the track as wall + ribbon at the flown altitude. */
   const [view3d, setView3d] = useState(false);
+  /** The map could not be created (no WebGL2): MapUnavailable instead of a blank area. */
+  const [mapFailed, setMapFailed] = useState(false);
   const view3dRef = useRef(false);
   /** Globe or flat Mercator, shared with the live map and the Länder view. */
   const [globe] = useGlobe();
@@ -109,7 +114,8 @@ export default function TrackMap({ samples, touchdowns, departure, arrival, airc
         interactive: true,
       });
       mapRef.current = map;
-      // our layers; again after a theme change (setStyle drops them)
+      // our layers; again after a theme change (setStyle drops them) and a WebGL context restore
+      // (custom layers are not restored); idempotent, so a second style load cannot collide
       let diagramOff: (() => void) | undefined;
       const addOwnLayers = () => {
         diagramOff?.();
@@ -117,8 +123,8 @@ export default function TrackMap({ samples, touchdowns, departure, arrival, airc
         addTrackLayers(map, "track");
         addCurtainLayers(map, "track-3d", firstSymbolLayer(map));
         setCurtainVisible(map, "track-3d", view3dRef.current);
-        map.addSource("markers", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
-        map.addLayer({
+        addSourceOnce(map, "markers", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+        addLayerOnce(map, {
           id: "markers",
           type: "circle",
           source: "markers",
@@ -131,7 +137,7 @@ export default function TrackMap({ samples, touchdowns, departure, arrival, airc
           },
         });
         const model = new AircraftModelLayer("aircraft-model", { body: COLOR.ownAircraft, dark: COLOR.aircraftEdge, light: getMapTheme().scheme === "light" });
-        map.addLayer(model);
+        replaceCustomLayer(map, model);
         modelRef.current = model;
         model.setEnabled(view3dRef.current);
       };
@@ -140,28 +146,31 @@ export default function TrackMap({ samples, touchdowns, departure, arrival, airc
       map.on("dragstart", (e) => {
         if (e.originalEvent && followRef.current) setFollowFlag(false);
       });
-      map.on("load", () => {
+      // one handler for every style load (first load, theme change, context restore)
+      map.on("style.load", () => {
         applyProjection(map, globeRef.current);
         addOwnLayers();
         readyRef.current = true;
-        // latest props: samples may have arrived while the style was loading
+        // latest props: samples may have arrived while the style was loading; a new style's
+        // sources start empty, so the track is drawn again (the fit is kept: same track id)
         drawRef.current();
       });
       let themeSeq = 0;
-      const onTheme = () => {
+      const reloadStyle = () => {
         const mySeq = ++themeSeq;
         void loadBasemapStyle().then((next) => {
           if (mySeq !== themeSeq || mapRef.current !== map) return;
           readyRef.current = false;
-          map.once("style.load", () => {
-            addOwnLayers();
-            readyRef.current = true;
-            drawRef.current();
-          });
           map.setStyle(withProjection(next, globeRef.current, COLOR.bg), { diff: false });
         });
       };
-      window.addEventListener("theme:changed", onTheme);
+      window.addEventListener("theme:changed", reloadStyle);
+      // WebGL context lost: MapLibre drops the custom layers (curtain, model); on restore a fresh
+      // style load re-adds everything, like a theme change
+      map.on("webglcontextlost", () => {
+        readyRef.current = false;
+      });
+      map.on("webglcontextrestored", reloadStyle);
       // basemap names follow the UI language (map/basemap.ts)
       const offLang = followLanguage(map);
       // Karte / Satellit (map/satellite.ts), re-applied after every theme change
@@ -169,7 +178,7 @@ export default function TrackMap({ samples, touchdowns, departure, arrival, airc
       const ro = new ResizeObserver(() => map.resize());
       ro.observe(container);
       return () => {
-        window.removeEventListener("theme:changed", onTheme);
+        window.removeEventListener("theme:changed", reloadStyle);
         offLang();
         offSat();
         diagramOff?.();
@@ -184,10 +193,16 @@ export default function TrackMap({ samples, touchdowns, departure, arrival, airc
     let disposed = false;
     let teardown: (() => void) | undefined;
     // patched basemap (map/basemap.ts); resolves at once from the in-memory copy after the first map
-    void loadBasemapStyle().then((style) => {
-      if (disposed || !containerRef.current || mapRef.current) return;
-      teardown = setupMap(containerRef.current, style);
-    });
+    void loadBasemapStyle()
+      .then((style) => {
+        if (disposed || !containerRef.current || mapRef.current) return;
+        teardown = setupMap(containerRef.current, style);
+      })
+      // no WebGL2: a hint instead of a blank area
+      .catch((e) => {
+        console.error("track map: could not create the map", e);
+        if (!disposed) setMapFailed(true);
+      });
     return () => {
       disposed = true;
       teardown?.();
@@ -227,10 +242,11 @@ export default function TrackMap({ samples, touchdowns, departure, arrival, airc
     if (followRef.current) setFollowFlag(false);
     const coords = points.map((p) => [p.lon, p.lat] as [number, number]);
     for (const m of markers) coords.push((m.geometry as GeoJSON.Point).coordinates as [number, number]);
-    if (coords.length >= 2) {
-      const bounds = coords.reduce((b, c) => b.extend(c), new maplibregl.LngLatBounds(coords[0], coords[0]));
+    // shortest longitude interval: a Pacific flight fits across ±180 (east > 180), not the whole world
+    const bounds = coords.length >= 2 ? pointsBounds(coords) : null;
+    if (bounds) {
       map.fitBounds(bounds, { padding: 30, maxZoom: 12, duration: 0 });
-    } else if (coords.length === 1) {
+    } else if (coords.length >= 1) {
       map.jumpTo({ center: coords[0], zoom: 10 });
     }
   };
@@ -356,6 +372,7 @@ export default function TrackMap({ samples, touchdowns, departure, arrival, airc
   return (
     <div className="track-map-wrap">
       <div ref={containerRef} className="map track-map" />
+      {mapFailed && <MapUnavailable />}
       <div className="map-toolbar track-map-toolbar">
         <button className="toggle" onClick={toggleFollow} aria-pressed={follow} title={t("map.toolbar.followTitle")}>
           {t("map.toolbar.follow")}

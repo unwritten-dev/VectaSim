@@ -52,6 +52,24 @@ fn flight_running(app: &AppHandle) -> bool {
     app.state::<ProviderManager>().current_flight_id().is_some()
 }
 
+/// The flight being recorded cannot go to the Papierkorb or be deleted: its row would vanish
+/// under the recorder (every later write fails, the log fills). `ids` are the flights to delete.
+pub fn refuse_recording_flight<'a>(current: Option<&str>, mut ids: impl Iterator<Item = &'a str>) -> Result<(), String> {
+    match current {
+        Some(cur) if ids.any(|id| id == cur) => Err(crate::lang::tr(
+            "Der Flug wird gerade aufgezeichnet und kann erst nach dem Flugende gelöscht werden.",
+            "This flight is being recorded and can only be deleted after it has ended.",
+        )
+        .into()),
+        _ => Ok(()),
+    }
+}
+
+/// [`refuse_recording_flight`] for one id against the manager's running flight.
+pub fn refuse_if_recording(app: &AppHandle, id: &str) -> Result<(), String> {
+    refuse_recording_flight(app.state::<ProviderManager>().current_flight_id().as_deref(), std::iter::once(id))
+}
+
 fn file_bytes(p: &Path) -> u64 {
     std::fs::metadata(p).map(|m| m.len()).unwrap_or(0)
 }
@@ -216,6 +234,7 @@ pub fn restore_flight(id: String, app: AppHandle, store: State<Store>) -> Result
 
 #[tauri::command]
 pub fn delete_flight_permanently(id: String, app: AppHandle, store: State<Store>) -> Result<bool, String> {
+    refuse_if_recording(&app, &id)?;
     let ok = store.delete_flight_permanently(&id).map_err(err)?;
     if ok {
         let _ = app.emit("logbook:changed", ());
@@ -226,6 +245,10 @@ pub fn delete_flight_permanently(id: String, app: AppHandle, store: State<Store>
 /// „Papierkorb leeren“. Returns how many flights went.
 #[tauri::command]
 pub fn empty_trash(app: AppHandle, store: State<Store>) -> Result<usize, String> {
+    if let Some(cur) = app.state::<ProviderManager>().current_flight_id() {
+        let trashed = store.list_deleted_flights().map_err(err)?;
+        refuse_recording_flight(Some(&cur), trashed.iter().map(|d| d.flight.id.as_str()))?;
+    }
     let n = store.purge_deleted(0, vectasim_core::now_ms()).map_err(err)?;
     log::info!("trash emptied: {n} flight(s)");
     let _ = app.emit("logbook:changed", ());
@@ -632,6 +655,15 @@ pub fn report_store_error(app: &AppHandle, e: &StoreError, db: &Path, backups: &
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_recording_flight_cannot_be_deleted() {
+        let ids = ["a", "b"];
+        assert!(refuse_recording_flight(Some("b"), ids.iter().copied()).is_err());
+        assert!(refuse_recording_flight(Some("c"), ids.iter().copied()).is_ok());
+        assert!(refuse_recording_flight(None, ids.iter().copied()).is_ok());
+        assert!(refuse_recording_flight(Some("a"), std::iter::empty()).is_ok());
+    }
 
     #[test]
     fn write_paths_are_checked() {

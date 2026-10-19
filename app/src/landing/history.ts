@@ -9,6 +9,7 @@
 import type { LandingFact, TouchdownReport } from "../types";
 import type { ApproachFact } from "./approachTypes";
 import { isDerivedSource } from "./types";
+import { isRated } from "./rated";
 import { t } from "../i18n";
 import { NNBSP, fmtNum } from "../i18n/number";
 
@@ -422,6 +423,9 @@ export interface PatternRow {
   timestampMs: number;
   touchAndGo: boolean;
   landingRateFpm: number;
+  landingRateSource: TouchdownReport["landingRateSource"];
+  /** false: unrated (slewed / fast-forwarded down) – no rate, left out of best and median. */
+  rated: boolean;
   peakG: number;
   bounces: number;
   /** From the landing fact (only where one exists – usually the full stop). */
@@ -456,6 +460,8 @@ export function patternSeries(touchdowns: TouchdownReport[], facts: HistLanding[
       timestampMs: t.timestampMs,
       touchAndGo: t.touchAndGo,
       landingRateFpm: t.landingRateFpm,
+      landingRateSource: t.landingRateSource,
+      rated: isRated(t),
       peakG: t.peakG,
       bounces: t.bounces,
       distanceM: f ? f.touchdownDistanceM : null,
@@ -465,12 +471,13 @@ export function patternSeries(touchdowns: TouchdownReport[], facts: HistLanding[
       stableFromFt: a && isNum(a.stableFromFt) ? a.stableFromFt : null,
     };
   });
-  const best = rows.reduce<PatternRow | null>((b, r) => (b == null || Math.abs(r.landingRateFpm) < Math.abs(b.landingRateFpm) ? r : b), null);
+  const rated = rows.filter((r) => r.rated);
+  const best = rated.reduce<PatternRow | null>((b, r) => (b == null || Math.abs(r.landingRateFpm) < Math.abs(b.landingRateFpm) ? r : b), null);
   return {
     rows,
     touchAndGos: rows.filter((r) => r.touchAndGo).length,
     fullStops: rows.filter((r) => !r.touchAndGo).length,
-    medianRateFpm: median(rows.map((r) => r.landingRateFpm)),
+    medianRateFpm: median(rated.map((r) => r.landingRateFpm)),
     bestIndex: best?.touchdownIndex ?? null,
   };
 }

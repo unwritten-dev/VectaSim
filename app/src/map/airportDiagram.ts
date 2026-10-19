@@ -6,6 +6,9 @@ import * as maplibregl from "maplibre-gl";
 import { invoke } from "@tauri-apps/api/core";
 import type { Airport, Runway } from "../types";
 import { COLOR, DIAGRAM } from "../theme";
+import { boundedDebounce } from "./debounce";
+import { addLayerOnce, addSourceOnce } from "./styleOnce";
+import { queryBox, unwrapLon } from "./geo";
 
 /** Zoom from which the diagram takes over from the airport dots in common.ts. */
 export const DIAGRAM_FROM_ZOOM = 13;
@@ -92,11 +95,16 @@ export function addAirportDiagramLayers(map: maplibregl.Map): () => void {
     const c = map.getCenter();
     const padLat = 0.06;
     const padLon = padLat / Math.max(0.2, Math.cos((c.lat * Math.PI) / 180));
+    // the centre in the bounds' world copy (getBounds may run past ±180), then wrapped for the
+    // backend: a view across the antimeridian finds the runways on both sides
+    const lng = unwrapLon(c.lng, (b.getWest() + b.getEast()) / 2);
     invoke<Airport[]>("airports_in_bbox", {
-      minLon: Math.min(b.getWest(), c.lng - padLon),
-      minLat: Math.min(b.getSouth(), c.lat - padLat),
-      maxLon: Math.max(b.getEast(), c.lng + padLon),
-      maxLat: Math.max(b.getNorth(), c.lat + padLat),
+      ...queryBox({
+        west: Math.min(b.getWest(), lng - padLon),
+        south: Math.min(b.getSouth(), c.lat - padLat),
+        east: Math.max(b.getEast(), lng + padLon),
+        north: Math.max(b.getNorth(), c.lat + padLat),
+      }),
       limit: 60,
     })
       .then(async (list) => {
@@ -120,10 +128,13 @@ export function addAirportDiagramLayers(map: maplibregl.Map): () => void {
       // runway overlay is decoration on top of the OSM diagram; keep the last state on failure
       .catch(() => {});
   };
-  map.on("moveend", refresh);
+  // the follow camera ends a move up to every frame: at most a few lookups per second
+  const soon = boundedDebounce(refresh, 150, 500);
+  map.on("moveend", soon);
   refresh();
   return () => {
-    map.off("moveend", refresh);
+    soon.cancel();
+    map.off("moveend", soon);
   };
 }
 
@@ -131,7 +142,7 @@ function addOsmLayers(map: maplibregl.Map, source: string) {
   const base = { source, "source-layer": "aeroway" } as const;
 
   // soft airport ground for the aerodrome polygon
-  map.addLayer({
+  addLayerOnce(map, {
     ...base,
     id: "apd-aerodrome",
     type: "fill",
@@ -139,7 +150,7 @@ function addOsmLayers(map: maplibregl.Map, source: string) {
     filter: ["all", isPolygon, cls("aerodrome")],
     paint: { "fill-color": DIAGRAM.aerodrome, "fill-opacity": ["interpolate", ["linear"], ["zoom"], 11, 0, 13, 0.55] },
   });
-  map.addLayer({
+  addLayerOnce(map, {
     ...base,
     id: "apd-apron",
     type: "fill",
@@ -147,7 +158,7 @@ function addOsmLayers(map: maplibregl.Map, source: string) {
     filter: ["all", isPolygon, cls("apron")],
     paint: { "fill-color": DIAGRAM.apron, "fill-opacity": ["interpolate", ["linear"], ["zoom"], 12, 0.3, 14, 0.8] },
   });
-  map.addLayer({
+  addLayerOnce(map, {
     ...base,
     id: "apd-apron-outline",
     type: "line",
@@ -156,7 +167,7 @@ function addOsmLayers(map: maplibregl.Map, source: string) {
     paint: { "line-color": DIAGRAM.apronOutline, "line-width": 0.8 },
   });
   // runway/taxiway polygons where mapped as areas
-  map.addLayer({
+  addLayerOnce(map, {
     ...base,
     id: "apd-pavement-area",
     type: "fill",
@@ -166,7 +177,7 @@ function addOsmLayers(map: maplibregl.Map, source: string) {
   });
 
   // taxiways: dark pavement at real width (~23 m) + yellow centreline
-  map.addLayer({
+  addLayerOnce(map, {
     ...base,
     id: "apd-taxiway-pavement",
     type: "line",
@@ -175,7 +186,7 @@ function addOsmLayers(map: maplibregl.Map, source: string) {
     layout: { "line-cap": "round", "line-join": "round" },
     paint: { "line-color": DIAGRAM.pavement, "line-width": realWidth(pxAtZ10(23, 50), 0.3) },
   });
-  map.addLayer({
+  addLayerOnce(map, {
     ...base,
     id: "apd-taxiway",
     type: "line",
@@ -190,7 +201,7 @@ function addOsmLayers(map: maplibregl.Map, source: string) {
   });
 
   // runways: grey at real width (~45 m) with a lighter edge and a dashed white centreline
-  map.addLayer({
+  addLayerOnce(map, {
     ...base,
     id: "apd-runway-edge",
     type: "line",
@@ -198,7 +209,7 @@ function addOsmLayers(map: maplibregl.Map, source: string) {
     filter: ["all", isLine, cls("runway")],
     paint: { "line-color": RUNWAY_EDGE, "line-width": realWidth(pxAtZ10(45, 50) + 0.8, 1.6) },
   });
-  map.addLayer({
+  addLayerOnce(map, {
     ...base,
     id: "apd-runway",
     type: "line",
@@ -206,7 +217,7 @@ function addOsmLayers(map: maplibregl.Map, source: string) {
     filter: ["all", isLine, cls("runway")],
     paint: { "line-color": RUNWAY, "line-width": realWidth(pxAtZ10(45, 50), 1) },
   });
-  map.addLayer({
+  addLayerOnce(map, {
     ...base,
     id: "apd-runway-centreline",
     type: "line",
@@ -221,7 +232,7 @@ function addOsmLayers(map: maplibregl.Map, source: string) {
   });
 
   // gates / stands
-  map.addLayer({
+  addLayerOnce(map, {
     ...base,
     id: "apd-gate",
     type: "circle",
@@ -236,7 +247,7 @@ function addOsmLayers(map: maplibregl.Map, source: string) {
   });
 
   // labels
-  map.addLayer({
+  addLayerOnce(map, {
     ...base,
     id: "apd-taxiway-label",
     type: "symbol",
@@ -253,7 +264,7 @@ function addOsmLayers(map: maplibregl.Map, source: string) {
     },
     paint: { "text-color": TAXIWAY, "text-halo-color": HALO, "text-halo-width": 1.5 },
   });
-  map.addLayer({
+  addLayerOnce(map, {
     ...base,
     id: "apd-runway-label",
     type: "symbol",
@@ -268,7 +279,7 @@ function addOsmLayers(map: maplibregl.Map, source: string) {
     },
     paint: { "text-color": DIAGRAM.runwayLabel, "text-halo-color": HALO, "text-halo-width": 1.5 },
   });
-  map.addLayer({
+  addLayerOnce(map, {
     ...base,
     id: "apd-gate-label",
     type: "symbol",
@@ -287,10 +298,10 @@ function addOsmLayers(map: maplibregl.Map, source: string) {
 }
 
 function addOurAirportsLayers(map: maplibregl.Map) {
-  map.addSource(THR_SOURCE, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  addSourceOnce(map, THR_SOURCE, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   // runway fallback from OurAirports thresholds, drawn under the OSM runway so OSM wins where present
   const below = map.getLayer("apd-runway-edge") ? "apd-runway-edge" : undefined;
-  map.addLayer(
+  addLayerOnce(map,
     {
       id: "apd-oa-runway",
       type: "line",
@@ -301,7 +312,7 @@ function addOurAirportsLayers(map: maplibregl.Map) {
     },
     below,
   );
-  map.addLayer({
+  addLayerOnce(map, {
     id: "apd-oa-designator",
     type: "symbol",
     source: THR_SOURCE,

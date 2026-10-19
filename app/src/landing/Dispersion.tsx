@@ -28,6 +28,7 @@ import {
   type DispersionFilter,
 } from "./dispersionStats";
 import "./dispersion.css";
+import { isRated } from "./rated";
 
 /** Normalised runway: every landing is drawn on the same 3000 m strip. */
 const RWY_LEN_M = 3000;
@@ -95,7 +96,8 @@ export default function Dispersion({ limit = 20 }: { limit?: number }) {
   const refresh = useCallback(async () => {
     try {
       const r = await invoke<RunwayFactsResult>("landing_facts_recent", { limit: fetchLimit, includeDemo: showDemo });
-      setData(r);
+      // unrated touchdowns (slewed down) are no landing rates – the backend leaves them out already
+      setData({ ...r, facts: r.facts.filter(isRated) });
       setError(null);
     } catch (e) {
       setError(String(e));

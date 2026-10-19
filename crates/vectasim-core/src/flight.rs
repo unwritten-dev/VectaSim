@@ -21,6 +21,48 @@
 //! ground before it requalified (10 s of air time or > 500 ft AGL), the position cannot be
 //! continued (sim restarted at a gate, reload on the runway): the flight ends as interrupted.
 //!
+//! Continuity across a reset in the air (reconnect, `AircraftLoaded`, `SimRunning`
+//! false → true): the first sample after the reset is compared with the last one before it.
+//! If it is where the aircraft could have got to in the meantime – no position jump by the
+//! teleport rule below, and AGL and MSL altitude within twice what the last V/S (at least
+//! 1 000 fpm) covers in the gap, plus 100 ft – the stream only had a hole: phase engine and
+//! touchdown detector are requalified at once ([`PhaseEngine::restore_qualified`]) and the
+//! next ground contact is a landing. Why: up to 0.5.0 every such reset demanded 10 s of fresh
+//! air time, so a SimConnect hiccup or the MSFS ESC menu on short final (below ~120 ft at
+//! 700 fpm) ended the flight as interrupted, lost its landing and started a ghost flight from
+//! the rollout. A sim restarted at the gate or a reload elsewhere still fails the comparison
+//! (position or altitude jumped) and keeps the old rule; a teleport detected between two
+//! samples never takes this path. The rate of a landing right after the hole comes from the
+//! samples after it or the sim's own value, else the touchdown is unrated (see
+//! [`crate::touchdown`]).
+//!
+//! Ground sessions are no flights ([`FlightState::Discarded`]): a recording that ends without
+//! the aircraft ever having flown – airborne qualified (> 500 ft AGL or 60 s), a take-off time,
+//! a touchdown or a start in the air – is discarded instead of `Completed` / `Interrupted`.
+//! That covers taxiing around and shutting down again, a provider stop on the ground, and the
+//! "scenery test": a flight loaded at airport A (taxied a bit, so it started), then a new flight
+//! loaded at airport B. Up to 0.5.0 that was stitched into one flight A → B. Now the A part ends
+//! as discarded and the recording starts over at B (ground → Preflight, air → the start-in-
+//! the-air phase without a take-off), when
+//! - [`SimEvent::FlightLoaded`] arrives (always a new flight, see above), or
+//! - the position jumps by the teleport rule below, or
+//! - the first sample after another context reset ([`SimEvent::AircraftLoaded`],
+//!   [`SimEvent::SimRunning`] false → true, reconnect) is not where the aircraft was (the
+//!   continuity check below). These events alone do not discard: the MSFS ESC menu and an
+//!   aircraft change in place leave the position as it was, and the taxi goes on.
+//!
+//! Without an open flight (idle, or after a completed one) the same jumps restart the phase
+//! engine, so an aircraft loaded in the air at B starts in the air instead of "taking off"
+//! from the ground phase it had at A. A flight that has flown keeps today's rules: a jump in
+//! the air sets `teleport_detected`, `FlightLoaded` interrupts it.
+//!
+//! Discarding emits the usual [`FlightEvent::FlightEnded`] (`interrupted: true` for an abort,
+//! `false` at Shutdown, so a consumer that does not know discards keeps it as before), the
+//! summary's state is [`FlightState::Discarded`], and a [`FlightDiscardedEvent`] with the same
+//! `timestamp_ms` goes out through [`FlightSession::take_discarded_flights`] – take it after
+//! every call that can end a flight. The recorder should act on that event (the summary may
+//! already be the next flight's when the new one starts in the same sample).
+//!
 //! Start in the air (the first sample after connecting or after [`SimEvent::FlightLoaded`]
 //! is airborne, see [`crate::phase`]): a legitimate flight, recorded from that point on. It
 //! starts like any other ([`FlightEvent::FlightStarted`]); `off_block_ms` and `departure` are
@@ -56,7 +98,7 @@
 //! | summary field                 | set when                                                     |
 //! |-------------------------------|--------------------------------------------------------------|
 //! | `touchdowns[i]`               | at the report; `touch_and_go` corrected in place by the outcome |
-//! | `landing_rate_fpm`            | outcome `FullStop` or `Unknown` (never provisional)          |
+//! | `landing_rate_fpm`            | outcome `FullStop` or `Unknown` (never provisional); `None` when that touchdown is unrated (slewed / fast-forwarded down, see [`crate::touchdown`]) |
 //! | `landing_ms`                  | outcome `FullStop` (= the touchdown's first contact); fallback: Landing → TaxiIn without a pending touchdown (detector had none, or `Unknown`) takes the Landing transition time |
 //! | `arrival`                     | Landing transition (as before; a later landing overwrites it) |
 //!
@@ -81,6 +123,12 @@ const TELEPORT_FT_PER_S: f64 = 5_000.0;
 const GAP_PAUSE_MS: u64 = 5_000;
 /// A gap is a pause when the sim clock advanced by less than this share of it.
 const GAP_SIM_CLOCK_SHARE: f64 = 0.25;
+/// Continuity across a reset: altitude may change by this factor times what the last V/S …
+const RESUME_ALT_FACTOR: f64 = 2.0;
+/// … (at least this, fpm) covers in the gap …
+const RESUME_MIN_FPM: f64 = 1_000.0;
+/// … plus this margin, ft.
+const RESUME_ALT_MARGIN_FT: f64 = 100.0;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -91,6 +139,8 @@ pub enum FlightState {
     Completed,
     /// Ended without a shutdown: new flight loaded, position lost, provider stopped.
     Interrupted,
+    /// Ended without ever having flown (a ground session, see the module doc): not a flight.
+    Discarded,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -211,6 +261,20 @@ pub struct TouchdownOutcomeEvent {
     pub touchdown_ms: u64,
 }
 
+/// A recording ended as a ground session (see the module doc): the [`FlightEvent::FlightEnded`]
+/// with the same `timestamp_ms` ended a [`FlightState::Discarded`] flight. Serialises like a
+/// flight event (`kind: "flightDiscarded"`).
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(tag = "kind", rename = "flightDiscarded", rename_all = "camelCase")]
+pub struct FlightDiscardedEvent {
+    /// Time of the `FlightEnded` it belongs to.
+    pub timestamp_ms: u64,
+    /// The discarded flight's off-block (its start), to find its stored row.
+    pub off_block_ms: Option<u64>,
+    /// It reached Shutdown (`FlightEnded { interrupted: false }`), rather than being cut off.
+    pub shut_down: bool,
+}
+
 /// Undrained outcome events kept at most (a caller that never drains loses the oldest).
 const MAX_QUEUED_OUTCOMES: usize = 32;
 
@@ -223,6 +287,8 @@ struct SampleRef {
     wall_ts: u64,
     pos: GeoPoint,
     alt_msl_ft: f64,
+    alt_agl_ft: f64,
+    vs_fpm: f64,
     gs_kt: f64,
     sim_time_s: f64,
 }
@@ -234,6 +300,8 @@ impl SampleRef {
             wall_ts: t.timestamp_ms,
             pos: GeoPoint { latitude: t.latitude, longitude: t.longitude },
             alt_msl_ft: t.altitude_msl_ft,
+            alt_agl_ft: t.altitude_agl_ft,
+            vs_fpm: t.vertical_speed_fpm,
             gs_kt: t.ground_speed_kt,
             sim_time_s: t.sim_zulu_time_s,
         }
@@ -291,6 +359,9 @@ pub struct FlightSession {
     /// A context reset happened in the air with an open flight and the aircraft has not
     /// requalified yet: ground contact now cannot be told apart from a reposition.
     resumed_airborne: bool,
+    /// Last sample before a reset in the air (reconnect, reload), to check the first sample
+    /// after it for continuity (see the module doc).
+    pre_reset: Option<SampleRef>,
     /// Wall clock → monotonic time for gaps, pauses and the distance integration;
     /// `last_sample.ts`, `pause_started_ms` and `last_pos` are on its scale.
     clock: MonoClock,
@@ -301,6 +372,10 @@ pub struct FlightSession {
     pending_touchdown: Option<usize>,
     /// Decided outcomes not yet taken by the caller.
     outcomes: Vec<TouchdownOutcomeEvent>,
+    /// Discarded ground sessions not yet taken by the caller.
+    discarded: Vec<FlightDiscardedEvent>,
+    /// The open flight has flown (see the module doc); without it, it ends as discarded.
+    flown: bool,
     /// Time of the last Landing transition while no full stop has set `landing_ms` for it yet.
     landing_phase_ms: Option<u64>,
     /// G-load of the samples this session evaluated for the open flight ...
@@ -332,6 +407,12 @@ impl FlightSession {
     /// touchdown each one refers to was handed out as [`FlightEvent::Touchdown`] before.
     pub fn take_touchdown_outcomes(&mut self) -> Vec<TouchdownOutcomeEvent> {
         std::mem::take(&mut self.outcomes)
+    }
+
+    /// Flights ended as discarded since the last call (see the module doc), oldest first. Take
+    /// them after the same calls as [`FlightSession::take_touchdown_outcomes`].
+    pub fn take_discarded_flights(&mut self) -> Vec<FlightDiscardedEvent> {
+        std::mem::take(&mut self.discarded)
     }
 
     /// Index into [`FlightSummary::touchdowns`] of the touchdown still waiting for its
@@ -388,6 +469,8 @@ impl FlightSession {
             self.gload = GLoadTracker::default();
         }
         self.gload_base = previous.g_load;
+        // a resumed flight is never discarded as a ground session
+        self.flown = true;
         self.resume_pending = matches!(self.engine.phase(), FlightPhase::Preflight | FlightPhase::Shutdown);
     }
 
@@ -435,8 +518,10 @@ impl FlightSession {
     /// V/S history, dwell timers and the airborne latches, keep the phase and the open
     /// flight. Returns a confirmed touchdown that was still settling, if any.
     pub fn reset_position_context(&mut self) -> Vec<FlightEvent> {
+        // several resets in a row (reconnect, then AircraftLoaded) compare with the last real sample
+        let before = self.last_sample.take().or(self.pre_reset);
         let events = self.reset_context();
-        self.last_sample = None;
+        self.pre_reset = before;
         events
     }
 
@@ -458,12 +543,53 @@ impl FlightSession {
         self.last_pos = None;
         self.last_fuel_kg = None;
         self.resumed_airborne = false;
+        self.pre_reset = None;
         self.resume_pending = false;
         if self.summary.state == FlightState::Active {
-            self.summary.state = FlightState::Interrupted;
+            self.summary.state = if self.flown { FlightState::Interrupted } else { FlightState::Discarded };
             events.push(FlightEvent::FlightEnded { timestamp_ms, interrupted: true });
+            self.note_discarded(timestamp_ms, false);
         }
         events
+    }
+
+    /// Queue the discard of the flight that just ended, if it never flew.
+    fn note_discarded(&mut self, timestamp_ms: u64, shut_down: bool) {
+        if self.summary.state == FlightState::Discarded {
+            log::info!("ground session ended without having flown: discarded, not a flight");
+            if self.discarded.len() >= MAX_QUEUED_OUTCOMES {
+                self.discarded.remove(0);
+            }
+            self.discarded.push(FlightDiscardedEvent { timestamp_ms, off_block_ms: self.summary.off_block_ms, shut_down });
+        }
+    }
+
+    /// Latch "this flight has flown" (see the module doc).
+    fn note_flown(&mut self) {
+        if self.summary.state == FlightState::Active
+            && (self.engine.airborne_qualified()
+                || self.engine.started_airborne()
+                || self.summary.takeoff_ms.is_some()
+                || !self.summary.touchdowns.is_empty())
+        {
+            self.flown = true;
+        }
+    }
+
+    /// The position jumped (teleport, or not continuous across a reset). An open flight that
+    /// never flew ends as discarded, and without a flight the phase engine starts over, so
+    /// the recording begins fresh at the new place. Returns whether it did either.
+    fn jumped_before_flying(&mut self, end_ms: u64, events: &mut Vec<FlightEvent>) -> bool {
+        if self.summary.state == FlightState::Active {
+            if self.flown {
+                return false;
+            }
+            log::info!("position jump before the flight ever flew: discarded, recording starts over here");
+            events.extend(self.interrupt(end_ms));
+        } else {
+            self.engine.restart();
+        }
+        true
     }
 
     /// Feed one sample at any rate; returns the events it produced (usually none).
@@ -489,6 +615,20 @@ impl FlightSession {
             );
         }
 
+        if let Some(before) = self.pre_reset.take() {
+            if !continues_after_reset(before, t, now) {
+                // somewhere else after the reset: a ground session ends, an idle engine restarts
+                if self.jumped_before_flying(before.wall_ts, &mut events) {
+                    events.extend(self.reset_context());
+                }
+            } else if self.resumed_airborne && !t.slew {
+                // only a hole in the stream: the flight goes on, a landing now is a landing
+                log::info!("position continuous across the context reset: flight requalified");
+                self.engine.restore_qualified();
+                self.detector.restore_qualified();
+                self.resumed_airborne = false;
+            }
+        }
         self.check_discontinuity(t, now, &mut events);
         if !t.paused
             && let Some(start) = self.pause_started_ms.take()
@@ -511,6 +651,7 @@ impl FlightSession {
         if self.engine.airborne_qualified() {
             self.resumed_airborne = false;
         }
+        self.note_flown();
         self.note_integrity(t, now);
 
         if let Some(tr) = transition {
@@ -524,9 +665,10 @@ impl FlightSession {
             if let Some(e) = ended {
                 events.push(e);
             }
+            self.note_flown();
         }
-        // an interrupted flight keeps the phase it ended in
-        if self.summary.state != FlightState::Interrupted {
+        // an interrupted (or discarded) flight keeps the phase it ended in
+        if !matches!(self.summary.state, FlightState::Interrupted | FlightState::Discarded) {
             self.summary.phase = self.engine.phase();
         }
 
@@ -535,7 +677,9 @@ impl FlightSession {
                 mono_ms: now,
                 wall_ms: t.timestamp_ms,
                 g: t.g_force,
-                on_ground: t.on_ground,
+                // the corroborated contact, like everywhere else: a stray "on ground" at
+                // altitude must not drop a real g peak as the landing's
+                on_ground: ground_contact_corroborated(t),
                 excluded: self.engine.last_skip().is_some(),
                 phase: self.engine.phase(),
                 altitude_msl_ft: t.altitude_msl_ft,
@@ -564,16 +708,18 @@ impl FlightSession {
         let Some(index) = self.pending_touchdown.take() else { return };
         let Some(td) = self.summary.touchdowns.get_mut(index) else { return };
         td.touch_and_go = outcome == TouchdownOutcome::TouchAndGo;
-        let (rate, touchdown_ms) = (td.landing_rate_fpm, td.timestamp_ms);
+        // an unrated touchdown (slewed / fast-forwarded down) is recorded, but has no rate to count
+        let rate = td.landing_rate_source.is_rated().then_some(td.landing_rate_fpm);
+        let touchdown_ms = td.timestamp_ms;
         match outcome {
             TouchdownOutcome::FullStop => {
-                self.summary.landing_rate_fpm = Some(rate);
+                self.summary.landing_rate_fpm = rate;
                 self.summary.landing_ms = Some(touchdown_ms);
                 self.landing_phase_ms = None;
             }
             TouchdownOutcome::Unknown => {
                 // stored as "not a touch-and-go", so it counts like one for the flight too
-                self.summary.landing_rate_fpm = Some(rate);
+                self.summary.landing_rate_fpm = rate;
                 // already taxiing: the Landing → TaxiIn fallback has passed (it was pending)
                 if matches!(self.engine.phase(), FlightPhase::TaxiIn | FlightPhase::Shutdown) {
                     self.summary.landing_ms = Some(self.landing_phase_ms.take().unwrap_or(touchdown_ms));
@@ -600,6 +746,8 @@ impl FlightSession {
         self.last_pos = None;
         self.last_fuel_kg = None;
         self.resumed_airborne = resume;
+        // a jump (or a reset on the ground) has nothing to continue from
+        self.pre_reset = None;
         events
     }
 
@@ -617,7 +765,7 @@ impl FlightSession {
         }
         if is_teleport(prev, t, dt_s) {
             log::info!("position jump detected ({dt_s:.1} s between samples): position context reset");
-            if self.summary.state == FlightState::Active {
+            if !self.jumped_before_flying(prev.wall_ts, events) && self.summary.state == FlightState::Active {
                 self.summary.integrity.teleport_detected = true;
             }
             events.extend(self.reset_context());
@@ -664,8 +812,10 @@ impl FlightSession {
                 self.summary.on_block_ms = Some(tr.timestamp_ms);
                 self.summary.fuel_end_kg = Some(t.fuel_total_kg);
                 if self.summary.state == FlightState::Active {
-                    self.summary.state = FlightState::Completed;
+                    // taxied around and shut down without flying: a ground session, no flight
+                    self.summary.state = if self.flown { FlightState::Completed } else { FlightState::Discarded };
                     ended = Some(FlightEvent::FlightEnded { timestamp_ms: tr.timestamp_ms, interrupted: false });
+                    self.note_discarded(tr.timestamp_ms, true);
                 }
             }
             _ => {}
@@ -686,6 +836,7 @@ impl FlightSession {
         self.last_pos = None;
         self.last_fuel_kg = None;
         self.resumed_airborne = false;
+        self.flown = false;
         // the previous flight's touchdowns are gone with its summary
         self.pending_touchdown = None;
         self.landing_phase_ms = None;
@@ -771,6 +922,18 @@ fn sim_clock_stood_still(prev: SampleRef, t: &Telemetry, dt_s: f64) -> bool {
     }
     let advanced = (t.sim_zulu_time_s - prev.sim_time_s).rem_euclid(86_400.0);
     advanced < GAP_SIM_CLOCK_SHARE * dt_s
+}
+
+/// The first sample after a reset in the air is where the last one before it could have got
+/// to in the gap (see the module doc). NaN altitudes compare false: no continuity.
+fn continues_after_reset(before: SampleRef, t: &Telemetry, now: u64) -> bool {
+    let dt_s = now.saturating_sub(before.ts) as f64 / 1000.0;
+    let allowed_ft =
+        before.vs_fpm.abs().max(RESUME_MIN_FPM) * dt_s / 60.0 * RESUME_ALT_FACTOR + RESUME_ALT_MARGIN_FT;
+    let within = |a: f64, b: f64| (a - b).abs() <= allowed_ft;
+    let agl_ok = !(before.alt_agl_ft.is_finite() && t.altitude_agl_ft.is_finite())
+        || within(before.alt_agl_ft, t.altitude_agl_ft);
+    !is_teleport(before, t, dt_s) && within(before.alt_msl_ft, t.altitude_msl_ft) && agl_ok
 }
 
 fn is_teleport(prev: SampleRef, t: &Telemetry, dt_s: f64) -> bool {

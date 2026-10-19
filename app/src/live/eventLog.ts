@@ -60,6 +60,19 @@ export function pushEvent(text: string, ms: number = Date.now()) {
   commit({ ...state, lines: [{ ms, text }, ...state.lines].slice(0, EVENT_LOG_MAX) });
 }
 
+/**
+ * Replace the newest of the latest `within` lines that `match` accepts (keeping its time) with
+ * `text`; false when none matched. A discarded ground session overwrites its "Flug gespeichert".
+ */
+export function replaceEvent(match: (text: string) => boolean, text: string, within = 5): boolean {
+  const i = state.lines.slice(0, within).findIndex((l) => match(l.text));
+  if (i < 0) return false;
+  const lines = state.lines.slice();
+  lines[i] = { ...lines[i], text };
+  commit({ ...state, lines });
+  return true;
+}
+
 /** Another provider session starts empty (demo started or ended). */
 export function clearEvents(provider: string | null = state.provider) {
   commit({ provider, lines: [] });

@@ -19,6 +19,9 @@ import { isDebriefOpen, openDebrief } from "./landing/debriefStore";
 import type { ApproachFactsResult } from "./landing/approachTypes";
 import { stripFactsFrom, type LandingStripFact } from "./stripFacts";
 import { mergeHint, mergeKey } from "./resume";
+import { loadFlightDetail, sleep } from "./logbookDetail";
+import { latestOnly } from "./latest";
+import { handleMenuKey, menuItems } from "./ui/menu";
 
 /** Merge hints dismissed with "Ignorieren" (per viewer, best effort). */
 const MERGE_IGNORED_KEY = "vectasim.mergeIgnored";
@@ -72,12 +75,16 @@ function TagFilter({ tags, selected, disabled, onChange }: { tags: Array<{ tag: 
   const tr = useT();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
     const close = (e: MouseEvent) => {
       if (!ref.current?.contains(e.target as Node)) setOpen(false);
     };
     document.addEventListener("mousedown", close);
+    // menu pattern: the focus moves into the menu (ui/menu.ts)
+    menuItems(listRef.current)[0]?.focus();
     return () => document.removeEventListener("mousedown", close);
   }, [open]);
   const isOn = (t: string) => selected.some((s) => s.toLowerCase() === t.toLowerCase());
@@ -87,15 +94,10 @@ function TagFilter({ tags, selected, disabled, onChange }: { tags: Array<{ tag: 
     <div
       className="export-menu tag-filter"
       ref={ref}
-      onKeyDown={(e) => {
-        if (e.key === "Escape" && open) {
-          e.stopPropagation();
-          setOpen(false);
-          ref.current?.querySelector<HTMLButtonElement>("button")?.focus();
-        }
-      }}
+      onKeyDown={(e) => handleMenuKey(e, open, listRef.current, triggerRef.current, () => setOpen(false))}
     >
       <button
+        ref={triggerRef}
         className={`chip${active ? " active" : ""}`}
         aria-haspopup="menu"
         aria-expanded={open}
@@ -106,7 +108,7 @@ function TagFilter({ tags, selected, disabled, onChange }: { tags: Array<{ tag: 
         {active ? tr("logbook.tagFilter.buttonCount", { count: selected.length }) : tr("logbook.tagFilter.button")} ▾
       </button>
       {open && (
-        <div className="export-menu-list tag-filter-list" role="menu" aria-label={tr("logbook.tagFilter.menu")}>
+        <div ref={listRef} className="export-menu-list tag-filter-list" role="menu" aria-label={tr("logbook.tagFilter.menu")}>
           {tags.length === 0 ? (
             <span className="detail tag-filter-empty">{tr("logbook.tagFilter.empty")}</span>
           ) : (
@@ -138,6 +140,7 @@ export default function Logbook({ active = true, focus, onGoLive }: Props) {
   const t = useT();
   const [flights, setFlights] = useState<FlightRow[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [latestList] = useState(latestOnly);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [track, setTrack] = useState<TrackSample[]>([]);
@@ -192,14 +195,16 @@ export default function Logbook({ active = true, focus, onGoLive }: Props) {
     loadFacts();
     loadTrash();
     loadMergeCandidates();
+    const isLatest = latestList();
     invoke<FlightRow[]>("list_flights", { limit: FETCH_LIMIT })
       .then((f) => {
+        if (!isLatest()) return;
         setFlights(f);
         setLoaded(true);
         setError(null);
       })
-      .catch((e) => setError(String(e)));
-  }, [loadFacts, loadTrash, loadMergeCandidates]);
+      .catch((e) => isLatest() && setError(String(e)));
+  }, [loadFacts, loadTrash, loadMergeCandidates, latestList]);
 
   useEffect(() => {
     refresh();
@@ -292,22 +297,7 @@ export default function Logbook({ active = true, focus, onGoLive }: Props) {
     setDetailError(null);
     const keepTrack = detail?.flight.id === selectedId;
     if (!keepTrack) setTrack([]);
-    invoke<Detail | null>("get_flight", { id: selectedId })
-      .then(async (d) => {
-        if (cancelled) return;
-        setDetail(d);
-        if (!d) return;
-        const active = d.flight.state === "active";
-        // preview first (tiny), then the full track
-        if (d.hasTrack && !keepTrack) {
-          const p = await invoke<TrackSample[] | null>("get_track", { id: selectedId, preview: true });
-          if (!cancelled && p) setTrack(p);
-        }
-        let full = d.hasTrack ? await invoke<TrackSample[] | null>("get_track", { id: selectedId, preview: false }) : null;
-        // the running flight's track may not be written yet: use the recorder's live buffer
-        if ((!full || full.length === 0) && active) full = await invoke<TrackSample[]>("get_live_track");
-        if (!cancelled && full) setTrack(full);
-      })
+    loadFlightDetail(selectedId, keepTrack, { invoke, cancelled: () => cancelled, wait: sleep, onDetail: setDetail, onTrack: setTrack })
       .catch((e) => !cancelled && setDetailError(String(e)));
     return () => {
       cancelled = true;

@@ -7,6 +7,7 @@ import { AIRPORT_DOT, COLOR, TRACK_RAMP } from "../theme";
 import { loadAircraftIcons } from "./aircraftIcons";
 import { curtainGeoJson, withGroundHeights } from "./trackChunks";
 import { CurtainLayer } from "./curtainLayer";
+import { addLayerOnce, addSourceOnce, replaceCustomLayer } from "./styleOnce";
 import { lerpHeading, lowerBoundT, sampleAt, trackBearingAt } from "../landing/replayStore";
 
 /** OpenFreeMap: free vector tiles, no API key. OSM attribution is mandatory and left enabled. */
@@ -70,9 +71,10 @@ export function trackColorExpr(): maplibregl.ExpressionSpecification {
  */
 export function addTrackLayers(map: maplibregl.Map, sourceIds: string | string[], before?: string) {
   const ids = Array.isArray(sourceIds) ? sourceIds : [sourceIds];
-  for (const id of ids) map.addSource(id, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  for (const id of ids) addSourceOnce(map, id, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   for (const id of ids)
-    map.addLayer(
+    addLayerOnce(
+      map,
       {
         id: `${id}-casing`,
         type: "line",
@@ -83,7 +85,8 @@ export function addTrackLayers(map: maplibregl.Map, sourceIds: string | string[]
       before,
     );
   for (const id of ids)
-    map.addLayer(
+    addLayerOnce(
+      map,
       {
         id: `${id}-line`,
         type: "line",
@@ -115,17 +118,36 @@ const curtains = new WeakMap<maplibregl.Map, Map<string, CurtainEntry>>();
  * colour along its top edge – one WebGL custom layer (map/curtainLayer.ts), smooth and
  * stepless. Hidden until the 3D view is switched on; fed with drawCurtainTrack. Inserted
  * below the first symbol layer when `before` is given, so airport and place labels stay
- * readable. Should the shaders not compile, the old fill-extrusion pair takes over.
+ * readable. Should the shaders not compile, the old fill-extrusion pair takes over (unless
+ * `fallback: false`). `ramp`: altitude colours (default: the own track's TRACK_RAMP).
  */
-export function addCurtainLayers(map: maplibregl.Map, id: string, before?: string) {
-  const layer = new CurtainLayer(id, TRACK_RAMP);
+export function addCurtainLayers(
+  map: maplibregl.Map,
+  id: string,
+  before?: string,
+  opts: { ramp?: ReadonlyArray<readonly [number, string]>; fallback?: boolean } = {},
+) {
+  const layer = new CurtainLayer(id, opts.ramp ?? TRACK_RAMP);
   let byId = curtains.get(map);
-  if (!byId) curtains.set(map, (byId = new Map()));
+  if (!byId) {
+    curtains.set(map, (byId = new Map()));
+    // the fallback's rebuild timer must not outlive the map (getSource on a removed map throws)
+    const all = byId;
+    map.once("remove", () => {
+      for (const e of all.values()) window.clearTimeout(e.timer);
+      all.clear();
+    });
+  }
+  // re-added (theme change, context restore, a second style load): the old entry's timer goes
+  const old = byId.get(id);
+  if (old) window.clearTimeout(old.timer);
   const entry: CurtainEntry = { id, layer, fallback: false, visible: false };
   byId.set(id, entry);
   layer.onFail = () =>
-    // not inside the render call: add the extrusion pair on the next frame
+    // not inside the render call: add the extrusion pair on the next frame (the own track only;
+    // without shaders a traffic curtain simply stays away)
     requestAnimationFrame(() => {
+      if (opts.fallback === false) return;
       if (curtains.get(map)?.get(id) !== entry || map.getSource(`${id}-fallback`)) return;
       const below = before && map.getLayer(before) ? before : undefined;
       addExtrudedCurtain(map, `${id}-fallback`, below);
@@ -133,7 +155,7 @@ export function addCurtainLayers(map: maplibregl.Map, id: string, before?: strin
       setCurtainVisible(map, id, entry.visible);
       feedFallback(map, entry);
     });
-  map.addLayer(layer, before);
+  replaceCustomLayer(map, layer, before);
 }
 
 /** The track (and the aircraft's position now as its head: null clears, undefined keeps it) for the curtain `id`. */
@@ -158,8 +180,9 @@ function feedFallback(map: maplibregl.Map, entry: CurtainEntry) {
 
 /** Fallback curtain (no WebGL custom layer): two fill-extrusion layers over trackChunks.curtainGeoJson. */
 function addExtrudedCurtain(map: maplibregl.Map, sourceId: string, before?: string) {
-  map.addSource(sourceId, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
-  map.addLayer(
+  addSourceOnce(map, sourceId, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  addLayerOnce(
+    map,
     {
       id: `${sourceId}-wall`,
       type: "fill-extrusion",
@@ -174,7 +197,8 @@ function addExtrudedCurtain(map: maplibregl.Map, sourceId: string, before?: stri
     },
     before,
   );
-  map.addLayer(
+  addLayerOnce(
+    map,
     {
       id: `${sourceId}-ribbon`,
       type: "fill-extrusion",
@@ -232,7 +256,7 @@ export function airportsGeoJson(airports: Airport[]): GeoJSON.FeatureCollection 
 
 /** Three layers so each airport class gets its own minzoom (large everywhere, medium ≥7, small ≥9). */
 export function addAirportLayers(map: maplibregl.Map, sourceId = "airports") {
-  map.addSource(sourceId, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  addSourceOnce(map, sourceId, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   const classes: Array<{ kind: string; minzoom: number; color: string; radius: number; labelFrom: number }> = [
     { kind: "large", minzoom: 3, color: AIRPORT_DOT.large, radius: 4, labelFrom: 5 },
     { kind: "medium", minzoom: 7, color: AIRPORT_DOT.medium, radius: 3, labelFrom: 7.5 },
@@ -240,7 +264,7 @@ export function addAirportLayers(map: maplibregl.Map, sourceId = "airports") {
     { kind: "seaplane_base", minzoom: 9, color: AIRPORT_DOT.seaplane, radius: 2.5, labelFrom: 10 },
   ];
   for (const c of classes) {
-    map.addLayer({
+    addLayerOnce(map, {
       id: `${sourceId}-${c.kind}-dot`,
       type: "circle",
       source: sourceId,
@@ -249,7 +273,7 @@ export function addAirportLayers(map: maplibregl.Map, sourceId = "airports") {
       filter: ["==", ["get", "kind"], c.kind],
       paint: { "circle-radius": c.radius, "circle-color": c.color, "circle-stroke-color": COLOR.halo, "circle-stroke-width": 1 },
     });
-    map.addLayer({
+    addLayerOnce(map, {
       id: `${sourceId}-${c.kind}-label`,
       type: "symbol",
       source: sourceId,
@@ -275,8 +299,8 @@ export function pointFeature(lon: number, lat: number, props: Record<string, unk
 
 /** Planned route from the OFP navlog: a dashed line plus fix points with labels. */
 export function addRouteLayers(map: maplibregl.Map, sourceId = "route") {
-  map.addSource(sourceId, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
-  map.addLayer({
+  addSourceOnce(map, sourceId, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  addLayerOnce(map, {
     id: `${sourceId}-line`,
     type: "line",
     source: sourceId,
@@ -284,7 +308,7 @@ export function addRouteLayers(map: maplibregl.Map, sourceId = "route") {
     paint: { "line-color": COLOR.route, "line-width": 2, "line-dasharray": [2, 2], "line-opacity": 0.9 },
     layout: { "line-cap": "round", "line-join": "round" },
   });
-  map.addLayer({
+  addLayerOnce(map, {
     id: `${sourceId}-fix`,
     type: "circle",
     source: sourceId,
@@ -292,7 +316,7 @@ export function addRouteLayers(map: maplibregl.Map, sourceId = "route") {
     minzoom: 5,
     paint: { "circle-radius": 3, "circle-color": COLOR.route, "circle-stroke-color": COLOR.halo, "circle-stroke-width": 1 },
   });
-  map.addLayer({
+  addLayerOnce(map, {
     id: `${sourceId}-label`,
     type: "symbol",
     source: sourceId,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { setLanguageSetting } from "../i18n";
-import { PHOTO_HIT_TTL_MS, PHOTO_MISS_TTL_MS, airframeName, matchesAirframe, needsPhotoLookup, normalizeRegistration, parseVapp, photoCredit, pickerOptions } from "./airframe";
+import { PHOTO_HIT_TTL_MS, PHOTO_MISS_TTL_MS, airframeName, matchesAirframe, needsPhotoLookup, normalizeRegistration, parseVapp, photoCredit, pickerOptions, safePhotoLink } from "./airframe";
 
 const base = { registration: "D-AINA", customName: null, title: null, airline: null, icaoType: null };
 
@@ -77,5 +77,28 @@ describe("parseVapp", () => {
     expect(parseVapp("12")).toBeUndefined();
     expect(parseVapp("400")).toBeUndefined();
     expect(parseVapp("abc")).toBeUndefined();
+  });
+});
+
+describe("safePhotoLink (only Planespotters photo pages are opened)", () => {
+  it("keeps https links to www.planespotters.net", () => {
+    expect(safePhotoLink("https://www.planespotters.net/photo/1234567/d-aina-lufthansa")).toBe("https://www.planespotters.net/photo/1234567/d-aina-lufthansa");
+  });
+  it("drops other hosts, schemes, look-alikes and garbage", () => {
+    for (const bad of [
+      "http://www.planespotters.net/photo/1",
+      "https://planespotters.net.evil.example/photo/1",
+      "https://www.planespotters.net.evil.example/",
+      "https://evil.example/?https://www.planespotters.net/",
+      "https://user@www.planespotters.net/photo/1",
+      "https://www.planespotters.net:8443/photo/1",
+      "javascript:alert(1)",
+      "file:///C:/Windows/System32/calc.exe",
+      "not a url",
+      "",
+      null,
+      undefined,
+    ])
+      expect(safePhotoLink(bad), String(bad)).toBeNull();
   });
 });

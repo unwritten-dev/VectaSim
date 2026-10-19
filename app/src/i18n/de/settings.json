@@ -175,7 +175,7 @@
     "reset": "Zurücksetzen",
     "folder": "Ordner",
     "savedMark": "✓ gespeichert",
-    "about": "VectaSim {version} · Dein Logbuch liegt nur auf diesem PC – ohne Konto, ohne Cloud. Daten: Karte © OpenStreetMap-Mitwirkende, OpenFreeMap · Flughäfen OurAirports (Public Domain) · Wetter NOAA aviationweather.gov (Ersatz VATSIM) · Online-Verkehr VATSIM · IVAO · Flugpläne SimBrief (Navigraph) · Flugzeugfotos Planespotters.net ·",
+    "about": "VectaSim {version} · Dein Logbuch liegt nur auf diesem PC – ohne Konto, ohne Cloud. Daten: Karte © OpenStreetMap-Mitwirkende, OpenFreeMap · Flughäfen OurAirports (Public Domain) · Wetter NOAA aviationweather.gov (Ersatz VATSIM) · Online-Verkehr VATSIM · IVAO · Flugpläne SimBrief (Navigraph) · Flugzeugfotos Planespotters.net · Satellitenbild EOxCloudless 2017 von EOX IT Services GmbH (enthält veränderte Copernicus-Sentinel-Daten, CC BY 4.0) · Niederschlagsradar RainViewer · Wolken EUMETSAT (enthält veränderte Meteosat-Daten) · Ländergrenzen Natural Earth (Public Domain) · Danke an npooky für den ersten Flugtest ·",
     "thirdParty": "Lizenzen Dritter",
     "sim": {
       "textLanding": "Landerate im Simulator anzeigen (MSFS)",

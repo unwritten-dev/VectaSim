@@ -44,6 +44,8 @@ import {
   type WindComponents,
 } from "./types";
 import { gLoadHints } from "../gload";
+import { isRated } from "./rated";
+export { isRated, rateText, ratedFpm } from "./rated";
 
 /** A label table that answers in the active language on every access (same shape as a plain Record). */
 function labels<K extends string>(keys: readonly K[], text: (k: K) => string): Record<K, string> {
@@ -416,7 +418,9 @@ export function buildHints(d: LandingDebriefData, approach?: ApproachAnalysis | 
   }
 
   // touchdown values
-  if (td.landingRateSource === "measured") {
+  if (!isRated(td)) {
+    out.push({ tone: "info", text: t("band.unratedTitle") });
+  } else if (td.landingRateSource === "measured") {
     out.push({ tone: "info", text: t("facts.hint.rateMeasured", { rate: fmt(td.landingRateFpm, 0, "fpm") }) });
   } else if (Math.abs(td.landingRateFpm - td.vsFpmMeasured) >= 50) {
     out.push({ tone: "info", text: t("facts.hint.rateDiff", { rate: fmt(td.landingRateFpm, 0, "fpm"), vs: fmt(td.vsFpmMeasured, 0, "fpm") }) });
@@ -610,7 +614,11 @@ export function zonePhrase(a: LandingAnalysis): string | null {
 export function keySentence(d: LandingDebriefData): string {
   const a = d.analysis;
   const td = a.touchdown;
-  const head = td.touchAndGo ? t(`facts.key.headTouchAndGo.${a.vsBand}`) : t(`facts.key.head.${a.vsBand}`);
+  const head = !isRated(td)
+    ? t(td.touchAndGo ? "facts.key.headTouchAndGoUnrated" : "facts.key.headUnrated")
+    : td.touchAndGo
+      ? t(`facts.key.headTouchAndGo.${a.vsBand}`)
+      : t(`facts.key.head.${a.vsBand}`);
   const parts: string[] = [];
   const zone = zonePhrase(a);
   if (zone && a.touchdownPoint) {
@@ -670,7 +678,9 @@ export function provenance(d: LandingDebriefData): { rate: Provenance; point: Pr
             diff > 50 && t("facts.prov.rateDiff", { diff: fmt(diff, 0, "fpm") }),
           ),
         }
-      : { kind: "measured", detail: t("facts.prov.rateMeasured", { rate: fmt(td.landingRateFpm, 0, "fpm") }) };
+      : isRated(td)
+        ? { kind: "measured", detail: t("facts.prov.rateMeasured", { rate: fmt(td.landingRateFpm, 0, "fpm") }) }
+        : { kind: "measured", detail: t("band.unratedTitle") };
   const disp = d.thresholdDisplacedM;
   const tp = a.touchdownPoint;
   const source = runwaySourceOf(a.runway);
@@ -770,7 +780,8 @@ export function indexParts(a: LandingAnalysis, approach?: ApproachAnalysis | nul
   const stable = stablePoints(a, approach);
 
   return [
-    part("rate", INDEX_BAND_POINTS[a.vsBand]),
+    // an unrated touchdown has no rate: the index is not comparable then
+    part("rate", isRated(td) ? INDEX_BAND_POINTS[a.vsBand] : null),
     part("g", INDEX_BAND_POINTS[a.gBand]),
     part("bounces", td.bounces === 0 ? 1 : td.bounces === 1 ? 0.4 : 0),
     part("zone", zone),
@@ -787,7 +798,9 @@ export function landingIndex(a: LandingAnalysis, approach?: ApproachAnalysis | n
   const parts = indexParts(a, approach);
   const missing = parts.filter((p) => p.points == null).map((p) => p.key);
   if (missing.length) {
-    const why = !a.runway || !a.touchdownPoint
+    const why = missing.includes("rate")
+      ? t("facts.index.unrated")
+      : !a.runway || !a.touchdownPoint
       ? t("facts.index.noRunway")
       : missing.includes("centreline")
         ? lateralMeasurable(a.touchdownPoint)

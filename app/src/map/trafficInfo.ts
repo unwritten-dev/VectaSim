@@ -298,6 +298,8 @@ export function greatCircle(a: { lat: number; lon: number }, b: { lat: number; l
   const l2 = b.lon * R;
   const d = 2 * Math.asin(Math.sqrt(Math.sin((p2 - p1) / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin((l2 - l1) / 2) ** 2));
   if (!(d > 1e-9)) return [[a.lon, a.lat], [b.lon, b.lat]];
+  // antipodes: every great circle joins them (sin d = 0 gave NaN) – take the one a hair off b
+  if (Math.PI - d < 1e-6) return greatCircle(a, { lat: b.lat + (b.lat > 0 ? -1e-3 : 1e-3), lon: b.lon }, n);
   const out: Array<[number, number]> = [];
   let prevLon: number | null = null;
   for (let i = 0; i <= n; i++) {

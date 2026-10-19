@@ -7,6 +7,7 @@ import { useT } from "./i18n";
 import { FACILITY_LABEL, NETWORK_LABEL } from "./map/online";
 import { userMessage } from "./errors";
 import ErrorNotice from "./ErrorNotice";
+import Collapsible from "./ui/Collapsible";
 import { selectTrafficOnMap } from "./map/trafficInfo";
 import { stableNearest } from "./map/trafficOrder";
 
@@ -115,8 +116,7 @@ export default function OnlinePanel({ summary, view, origin }: Props) {
       )}
 
       <div className="online-cols">
-        <div>
-          <div className="online-head">{t("shell.online.nearby")}</div>
+        <Collapsible id="online.nearby" headClassName="online-head" title={t("shell.online.nearby")} summary={traffic.length ? String(traffic.length) : undefined}>
           {traffic.length === 0 && <div className="detail">{summary.fetchedMs ? t("shell.online.noTraffic") : t("shell.online.loading")}</div>}
           <ul
             className="online-list online-traffic"
@@ -159,10 +159,14 @@ export default function OnlinePanel({ summary, view, origin }: Props) {
               </li>
             ))}
           </ul>
-        </div>
+        </Collapsible>
 
-        <div>
-          <div className="online-head">{t("shell.online.atc")}</div>
+        <Collapsible
+          id="online.atc"
+          headClassName="online-head"
+          title={t("shell.online.atc")}
+          summary={airports.length + enroute.length ? [...airports.map(([icao]) => icao), ...enroute.map((c) => c.callsign)].join(" · ") : undefined}
+        >
           {airports.length === 0 && enroute.length === 0 && <div className="detail">{t("shell.online.noAtc")}</div>}
           <ul className="online-list">
             {airports.map(([icao, list]) => (
@@ -181,7 +185,7 @@ export default function OnlinePanel({ summary, view, origin }: Props) {
               </li>
             ))}
           </ul>
-        </div>
+        </Collapsible>
       </div>
     </section>
   );

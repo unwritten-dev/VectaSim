@@ -358,3 +358,153 @@ fn long_touch_and_go_row_is_corrected_by_its_outcome() {
 fn touch_and_go_outcome_corrects_a_touchdown_still_waiting_for_its_insert() {
     long_touch_and_go_then_full_stop(true);
 }
+
+/// The system clock set back by an hour mid-flight: 1 Hz samples and the 15 s flush go on
+/// (the recorder paces on a monotonic clock, the samples keep the wall-clock time).
+#[test]
+fn clock_set_back_keeps_sampling_and_flushing() {
+    let store = Store::open_in_memory().unwrap();
+    let mut flight = MockFlight::with_variant(MockVariant::Circuit);
+    let mut session = FlightSession::new();
+    let mut rec = recorder(&store);
+    let hz = 20.0;
+    let wall = |t_s: f64, back_ms: u64| T0 + (t_s * 1000.0) as u64 - back_ms;
+    for i in 1..=(150 * 20) {
+        let t_s = i as f64 / hz;
+        assert!(tick(&mut session, &mut rec, &flight.sample(t_s, wall(t_s, 0))).1);
+    }
+    let id = rec.current_flight_id().unwrap().to_owned();
+    let before = rec.live_track().lock().unwrap().len();
+    let stored_before = store.get_track(&id).unwrap().unwrap().len();
+    // 60 s with the wall clock an hour behind
+    for i in (150 * 20 + 1)..=(210 * 20) {
+        let t_s = i as f64 / hz;
+        assert!(tick(&mut session, &mut rec, &flight.sample(t_s, wall(t_s, 3_600_000))).1);
+    }
+    let after = rec.live_track().lock().unwrap().len();
+    assert!((58..=61).contains(&(after - before)), "1 Hz samples go on: {before} → {after}");
+    let stored = store.get_track(&id).unwrap().unwrap();
+    assert!(stored.len() >= stored_before + 40, "flushes go on: {stored_before} → {}", stored.len());
+    assert!(stored.last().unwrap().t_ms < T0, "samples keep the wall-clock time");
+}
+
+/// One sample of a ground session at `wall_ms` (engines on unless `engines` is 0).
+fn ground_sample(wall_ms: u64, lat: f64, gs: f64, engines: u8) -> Telemetry {
+    Telemetry {
+        timestamp_ms: wall_ms,
+        sim_zulu_time_s: 36_000.0 + (wall_ms - T0) as f64 / 1000.0,
+        latitude: lat,
+        longitude: 8.0,
+        sim_rate: 1.0,
+        num_engines: 2,
+        engines_running: engines,
+        fuel_total_kg: 5_000.0,
+        on_ground: true,
+        ground_speed_kt: gs,
+        altitude_msl_ft: 400.0,
+        ..Default::default()
+    }
+}
+
+/// Taxi out and shut down again without a take-off: the core discards the recording, the
+/// recorder stores it as `discarded` straight in the Papierkorb – not in the logbook.
+#[test]
+fn a_ground_session_goes_to_the_trash_as_discarded() {
+    let store = Store::open_in_memory().unwrap();
+    let mut session = FlightSession::new();
+    let mut rec = recorder(&store);
+    let (mut wall, mut lat) = (T0, 50.0);
+    let mut discarded = Vec::new();
+    let mut run = |secs: u64, gs: f64, engines: u8, rec: &mut FlightRecorder, session: &mut FlightSession| {
+        for _ in 0..secs {
+            wall += 1000;
+            lat += gs / 3_600.0 / 60.0;
+            let t = ground_sample(wall, lat, gs, engines);
+            assert!(tick(session, rec, &t).1);
+            let d = session.take_discarded_flights();
+            if !d.is_empty() {
+                discarded.extend(rec.on_discarded(&d, wall).unwrap());
+            }
+        }
+    };
+    run(20, 12.0, 2, &mut rec, &mut session);
+    let id = rec.current_flight_id().expect("taxiing starts a recording").to_owned();
+    run(20, 10.0, 2, &mut rec, &mut session);
+    run(60, 0.0, 0, &mut rec, &mut session);
+    assert_eq!(rec.current_flight_id(), None);
+    assert_eq!(discarded, std::slice::from_ref(&id));
+    assert!(store.list_flights(10, 0).unwrap().is_empty(), "not in the logbook");
+    let trash = store.list_deleted_flights().unwrap();
+    assert_eq!(trash.len(), 1);
+    assert_eq!((trash[0].flight.id.as_str(), trash[0].flight.state.as_str()), (id.as_str(), "discarded"));
+    assert_eq!(store.totals().unwrap().flights, 0);
+    // restorable, but still no flight for the statistics
+    assert!(store.restore_flight(&id).unwrap());
+    assert_eq!(store.list_flights(10, 0).unwrap().len(), 1);
+    assert_eq!(store.totals().unwrap().flights, 0);
+    assert!(!store.list_flights(10, 0).unwrap()[0].counts_in_stats());
+}
+
+/// Averages and rankings skip unrated touchdowns; counters skip discarded flights and old
+/// recordings that never took off or touched down.
+#[test]
+fn statistics_ignore_unrated_landings_and_ground_sessions() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("v.db");
+    let store = Store::open(&path).unwrap();
+    for k in 0..3u64 {
+        let mut flight = MockFlight::with_variant(MockVariant::Circuit);
+        let mut session = FlightSession::new();
+        let mut rec = recorder(&store);
+        let base = T0 + k * 10 * 3_600_000;
+        for i in 1..=((MockVariant::Circuit.loop_seconds() + 10.0) * 5.0) as u64 {
+            let t_s = i as f64 / 5.0;
+            assert!(tick(&mut session, &mut rec, &flight.sample(t_s, base + (t_s * 1000.0) as u64)).1);
+        }
+    }
+    let before = store.totals().unwrap();
+    assert_eq!(before.flights, 3);
+    let ids: Vec<String> = store.list_flights(10, 0).unwrap().into_iter().map(|f| f.id).collect();
+    let rated = store.get_flight(&ids[1]).unwrap().unwrap().touchdowns.iter().find(|t| !t.touch_and_go).unwrap().landing_rate_fpm;
+    {
+        let c = rusqlite::Connection::open(&path).unwrap();
+        // flight 0: slewed down (unrated, ~0 fpm); flight 2: an old taxi-only recording
+        c.execute("UPDATE touchdowns SET landing_rate_source = 'unrated', landing_rate_fpm = 0 WHERE flight_id = ?1", [&ids[0]]).unwrap();
+        c.execute("DELETE FROM touchdowns WHERE flight_id = ?1", [&ids[2]]).unwrap();
+        c.execute("UPDATE flights SET takeoff_ms = NULL, airframe_reg = NULL WHERE id = ?1", [&ids[2]]).unwrap();
+    }
+    let t = store.totals().unwrap();
+    assert_eq!(t.flights, 2, "the taxi-only recording does not count");
+    assert!((t.avg_landing_vs_fpm.unwrap() - rated).abs() < 1e-6, "{:?} vs {rated}", t.avg_landing_vs_fpm);
+    let recent = store.recent_landings(10, true).unwrap();
+    assert!(recent.iter().all(|l| l.flight.id != ids[0]), "no unrated landing in rankings/trends");
+    let rows = store.list_flights(10, 0).unwrap();
+    assert_eq!(rows.iter().find(|f| f.id == ids[0]).unwrap().landing_vs_fpm, None, "no rate shown for an unrated landing");
+    assert!(!rows.iter().find(|f| f.id == ids[2]).unwrap().counts_in_stats());
+}
+
+/// The discard can arrive after its `FlightEnded` was written as interrupted (the summary
+/// already described the next flight): `on_discarded` finds the flight by its off-block.
+#[test]
+fn a_late_discard_finds_the_closed_flight_by_off_block() {
+    let store = Store::open_in_memory().unwrap();
+    let mut session = FlightSession::new();
+    let mut rec = recorder(&store);
+    let mut wall = T0;
+    for _ in 0..20 {
+        wall += 1000;
+        assert!(tick(&mut session, &mut rec, &ground_sample(wall, 50.0, 12.0, 2)).1);
+    }
+    let id = rec.current_flight_id().unwrap().to_owned();
+    let off_block = store.get_flight(&id).unwrap().unwrap().flight.off_block_ms;
+    // closed as an ordinary interruption first
+    rec.on_events(session.summary(), &[FlightEvent::FlightEnded { timestamp_ms: wall, interrupted: true }], wall).unwrap();
+    assert_eq!(store.get_flight(&id).unwrap().unwrap().flight.state, "interrupted");
+    let ev = vectasim_core::flight::FlightDiscardedEvent { timestamp_ms: wall, off_block_ms: off_block, shut_down: false };
+    // an unknown off-block matches nothing
+    let other = vectasim_core::flight::FlightDiscardedEvent { off_block_ms: Some(1), ..ev.clone() };
+    assert!(rec.on_discarded(&[other], wall).unwrap().is_empty());
+    assert_eq!(rec.on_discarded(&[ev], wall).unwrap(), std::slice::from_ref(&id));
+    let trash = store.list_deleted_flights().unwrap();
+    assert_eq!((trash.len(), trash[0].flight.state.as_str()), (1, "discarded"));
+}

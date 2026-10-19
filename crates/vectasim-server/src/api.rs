@@ -176,12 +176,13 @@ pub struct Landing {
     pub timestamp_ms: u64,
     /// Headline landing rate, fpm (negative = descending).
     pub landing_rate_fpm: f64,
-    /// sim (the simulator's touchdown velocity) | measured (last V/S sample before contact)
+    /// sim (the simulator's touchdown velocity) | measured (last V/S sample before contact) |
+    /// unrated (slewed or fast-forwarded down: `landingRateFpm` is ~0 and means nothing)
     pub landing_rate_source: LandingRateSource,
-    /// smooth (< 150 fpm) | normal (< 300) | firm (< 600) | hard
-    pub band: Band,
+    /// smooth (< 150 fpm) | normal (< 300) | firm (< 600) | hard; `null` when unrated
+    pub band: Option<Band>,
     /// Label of `band` in the backend language (`Status.lang`): sanft | normal | fest | hart,
-    /// smooth | normal | firm | hard. Overlays should translate `band` themselves.
+    /// smooth | normal | firm | hard, unbewertet | unrated. Overlays should translate `band` themselves.
     pub band_label: String,
     pub peak_g: f64,
     /// Band of `peakG`: smooth < 1.25 · normal < 1.5 · firm < 2.0 · hard
@@ -214,7 +215,7 @@ pub struct Landing {
 impl Landing {
     /// A landing from a touchdown report; runway and approach fields stay empty.
     pub fn from_report(td: &vectasim_core::TouchdownReport, index: u32) -> Self {
-        let band = vectasim_core::landing::vs_band(td.landing_rate_fpm);
+        let band = (td.landing_rate_source != LandingRateSource::Unrated).then(|| vectasim_core::landing::vs_band(td.landing_rate_fpm));
         Self {
             flight_id: None,
             touchdown_index: index,
@@ -222,7 +223,7 @@ impl Landing {
             landing_rate_fpm: td.landing_rate_fpm,
             landing_rate_source: td.landing_rate_source,
             band,
-            band_label: band_label(band).to_string(),
+            band_label: rate_band_label_in(band, Lang::De).to_string(),
             peak_g: td.peak_g,
             g_band: vectasim_core::landing::g_band(td.peak_g),
             bounces: td.bounces,
@@ -258,6 +259,14 @@ pub fn band_label_in(b: Band, lang: Lang) -> &'static str {
         (Lang::En, Band::Normal) => "normal",
         (Lang::En, Band::Firm) => "firm",
         (Lang::En, Band::Hard) => "hard",
+    }
+}
+
+/// Label of a landing-rate band in `lang`; `None` = unrated.
+pub fn rate_band_label_in(b: Option<Band>, lang: Lang) -> &'static str {
+    match b {
+        Some(b) => band_label_in(b, lang),
+        None => lang.tr("unbewertet", "unrated"),
     }
 }
 
@@ -545,10 +554,17 @@ mod tests {
     #[test]
     fn landing_bands() {
         let td = |fpm: f64, g: f64| Landing::from_report(&report(fpm, g), 0);
-        assert_eq!((td(-120.0, 1.1).band, td(-120.0, 1.1).band_label.as_str()), (Band::Smooth, "sanft"));
+        assert_eq!((td(-120.0, 1.1).band, td(-120.0, 1.1).band_label.as_str()), (Some(Band::Smooth), "sanft"));
         assert_eq!(td(-299.0, 1.3).band_label, "normal");
         assert_eq!(td(-450.0, 1.6).band_label, "fest");
         assert_eq!(td(-700.0, 2.1).g_band, Band::Hard);
+        // slewed down: no band, not "smooth"
+        let mut r = report(-3.0, 1.0);
+        r.landing_rate_source = LandingRateSource::Unrated;
+        let l = Landing::from_report(&r, 0);
+        assert_eq!((l.band, l.band_label.as_str()), (None, "unbewertet"));
+        assert_eq!(serde_json::to_value(&l).unwrap()["band"], json!(null));
+        assert_eq!(rate_band_label_in(None, Lang::En), "unrated");
     }
 
     // ---- golden schemas: field lists and value shapes are the API contract ------------

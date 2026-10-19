@@ -14,6 +14,7 @@ import { navigate } from "../airframes/navigation";
 import { usePrefs } from "../prefs";
 import GlobeToggle from "../map/GlobeToggle";
 import { isDemoRow } from "../totals";
+import { countsInStats } from "../flightStats";
 import { COLOR } from "../theme";
 import { useLanguage, useT, type Language, type TFunction } from "../i18n";
 import { fmt, fmtDate } from "../i18n/number";
@@ -109,7 +110,7 @@ export default function Countries() {
       ]);
       setData(visited);
       setFlights(new Map(rows.map((f) => [f.id, f])));
-      setDemoSkipped(showDemo ? 0 : rows.filter((f) => isDemoRow(f) && f.state === "completed" && f.arrIcao).length);
+      setDemoSkipped(showDemo ? 0 : rows.filter((f) => isDemoRow(f) && countsInStats(f) && f.state === "completed" && f.arrIcao).length);
       setError(null);
     } catch (e) {
       setError(String(e));

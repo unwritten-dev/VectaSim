@@ -217,3 +217,57 @@ describe("3D height above the map's ground", () => {
     expect(t.heightFor({ altFt: 20_360, aglFt: 17_000 })).toBe(20_000);
   });
 });
+
+describe("antimeridian", () => {
+  /** A synthetic Pacific crossing: 178° E → 178° W at FL350, one point per 0.5°. */
+  const pacific = (): TimedPoint[] =>
+    Array.from({ length: 9 }, (_, i) => {
+      const x = 178 + i * 0.5;
+      return { lon: x > 180 ? x - 360 : x, lat: 40 + i * 0.1, altFt: 35_000, tMs: i * 1000 };
+    });
+  const maxStep = (features: GeoJSON.Feature[]) =>
+    Math.max(
+      ...features.flatMap((f) => {
+        const c = (f.geometry as GeoJSON.LineString).coordinates;
+        return c.slice(1).map((p, i) => Math.abs(p[0] - c[i][0]));
+      }),
+    );
+
+  it("bandedRuns splits the run at ±180 instead of drawing around the world", () => {
+    const f = bandedRuns(pacific());
+    expect(f).toHaveLength(2);
+    expect(maxStep(f)).toBeLessThanOrEqual(0.5 + 1e-9);
+    const a = (f[0].geometry as GeoJSON.LineString).coordinates;
+    const b = (f[1].geometry as GeoJSON.LineString).coordinates;
+    // the first part ends on +180, the second starts on -180 at the same latitude
+    expect(a[a.length - 1][0]).toBe(180);
+    expect(b[0][0]).toBe(-180);
+    expect(b[0][1]).toBeCloseTo(a[a.length - 1][1], 9);
+    expect(f[0].properties?.alt).toBe(f[1].properties?.alt);
+  });
+
+  it("splits westbound crossings too", () => {
+    const f = bandedRuns(pacific().reverse());
+    expect(f).toHaveLength(2);
+    expect(maxStep(f)).toBeLessThanOrEqual(0.5 + 1e-9);
+    const first = (f[0].geometry as GeoJSON.LineString).coordinates;
+    expect(first[first.length - 1][0]).toBe(-180);
+  });
+
+  it("chunk ids stay unique with split runs", () => {
+    const tr = new ChunkedTrack(4);
+    for (const p of pacific()) tr.push(p);
+    const ids = tr.historyGeoJson().features.map((f) => f.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(maxStep([...tr.historyGeoJson().features, ...tr.liveGeoJson().features])).toBeLessThanOrEqual(0.5 + 1e-9);
+  });
+
+  it("curtainRuns builds a narrow rectangle across ±180, not one around the globe", () => {
+    const rings = curtainRuns(pacific()).map((f) => (f.geometry as GeoJSON.Polygon).coordinates[0]);
+    expect(rings).toHaveLength(8);
+    for (const r of rings) {
+      const xs = r.map((p) => p[0]);
+      expect(Math.max(...xs) - Math.min(...xs)).toBeLessThan(1);
+    }
+  });
+});

@@ -55,6 +55,59 @@ fn apply_dll_setting(store: &Store) {
             (None, None) => std::env::remove_var(ENV_SIMCONNECT_DLL),
         }
     }
+    if let Some(dll) = find_simconnect_dll() {
+        let system_root = std::env::var_os("SystemRoot").map(std::path::PathBuf::from);
+        if dll_in_shared_folder(&dll, system_root.as_deref()) {
+            log::warn!(
+                "SimConnect.dll will be loaded from {} ({}): a folder that other Windows accounts may write to \
+                 (drive root or PATH). Prefer the in-app download (Einstellungen → Simulator).",
+                dll.display(),
+                vectasim_simconnect::ffi::dll_source(&dll).label()
+            );
+        }
+    }
+}
+
+/// A DLL outside the folders only administrators or the user can write (Windows, Program
+/// Files, the user profiles): e.g. `C:\MSFS SDK\…` – any account may create folders at a drive
+/// root – or a folder on PATH. VectaSim still loads it, but says so prominently in the log.
+fn dll_in_shared_folder(dll: &std::path::Path, system_root: Option<&std::path::Path>) -> bool {
+    use std::path::Component;
+    if !dll.is_absolute() {
+        return true;
+    }
+    let lower = |p: &std::path::Path| p.to_string_lossy().to_ascii_lowercase().replace('/', "\\");
+    if let Some(root) = system_root.filter(|r| !r.as_os_str().is_empty()) {
+        let (d, r) = (lower(dll), lower(root));
+        if d.starts_with(&format!("{}\\", r.trim_end_matches('\\'))) {
+            return false;
+        }
+    }
+    let first = dll.components().find_map(|c| match c {
+        Component::Normal(n) => Some(n.to_string_lossy().to_ascii_lowercase()),
+        _ => None,
+    });
+    !matches!(first.as_deref(), Some("program files" | "program files (x86)" | "windows" | "users"))
+}
+
+/// What `set_simconnect_dll` accepts from the webview: an absolute path without `..` to an
+/// existing file named `SimConnect.dll`. The webview cannot write such a file itself, so even a
+/// script injected there could not make VectaSim load a DLL of its choosing.
+fn check_dll_choice(raw: &str) -> Result<std::path::PathBuf, String> {
+    let file = std::path::Path::new(raw);
+    if !file.is_absolute() || file.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        return Err(trf!("Ungültiger Pfad: {raw}", "Invalid path: {raw}"));
+    }
+    if !file.extension().is_some_and(|e| e.eq_ignore_ascii_case("dll")) {
+        return Err(trf!("Keine DLL-Datei: {raw}", "Not a DLL file: {raw}"));
+    }
+    if !file.file_name().is_some_and(|n| n.eq_ignore_ascii_case("SimConnect.dll")) {
+        return Err(trf!("Die Datei muss SimConnect.dll heißen: {raw}", "The file must be named SimConnect.dll: {raw}"));
+    }
+    if !file.is_file() {
+        return Err(trf!("Datei nicht gefunden: {raw}", "File not found: {raw}"));
+    }
+    Ok(file.to_path_buf())
 }
 
 /// The OFP currently loaded for dispatch (not yet necessarily attached to a flight).
@@ -197,13 +250,7 @@ fn set_simconnect_dll(
 ) -> Result<bool, String> {
     let path = path.map(|p| p.trim().to_string()).filter(|p| !p.is_empty());
     if let Some(p) = &path {
-        let file = std::path::Path::new(p);
-        if !file.is_file() {
-            return Err(trf!("Datei nicht gefunden: {p}", "File not found: {p}"));
-        }
-        if !file.extension().is_some_and(|e| e.eq_ignore_ascii_case("dll")) {
-            return Err(trf!("Keine DLL-Datei: {p}", "Not a DLL file: {p}"));
-        }
+        check_dll_choice(p)?;
     }
     store.set_setting(SETTING_SIMCONNECT_DLL, path.as_deref().unwrap_or("")).map_err(lang::ui_error)?;
     apply_dll_setting(&store);
@@ -470,7 +517,9 @@ async fn simbrief_fetch(
     };
     let user = User::parse(&user_input).ok_or_else(|| SimbriefError::NoUser.to_string())?;
     let ofp = vectasim_simbrief::fetch_latest(&user).await.map_err(lang::ui_error)?;
-    log::info!("SimBrief OFP loaded: {} {} ({} fixes)", ofp.callsign, ofp.route_label(), ofp.navlog.len());
+    // no callsign at INFO (Streamer-Modus, Diagnosepaket); the DEBUG line is masked there
+    log::info!("SimBrief OFP loaded: {} ({} fixes)", ofp.route_label(), ofp.navlog.len());
+    log::debug!("SimBrief OFP callsign {}, registration {}", ofp.callsign, ofp.registration);
 
     let plan = plan_from_ofp(&ofp);
     *manager.planned.lock().unwrap_or_else(|e| e.into_inner()) = Some(plan.clone());
@@ -538,6 +587,7 @@ async fn get_track(id: String, preview: Option<bool>, store: State<'_, Store>) -
 /// Moves the flight to the Papierkorb (restorable for 30 days, see `data`).
 #[tauri::command]
 fn delete_flight(id: String, app: AppHandle, store: State<Store>) -> Result<bool, String> {
+    data::refuse_if_recording(&app, &id)?;
     let deleted = store.delete_flight(&id).map_err(lang::ui_error)?;
     if deleted {
         let _ = app.emit("logbook:changed", ());
@@ -849,6 +899,7 @@ pub fn run() {
             online::online_summary,
             online::online_snapshot_in_bbox,
             online::online_pilot,
+            online::traffic_track,
             online::online_nearby,
             online::metar,
             online::metars,
@@ -886,4 +937,45 @@ pub fn run() {
                 app.state::<ProviderManager>().dump().flush_and_close();
             }
         });
+}
+
+#[cfg(test)]
+mod dll_tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn dll_in_a_drive_root_folder_or_on_path_is_flagged() {
+        let root = Some(Path::new(r"C:\Windows"));
+        for p in [r"C:\MSFS SDK\SimConnect SDK\lib\SimConnect.dll", r"D:\Tools\SimConnect.dll", "SimConnect.dll"] {
+            assert!(dll_in_shared_folder(Path::new(p), root), "{p}");
+        }
+        for p in [
+            r"C:\Users\max\AppData\Local\io.vectasim.app\simconnect\SimConnect.dll",
+            r"C:\Program Files\VectaSim\SimConnect.dll",
+            r"C:\Windows\System32\SimConnect.dll",
+            r"E:\Win\System32\SimConnect.dll",
+        ] {
+            let root = if p.starts_with('E') { Some(Path::new(r"E:\Win")) } else { root };
+            assert!(!dll_in_shared_folder(Path::new(p), root), "{p}");
+        }
+    }
+
+    #[test]
+    fn only_an_existing_simconnect_dll_is_accepted() {
+        let dir = std::env::temp_dir().join(format!("vs-dll-{}-{}", std::process::id(), vectasim_core::now_ms()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let good = dir.join("SimConnect.dll");
+        let evil = dir.join("evil.dll");
+        std::fs::write(&good, b"MZ").unwrap();
+        std::fs::write(&evil, b"MZ").unwrap();
+        assert_eq!(check_dll_choice(&good.display().to_string()).unwrap(), good);
+        assert!(check_dll_choice(&dir.join("simconnect.DLL").display().to_string()).is_ok(), "case does not matter");
+        assert!(check_dll_choice(&evil.display().to_string()).is_err(), "any other DLL name");
+        assert!(check_dll_choice(&dir.join("SimConnect.exe").display().to_string()).is_err());
+        assert!(check_dll_choice("SimConnect.dll").is_err(), "relative");
+        assert!(check_dll_choice(&dir.join("x").join("..").join("SimConnect.dll").display().to_string()).is_err(), "..");
+        assert!(check_dll_choice(&dir.join("missing").join("SimConnect.dll").display().to_string()).is_err());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

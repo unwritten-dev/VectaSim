@@ -13,7 +13,9 @@ import { onNavigate } from "./airframes/navigation";
 import Logbook from "./Logbook";
 import Settings from "./Settings";
 import LiveView from "./live/LiveView";
-import { clearEvents, pushEvent, syncEventProvider } from "./live/eventLog";
+import { clearEvents, pushEvent, replaceEvent, syncEventProvider } from "./live/eventLog";
+import { describeFlightEvent, discardedToast, isFlightEndedLine, noteDiscarded, wasDiscarded } from "./flightEvents";
+import { isRated, rateText } from "./landing/rated";
 import { useStoredState } from "./live/hooks";
 import { Tabs } from "./ui/Tabs";
 import Landings from "./Landings";
@@ -24,7 +26,7 @@ import { isDebriefOpen, openDebrief, useDebrief } from "./landing/debriefStore";
 import { G_HARD } from "./landing/facts";
 import { autoSaveCard, saveCardPng } from "./landing/exportCard";
 import type { LandingDebriefData } from "./landing/types";
-import { PHASE_LABEL, privacy } from "./format";
+import { privacy } from "./format";
 import { fmt, fmtDuration } from "./i18n/number";
 import { t, t as tGlobal, useT, type TKey } from "./i18n";
 import { getPrefs, initZoom, loadPrefs, setZoom, stepZoom } from "./prefs";
@@ -35,6 +37,8 @@ import StatusButton, { type LastError } from "./ui/StatusButton";
 import { getLiveState, resetLive, setFlight, setTelemetry, startTelemetryListeners, useRecFlight, useStats } from "./telemetryStore";
 import TitleBar from "./ui/TitleBar";
 import { rich } from "./ui/richText";
+import { connToastAction } from "./connToast";
+import { isModalOpen } from "./ui/modalStack";
 import { ToastAnnouncer, ToastViewport, dismissToast, focusNewestToast, hasToast, showToast, type ToastOptions } from "./ui/Toast";
 import { checkForUpdate, setRecordingCheck } from "./updater";
 import { RESUME_TOAST_MS, resumeCandidate } from "./resume";
@@ -197,27 +201,6 @@ function onTouchdownOutcome(touchdownMs: number, outcome: TouchdownOutcomeKind) 
   }
 }
 
-function describeFlightEvent(e: FlightEvent): string | null {
-  switch (e.kind) {
-    case "flightStarted":
-      return t("shell.flightEvent.started");
-    case "flightEnded":
-      return e.interrupted ? t("shell.flightEvent.interrupted") : t("shell.flightEvent.saved");
-    case "phaseChanged":
-      return `Phase: ${PHASE_LABEL[e.from]} → ${PHASE_LABEL[e.to]}`;
-    case "touchdown":
-      return [
-        t("shell.flightEvent.touchdown", { rate: fmt(e.landingRateFpm, 0, "fpm"), g: fmt(e.peakG, 2, "g") }),
-        e.bounces ? t("count.bounces", { count: e.bounces }) : null,
-        e.touchAndGo ? t("shell.landing.touchAndGo") : null,
-      ]
-        .filter(Boolean)
-        .join(", ");
-    case "touchdownOutcome":
-      return e.outcome === "fullStop" ? t("shell.flightEvent.fullStop") : e.outcome === "touchAndGo" ? t("shell.landing.touchAndGo") : null;
-  }
-}
-
 /** Airport + runway of a touchdown, from the local airport DB (best effort). */
 async function touchdownPlace(td: TouchdownReport): Promise<string | null> {
   try {
@@ -373,7 +356,7 @@ export default function App() {
         setZoom(1);
         return;
       }
-      if (isDebriefOpen()) return;
+      if (isDebriefOpen() || isModalOpen()) return;
       const item = NAV.find((n) => n.key === e.key);
       if (!item) return;
       e.preventDefault();
@@ -491,6 +474,16 @@ export default function App() {
   const onFlightEvent = useCallback(
     async (e: FlightEvent) => {
       const line = describeFlightEvent(e);
+      if (e.kind === "flightDiscarded") {
+        // a ground session, no flight: its "Flug gespeichert" line goes, no card, no saved toast
+        noteDiscarded(e.timestampMs);
+        if (line && !replaceEvent(isFlightEndedLine, line)) pushEvent(line);
+        setAfterFlight(null);
+        dismissToast("flight-saved");
+        dismissToast("landing");
+        showToast(discardedToast(LANDING_TOAST_MS));
+        return;
+      }
       if (line) pushEvent(line);
       if (e.kind === "touchdownOutcome") {
         onTouchdownOutcome(e.touchdownMs, e.outcome);
@@ -501,9 +494,13 @@ export default function App() {
         return;
       }
       if (e.kind === "flightEnded") {
-        requestAttention();
+        // a ground session's flightDiscarded follows right after (same timestamp)
+        if (wasDiscarded(e.timestampMs)) return;
         try {
           const rows = await invoke<FlightRow[]>("list_flights", { limit: 1 });
+          // the discarded session is in the Papierkorb: rows[0] would be an older flight
+          if (wasDiscarded(e.timestampMs)) return;
+          requestAttention();
           const done = rows[0] ? afterFlightOf(rows[0]) : null;
           if (!done) return;
           setAfterFlight(done);
@@ -532,8 +529,9 @@ export default function App() {
       }
       if (e.kind !== "touchdown") return;
       const [place, id] = await Promise.all([touchdownPlace(e), currentFlightId()]);
-      const hard = e.landingRateFpm <= -600;
-      const rate = fmt(e.landingRateFpm, 0, "fpm");
+      // unrated (slewed / fast-forwarded down): "nicht bewertbar", never "0 fpm"
+      const hard = isRated(e) && e.landingRateFpm <= -600;
+      const rate = rateText(e);
       // neutral until the outcome is decided; a short-roll touch-and-go is decided in the report
       const early = earlyOutcome?.touchdownMs === e.timestampMs ? outcomeHeadline(earlyOutcome.outcome) : null;
       earlyOutcome = null;
@@ -607,8 +605,10 @@ export default function App() {
     if (s.state === "disconnected") setAircraft(null);
     if (s.state === "error") setLastSimError({ detail: s.detail, ms: Date.now() });
     // connection lost mid-flight: reassure that nothing is lost; stays until the sim is back
+    // (removed on every reconnect and provider switch, connToast.ts)
     const active = getLiveState().flight?.state === "active";
-    if (prev?.state === "connected" && (s.state === "disconnected" || s.state === "error") && active) {
+    const conn = connToastAction(prev ?? null, s, active);
+    if (conn === "lost") {
       showToast({
         id: "conn",
         tone: "warn",
@@ -616,9 +616,9 @@ export default function App() {
         body: tGlobal("shell.conn.lostBody"),
         durationMs: null,
       });
-    } else if (prev && prev.state !== "connected" && s.state === "connected" && active) {
+    } else if (conn === "back") {
       showToast({ id: "conn", tone: "ok", title: tGlobal("shell.conn.back"), body: tGlobal("shell.conn.backBody"), durationMs: 5000 });
-    }
+    } else if (conn === "dismiss") dismissToast("conn");
     if (prev?.state !== "connected" && s.state === "connected" && !active) void autoLoadOfpRef.current();
   };
   const onStatusRef = useRef(onStatus);
@@ -734,7 +734,7 @@ export default function App() {
             {!live && (
               <header className="topbar">
                 <h1>{title}</h1>
-                {view === "logbook" && <Tabs tabs={logbookTabs} active={logbookTab} onChange={setLogbookTab} idBase="logbook" label={t("shell.logbookTab.label")} className="topbar-tabs" />}
+                {view === "logbook" && <Tabs tabs={logbookTabs} active={logbookTab} onChange={setLogbookTab} idBase="logbook" label={t("shell.logbookTab.label")} className="topbar-tabs" panels={false} />}
               </header>
             )}
 

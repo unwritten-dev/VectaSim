@@ -226,11 +226,14 @@ pub async fn airframe_photo(
                 link: p.link,
                 source: vectasim_photos::SOURCE.into(),
             });
-            log::info!("planespotters {reg}: {}", if photo.is_some() { "photo found" } else { "no photo" });
+            // the registration only at DEBUG (Streamer-Modus: masked in the Diagnosepaket)
+            log::info!("planespotters: {}", if photo.is_some() { "photo found" } else { "no photo" });
+            log::debug!("planespotters {reg}: {}", if photo.is_some() { "photo found" } else { "no photo" });
             store.set_airframe_photo(&reg, photo.as_ref(), now()).map_err(err)?
         }
         Err(e) => {
-            log::warn!("planespotters {reg}: {e}");
+            log::warn!("planespotters: {e}");
+            log::debug!("planespotters {reg}: lookup failed");
             photos.failed.lock().unwrap().insert(reg.clone(), Instant::now());
             if refresh {
                 return Err(trf!("Foto konnte nicht geladen werden: {e}", "Photo could not be loaded: {e}"));
@@ -262,11 +265,12 @@ pub async fn traffic_photo(registration: String, store: State<'_, Store>, photos
     }
     match photos.client.by_registration(&reg).await {
         Ok(found) => {
-            log::info!("planespotters traffic {reg}: {}", if found.is_some() { "photo found" } else { "no photo" });
+            log::debug!("planespotters traffic {reg}: {}", if found.is_some() { "photo found" } else { "no photo" });
             Ok(photos.remember_traffic(&reg, found, now()))
         }
         Err(e) => {
-            log::warn!("planespotters traffic {reg}: {e}");
+            log::warn!("planespotters traffic: {e}");
+            log::debug!("planespotters traffic {reg}: lookup failed");
             photos.failed.lock().unwrap().insert(key, Instant::now());
             Ok(TrafficPhoto::status(&reg, "error"))
         }

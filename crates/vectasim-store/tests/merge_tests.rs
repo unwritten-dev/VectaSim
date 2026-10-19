@@ -378,7 +378,9 @@ fn resume_after_restart_appends_to_the_interrupted_flight() {
 /// Preflight; resuming must not start a second flight when it does.
 #[test]
 fn resume_before_the_engine_left_the_blocks_keeps_one_flight() {
-    let store = Store::open_in_memory().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("v.db");
+    let store = Store::open(&path).unwrap();
     const HZ: f64 = 4.0;
     let (mut flight, mut session, mut rec) = (MockFlight::with_variant(MockVariant::Circuit), FlightSession::new(), mock_recorder(&store));
     let mut cut = None;
@@ -394,8 +396,11 @@ fn resume_before_the_engine_left_the_blocks_keeps_one_flight() {
     }
     let cut = cut.expect("taxiing with a flight open");
     let a = rec.current_flight_id().unwrap().to_owned();
-    let ev = session.interrupt(T0 + (cut * 1000.0) as u64);
-    rec.on_events(session.summary(), &ev, T0 + (cut * 1000.0) as u64).unwrap();
+    // the app crashes (a provider stop here would discard the taxi-only recording): what was
+    // flushed stays, the row is still `active` and becomes `interrupted` on the next open
+    rec.checkpoint(session.summary(), T0 + (cut * 1000.0) as u64).unwrap();
+    drop((rec, store));
+    let store = Store::open(&path).unwrap();
     assert_eq!(store.get_flight(&a).unwrap().unwrap().flight.state, "interrupted");
 
     // new session: one sample, still Preflight (dwell not reached), then resume

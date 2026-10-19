@@ -5,6 +5,7 @@ import { fmt, fmtClock, fmtDateTime, fmtDuration, fmtWeight, fmtWeightNum } from
 import { useT } from "./i18n";
 import { usePrefs, usePrivacy } from "./prefs";
 import ErrorNotice from "./ErrorNotice";
+import Collapsible from "./ui/Collapsible";
 import Stat from "./ui/Stat";
 import EmptyState from "./ui/EmptyState";
 import { showToast } from "./ui/Toast";
@@ -106,57 +107,65 @@ export default function Dispatch({ ofp, onOfp }: Props) {
         />
       ) : (
         <>
-          <div className="dispatch-head">
-            <div>
-              <div className="flight-route num">
-                {ofp.originIcao} → {ofp.destinationIcao}
-              </div>
-              <div className="detail">
-                {priv.mask(ofp.callsign, "callsign")}
-                {ofp.flightNumber ? ` (${priv.on ? priv.mask(ofp.flightNumber, "callsign") : `${ofp.airlineIcao}${ofp.flightNumber}`})` : ""} · {ofp.aircraftIcao}{" "}
-                {priv.mask(ofp.registration, "registration")}
+          <Collapsible
+            id="dispatch.ofp"
+            className="side-group"
+            headClassName="side-group-title"
+            bodyClassName="side-stack"
+            title={t("dispatch.ofp")}
+            summary={`${ofp.originIcao} → ${ofp.destinationIcao} · FL${Math.round(ofp.cruiseAltitudeFt / 100)}`}
+          >
+            <div className="dispatch-head">
+              <div>
+                <div className="flight-route num">
+                  {ofp.originIcao} → {ofp.destinationIcao}
+                </div>
+                <div className="detail">
+                  {priv.mask(ofp.callsign, "callsign")}
+                  {ofp.flightNumber ? ` (${priv.on ? priv.mask(ofp.flightNumber, "callsign") : `${ofp.airlineIcao}${ofp.flightNumber}`})` : ""} · {ofp.aircraftIcao}{" "}
+                  {priv.mask(ofp.registration, "registration")}
+                </div>
               </div>
             </div>
-          </div>
-          {userForm}
-          <div className="stat-grid cols-2">
-            <Stat size="sm" label={t("dispatch.stat.departure")} value={`${ofp.originIcao}${ofp.originRunway ? ` RWY ${ofp.originRunway}` : ""}`} sub={ofp.originName} />
-            <Stat size="sm" label={t("dispatch.stat.arrival")} value={`${ofp.destinationIcao}${ofp.destinationRunway ? ` RWY ${ofp.destinationRunway}` : ""}`} sub={ofp.destinationName} />
-            <Stat size="sm" label={t("dispatch.stat.alternate")} value={ofp.alternateIcao || "–"} sub={ofp.alternateName} />
-            <Stat size="sm" label={t("dispatch.stat.cruise")} value={`FL${Math.round(ofp.cruiseAltitudeFt / 100)}`} sub={`CI ${ofp.costIndex} · ${fmt(ofp.routeDistanceNm, 0, "nm")}`} />
-            <Stat size="sm" label={t("dispatch.stat.blockTimes")} value={`${clockS(ofp.times.schedOutS)} / ${clockS(ofp.times.schedInS)}`} />
-            <Stat
-              size="sm"
-              label={t("dispatch.stat.blockAir")}
-              value={fmtDuration(ofp.times.blockS * 1000)}
-              sub={t("dispatch.stat.airTime", { time: fmtDuration(ofp.times.enrouteS * 1000) })}
-            />
-            <Stat
-              size="sm"
-              label={t("dispatch.stat.rampFuel")}
-              value={fmtWeightNum(ofp.fuel.planRampKg)}
-              unit={weightUnit}
-              sub={t("dispatch.stat.fuelSub", { trip: fmtWeight(ofp.fuel.tripKg), landing: fmtWeight(ofp.fuel.planLandingKg) })}
-            />
-            <Stat
-              size="sm"
-              label={t("dispatch.stat.taxi")}
-              value={`${ofp.times.taxiOutS ? Math.round(ofp.times.taxiOutS / 60) : "–"} / ${ofp.times.taxiInS ? Math.round(ofp.times.taxiInS / 60) : "–"} min`}
-              sub={ofp.fuel.taxiKg ? t("dispatch.stat.taxiFuel", { fuel: fmtWeight(ofp.fuel.taxiKg) }) : undefined}
-            />
-            <Stat
-              size="sm"
-              label="Reserve / Alternate"
-              value={fmtWeightNum(ofp.fuel.reserveKg)}
-              unit={weightUnit}
-              sub={`Alternate ${fmtWeight(ofp.fuel.alternateKg)} · Contingency ${fmtWeight(ofp.fuel.contingencyKg)}`}
-            />
-            <Stat size="sm" label="TOW"value={fmtWeightNum(ofp.weights.estTowKg)} unit={weightUnit} sub={`ZFW ${fmtWeight(ofp.weights.estZfwKg)} · ${ofp.passengers} PAX`} />
-          </div>
-          <div className="side-group">
-            <div className="side-group-title">{t("dispatch.route")}</div>
+            {userForm}
+            <div className="stat-grid cols-2">
+              <Stat size="sm" label={t("dispatch.stat.departure")} value={`${ofp.originIcao}${ofp.originRunway ? ` RWY ${ofp.originRunway}` : ""}`} sub={ofp.originName} />
+              <Stat size="sm" label={t("dispatch.stat.arrival")} value={`${ofp.destinationIcao}${ofp.destinationRunway ? ` RWY ${ofp.destinationRunway}` : ""}`} sub={ofp.destinationName} />
+              <Stat size="sm" label={t("dispatch.stat.alternate")} value={ofp.alternateIcao || "–"} sub={ofp.alternateName} />
+              <Stat size="sm" label={t("dispatch.stat.cruise")} value={`FL${Math.round(ofp.cruiseAltitudeFt / 100)}`} sub={`CI ${ofp.costIndex} · ${fmt(ofp.routeDistanceNm, 0, "nm")}`} />
+              <Stat size="sm" label={t("dispatch.stat.blockTimes")} value={`${clockS(ofp.times.schedOutS)} / ${clockS(ofp.times.schedInS)}`} />
+              <Stat
+                size="sm"
+                label={t("dispatch.stat.blockAir")}
+                value={fmtDuration(ofp.times.blockS * 1000)}
+                sub={t("dispatch.stat.airTime", { time: fmtDuration(ofp.times.enrouteS * 1000) })}
+              />
+              <Stat
+                size="sm"
+                label={t("dispatch.stat.rampFuel")}
+                value={fmtWeightNum(ofp.fuel.planRampKg)}
+                unit={weightUnit}
+                sub={t("dispatch.stat.fuelSub", { trip: fmtWeight(ofp.fuel.tripKg), landing: fmtWeight(ofp.fuel.planLandingKg) })}
+              />
+              <Stat
+                size="sm"
+                label={t("dispatch.stat.taxi")}
+                value={`${ofp.times.taxiOutS ? Math.round(ofp.times.taxiOutS / 60) : "–"} / ${ofp.times.taxiInS ? Math.round(ofp.times.taxiInS / 60) : "–"} min`}
+                sub={ofp.fuel.taxiKg ? t("dispatch.stat.taxiFuel", { fuel: fmtWeight(ofp.fuel.taxiKg) }) : undefined}
+              />
+              <Stat
+                size="sm"
+                label="Reserve / Alternate"
+                value={fmtWeightNum(ofp.fuel.reserveKg)}
+                unit={weightUnit}
+                sub={`Alternate ${fmtWeight(ofp.fuel.alternateKg)} · Contingency ${fmtWeight(ofp.fuel.contingencyKg)}`}
+              />
+              <Stat size="sm" label="TOW"value={fmtWeightNum(ofp.weights.estTowKg)} unit={weightUnit} sub={`ZFW ${fmtWeight(ofp.weights.estZfwKg)} · ${ofp.passengers} PAX`} />
+            </div>
+          </Collapsible>
+          <Collapsible id="dispatch.route" className="side-group" headClassName="side-group-title" title={t("dispatch.route")} summary={ofp.route}>
             <div className="route-string mono">{ofp.route}</div>
-          </div>
+          </Collapsible>
           <div className="detail">
             {t("dispatch.footer", { airac: ofp.airac, created: fmtDateTime(ofp.generatedAtS * 1000), waypoints: t("dispatch.waypoints", { count: ofp.navlog.length }) })}
           </div>

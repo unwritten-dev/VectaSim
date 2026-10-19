@@ -46,6 +46,8 @@ import { statusLine as serverStatusLine, type ServerStatus } from "./serverLinks
 import { useGlobe } from "./map/projection";
 import { useMapStyle } from "./map/satellite";
 import { NETWORK_LABEL, networkStatuses, networksWith, onlineDiagRows, onlineLine, onlineTone } from "./onlineText";
+import { errorToast } from "./ui/errorToast";
+import { Segmented } from "./ui/Segmented";
 
 interface Props {
   providers: string[];
@@ -243,7 +245,7 @@ export default function Settings({ providers, onProvider, online, status, flight
     try {
       target = await saveFileDialog({ title: t("settings.diag.package.saveTitle"), defaultPath, filters: [{ name: t("settings.diag.package.zip"), extensions: ["zip"] }] });
     } catch (e) {
-      showToast({ tone: "err", title: t("settings.diag.package.failed"), body: String(e) });
+      showToast({ tone: "err", ...errorToast(t("settings.diag.package.failed"), e, "settings") });
       return;
     }
     if (!target) return;
@@ -258,7 +260,7 @@ export default function Settings({ providers, onProvider, online, status, flight
         actions: [{ label: t("settings.openFolder"), onClick: () => void revealItemInDir(pkg.path).catch(() => {}) }],
       });
     } catch (e) {
-      showToast({ tone: "err", title: t("settings.diag.package.failed"), body: String(e) });
+      showToast({ tone: "err", ...errorToast(t("settings.diag.package.failed"), e, "settings") });
     } finally {
       setPacking(false);
     }
@@ -276,7 +278,7 @@ export default function Settings({ providers, onProvider, online, status, flight
         void revealItemInDir(path).catch(() => {});
         invoke<DumpInfo>("dump_info").then(setDump).catch(() => {});
       })
-      .catch((e) => showToast({ tone: "warn", title: t("settings.diag.dump.notSaved"), body: String(e), durationMs: 6000 }));
+      .catch((e) => showToast({ tone: "warn", ...errorToast(t("settings.diag.dump.notSaved"), e, "settings"), durationMs: 6000 }));
 
   const chooseReplay = async () => {
     try {
@@ -584,19 +586,12 @@ export default function Settings({ providers, onProvider, online, status, flight
           <span className="setting-label" id="ui-language">
             {t("settings.display.language.label")}
           </span>
-          <div className="segmented" role="radiogroup" aria-labelledby="ui-language">
-            {LANGUAGE_OPTIONS.map((o) => (
-              <button
-                key={o.value}
-                role="radio"
-                aria-checked={prefs.language === o.value}
-                className={prefs.language === o.value ? "active" : ""}
-                onClick={() => setPref("language", o.value).catch((e) => setError(String(e)))}
-              >
-                {t(o.label)}
-              </button>
-            ))}
-          </div>
+          <Segmented
+            aria-labelledby="ui-language"
+            options={LANGUAGE_OPTIONS.map((o) => ({ value: o.value, label: t(o.label) }))}
+            value={prefs.language}
+            onChange={(v) => setPref("language", v).catch((e) => setError(String(e)))}
+          />
           <span className="detail">{t("settings.display.language.hint")}</span>
         </div>
         <ThemePicker value={prefs.theme} onChange={(id) => setPref("theme", id).catch((e) => setError(String(e)))} />
@@ -604,33 +599,27 @@ export default function Settings({ providers, onProvider, online, status, flight
           <span className="setting-label" id="time-base">
             {t("settings.display.times")}
           </span>
-          <div className="segmented" role="radiogroup" aria-labelledby="time-base">
-            <button role="radio" aria-checked={!prefs.timeLocal} className={!prefs.timeLocal ? "active" : ""} onClick={() => toggle("timeLocal", false)}>
-              UTC
-            </button>
-            <button role="radio" aria-checked={prefs.timeLocal} className={prefs.timeLocal ? "active" : ""} onClick={() => toggle("timeLocal", true)}>
-              {t("time.local")}
-            </button>
-          </div>
+          <Segmented
+            aria-labelledby="time-base"
+            options={[
+              { value: false, label: "UTC" },
+              { value: true, label: t("time.local") },
+            ]}
+            value={prefs.timeLocal}
+            onChange={(v) => toggle("timeLocal", v)}
+          />
           <span className="detail">{t("settings.display.now", { time: fmtClock(Date.now()) })}</span>
         </div>
         <div className="setting-row">
           <span className="setting-label" id="weight-unit">
             {t("settings.display.weights")}
           </span>
-          <div className="segmented" role="radiogroup" aria-labelledby="weight-unit">
-            {(["kg", "lb"] as const).map((u) => (
-              <button
-                key={u}
-                role="radio"
-                aria-checked={prefs.weightUnit === u}
-                className={prefs.weightUnit === u ? "active" : ""}
-                onClick={() => setPref("weightUnit", u).catch((e) => setError(String(e)))}
-              >
-                {u}
-              </button>
-            ))}
-          </div>
+          <Segmented
+            aria-labelledby="weight-unit"
+            options={(["kg", "lb"] as const).map((u) => ({ value: u, label: u }))}
+            value={prefs.weightUnit}
+            onChange={(u) => setPref("weightUnit", u).catch((e) => setError(String(e)))}
+          />
           <span className="detail">{t("settings.display.weightsHint")}</span>
         </div>
         <ZoomRow />
@@ -1073,7 +1062,7 @@ function DataPanel({ onError }: { onError: (e: string) => void }) {
     try {
       await fn();
     } catch (e) {
-      showToast({ tone: "err", title: t(`settings.data.failed.${what}`), body: String(e) });
+      showToast({ tone: "err", ...errorToast(t(`settings.data.failed.${what}`), e, "settings") });
     } finally {
       setBusy(null);
     }
@@ -1175,7 +1164,7 @@ function DataPanel({ onError }: { onError: (e: string) => void }) {
     try {
       setImportAsk({ path, manifest: await invoke<BundleManifest>("read_bundle_manifest", { path }) });
     } catch (e) {
-      showToast({ tone: "err", title: t("settings.data.import.unreadable"), body: String(e) });
+      showToast({ tone: "err", ...errorToast(t("settings.data.import.unreadable"), e, "settings") });
     }
   };
 

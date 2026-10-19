@@ -116,7 +116,8 @@ export default function FlightStrip({ flight: f, fact, selected, tabIndex, onSel
     // a flight resumed or merged after a crash: the recording has a hole
     f.state !== "interrupted" && (f.integrity.gapMs ?? 0) > 0 && { mark: "⋯", title: gapTitle(f) ?? tr("logbook.integrity.gap") },
   ]).filter(Boolean) as Array<{ mark: string; title: string }>;
-  const stateTitle = gapTitle(f, gapToNextMs) ?? undefined;
+  const discarded = f.state === "discarded";
+  const stateTitle = discarded ? tr("logbook.state.discardedTitle") : (gapTitle(f, gapToNextMs) ?? undefined);
   const dep = effectiveDep(f);
   const arr = effectiveArr(f);
   const tags = f.tags ?? [];
@@ -131,7 +132,7 @@ export default function FlightStrip({ flight: f, fact, selected, tabIndex, onSel
   };
 
   return (
-    <div className={`strip${selected ? " selected" : ""}`} role="none" onClick={onSelect}>
+    <div className={`strip${selected ? " selected" : ""}${discarded ? " strip-discarded" : ""}`} role="none" onClick={onSelect}>
       <div
         data-id={f.id}
         role="option"
@@ -174,7 +175,7 @@ export default function FlightStrip({ flight: f, fact, selected, tabIndex, onSel
             )}
             {f.state !== "completed" && (
               <span className={`badge badge-inline state-${f.state}`} title={stateTitle}>
-                {f.state === "interrupted" ? tr("logbook.state.interruptedShort") : stateLabel(f.state, tr)}
+                {f.state === "interrupted" ? tr("logbook.state.interruptedShort") : discarded ? tr("logbook.state.discardedShort") : stateLabel(f.state, tr)}
               </span>
             )}
             {flags.map((x) => (

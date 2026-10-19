@@ -91,3 +91,21 @@ fn serialises_plan_fields_in_camel_case_for_the_ui() {
     assert_eq!(v["costIndex"], "25");
     assert_eq!(v["sourceUnits"], "kgs");
 }
+
+/// JSON v2 (`json=v2`, what the app requests): `navlog` is a bare list of fixes, not `{ "fix": [...] }`.
+/// A real OFP with 50+ fixes failed with "trailing characters" before this was accepted.
+#[test]
+fn v2_navlog_as_bare_list() {
+    let json = r#"{"fetch":{"status":"Success"},"params":{"units":"kgs"},
+      "navlog":[{"ident":"MARUN","type":"wpt","pos_lat":"50.1","pos_long":"8.9","altitude_feet":"6000","is_sid_star":"1","wind_data":{"level":[{"altitude":"2000","oat":"7"}]}},
+                {"ident":"TOLGI","type":"wpt","pos_lat":"51.0","pos_long":"9.5","altitude_feet":"33000","is_sid_star":"0","fir_crossing":[]},
+                {"ident":"EDDH","type":"apt","pos_lat":"53.6","pos_long":"10.0","altitude_feet":"53"}]}"#;
+    let ofp = parse_ofp_json(json).expect("parse");
+    assert_eq!(ofp.navlog.len(), 3);
+    assert_eq!(ofp.navlog[0].ident, "MARUN");
+    assert!(ofp.navlog[0].is_sid_star && !ofp.navlog[1].is_sid_star);
+    assert_eq!(ofp.navlog[1].altitude_ft, 33000.0);
+    // v1 shapes still work: object with a list, and a single fix as a bare object
+    let v1 = r#"{"fetch":{"status":"Success"},"navlog":{"fix":{"ident":"ONLY"}}}"#;
+    assert_eq!(parse_ofp_json(v1).unwrap().navlog.len(), 1);
+}

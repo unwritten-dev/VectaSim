@@ -4,6 +4,7 @@ import type { FlightRow, FlightUserEdit, TagCount } from "./types";
 import { showToast } from "./ui/Toast";
 import { NOTES_MAX_CHARS, TAG_MAX_CHARS, TAGS_MAX, normalizeTags, recordedCallsignOf } from "./logbookFilter";
 import { t as tr, useT, type TKey } from "./i18n";
+import { errorToast } from "./ui/errorToast";
 
 interface Props {
   flight: FlightRow;
@@ -24,7 +25,7 @@ async function saveEdit(id: string, edit: FlightUserEdit): Promise<FlightRow | n
   try {
     return await invoke<FlightRow>("update_flight_user", { id, edit });
   } catch (e) {
-    showToast({ tone: "err", title: tr("logbook.notes.saveFailed"), body: String(e) });
+    showToast({ tone: "err", ...errorToast(tr("logbook.notes.saveFailed"), e, "logbook") });
     return null;
   }
 }

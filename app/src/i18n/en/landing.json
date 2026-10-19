@@ -173,6 +173,8 @@
     "metarAfter": "METAR from {at} (more than {age} after the landing)",
     "key": {
       "sentence": "{head} {clauses}.",
+      "headUnrated": "Landing without a measurable rate",
+      "headTouchAndGoUnrated": "Touch-and-go without a measurable rate",
       "head": {
         "smooth": "Smooth landing",
         "normal": "Normal landing",
@@ -234,6 +236,7 @@
       "widthUnknown": "width unknown",
       "lateralUnmeasurable": "lateral offset not measurable",
       "noGate": "no gate reached",
+      "unrated": "landing rate unrated",
       "notComparable": "not comparable ({why})",
       "bandPoints": "{band} {points}",
       "formula": {
@@ -556,7 +559,8 @@
     "state": {
       "retry": "Try again",
       "loading": "Analysing the landing …",
-      "noApproachForLanding": "no approach to this landing was found in the track"
+      "noApproachForLanding": "no approach to this landing was found in the track",
+      "noLanding": "No landing was recorded for this flight."
     },
     "card": {
       "save": "Save landing card",

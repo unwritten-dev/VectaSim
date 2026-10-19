@@ -1,0 +1,23 @@
+/* MapUnavailable.tsx: the hint in place of a map that could not be created (no WebGL2). */
+.map-unavailable {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 16px;
+  text-align: center;
+  color: var(--text-muted);
+  background: var(--surface-1);
+  font-size: 13px;
+  z-index: 1;
+}
+.map-unavailable strong {
+  color: var(--text);
+  font-size: 14px;
+}
+.map-unavailable span {
+  max-width: 42ch;
+}

@@ -198,6 +198,7 @@ impl Store {
             "active" => FlightState::Active,
             "completed" => FlightState::Completed,
             "interrupted" => FlightState::Interrupted,
+            "discarded" => FlightState::Discarded,
             _ => FlightState::Idle,
         };
         let landing_rate_fpm = d.touchdowns.iter().rev().find(|t| !t.touch_and_go).map(|t| t.landing_rate_fpm);

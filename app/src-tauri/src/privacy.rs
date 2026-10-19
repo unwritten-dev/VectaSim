@@ -112,6 +112,138 @@ pub fn mask_json(v: &mut Value) {
     }
 }
 
+// ---- Kennungen ausblenden (Diagnosepaket im Streamer-Modus) ---------------------------------
+
+/// Registrations and callsigns to hide from a text: every word of `[A-Za-z0-9_-]` (and each
+/// `_`/`-` part of it) that is one of them, in any case and with `_` for `-` or no dash at all
+/// (`D-AIBL`, `d_aibl`, `DAIBL`), becomes `***`. Linear in the text, whatever the number of words.
+#[derive(Debug, Default, Clone)]
+pub struct Redactor {
+    words: std::collections::HashSet<String>,
+}
+
+fn redact_key(w: &str) -> String {
+    w.to_ascii_uppercase().replace('_', "-")
+}
+
+impl Redactor {
+    pub fn new<I: IntoIterator<Item = S>, S: AsRef<str>>(words: I) -> Self {
+        let mut set = std::collections::HashSet::new();
+        for w in words {
+            let w = redact_key(w.as_ref().trim());
+            // shorter values (or pure numbers like a flight number) would hit ordinary words
+            if w.len() < 3 || !w.chars().any(|c| c.is_ascii_alphabetic()) || !w.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+                continue;
+            }
+            if w.contains('-') {
+                set.insert(w.replace('-', ""));
+            }
+            set.insert(w);
+        }
+        Redactor { words: set }
+    }
+
+    fn hit(&self, w: &str) -> bool {
+        !w.is_empty() && self.words.contains(&redact_key(w))
+    }
+
+    /// One word: whole, else each `_`-part, else the longest runs of `-`-parts that are a hit
+    /// (`X-D-AIBL` → `X-***`).
+    fn mask_word(&self, w: &str, out: &mut String) {
+        if self.hit(w) {
+            out.push_str("***");
+        } else if w.contains('_') {
+            for (i, p) in w.split('_').enumerate() {
+                if i > 0 {
+                    out.push('_');
+                }
+                self.mask_word(p, out);
+            }
+        } else if w.contains('-') {
+            let parts: Vec<&str> = w.split('-').collect();
+            let mut i = 0;
+            while i < parts.len() {
+                if i > 0 {
+                    out.push('-');
+                }
+                match (i..parts.len()).rev().find(|&j| self.hit(&parts[i..=j].join("-"))) {
+                    Some(j) => {
+                        out.push_str("***");
+                        i = j + 1;
+                    }
+                    None => {
+                        out.push_str(parts[i]);
+                        i += 1;
+                    }
+                }
+            }
+        } else {
+            out.push_str(w);
+        }
+    }
+
+    pub fn mask(&self, text: &str) -> String {
+        if self.words.is_empty() {
+            return text.to_string();
+        }
+        let is_word = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_';
+        let mut out = String::with_capacity(text.len());
+        let mut start: Option<usize> = None;
+        for (i, c) in text.char_indices() {
+            match (is_word(c), start) {
+                (true, None) => start = Some(i),
+                (false, Some(s)) => {
+                    self.mask_word(&text[s..i], &mut out);
+                    start = None;
+                    out.push(c);
+                }
+                (false, None) => out.push(c),
+                (true, Some(_)) => {}
+            }
+        }
+        if let Some(s) = start {
+            self.mask_word(&text[s..], &mut out);
+        }
+        out
+    }
+
+    /// [`Redactor::mask`] on every string (keys stay) of a JSON value.
+    pub fn mask_json(&self, v: &mut Value) {
+        match v {
+            Value::String(s) => {
+                let m = self.mask(s);
+                if m != *s {
+                    *s = m;
+                }
+            }
+            Value::Array(a) => a.iter_mut().for_each(|x| self.mask_json(x)),
+            Value::Object(o) => o.values_mut().for_each(|x| self.mask_json(x)),
+            _ => {}
+        }
+    }
+}
+
+/// Fields that name the aircraft or the flight (title, ATC ID, airline, callsign, registration):
+/// non-empty strings under these keys become `***`, wherever they are in `v`.
+pub fn mask_identity_fields(v: &mut Value) {
+    const KEYS: &[&str] = &[
+        "title", "aircraft", "aircraftTitle", "aircraft_title", "atcId", "atc_id", "atcAirline", "atc_airline", "atcFlightNumber",
+        "atc_flight_number", "callsign", "registration", "airframeReg", "airframe_reg", "airline",
+    ];
+    match v {
+        Value::Array(a) => a.iter_mut().for_each(mask_identity_fields),
+        Value::Object(o) => {
+            for (k, x) in o.iter_mut() {
+                match x {
+                    Value::String(s) if KEYS.contains(&k.as_str()) && !s.trim().is_empty() => *s = "***".into(),
+                    _ => mask_identity_fields(x),
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
 // ---- Landekarte automatisch speichern -------------------------------------------------------
 
 #[derive(Debug, Serialize)]
@@ -212,6 +344,30 @@ mod tests {
             mask_user_paths(r"copy C:\Users\a\x.txt to E:\Users\b\AppData\Roaming"),
             r"copy %USERPROFILE%\x.txt to %APPDATA%"
         );
+    }
+
+    #[test]
+    fn redactor_hides_registrations_and_callsigns_as_words() {
+        let r = Redactor::new(["D-AIBL", "DLH4AB", "12", "123", " "]);
+        assert_eq!(r.mask("planespotters D-AIBL: photo found"), "planespotters ***: photo found");
+        assert_eq!(r.mask(r"img\D_AIBL.png and daibl, d-aibl"), r"img\***.png and ***, ***");
+        assert_eq!(r.mask("SimBrief OFP loaded: DLH4AB EDDF-EGLL"), "SimBrief OFP loaded: *** EDDF-EGLL");
+        assert_eq!(r.mask("ring_DLH4AB_x X-D-AIBL-Y"), "ring_***_x X-***-Y");
+        assert_eq!(Redactor::new(Vec::<String>::new()).mask("D-AIBL"), "D-AIBL");
+        // parts of other words, numbers and too short values stay
+        assert_eq!(r.mask("D-AIBLX DAIBLE 123 12 DLH4ABC"), "D-AIBLX DAIBLE 123 12 DLH4ABC");
+        let mut v = json!({ "a": ["x D-AIBL y", 1], "b": { "c": "DLH4AB" } });
+        r.mask_json(&mut v);
+        assert_eq!(v, json!({ "a": ["x *** y", 1], "b": { "c": "***" } }));
+    }
+
+    #[test]
+    fn identity_fields_are_masked() {
+        let mut v = json!({ "recentFlights": [{ "aircraft": "A320 Lufthansa", "dep": "EDDF" }, { "aircraft": null }],
+                            "status": { "aircraft": { "title": "T", "atcId": "D-AIBL", "atcModel": "A320", "atcAirline": "" } } });
+        mask_identity_fields(&mut v);
+        assert_eq!(v, json!({ "recentFlights": [{ "aircraft": "***", "dep": "EDDF" }, { "aircraft": null }],
+                              "status": { "aircraft": { "title": "***", "atcId": "***", "atcModel": "A320", "atcAirline": "" } } }));
     }
 
     #[test]

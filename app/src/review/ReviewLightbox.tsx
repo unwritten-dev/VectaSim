@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useT } from "../i18n";
 import { FORMAT_SIZE, type CardFormat } from "./text";
 import { lightboxKey } from "./layout";
+import { acquireModal } from "../ui/modalStack";
 
 const FOCUSABLE = "button:not([disabled]), [tabindex]:not([tabindex=\"-1\"])";
 
@@ -17,6 +18,26 @@ export interface LightboxProps {
   children: ReactNode;
   /** Save/Copy buttons for the shown card. */
   actions: ReactNode;
+}
+
+type Focusable = { focus: (o?: FocusOptions) => void };
+
+/**
+ * After a step: when ‹/› just got disabled under the focus (first/last card), Chromium drops the
+ * focus to <body> and a screen reader loses its place – move it to the arrow that is still
+ * enabled, else to "Schließen". Focus elsewhere (a toast via Alt+T, another control) stays.
+ */
+export function keepLightboxFocus(
+  root: { contains: (n: Node | null) => boolean; querySelector: (sel: string) => Focusable | null },
+  active: (Element & { disabled?: boolean }) | null,
+  body: Element | null,
+  close: Focusable | null,
+): Focusable | null {
+  const lost = !active || active === body || (root.contains(active) && active.disabled === true);
+  if (!lost) return null;
+  const target = root.querySelector(".review-lightbox-nav:not(:disabled)") ?? close;
+  target?.focus({ preventScroll: true });
+  return target;
 }
 
 /** Inner part of the single-card view, without portal and effects (also rendered by the tests). */
@@ -69,11 +90,10 @@ export default function ReviewLightbox(props: LightboxProps) {
 
   useEffect(() => {
     const before = document.activeElement as HTMLElement | null;
-    const behind = document.querySelector<HTMLElement>(".shell-body");
-    behind?.setAttribute("inert", "");
-    document.body.classList.add("modal-open");
+    const modal = acquireModal();
     closeRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
+      if (!modal.isTop()) return;
       if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
       if (e.key === "Tab") {
         const root = rootRef.current;
@@ -102,11 +122,15 @@ export default function ReviewLightbox(props: LightboxProps) {
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("keydown", onKey);
-      behind?.removeAttribute("inert");
-      document.body.classList.remove("modal-open");
+      modal.release();
       if (before && before.isConnected) before.focus({ preventScroll: true });
     };
   }, []);
+
+  useEffect(() => {
+    const root = rootRef.current;
+    if (root) keepLightboxFocus(root, document.activeElement, document.body, closeRef.current);
+  }, [index]);
 
   return createPortal(
     <div

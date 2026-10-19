@@ -45,6 +45,7 @@ import { M_PER_FT, M_PER_NM, drawWidthM, pathOf, referenceHeightFt, runwayLayout
 import type { ApproachAnalysis } from "./approachTypes";
 import type { Band, LandingAnalysis, LandingDebriefData } from "./types";
 import { ShapeMark } from "./BandMark";
+import { isRated } from "./rated";
 
 export const CARD_W = 1200;
 export const CARD_H = 675;
@@ -250,11 +251,12 @@ export default function LandingCard({ data: d, colors: t, approach, fontCss, hid
         i={0}
         t={t}
         label={tr("landingCard.rate")}
-        value={fmt(td.landingRateFpm, 0)}
+        // unrated (slewed / fast-forwarded down): no number, no band – "nicht bewertbar" below
+        value={isRated(td) ? fmt(td.landingRateFpm, 0) : "–"}
         unit="fpm"
         source={src.rate.kind}
-        band={a.vsBand}
-        sub={`${BAND_LABEL[a.vsBand]} · ${td.landingRateSource === "sim" ? tr("landingCard.simValue") : tr("landingCard.measured")}`}
+        band={isRated(td) ? a.vsBand : undefined}
+        sub={isRated(td) ? `${BAND_LABEL[a.vsBand]} · ${td.landingRateSource === "sim" ? tr("landingCard.simValue") : tr("landingCard.measured")}` : tr("band.unrated")}
       />
       <Tile i={1} t={t} label={tr("landingCard.gPeak")} value={fmt(td.peakG, 2)} unit="g" source={src.g.kind} band={a.gBand} sub={`${BAND_LABEL[a.gBand]} · ${td.bounces ? tr("count.bounces", { count: td.bounces }) : tr("facts.key.noBounce")}`} />
       <Tile
@@ -433,7 +435,7 @@ function RunwayTop({ d, t, tr, panelH }: { d: LandingDebriefData; t: CardTheme; 
   const labelX = offRunway ? tdx + (tdLabelRight ? 12 : -12) : tdx;
   const labelY = offRunway ? tdy + 5 : Math.min(L.heightPx - 2, ry1 + 40);
   const anchor = offRunway ? (tdLabelRight ? "start" : "end") : "middle";
-  const tdColor = bandColor(t, a.vsBand);
+  const tdColor = isRated(a.touchdown) ? bandColor(t, a.vsBand) : t.textMuted;
 
   return (
     <g transform={`translate(${PAD},${RWY_Y + 26})`}>
@@ -624,7 +626,7 @@ function MiniProfile({ d, t, tr, profY: PROF_Y }: { d: LandingDebriefData; t: Ca
           </text>
         </g>
       )}
-      <path d={`M${x(tdDist) - 5},${y1 - 9}L${x(tdDist) + 5},${y1 - 9}L${x(tdDist)},${y1 - 1}Z`} fill={bandColor(t, a.vsBand)} />
+      <path d={`M${x(tdDist) - 5},${y1 - 9}L${x(tdDist) + 5},${y1 - 9}L${x(tdDist)},${y1 - 1}Z`} fill={isRated(a.touchdown) ? bandColor(t, a.vsBand) : t.textMuted} />
       {/* the touchdown sits at the right edge: label it above the plot, left of the mark */}
       <text x={x(tdDist) - 8} y={y0 + 6} textAnchor="end" fill={t.text} fontSize={12} stroke={t.surface1} strokeWidth={3} paintOrder="stroke" style={sans}>
         {tr("landingCard.touchdown")}

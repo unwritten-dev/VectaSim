@@ -8,6 +8,8 @@ import { isWeightUnit, maskTitle, privacy, setPrivacyMode, setTimeLocal, setWeig
 import { showToast } from "./ui/Toast";
 import { DEFAULT_THEME, applyTheme, isThemeId, type ThemeId } from "./themes";
 import { DEFAULT_LANGUAGE_SETTING, getLanguageSetting, isLanguageSetting, setLanguageSetting, type LanguageSetting } from "./i18n/lang";
+import { t } from "./i18n";
+import { userMessage } from "./errors";
 
 export interface Prefs {
   /** `time_local` = "1": clock times in local time instead of UTC ("z"). */
@@ -156,12 +158,14 @@ export function loadPrefs(): Promise<void> {
 
 /** Optimistic update; reverts and rethrows if the backend could not store it. */
 export async function setPref<K extends keyof Prefs>(key: K, value: Prefs[K]): Promise<void> {
-  const before = prefs;
+  const before = prefs[key];
   publish({ ...prefs, [key]: value });
   try {
     await invoke("set_setting", { key: KEYS[key], value: serialize(value) });
   } catch (e) {
-    publish(before);
+    // roll back only this key, and only if nothing changed it meanwhile: a parallel setPref of
+    // another key (or a later one of the same key) must survive this failure
+    if (prefs[key] === value) publish({ ...prefs, [key]: before });
     throw e;
   }
 }
@@ -214,12 +218,12 @@ export async function togglePrivacyMode(on: boolean = !prefs.privacyMode): Promi
     showToast({
       id: "privacy-mode",
       tone: "info",
-      title: on ? "Streamer-Modus an" : "Streamer-Modus aus",
-      body: on ? "Kennzeichen, Rufzeichen, Airline, SimBrief-ID und Benutzerpfade sind ausgeblendet." : "Alle Angaben werden wieder vollständig angezeigt.",
+      title: on ? t("shell.privacy.onTitle") : t("shell.privacy.offTitle"),
+      body: on ? t("shell.privacy.onBody") : t("shell.privacy.offBody"),
       durationMs: 3000,
     });
   } catch (e) {
-    showToast({ id: "privacy-mode", tone: "warn", title: "Streamer-Modus nicht umgeschaltet", body: String(e), durationMs: 5000 });
+    showToast({ id: "privacy-mode", tone: "warn", title: t("shell.privacy.failed"), body: userMessage(e, "settings").hint, durationMs: 5000 });
   }
 }
 

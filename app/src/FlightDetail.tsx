@@ -1,17 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
-import type { FlightDetail as Detail, Ofp, TouchdownReport, TrackSample } from "./types";
+import type { FlightDetail as Detail, FlightRow, Ofp, TouchdownReport, TrackSample } from "./types";
 import type { ApproachAnalysis } from "./landing/approachTypes";
 import { PHASE_LABEL, getWeightUnit } from "./format";
 import { fmt, fmtClock, fmtCoord, fmtDate, fmtDuration, fmtWeightNum } from "./i18n/number";
-import { t as tr, useT, type TFunction, type TKey } from "./i18n";
+import { t as tr, useLanguage, useT, type TFunction, type TKey } from "./i18n";
+import { handleMenuKey, menuItems } from "./ui/menu";
 import { ON_TIME_THRESHOLD_MIN, actualFromRow, buildPirep, fmtPunctuality, fmtPvaDelta, fmtPvaValue, integrityIssues, parseOfp, pirepFileName, planFromRow, planVsActual, type PirepApproach } from "./pirep";
 import { usePrefs } from "./prefs";
 import TrackMap from "./map/TrackMap";
 import ProfileChart from "./ProfileChart";
 import ReplayBar from "./landing/ReplayBar";
 import { logbookReplay, type ReplayMarker } from "./landing/replayStore";
+import Collapsible from "./ui/Collapsible";
 import Stat from "./ui/Stat";
 import { showToast } from "./ui/Toast";
 import { userMessage } from "./errors";
@@ -22,12 +24,16 @@ import { importSourceLabel, isDemoRow } from "./totals";
 import LandingSummary from "./landing/LandingSummary";
 import { openDebrief } from "./landing/debriefStore";
 import { BAND_VAR, G_HARD, vsBandOf } from "./landing/facts";
+import { isRated, rateText } from "./landing/rated";
 import { gLoadSummary, gLoadTitle } from "./gload";
 import HistoryPanel, { useHistoryFacts } from "./landing/HistoryPanel";
 import { patternSeries } from "./landing/history";
 import { linear } from "./landing/dispersionStats";
 import AirframeCard from "./airframes/AirframeCard";
 import { navigate } from "./airframes/navigation";
+
+/** The flight is the one being recorded (state active, not in the Papierkorb): it cannot be deleted. */
+export const isRecording = (f: Pick<FlightRow, "state">, trashed = false): boolean => f.state === "active" && !trashed;
 
 /** State of a flight in words; `t` defaults to the UI language. */
 export function stateLabel(state: string, t: TFunction = tr): string {
@@ -38,6 +44,8 @@ export function stateLabel(state: string, t: TFunction = tr): string {
       return t("logbook.state.active");
     case "interrupted":
       return t("logbook.state.interrupted");
+    case "discarded":
+      return t("logbook.state.discarded");
     default:
       return state;
   }
@@ -70,6 +78,7 @@ interface Props {
 /** Right-hand side of the logbook: one flight with map, profile, landings and phases. */
 export default function FlightDetail({ detail, track, onDelete, deleteRequest, onCancelDelete, deletedMs, onRestore }: Props) {
   const t = useT();
+  const lang = useLanguage();
   // the profile chart and the track map share the logbook replay cursor; the bar needs a range
   useEffect(() => {
     if (track.length < 2) {
@@ -92,12 +101,14 @@ export default function FlightDetail({ detail, track, onDelete, deleteRequest, o
   const depAirport = useAirport(dep);
   const arrAirport = useAirport(arr);
   useEffect(() => setConfirming(false), [f.id]);
+  /** The flight being recorded right now: no delete (Entf neither). */
+  const recording = isRecording(f, deletedMs != null);
   const seenDelete = useRef(deleteRequest);
   useEffect(() => {
     if (deleteRequest === seenDelete.current) return;
     seenDelete.current = deleteRequest;
-    setConfirming(true);
-  }, [deleteRequest]);
+    if (!recording) setConfirming(true);
+  }, [deleteRequest, recording]);
 
   // stable objects so the track map does not refit on every re-render
   const departure = useMemo(() => (f.depLat != null && f.depLon != null ? { latitude: f.depLat, longitude: f.depLon } : null), [f.depLat, f.depLon]);
@@ -119,8 +130,9 @@ export default function FlightDetail({ detail, track, onDelete, deleteRequest, o
   const ofp = useMemo(() => parseOfp(detail.ofpJson), [detail.ofpJson]);
   const pva = useMemo(() => {
     const plan = planFromRow(f);
-    return plan || ofp ? planVsActual(actualFromRow(f, track), plan, ofp) : null;
-  }, [f, track, ofp]);
+    // keyed on the language: the logbook stays mounted and `f` keeps its reference on a switch
+    return plan || ofp ? planVsActual(actualFromRow(f, track), plan, ofp, lang) : null;
+  }, [f, track, ofp, lang]);
 
   return (
     <article className="flight-detail" aria-label={t("logbook.detail.ariaLabel", { dep: dep ?? "····", arr: arr ?? "····" })}>
@@ -156,7 +168,9 @@ export default function FlightDetail({ detail, track, onDelete, deleteRequest, o
               ))}
           </div>
           <div className="detail-badges">
-            <span className={`badge state-${f.state}`}>{stateLabel(f.state, t)}</span>
+            <span className={`badge state-${f.state}`} title={f.state === "discarded" ? t("logbook.state.discardedTitle") : undefined}>
+              {stateLabel(f.state, t)}
+            </span>
             {trashed && (
               <span className="badge badge-trash" title={t("logbook.detail.trashTitle", { days: TRASH_DAYS })}>
                 {t("logbook.detail.trashBadge", { count: trashDaysLeft(deletedMs, Date.now()) })}
@@ -209,7 +223,13 @@ export default function FlightDetail({ detail, track, onDelete, deleteRequest, o
               </button>
             </span>
           ) : (
-            <button className="danger" onClick={() => setConfirming(true)} title={trashed ? t("logbook.detail.deletePermanentTitle") : t("logbook.detail.deleteTitle")}>
+            <button
+              className="danger"
+              onClick={() => setConfirming(true)}
+              // the running recording cannot be deleted (the backend refuses it too)
+              disabled={recording}
+              title={recording ? t("logbook.detail.deleteRecording") : trashed ? t("logbook.detail.deletePermanentTitle") : t("logbook.detail.deleteTitle")}
+            >
               {trashed ? t("logbook.detail.deletePermanent") : t("logbook.detail.delete")}
             </button>
           )}
@@ -228,8 +248,13 @@ export default function FlightDetail({ detail, track, onDelete, deleteRequest, o
         <div className="detail">{importedFrom ? t("logbook.detail.noTrackImported") : t("logbook.detail.noTrack")}</div>
       )}
 
-      <div className="detail-section">
-        <h3>{detail.touchdowns.length > 1 ? t("logbook.detail.headingLandings") : t("logbook.detail.headingLanding")}</h3>
+      <Collapsible
+        id="logbook.detail.landings"
+        className="detail-section"
+        level={3}
+        title={detail.touchdowns.length > 1 ? t("logbook.detail.headingLandings") : t("logbook.detail.headingLanding")}
+        summary={detail.touchdowns.length ? detail.touchdowns.map((td) => rateText(td)).join(" · ") : undefined}
+      >
         {detail.touchdowns.length === 0 ? (
           <div className="detail">
             {importedFrom ? t("logbook.detail.noLandingImported") : t("logbook.detail.noLanding")}
@@ -259,16 +284,16 @@ export default function FlightDetail({ detail, track, onDelete, deleteRequest, o
                 <tr key={i}>
                   <td className="num">{fmtClock(td.timestampMs, { seconds: true })}</td>
                   <td
-                    className={`num right strong${td.landingRateFpm <= -HARD_FPM ? " warn-text" : ""}`}
+                    className={`num right strong${isRated(td) && td.landingRateFpm <= -HARD_FPM ? " warn-text" : ""}`}
                     title={rateTitle(t, td)}
                   >
-                    <button className="rate-link" onClick={() => openDebrief(f.id, i)} aria-label={t("logbook.detail.rateAria", { rate: fmt(td.landingRateFpm, 0, "fpm") })}>
-                      {td.landingRateFpm <= -HARD_FPM && (
+                    <button className="rate-link" onClick={() => openDebrief(f.id, i)} aria-label={t("logbook.detail.rateAria", { rate: rateText(td) })}>
+                      {isRated(td) && td.landingRateFpm <= -HARD_FPM && (
                         <span className="warn-icon" aria-hidden="true">
                           !
                         </span>
                       )}
-                      {fmt(td.landingRateFpm, 0, "fpm")}
+                      {rateText(td)}
                     </button>
                   </td>
                   <td className="num right">{fmt(td.vsFpmMeasured, 0, "fpm")}</td>
@@ -289,17 +314,21 @@ export default function FlightDetail({ detail, track, onDelete, deleteRequest, o
           </details>
           </>
         )}
-      </div>
+      </Collapsible>
 
       {detail.touchdowns.length >= 2 && <Circuits flightId={f.id} touchdowns={detail.touchdowns} />}
 
-      <div className="detail-section">
-        <h3>{t("logbook.detail.aircraft")}</h3>
+      <Collapsible id="logbook.detail.aircraft" className="detail-section" level={3} title={t("logbook.detail.aircraft")} summary={effectiveAircraftTitle(f) || undefined}>
         <AirframeCard flight={f} onOpenFleet={(registration) => navigate({ kind: "airframe", registration })} />
-      </div>
+      </Collapsible>
 
-      <div className="detail-section">
-        <h3>{t("logbook.detail.flight")}</h3>
+      <Collapsible
+        id="logbook.detail.flight"
+        className="detail-section"
+        level={3}
+        title={t("logbook.detail.flight")}
+        summary={`${dep ?? "–"} → ${arr ?? "–"} · ${fmtDuration(blockMs)}`}
+      >
         <div className="stat-grid detail-grid">
           <Stat
             size="sm"
@@ -329,26 +358,35 @@ export default function FlightDetail({ detail, track, onDelete, deleteRequest, o
             <Stat size="sm" label={t("gload.label")} value={gLoadSummary(f.gLoad)} title={gLoadTitle(f.gLoad)} />
           </div>
         </div>
-      </div>
+      </Collapsible>
 
       {pva && (
-        <div className="detail-section">
-          <h3 className="pva-head">
-            {t("logbook.detail.pvaHeading")}
-            {pva.headline && (
-              <span
-                className={`badge ${pva.headline.status === "late" ? "state-interrupted" : "state-completed"}`}
-                title={t(pva.headline.event === "in" ? "logbook.detail.punctualityTitleIn" : "logbook.detail.punctualityTitleOut", { min: ON_TIME_THRESHOLD_MIN })}
-              >
-                {fmtPunctuality(pva.headline)}
-              </span>
-            )}
+        <Collapsible
+          id="logbook.detail.pva"
+          className="detail-section"
+          headClassName="pva-head"
+          level={3}
+          title={
+            <>
+              {t("logbook.detail.pvaHeading")}
+              {pva.headline && (
+                <span
+                  className={`badge ${pva.headline.status === "late" ? "state-interrupted" : "state-completed"}`}
+                  title={t(pva.headline.event === "in" ? "logbook.detail.punctualityTitleIn" : "logbook.detail.punctualityTitleOut", { min: ON_TIME_THRESHOLD_MIN })}
+                >
+                  {fmtPunctuality(pva.headline)}
+                </span>
+              )}
+            </>
+          }
+          actions={
             <span className="detail">
               {ofp
                 ? `SimBrief ${ofp.originIcao || f.plannedDep || "–"} → ${ofp.destinationIcao || f.plannedArr || "–"}${ofp.alternateIcao ? ` · ALTN ${ofp.alternateIcao}` : ""}`
                 : t("logbook.detail.pvaPlanRoute", { dep: f.plannedDep ?? "–", arr: f.plannedArr ?? "–" })}
             </span>
-          </h3>
+          }
+        >
           <table className="mini-table pva-table">
             <thead>
               <tr>
@@ -376,11 +414,16 @@ export default function FlightDetail({ detail, track, onDelete, deleteRequest, o
               ))}
             </tbody>
           </table>
-        </div>
+        </Collapsible>
       )}
 
-      <div className="detail-section">
-        <h3>{t("logbook.detail.phases")}</h3>
+      <Collapsible
+        id="logbook.detail.phases"
+        className="detail-section"
+        level={3}
+        title={t("logbook.detail.phases")}
+        summary={detail.phases.length ? detail.phases.map((p) => PHASE_LABEL[p.to]).slice(-1)[0] : undefined}
+      >
         {detail.phases.length === 0 ? (
           <div className="detail">{t("logbook.detail.noPhases")}</div>
         ) : (
@@ -395,11 +438,10 @@ export default function FlightDetail({ detail, track, onDelete, deleteRequest, o
             ))}
           </ol>
         )}
-      </div>
+      </Collapsible>
 
       {issues.length > 0 && (
-        <div className="detail-section">
-          <h3>{t("logbook.detail.integrity")}</h3>
+        <Collapsible id="logbook.detail.integrity" className="detail-section" level={3} title={t("logbook.detail.integrity")} summary={String(issues.length)}>
           <div className="detail-badges">
             {issues.map((s) => (
               <span key={String(s)} className="badge state-interrupted">
@@ -407,7 +449,7 @@ export default function FlightDetail({ detail, track, onDelete, deleteRequest, o
               </span>
             ))}
           </div>
-        </div>
+        </Collapsible>
       )}
     </article>
   );
@@ -415,6 +457,7 @@ export default function FlightDetail({ detail, track, onDelete, deleteRequest, o
 
 /** Tooltip of a landing-rate cell: hard mark, where the value comes from, the click hint. */
 function rateTitle(t: TFunction, td: TouchdownReport): string {
+  if (!isRated(td)) return [t("band.unratedTitle"), t("logbook.detail.clickDebrief")].join(" ");
   const source: TKey =
     td.landingRateSource === "sim"
       ? td.bounces
@@ -439,15 +482,19 @@ function Circuits({ flightId, touchdowns }: { flightId: string; touchdowns: Touc
   const t = useT();
   const { landings, approaches } = useHistoryFacts();
   const s = useMemo(() => patternSeries(touchdowns, landings ?? [], flightId, approaches ?? []), [touchdowns, landings, approaches, flightId]);
-  const maxFpm = Math.max(300, ...s.rows.map((r) => Math.abs(r.landingRateFpm)));
+  const maxFpm = Math.max(300, ...s.rows.filter((r) => r.rated).map((r) => Math.abs(r.landingRateFpm)));
   const X = linear(0, Math.max(s.rows.length - 1, 1), 6, SPARK_W - 6);
   const Y = linear(0, maxFpm, SPARK_H - 5, 5);
-  const line = s.rows.map((r, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(Math.abs(r.landingRateFpm)).toFixed(1)}`).join("");
+  // unrated contacts (slewed down) have no rate: no point, the line skips them
+  const line = s.rows
+    .map((r, i) => (r.rated ? { i, y: Y(Math.abs(r.landingRateFpm)) } : null))
+    .filter((p): p is { i: number; y: number } => p != null)
+    .map((p, k) => `${k ? "L" : "M"}${X(p.i).toFixed(1)},${p.y.toFixed(1)}`)
+    .join("");
   const hasPoint = s.rows.some((r) => r.distanceM != null);
   const hasStable = s.rows.some((r) => r.stableFromFt != null);
   return (
-    <div className="detail-section">
-      <h3>{t("logbook.circuits.heading")}</h3>
+    <Collapsible id="logbook.detail.circuits" className="detail-section" level={3} title={t("logbook.circuits.heading")} summary={String(s.rows.length)}>
       <div className="circuits-head">
         <span className="detail num">
           {t("logbook.circuits.summary", { contacts: s.rows.length, tgs: s.touchAndGos, stops: s.fullStops, median: fmt(s.medianRateFpm, 0, "fpm") })}
@@ -457,6 +504,7 @@ function Circuits({ flightId, touchdowns }: { flightId: string; touchdowns: Touc
         <svg className="circuits-spark" viewBox={`0 0 ${SPARK_W} ${SPARK_H}`} width={SPARK_W} height={SPARK_H} aria-hidden="true">
           <path d={line} className="tr-line" />
           {s.rows.map((r, i) => {
+            if (!r.rated) return null;
             const band = vsBandOf(r.landingRateFpm);
             return (
               <g key={i} className="circuits-pt" onClick={() => openDebrief(flightId, r.touchdownIndex)}>
@@ -511,16 +559,22 @@ function Circuits({ flightId, touchdowns }: { flightId: string; touchdowns: Touc
                 <td className="num">{i + 1}</td>
                 <td className="num">{fmtClock(r.timestampMs, { seconds: true })}</td>
                 <td>{r.touchAndGo ? t("logbook.detail.touchAndGo") : t("logbook.detail.fullStop")}</td>
-                <td className={`num right strong${r.landingRateFpm <= -HARD_FPM ? " warn-text" : ""}`}>
+                <td className={`num right strong${r.rated && r.landingRateFpm <= -HARD_FPM ? " warn-text" : ""}`} title={r.rated ? undefined : t("band.unratedTitle")}>
                   <button
                     className="rate-link"
                     onClick={(e) => {
                       e.stopPropagation();
                       openDebrief(flightId, r.touchdownIndex);
                     }}
-                    aria-label={t("logbook.circuits.rateAria", { n: i + 1, rate: fmt(r.landingRateFpm, 0, "fpm"), band: t(`band.${band}`) })}
+                    aria-label={t("logbook.circuits.rateAria", { n: i + 1, rate: rateText(r), band: r.rated ? t(`band.${band}`) : t("band.unrated") })}
                   >
-                    <span className="band-dot inline" style={{ background: BAND_VAR[band] }} aria-hidden="true" /> {fmt(r.landingRateFpm, 0, "fpm")}
+                    {r.rated ? (
+                      <>
+                        <span className="band-dot inline" style={{ background: BAND_VAR[band] }} aria-hidden="true" /> {fmt(r.landingRateFpm, 0, "fpm")}
+                      </>
+                    ) : (
+                      rateText(r)
+                    )}
                   </button>
                 </td>
                 <td className={`num right${r.peakG >= G_HARD ? " warn-text" : ""}`}>{fmt(r.peakG, 2)}</td>
@@ -536,7 +590,7 @@ function Circuits({ flightId, touchdowns }: { flightId: string; touchdowns: Touc
           })}
         </tbody>
       </table>
-    </div>
+    </Collapsible>
   );
 }
 
@@ -574,19 +628,18 @@ function ExportMenu({ detail, ofp, track }: { detail: Detail; ofp: Ofp | null; t
   const flightId = detail.flight.id;
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
     const close = (e: MouseEvent) => {
       if (!ref.current?.contains(e.target as Node)) setOpen(false);
     };
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
     document.addEventListener("mousedown", close);
-    document.addEventListener("keydown", esc);
-    return () => {
-      document.removeEventListener("mousedown", close);
-      document.removeEventListener("keydown", esc);
-    };
+    // menu pattern: the focus moves into the menu; keys in handleMenuKey (ui/menu.ts)
+    menuItems(listRef.current)[0]?.focus();
+    return () => document.removeEventListener("mousedown", close);
   }, [open]);
 
   const fail = (e: unknown) => {
@@ -634,12 +687,12 @@ function ExportMenu({ detail, ofp, track }: { detail: Detail; ofp: Ofp | null; t
   };
 
   return (
-    <div className="export-menu" ref={ref}>
-      <button onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open}>
+    <div className="export-menu" ref={ref} onKeyDown={(e) => handleMenuKey(e, open, listRef.current, triggerRef.current, () => setOpen(false))}>
+      <button ref={triggerRef} onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open}>
         {t("logbook.export.button")} ▾
       </button>
       {open && (
-        <div className="export-menu-list" role="menu">
+        <div ref={listRef} className="export-menu-list" role="menu">
           {EXPORT_FORMATS.map((f) => (
             <button key={f.id} role="menuitem" onClick={() => run(f)}>
               {t(f.title)}

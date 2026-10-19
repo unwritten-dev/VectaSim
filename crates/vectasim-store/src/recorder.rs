@@ -1,7 +1,9 @@
 //! Turns the live `FlightSession` stream into database rows.
 //!
 //! Cadence is driven by telemetry timestamps, not wall-clock, so the recorder
-//! behaves identically under test and in the app. The whole track of the
+//! behaves identically under test and in the app. The 1 Hz sampling and the flush interval
+//! run on a [`MonoClock`] over those timestamps: a system clock set back does not stop
+//! either (the samples keep their wall-clock `t_ms`). The whole track of the
 //! current flight stays in memory (a 10 h flight at 1 Hz is ~4 MB) and is
 //! re-encoded and upserted every `FLUSH_INTERVAL_MS` and on flight end.
 //!
@@ -11,15 +13,21 @@
 //! the flight row of a `FlightStarted`, touchdowns, and the end of a flight (the
 //! flight stays "ending" until its final state is written). The first error of a
 //! call is returned after everything else was attempted; the rest are logged.
+//!
+//! Ground sessions (`FlightState::Discarded`, see `vectasim_core::flight`): a flight that ends
+//! without having flown is stored with state `discarded` and goes straight to the Papierkorb.
+//! The `FlightEnded` of such a flight is written that way when its summary says so; in any case
+//! the caller passes the session's [`FlightDiscardedEvent`]s to [`FlightRecorder::on_discarded`]
+//! (the summary may already describe the next flight when it starts in the same sample).
 
 use crate::airframe::{AirframeHint, icao_from_atc_model, merge_hint, normalize_registration, resolve_registration};
 use crate::store::{FlightContext, PlannedFlight};
 use crate::track::{TrackSample, encode_track, subsample};
 use crate::{AirportResolver, Result, Store, StoreError};
 use std::sync::{Arc, Mutex, MutexGuard};
-use vectasim_core::flight::TouchdownOutcomeEvent;
+use vectasim_core::flight::{FlightDiscardedEvent, TouchdownOutcomeEvent};
 use vectasim_core::touchdown::TouchdownOutcome;
-use vectasim_core::{AircraftInfo, FlightEvent, FlightPhase, FlightState, FlightSummary, Telemetry, TouchdownReport, now_ms};
+use vectasim_core::{AircraftInfo, FlightEvent, FlightPhase, FlightState, FlightSummary, MonoClock, Telemetry, TouchdownReport, now_ms};
 
 const SAMPLE_INTERVAL_MS: u64 = 1_000;
 /// Track upsert cadence: bounds what a crash or a hard close loses to 15 s of track
@@ -27,6 +35,8 @@ const SAMPLE_INTERVAL_MS: u64 = 1_000;
 const FLUSH_INTERVAL_MS: u64 = 15_000;
 /// 1/30 Hz preview: ~120 points for an hour of flying.
 pub(crate) const PREVIEW_EVERY: usize = 30;
+/// Flights closed by this recorder that a later [`FlightDiscardedEvent`] may still refer to.
+const RECENTLY_CLOSED: usize = 4;
 /// How far from the nearest airport a start/landing position may be to still count as "at" it.
 const AIRPORT_MATCH_NM: f64 = 3.0;
 
@@ -38,8 +48,10 @@ pub use crate::store::FlightContext as RecorderContext;
 
 struct Current {
     id: String,
-    last_sample_ms: Option<u64>,
-    last_flush_ms: u64,
+    /// [`FlightRecorder::clock`] time of the last 1 Hz sample (`None`: take the next one).
+    last_sample_mono: Option<u64>,
+    /// [`FlightRecorder::clock`] time of the last flush (`None`: the next sample starts the interval).
+    last_flush_mono: Option<u64>,
     /// Latest summary of this flight: closes it correctly even when the summary passed in
     /// already belongs to the next flight.
     summary: FlightSummary,
@@ -62,6 +74,10 @@ pub struct FlightRecorder {
     live: LiveTrack,
     resolver: Option<Arc<dyn AirportResolver>>,
     planned: PlannedSlot,
+    /// Monotonic time over the telemetry timestamps, for sampling and flush cadence.
+    clock: MonoClock,
+    /// (id, off-block) of the last flights this recorder closed, newest last.
+    recently_closed: Vec<(String, Option<u64>)>,
 }
 
 /// Keeps the first error of a batch, logs the others.
@@ -91,6 +107,8 @@ impl FlightRecorder {
             live: LiveTrack::default(),
             resolver: None,
             planned: PlannedSlot::default(),
+            clock: MonoClock::new(),
+            recently_closed: Vec::new(),
         }
     }
 
@@ -166,7 +184,9 @@ impl FlightRecorder {
             ),
             None => from_sim,
         };
-        log::info!("flight {id} booked onto airframe {reg}");
+        // the registration only at DEBUG (Streamer-Modus: the app masks it in the Diagnosepaket)
+        log::info!("flight {id} booked onto its airframe");
+        log::debug!("flight {id} booked onto airframe {reg}");
         self.store.book_flight_airframe(id, &reg, &hint, now)
     }
 
@@ -177,6 +197,7 @@ impl FlightRecorder {
     /// Feed the sample that produced `events` together with the session's current summary.
     pub fn on_telemetry(&mut self, t: &Telemetry, summary: &FlightSummary, events: &[FlightEvent]) -> Result<()> {
         let now = t.timestamp_ms;
+        let mono = self.clock.advance(now);
         let mut errs = Errors::default();
         self.retry(summary, events, now, &mut errs);
         if let Err(e) = self.on_events(summary, events, now) {
@@ -184,12 +205,24 @@ impl FlightRecorder {
         }
 
         if let Some(c) = self.current.as_mut().filter(|c| c.ending.is_none()) {
-            if c.last_sample_ms.is_none_or(|last| now.saturating_sub(last) >= SAMPLE_INTERVAL_MS) {
-                c.last_sample_ms = Some(now);
+            if c.last_sample_mono.is_none_or(|last| mono.saturating_sub(last) >= SAMPLE_INTERVAL_MS) {
+                c.last_sample_mono = Some(mono);
                 self.live.lock().unwrap_or_else(|e| e.into_inner()).push(TrackSample::from(t));
             }
-            if now.saturating_sub(c.last_flush_ms) >= FLUSH_INTERVAL_MS {
+            let due = match c.last_flush_mono {
+                Some(last) => mono.saturating_sub(last) >= FLUSH_INTERVAL_MS,
+                None => {
+                    c.last_flush_mono = Some(mono);
+                    false
+                }
+            };
+            if due {
                 let r = self.flush(summary, now);
+                if r.is_ok()
+                    && let Some(c) = self.current.as_mut()
+                {
+                    c.last_flush_mono = Some(mono);
+                }
                 errs.note("track flush", r);
             }
         }
@@ -230,10 +263,14 @@ impl FlightRecorder {
                 }
                 FlightEvent::FlightEnded { interrupted, .. } => {
                     self.pending_start = false;
-                    let state = if *interrupted { "interrupted" } else { "completed" };
                     let Some(c) = self.current.as_mut() else { continue };
-                    c.ending = Some(state);
                     let s = if new_flight_here { c.summary.clone() } else { summary.clone() };
+                    let state = match (s.state, *interrupted) {
+                        (FlightState::Discarded, _) => "discarded",
+                        (_, true) => "interrupted",
+                        (_, false) => "completed",
+                    };
+                    c.ending = Some(state);
                     let r = self.finish(&s, now);
                     errs.note("flight end", r);
                 }
@@ -305,8 +342,8 @@ impl FlightRecorder {
         self.samples().clear();
         self.current = Some(Current {
             id: id.clone(),
-            last_sample_ms: None,
-            last_flush_ms: now,
+            last_sample_mono: None,
+            last_flush_mono: None,
             summary: summary.clone(),
             pending_touchdowns: Vec::new(),
             ending: None,
@@ -322,13 +359,13 @@ impl FlightRecorder {
 
     fn flush(&mut self, summary: &FlightSummary, now: u64) -> Result<()> {
         let Some(c) = self.current.as_mut() else { return Ok(()) };
-        let (count, data, preview) = {
-            let samples = self.live.lock().unwrap_or_else(|e| e.into_inner());
-            (samples.len(), encode_track(&samples), encode_track(&subsample(&samples, PREVIEW_EVERY)))
-        };
+        // copy under the lock (a memcpy), encode outside it: the live map and `live_track`
+        // readers do not wait for the zstd encode of a long track
+        let samples = self.live.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let (count, data, preview) = (samples.len(), encode_track(&samples), encode_track(&subsample(&samples, PREVIEW_EVERY)));
+        drop(samples);
         self.store.upsert_track(&c.id, count, &data, &preview, now)?;
         self.store.update_flight(&c.id, summary, "active", now)?;
-        c.last_flush_ms = now;
         Ok(())
     }
 
@@ -346,9 +383,52 @@ impl FlightRecorder {
         self.flush(summary, now)?;
         let Some(c) = self.current.as_ref() else { return Ok(()) };
         self.store.update_flight(&c.id, summary, state, now)?;
+        if state == "discarded" {
+            self.store.discard_flight_at(&c.id, now)?;
+        }
         log::info!("flight {} {state} with {} track samples", c.id, self.samples().len());
+        let closed = (c.id.clone(), c.summary.off_block_ms);
+        if self.recently_closed.len() >= RECENTLY_CLOSED {
+            self.recently_closed.remove(0);
+        }
+        self.recently_closed.push(closed);
         self.current = None;
         Ok(())
+    }
+
+    /// The session's discarded ground sessions (`FlightSession::take_discarded_flights`, after
+    /// the events of the same call went through [`Self::on_telemetry`] / [`Self::on_events`]):
+    /// each flight goes to the Papierkorb with state `discarded`. A flight whose end is still
+    /// pending is marked so its end writes it that way. Returns the ids of the flights it
+    /// discarded (or will, for a pending end).
+    pub fn on_discarded(&mut self, discarded: &[FlightDiscardedEvent], now: u64) -> Result<Vec<String>> {
+        let mut ids = Vec::new();
+        let mut errs = Errors::default();
+        for d in discarded {
+            if let Some(c) = self.current.as_mut().filter(|c| c.ending.is_some() && c.summary.off_block_ms == d.off_block_ms) {
+                c.ending = Some("discarded");
+                ids.push(c.id.clone());
+                continue;
+            }
+            let pos = self
+                .recently_closed
+                .iter()
+                .rposition(|(_, off)| *off == d.off_block_ms)
+                .or_else(|| d.off_block_ms.is_none().then(|| self.recently_closed.len().checked_sub(1)).flatten());
+            let Some(pos) = pos else {
+                log::warn!("logbook: discarded ground session (off-block {:?}) matches no recorded flight", d.off_block_ms);
+                continue;
+            };
+            let (id, _) = self.recently_closed.remove(pos);
+            match self.store.discard_flight_at(&id, now) {
+                Ok(_) => {
+                    log::info!("flight {id} discarded (ground session, in the Papierkorb)");
+                    ids.push(id);
+                }
+                Err(e) => errs.note("discard", Err(e)),
+            }
+        }
+        errs.into_result().map(|()| ids)
     }
 
     /// Continue recording the interrupted flight `flight_id` (the pilot accepted "Flug
@@ -374,13 +454,12 @@ impl FlightRecorder {
         }
         self.pending_start = false;
         let track = self.store.get_track(flight_id)?.unwrap_or_default();
-        let last_sample_ms = track.last().map(|s| s.t_ms);
         *self.samples() = track;
         let pending_touchdowns = self.current.take().map(|c| c.pending_touchdowns).unwrap_or_default();
         self.current = Some(Current {
             id: flight_id.to_string(),
-            last_sample_ms,
-            last_flush_ms: now,
+            last_sample_mono: None,
+            last_flush_mono: None,
             summary: summary.clone(),
             pending_touchdowns,
             ending: None,

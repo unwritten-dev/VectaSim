@@ -56,7 +56,9 @@ fn is_demo(f: &FlightRow) -> bool {
 fn arrivals(flights: &[FlightRow], include_demo: bool) -> Vec<Arrival<'_>> {
     flights
         .iter()
-        .filter(|f| f.state == "completed" && (include_demo || !is_demo(f)))
+        // a completed recording that never took off or touched down (taxi only, from before 0.5.1)
+        // is no visit; discarded ones are not "completed" anyway
+        .filter(|f| f.state == "completed" && f.counts_in_stats() && (include_demo || !is_demo(f)))
         .filter_map(|f| {
             let icao = f.arr_icao.as_deref().filter(|s| !s.trim().is_empty())?;
             let ms = f.landing_ms.or(f.on_block_ms).unwrap_or(f.updated_ms);
@@ -119,8 +121,23 @@ mod tests {
             arr_icao: arr.map(Into::into),
             dep_icao: Some("EDDF".into()),
             landing_ms: Some(landing_ms),
+            takeoff_ms: Some(landing_ms.saturating_sub(5)),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn ground_sessions_are_no_visits() {
+        let index = AirportIndex::load();
+        let mut taxi_only = flight("g", "completed", "simconnect", Some("EGLL"), 10);
+        taxi_only.takeoff_ms = None;
+        let mut imported = flight("i", "completed", "import:volanta", Some("EGLL"), 20);
+        imported.takeoff_ms = None;
+        let discarded = flight("d", "discarded", "simconnect", Some("LFPG"), 30);
+        let v = compute(&[taxi_only, discarded], false, &index);
+        assert!(v.countries.is_empty() && v.airports.is_empty());
+        let v = compute(&[imported], false, &index);
+        assert_eq!(v.airports.len(), 1, "imports always count");
     }
 
     #[test]

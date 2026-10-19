@@ -827,3 +827,23 @@ fn energy_band_high_when_fast_far_out() {
     assert_eq!(e.band, Some(EnergyBand::High), "{e:?}");
     assert!(e.band_max_ft.unwrap() >= 500.0, "{e:?}");
 }
+
+#[test]
+fn clock_stepping_back_inside_the_approach_does_not_panic() {
+    // audit 0.5.0 N5: track times are wall clock; a backward step inside a go-around lookback
+    // or an exceedance underflowed (panic in debug, a ~10^16 ms "duration" in release)
+    for ga in [None, Some(300.0)] {
+        let (track, tds) = straight_in(|h, cur| if h > 500.0 { 170.0 } else { (cur - 3.0).max(140.0) }, ga);
+        let n = track.len();
+        for k in (n / 4..n - 5).step_by(7) {
+            let mut stepped = track.clone();
+            for s in stepped.iter_mut().skip(k) {
+                s.t_ms -= 120_000;
+            }
+            let all = approach::analyze_flight(&stepped, &[], &tds, &both_ends(runway09()), &AircraftRef::default(), &ApproachConfig::default());
+            for a in &all {
+                assert!(a.exceedances.iter().all(|e| e.duration_s.is_finite() && e.duration_s < 3_600.0), "{k}: {:#?}", a.exceedances);
+            }
+        }
+    }
+}

@@ -9,6 +9,7 @@ use serde::Serialize;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
+use crate::history::{TrackFix, TrackHistory};
 use crate::model::{Facility, NearbyPilot, Network, OnlineSnapshot, Pilot};
 use crate::{OnlineError, ivao, vatsim};
 
@@ -73,6 +74,8 @@ pub(crate) struct Inner {
     /// VATSIM: the data URL discovered through status.json (cached until a fetch fails).
     pub(crate) data_url: Mutex<Option<String>>,
     snapshot: RwLock<Option<Arc<OnlineSnapshot>>>,
+    /// Flown track per pilot from the snapshots (history.rs; bounded, cleared by `stop`).
+    history: Mutex<TrackHistory>,
     status: Mutex<FeedStatus>,
     task: Mutex<Option<tokio::task::JoinHandle<()>>>,
     /// Survives stop/start so toggling the setting cannot hammer the endpoint.
@@ -103,6 +106,7 @@ impl OnlineFeed {
                 client,
                 data_url: Mutex::new(None),
                 snapshot: RwLock::new(None),
+                history: Mutex::new(TrackHistory::default()),
                 status: Mutex::new(FeedStatus::idle(network)),
                 task: Mutex::new(None),
                 last_fetch: Mutex::new(None),
@@ -143,6 +147,7 @@ impl OnlineFeed {
         st.prefiles = snap.prefiles.len();
         st.update_timestamp = Some(snap.update_timestamp.clone());
         st.fetched_ms = Some(snap.fetched_ms);
+        self.inner.history.lock().unwrap_or_else(|e| e.into_inner()).record(&snap.pilots, snap.fetched_ms);
         *self.inner.snapshot.write().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(snap));
     }
 
@@ -170,11 +175,17 @@ impl OnlineFeed {
             log::info!("{} feed stopped", self.inner.network.label());
         }
         *self.inner.snapshot.write().unwrap_or_else(|e| e.into_inner()) = None;
+        self.inner.history.lock().unwrap_or_else(|e| e.into_inner()).clear();
         *self.inner.status.lock().unwrap_or_else(|e| e.into_inner()) = FeedStatus::idle(self.inner.network);
     }
 
     pub fn pilot(&self, cid: u64) -> Option<Pilot> {
         self.snapshot()?.pilot(cid).cloned()
+    }
+
+    /// The pilot's flown track from the snapshots so far, oldest first (history.rs).
+    pub fn track(&self, cid: u64) -> Vec<TrackFix> {
+        self.inner.history.lock().unwrap_or_else(|e| e.into_inner()).track(cid)
     }
 
     pub fn pilots_in_bbox(&self, min_lon: f64, min_lat: f64, max_lon: f64, max_lat: f64, limit: usize) -> Vec<Pilot> {

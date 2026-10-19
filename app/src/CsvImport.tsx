@@ -23,6 +23,7 @@ import type {
 import { fmt, fmtDateTime } from "./i18n/number";
 import { t as tGlobal, useT, type TFunction, type TKey } from "./i18n";
 import { showToast } from "./ui/Toast";
+import { acquireModal } from "./ui/modalStack";
 import { usePrivacy } from "./prefs";
 
 /** i18n key of each preset's name. */
@@ -245,29 +246,31 @@ export default function CsvImportDialog({ onClose }: { onClose: () => void }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const localSpans = useMemo(() => localOffsetSpans(), []);
+  /** A running import cannot be cancelled: Esc and "Schließen" are off until it is done. */
+  const importing = busy === "Import";
   const closeRef = useRef(onClose);
+  const importingRef = useRef(importing);
   useEffect(() => {
     closeRef.current = onClose;
-  }, [onClose]);
+    importingRef.current = importing;
+  }, [onClose, importing]);
 
   // modal: inert behind, Esc closes, Tab cycles, focus back on close
   useEffect(() => {
     const before = document.activeElement as HTMLElement | null;
-    const behind = document.querySelector<HTMLElement>(".shell-body");
-    behind?.setAttribute("inert", "");
-    document.body.classList.add("modal-open");
+    const modal = acquireModal();
     ref.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
     const onKey = (e: KeyboardEvent) => {
+      if (!modal.isTop()) return;
       if (e.key === "Escape" && !e.defaultPrevented) {
         e.preventDefault();
-        closeRef.current();
+        if (!importingRef.current) closeRef.current();
       } else if (e.key === "Tab") trapTab(e, ref.current);
     };
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("keydown", onKey);
-      behind?.removeAttribute("inert");
-      document.body.classList.remove("modal-open");
+      modal.release();
       if (before?.isConnected) before.focus({ preventScroll: true });
     };
   }, []);
@@ -381,7 +384,7 @@ export default function CsvImportDialog({ onClose }: { onClose: () => void }) {
 
   return createPortal(
     <div className="csv-backdrop">
-      <div ref={ref} className="csv-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+      <div ref={ref} className="csv-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId} aria-busy={importing || undefined}>
         <header className="csv-head">
           <h2 id={titleId}>{t("csvImport.title")}</h2>
           <ol className="csv-steps" aria-label={t("csvImport.steps")}>
@@ -391,7 +394,7 @@ export default function CsvImportDialog({ onClose }: { onClose: () => void }) {
               </li>
             ))}
           </ol>
-          <button className="btn-sm" onClick={onClose} aria-label={t("csvImport.close")}>
+          <button className="btn-sm" onClick={onClose} aria-label={t("csvImport.close")} disabled={importing} title={importing ? t("csvImport.closeWhileImporting") : undefined}>
             {t("shell.action.close")}
           </button>
         </header>
@@ -593,7 +596,7 @@ export default function CsvImportDialog({ onClose }: { onClose: () => void }) {
             </div>
             <div className="detail">{t("csvImport.tagsHint")}</div>
             <footer className="csv-foot">
-              <button className="btn-sm" onClick={() => setStep(2)}>
+              <button className="btn-sm" onClick={() => setStep(2)} disabled={importing}>
                 {t("csvImport.back")}
               </button>
               <button

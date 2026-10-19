@@ -11,6 +11,8 @@
     "normal": "normal",
     "firm": "fest",
     "hard": "hart",
+    "unrated": "nicht bewertbar",
+    "unratedTitle": "Keine Landerate messbar: ohne Flugphase vor dem Aufsetzen (geslewt oder im Zeitraffer abgesetzt). Zählt nicht in Statistiken.",
     "vsScale": "sanft < {smooth} · normal < {normal} · fest < {firm} · hart ≥ {firm} fpm"
   },
   "time": {

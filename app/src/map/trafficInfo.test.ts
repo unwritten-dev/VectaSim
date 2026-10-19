@@ -199,3 +199,12 @@ describe("selection over feed updates", () => {
     expect(shouldClose(s, 1e9)).toBe(false);
   });
 });
+
+describe("greatCircle at the antipodes", () => {
+  it("returns finite points (sin d = 0 used to give NaN)", () => {
+    const pts = greatCircle({ lat: 40, lon: -3.7 }, { lat: -40, lon: 176.3 }, 16);
+    expect(pts).toHaveLength(17);
+    expect(pts.flat().every(Number.isFinite)).toBe(true);
+    expect(pts[0]).toEqual([-3.7, 40]);
+  });
+});

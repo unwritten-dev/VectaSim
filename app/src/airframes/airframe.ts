@@ -4,6 +4,7 @@
 import type { Airframe } from "../types";
 import { maskRegistration, maskTitle } from "../format";
 import { t } from "../i18n";
+import { planespottersLink } from "../map/photoLink";
 
 const PLACEHOLDER_IDS = new Set(["ASXGS", "ASOBO", "N12345", "NONE", "UNKNOWN", "TEST", "XXXX", "XXXXX", "ABC", "ABCD", "ABCDE"]);
 
@@ -103,3 +104,11 @@ export function parseVapp(raw: string): number | null | undefined {
   if (!Number.isFinite(v) || v < VAPP_MIN_KT || v > VAPP_MAX_KT) return undefined;
   return Math.round(v);
 }
+
+/**
+ * The photo page to open for a credit line, or null. Only Planespotters photo pages are opened:
+ * the link comes from the Planespotters API or from an imported .vectasim file, so anything
+ * else (another host, http, javascript:) could lead to a foreign page – it is dropped. The same
+ * check as the traffic card's photo credit (map/photoLink.ts).
+ */
+export const safePhotoLink: (link: string | null | undefined) => string | null = planespottersLink;

@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { fmt } from "../i18n/number";
 import { useT } from "../i18n";
 import { openDebrief } from "./debriefStore";
-import { APPROACH_BAND_LABEL, APPROACH_BAND_VAR, BAND_LABEL, BAND_VAR, lateralMeasurable, runwaySourceOf, touchdownDistanceText } from "./facts";
+import { APPROACH_BAND_LABEL, APPROACH_BAND_VAR, BAND_LABEL, BAND_VAR, isRated, lateralMeasurable, rateText, runwaySourceOf, touchdownDistanceText } from "./facts";
 import { sideLabel } from "./geometry";
 import type { LandingDebriefData } from "./types";
 import type { ApproachAnalysis } from "./approachTypes";
@@ -44,7 +44,7 @@ export default function LandingSummary({ flightId, touchdowns, updatedMs }: { fl
   const fails = a ? a.gates.reduce((n, g) => n + g.criteria.filter((c) => c.status === "fail").length, 0) : 0;
   const reached = a ? a.gates.filter((g) => g.reached).length : 0;
   return (
-    <div className="landing-summary" style={a ? { borderLeftColor: BAND_VAR[a.vsBand] } : undefined}>
+    <div className="landing-summary" style={a && isRated(a.touchdown) ? { borderLeftColor: BAND_VAR[a.vsBand] } : undefined}>
       <div>
         <div className="landing-summary-title num">
           {a
@@ -58,9 +58,14 @@ export default function LandingSummary({ flightId, touchdowns, updatedMs }: { fl
             <span>
               {t("debrief.summary.rate")}{" "}
               <button className="rate-link" onClick={() => openDebrief(flightId, null)} title={t("debrief.summary.openTitle")}>
-                {fmt(a.touchdown.landingRateFpm, 0, "fpm")}
-              </button>{" "}
-              <span className="band-dot inline" style={{ background: BAND_VAR[a.vsBand] }} aria-hidden="true" /> {BAND_LABEL[a.vsBand]}
+                {rateText(a.touchdown)}
+              </button>
+              {isRated(a.touchdown) && (
+                <>
+                  {" "}
+                  <span className="band-dot inline" style={{ background: BAND_VAR[a.vsBand] }} aria-hidden="true" /> {BAND_LABEL[a.vsBand]}
+                </>
+              )}
             </span>
             {tp && (
               <span>

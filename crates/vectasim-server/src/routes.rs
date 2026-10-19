@@ -14,14 +14,15 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::net::SocketAddr;
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::net::{IpAddr, SocketAddr};
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use hyper::body::Incoming;
 use hyper_util::rt::{TokioIo, TokioTimer};
 use hyper_util::service::TowerToHyperService;
-use tokio::sync::{Semaphore, broadcast, watch};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, broadcast, watch};
 use tower::ServiceExt as _;
 use vectasim_core::{Lang, now_ms};
 
@@ -68,11 +69,73 @@ pub(crate) fn router(state: AppState) -> Router {
         .with_state(state)
 }
 
+/// Connection slots: one pool for this PC (loopback), one for other devices with a cap per
+/// address. A LAN client without a token (or many idle connections from one device) can then
+/// never starve the local OBS overlays.
+pub(crate) struct Pools {
+    local: Arc<Semaphore>,
+    lan: Arc<Semaphore>,
+    per_ip: Arc<Mutex<HashMap<IpAddr, usize>>>,
+    per_ip_max: usize,
+    max: usize,
+}
+
+/// A LAN connection's slot: the pool permit and its count for the address, both given back on drop.
+pub(crate) struct LanSlot {
+    _permit: OwnedSemaphorePermit,
+    ip: IpAddr,
+    per_ip: Arc<Mutex<HashMap<IpAddr, usize>>>,
+}
+
+impl Drop for LanSlot {
+    fn drop(&mut self) {
+        let mut m = self.per_ip.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(n) = m.get_mut(&self.ip) {
+            *n = n.saturating_sub(1);
+            if *n == 0 {
+                m.remove(&self.ip);
+            }
+        }
+    }
+}
+
+impl Pools {
+    pub(crate) fn new(limits: &Limits) -> Self {
+        let max = limits.max_connections.max(1);
+        Self {
+            local: Arc::new(Semaphore::new(max)),
+            lan: Arc::new(Semaphore::new(max)),
+            per_ip: Arc::default(),
+            per_ip_max: limits.max_connections_per_ip.max(1),
+            max,
+        }
+    }
+
+    /// A slot for a LAN peer now, or `None` (pool or the address's share full: close it).
+    pub(crate) fn try_lan(&self, ip: IpAddr) -> Option<LanSlot> {
+        let mut m = self.per_ip.lock().unwrap_or_else(|e| e.into_inner());
+        let n = m.entry(ip).or_insert(0);
+        if *n >= self.per_ip_max {
+            return None;
+        }
+        let permit = self.lan.clone().try_acquire_owned().ok()?;
+        *n += 1;
+        Some(LanSlot { _permit: permit, ip, per_ip: self.per_ip.clone() })
+    }
+
+    /// Waits for every slot of both pools (shutdown).
+    async fn drain(&self) {
+        let n = self.max as u32;
+        let _ = tokio::join!(self.local.acquire_many(n), self.lan.acquire_many(n));
+    }
+}
+
 /// The accept loop. Not `axum::serve`: that builds hyper without a timer, so hyper's
 /// header-read timeout never fires, and it has no connection limit (slowloris in LAN mode).
-/// Here every connection gets [`Limits::header_read_timeout`] (also the keep-alive idle
-/// limit) and at most [`Limits::max_connections`] are served at once; further ones wait in
-/// the OS backlog until a slot is free.
+/// Here every connection gets a header-read timeout (also the keep-alive idle limit; shorter
+/// for LAN peers) and a slot from [`Pools`]: at most [`Limits::max_connections`] loopback
+/// connections are served at once (further ones wait until a slot is free), LAN connections
+/// beyond their pool or [`Limits::max_connections_per_ip`] are closed right away.
 pub(crate) async fn serve(listener: std::net::TcpListener, state: AppState, limits: Limits, mut shutdown: watch::Receiver<bool>) {
     let listener = match tokio::net::TcpListener::from_std(listener) {
         Ok(l) => l,
@@ -83,13 +146,8 @@ pub(crate) async fn serve(listener: std::net::TcpListener, state: AppState, limi
     };
     tokio::spawn(pump(state.clone()));
     let app = router(state);
-    let max = limits.max_connections.max(1);
-    let slots = Arc::new(Semaphore::new(max));
+    let pools = Arc::new(Pools::new(&limits));
     loop {
-        let permit = tokio::select! {
-            p = slots.clone().acquire_owned() => match p { Ok(p) => p, Err(_) => break },
-            _ = stopped(&mut shutdown) => break,
-        };
         let (stream, peer) = tokio::select! {
             r = listener.accept() => match r {
                 Ok(c) => c,
@@ -102,17 +160,41 @@ pub(crate) async fn serve(listener: std::net::TcpListener, state: AppState, limi
             },
             _ = stopped(&mut shutdown) => break,
         };
+        let local = auth::is_loopback_peer(peer.ip());
+        let lan_slot = if local {
+            None
+        } else {
+            match pools.try_lan(peer.ip()) {
+                Some(s) => Some(s),
+                None => {
+                    log::debug!("overlay server: connection from {peer} refused (LAN connection limit)");
+                    drop(stream);
+                    continue;
+                }
+            }
+        };
         let _ = stream.set_nodelay(true);
         let svc = app.clone().map_request(move |mut req: axum::http::Request<Incoming>| {
             req.extensions_mut().insert(ConnectInfo(peer));
             req.map(Body::new)
         });
         let mut stop = shutdown.clone();
+        let pools = pools.clone();
+        let header_timeout = if local { limits.header_read_timeout } else { limits.lan_header_read_timeout };
         tokio::spawn(async move {
-            let _permit = permit;
+            // loopback: wait for a free slot (as in the OS backlog before)
+            let _local_permit = if lan_slot.is_none() {
+                tokio::select! {
+                    p = pools.local.clone().acquire_owned() => match p { Ok(p) => Some(p), Err(_) => return },
+                    _ = stopped(&mut stop) => return,
+                }
+            } else {
+                None
+            };
+            let _lan_slot = lan_slot;
             let conn = hyper::server::conn::http1::Builder::new()
                 .timer(TokioTimer::new())
-                .header_read_timeout(limits.header_read_timeout)
+                .header_read_timeout(header_timeout)
                 .serve_connection(TokioIo::new(stream), TowerToHyperService::new(svc))
                 .with_upgrades();
             let mut conn = std::pin::pin!(conn);
@@ -126,9 +208,8 @@ pub(crate) async fn serve(listener: std::net::TcpListener, state: AppState, limi
         });
     }
     // let open requests finish (WebSockets close themselves on the stop signal)
-    match tokio::time::timeout(SHUTDOWN_GRACE, slots.acquire_many(max as u32)).await {
-        Ok(_) => {}
-        Err(_) => log::info!("overlay server: connections still open after {SHUTDOWN_GRACE:?}, closing them"),
+    if tokio::time::timeout(SHUTDOWN_GRACE, pools.drain()).await.is_err() {
+        log::info!("overlay server: connections still open after {SHUTDOWN_GRACE:?}, closing them");
     }
 }
 
@@ -161,6 +242,10 @@ async fn guard(State(st): State<AppState>, ConnectInfo(peer): ConnectInfo<Socket
         let mut r = error(StatusCode::from_u16(d.status()).unwrap_or(StatusCode::FORBIDDEN), d.message());
         if d == auth::Denied::Method {
             r.headers_mut().insert(header::ALLOW, HeaderValue::from_static("GET, HEAD, OPTIONS"));
+        }
+        // a refused LAN client does not keep its connection (and slot) open
+        if !auth::is_loopback_peer(peer.ip()) {
+            r.headers_mut().insert(header::CONNECTION, HeaderValue::from_static("close"));
         }
         return r;
     }
@@ -269,7 +354,7 @@ fn read_landing(source: &Arc<dyn Source>) -> Option<api::Landing> {
     if privacy {
         l.mask();
     }
-    l.band_label = api::band_label_in(l.band, source.lang()).to_string();
+    l.band_label = api::rate_band_label_in(l.band, source.lang()).to_string();
     Some(l)
 }
 
@@ -532,5 +617,32 @@ mod tests {
         keys.sort();
         assert_eq!(keys, ["apiVersion", "flight", "landing", "status", "telemetry", "type"]);
         assert_eq!(v["type"], "hello");
+    }
+}
+
+#[cfg(test)]
+mod pool_tests {
+    use super::*;
+
+    #[test]
+    fn lan_peers_cannot_take_the_local_slots() {
+        let limits = Limits { max_connections: 4, max_connections_per_ip: 2, ..Limits::default() };
+        let pools = Pools::new(&limits);
+        let a: IpAddr = "192.168.1.20".parse().unwrap();
+        let b: IpAddr = "192.168.1.21".parse().unwrap();
+        let c: IpAddr = "192.168.1.22".parse().unwrap();
+        // two per address, four in the LAN pool
+        let a1 = pools.try_lan(a).unwrap();
+        let _a2 = pools.try_lan(a).unwrap();
+        assert!(pools.try_lan(a).is_none(), "per-address cap");
+        let _b1 = pools.try_lan(b).unwrap();
+        let _b2 = pools.try_lan(b).unwrap();
+        assert!(pools.try_lan(c).is_none(), "LAN pool full");
+        // the loopback pool is untouched
+        assert_eq!(pools.local.available_permits(), 4);
+        // a closed connection gives its slot back
+        drop(a1);
+        let _c1 = pools.try_lan(c).expect("slot given back");
+        assert!(pools.try_lan(a).is_none(), "pool full again");
     }
 }

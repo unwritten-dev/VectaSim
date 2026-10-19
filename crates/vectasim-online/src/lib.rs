@@ -16,12 +16,14 @@
 //!   trusting the NOAA JSON fields so both sources produce identical results.
 
 pub mod feed;
+pub mod history;
 pub mod ivao;
 pub mod metar;
 pub mod model;
 pub mod vatsim;
 
 pub use feed::{FeedStatus, OnlineFeed, VatsimFeed, backoff_delay};
+pub use history::{TrackFix, TrackHistory};
 pub use ivao::parse_ivao_json;
 pub use metar::{FlightCategory, Metar, MetarClient, Wind};
 pub use model::{

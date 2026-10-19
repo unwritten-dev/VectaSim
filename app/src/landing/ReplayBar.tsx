@@ -5,6 +5,7 @@ import { sideLabel } from "./geometry";
 import { sampleAt, useReplay, useReplayCursor, useReplayStore, type ReplayStore } from "./replayStore";
 import type { ApproachAnalysis } from "./approachTypes";
 import type { LandingAnalysis } from "./types";
+import { Segmented } from "../ui/Segmented";
 
 /**
  * 2D playback of the debrief: play/pause, speed, a slider over the range, the cursor time
@@ -91,13 +92,14 @@ export default function ReplayBar() {
         <button className="btn-sm replay-step" onClick={() => store.step(1)} aria-label={tr("replay.forward")} title={tr("replay.forwardTitle")}>
           +1{NNBSP}s
         </button>
-        <span className="segmented replay-speed" role="radiogroup" aria-label={tr("replay.speed")}>
-          {store.speeds.map((s) => (
-            <button key={s} role="radio" aria-checked={speed === s} className={speed === s ? "active" : ""} onClick={() => store.setSpeed(s)} aria-label={tr("replay.speedOption", { speed: s })}>
-              {s}×
-            </button>
-          ))}
-        </span>
+        <Segmented
+          inline
+          className="replay-speed"
+          aria-label={tr("replay.speed")}
+          options={store.speeds.map((s) => ({ value: s, label: `${s}×`, ariaLabel: tr("replay.speedOption", { speed: s }) }))}
+          value={speed}
+          onChange={(s) => store.setSpeed(s)}
+        />
         <input
           type="range"
           className="replay-slider"

@@ -14,6 +14,7 @@ import AirframePicker from "./airframes/AirframePicker";
 import { LANDING_FLAPS_MAX, VAPP_MAX_KT, VAPP_MIN_KT, airframeName, matchesAirframe, normalizeRegistration, parseLandingFlaps, parseVapp, shownAirframeName } from "./airframes/airframe";
 import { useAirframes } from "./airframes/hooks";
 import { navigate } from "./airframes/navigation";
+import { errorToast } from "./ui/errorToast";
 
 const PLANE_ICON = (
   <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round">
@@ -63,7 +64,7 @@ export default function Fleet({ focus }: Props) {
         setNewReg("");
         setSelected(reg);
       })
-      .catch((e) => showToast({ tone: "err", title: t("logbook.fleet.addFailed"), body: String(e) }));
+      .catch((e) => showToast({ tone: "err", ...errorToast(t("logbook.fleet.addFailed"), e, "logbook") }));
   };
 
   if (rows && rows.length === 0 && !adding) {
@@ -237,7 +238,7 @@ function AirframeDetail({ row: a, onSelect }: { row: AirframeRow; onSelect: (reg
       edit: { registration: a.registration, customName, icaoType, airline, notes, vappKt: vapp ?? 0, landingFlaps: flaps ?? -1 } satisfies AirframeEdit,
     })
       .then(() => showToast({ tone: "ok", title: t("logbook.fleet.saved", { reg }) }))
-      .catch((e) => showToast({ tone: "err", title: t("logbook.fleet.saveFailed"), body: String(e) }));
+      .catch((e) => showToast({ tone: "err", ...errorToast(t("logbook.fleet.saveFailed"), e, "logbook") }));
   };
 
   const refreshPhoto = () => {
@@ -250,7 +251,7 @@ function AirframeDetail({ row: a, onSelect }: { row: AirframeRow; onSelect: (reg
             : { tone: "info", title: t("logbook.fleet.noPhoto"), body: t("logbook.fleet.noPhotoBody", { reg }) },
         ),
       )
-      .catch((e) => showToast({ tone: "err", title: t("logbook.fleet.photoFailed"), body: String(e) }))
+      .catch((e) => showToast({ tone: "err", ...errorToast(t("logbook.fleet.photoFailed"), e, "logbook") }))
       .finally(() => setBusy(false));
   };
 
@@ -259,7 +260,7 @@ function AirframeDetail({ row: a, onSelect }: { row: AirframeRow; onSelect: (reg
     if (typeof path !== "string") return;
     invoke("set_airframe_image", { registration: a.registration, path })
       .then(() => showToast({ tone: "ok", title: t("logbook.fleet.imageSet") }))
-      .catch((e) => showToast({ tone: "err", title: t("logbook.fleet.imageFailed"), body: String(e) }));
+      .catch((e) => showToast({ tone: "err", ...errorToast(t("logbook.fleet.imageFailed"), e, "logbook") }));
   };
 
   const merge = (into: string | null) => {
@@ -270,7 +271,7 @@ function AirframeDetail({ row: a, onSelect }: { row: AirframeRow; onSelect: (reg
         onSelect(r.registration);
         showToast({ tone: "ok", title: t("logbook.fleet.merged", { reg, into: priv.mask(r.registration, "registration") }), body: t("logbook.fleet.mergedBody", { count: a.totalFlights }) });
       })
-      .catch((e) => showToast({ tone: "err", title: t("logbook.fleet.mergeFailed"), body: String(e) }));
+      .catch((e) => showToast({ tone: "err", ...errorToast(t("logbook.fleet.mergeFailed"), e, "logbook") }));
   };
 
   const remove = () =>
@@ -279,7 +280,7 @@ function AirframeDetail({ row: a, onSelect }: { row: AirframeRow; onSelect: (reg
         onSelect(null);
         showToast({ tone: "ok", title: t("logbook.fleet.removed", { reg }), body: t("logbook.fleet.removedBody") });
       })
-      .catch((e) => showToast({ tone: "err", title: t("logbook.fleet.removeFailed"), body: String(e) }));
+      .catch((e) => showToast({ tone: "err", ...errorToast(t("logbook.fleet.removeFailed"), e, "logbook") }));
 
   const field = (key: keyof typeof form, label: string, props: React.InputHTMLAttributes<HTMLInputElement> = {}) => (
     <label className="af-field">

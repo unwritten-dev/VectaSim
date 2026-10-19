@@ -559,6 +559,11 @@ input[type="checkbox"] {
   background: var(--warn-soft);
   color: var(--warn);
 }
+/* a discarded ground session: like "unterbrochen", but muted – it is no flight */
+.state-discarded {
+  background: var(--surface-2);
+  color: var(--text-muted);
+}
 
 /* warning marker next to a value: colour + symbol */
 .warn-icon {
@@ -908,6 +913,78 @@ input[type="checkbox"] {
 }
 .side-group-title .link-btn {
   margin-left: auto;
+}
+
+/* Foldable sections (ui/Collapsible.tsx): the header row keeps the look of the surrounding
+   title (side-group-title, detail-section heads); folding is instant, the chevron turns
+   (no turn with reduced motion: global rule) */
+.collapsible-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.collapsible-head > button.collapsible-toggle {
+  min-height: 24px; /* hit area >= 24 px (WCAG 2.5.8) */
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  border-radius: var(--r-sm);
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-align: left;
+}
+.collapsible-head > button.collapsible-toggle:hover:not(:disabled) {
+  background: none;
+  color: var(--text);
+}
+.collapsible-head > button.collapsible-toggle:active:not(:disabled) {
+  transform: none;
+}
+.collapsible-title {
+  flex: none;
+}
+.collapsible-summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-text);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-muted);
+}
+.collapsible-actions {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.collapsible-actions .link-btn {
+  text-transform: none;
+  letter-spacing: 0;
+}
+.collapsible-body {
+  display: flex;
+  flex-direction: column;
+  gap: inherit;
+  min-width: 0;
+}
+.side-group > .collapsible-body {
+  gap: 6px;
+}
+.side-group > .collapsible-body.side-stack {
+  gap: var(--sp-3);
 }
 .flight-head {
   display: flex;
@@ -1277,6 +1354,14 @@ button.chip.active {
 .strip.selected {
   background: var(--surface-2);
   box-shadow: inset 2px 0 0 var(--accent);
+}
+/* discarded ground session (never took off): the strip reads muted */
+.strip-discarded .strip-id,
+.strip-discarded .strip-route {
+  color: var(--text-muted);
+}
+.strip-discarded strong {
+  font-weight: inherit;
 }
 .strip:focus-visible {
   outline-offset: -2px;

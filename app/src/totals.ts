@@ -2,6 +2,7 @@
 // left out (setting `show_demo`). Pure, see totals.test.ts.
 
 import type { FlightRow } from "./types";
+import { countsInStats, type StatsRow } from "./flightStats";
 
 export interface LogTotals {
   flights: number;
@@ -29,9 +30,17 @@ export function importSourceLabel(f: Pick<FlightRow, "provider">): string | null
   return IMPORT_SOURCE[preset] ?? (preset || "CSV");
 }
 
-/** Flights that count: all, or all but demo flights. */
-export function countedFlights<T extends Pick<FlightRow, "provider">>(rows: T[], showDemo: boolean): T[] {
-  return showDemo ? rows : rows.filter((f) => !isDemoRow(f));
+/**
+ * Flights that count in statistics: the backend rule (`countsInStats`: no discarded ground
+ * session, a recorded flight took off or landed), and demo flights only with the setting.
+ */
+export function countedFlights<T extends StatsRow>(rows: T[], showDemo: boolean): T[] {
+  return rows.filter((f) => countsInStats(f) && (showDemo || !isDemoRow(f)));
+}
+
+/** Demo flights the setting leaves out of the statistics (ones that would count otherwise). */
+export function demoLeftOut(rows: StatsRow[], showDemo: boolean): number {
+  return showDemo ? 0 : rows.filter((f) => isDemoRow(f) && countsInStats(f)).length;
 }
 
 export function computeTotals(rows: FlightRow[]): LogTotals {

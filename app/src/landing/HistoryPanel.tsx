@@ -24,6 +24,7 @@ import {
   type Scope,
 } from "./history";
 import "./trends.css";
+import { isRated } from "./rated";
 
 // ---- shared facts store -------------------------------------------------------------------
 // One request per list for every consumer (debrief, logbook detail, after-flight card, trends);
@@ -51,7 +52,8 @@ function set(patch: Partial<HistoryFacts>) {
 
 function loadLandings() {
   invoke<LandingFactsResult>("landing_facts_recent", { limit: FETCH_LIMIT, includeDemo: true })
-    .then((r) => set({ landings: r.facts, error: null }))
+    // unrated touchdowns are no points in trends and rankings (the backend leaves them out already)
+    .then((r) => set({ landings: r.facts.filter(isRated), error: null }))
     .catch((e) => set({ landings: state.landings ?? [], error: String(e) }));
 }
 

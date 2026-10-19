@@ -204,6 +204,50 @@ describe("semantic colours and track ramp (4.8)", () => {
   });
 });
 
+describe("information colours (M4: --text-faint never carries information)", () => {
+  /** Text tokens that carry information, and the grounds they sit on (sheet, tile, nested tile). */
+  const INFO_TEXT = ["text", "textMuted"] as const;
+
+  it("every text token used for information reaches 4.5:1 on canvas, surface-1 and surface-2", () => {
+    for (const t of THEMES)
+      for (const k of INFO_TEXT)
+        for (const bg of [t.colors.bg, t.colors.surface1, t.colors.surface2])
+          expect(contrastRatio(t.colors[k], bg), `${t.id} ${k} on ${bg}`).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("control states drawn in muted text (unselected rating stars) reach 3:1 on surface-3", () => {
+    for (const t of THEMES) expect(contrastRatio(t.colors.textMuted, t.colors.surface3), t.id).toBeGreaterThanOrEqual(3);
+  });
+
+  it("--text-faint is below the text threshold – so it must stay decoration", () => {
+    // documents why the CSS scan below exists: faint text would fail WCAG 1.4.3 in some theme
+    expect(THEMES.some((t) => contrastRatio(t.colors.textFaint, t.colors.surface2) < 4.5)).toBe(true);
+  });
+
+  it("the CSS uses --text-faint as a text/fill colour only for decoration", () => {
+    // `color:`/`fill:` with --text-faint, per selector; everything else (strokes, borders,
+    // underlines) is decoration by construction. Disabled controls are exempt (WCAG 1.4.3).
+    const DECORATION = new Set([".rwy-glyph-stripe", ".af-silhouette", 'button:not([class*="maplibregl"]):disabled']);
+    const files = ["App.css", "flows.css", "a11y.css", "landing/trends.css", "landing/landing.css", "landing/dispersion.css", "landing/approachDispersion.css"];
+    const offenders: string[] = [];
+    for (const f of files) {
+      const css = (readFileSync(new URL(`./${f}`, import.meta.url), "utf8") as string).replace(/\/\*[\s\S]*?\*\//g, "");
+      for (const m of css.matchAll(/([^{}]+)\{([^{}]*)\}/g) as IterableIterator<RegExpMatchArray>) {
+        if (!/(^|[;\s])(color|fill)\s*:\s*var\(--text-faint/.test(m[2])) continue;
+        const selectors = m[1].split(",").map((x) => x.trim());
+        if (!selectors.some((x) => DECORATION.has(x))) offenders.push(`${f}: ${m[1].trim()}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+    // the three spots from the 0.5.0 audit read in muted text now
+    const trends = readFileSync(new URL("./landing/trends.css", import.meta.url), "utf8");
+    expect(trends).toMatch(/\.hist-n \{\s*color: var\(--text-muted\)/);
+    expect(trends).toMatch(/\.tr-unit \{\s*fill: var\(--text-muted\)/);
+    const flows = readFileSync(new URL("./flows.css", import.meta.url), "utf8");
+    expect(flows).toMatch(/\.notes-editor button\.star \{[^}]*color: var\(--text-muted\)/);
+  });
+});
+
 describe("themes", () => {
   it("has the six directions, Signal as default", () => {
     expect(THEMES.map((t) => t.id)).toEqual(["nachtcockpit", "graphit-amber", "papierkarte", "phosphor", "arktis-studio", "signal"]);

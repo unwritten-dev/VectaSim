@@ -78,6 +78,7 @@ impl Tracker {
         if same && now.touchdowns > prev.touchdowns {
             out.push(Change::Touchdown { index: now.touchdowns - 1 });
         }
+        // a discarded ground session is no saved flight: no `flightSaved` for it
         let closed = |s: Option<FlightState>| matches!(s, Some(FlightState::Completed | FlightState::Interrupted));
         if same && prev.state == Some(FlightState::Active) && closed(now.state) {
             let flight_id = snap.flight.as_ref().and_then(|f| f.id.clone());
@@ -122,6 +123,14 @@ mod tests {
                 Change::FlightSaved { flight_id: Some("f1".into()), state: FlightState::Completed }
             ]
         );
+    }
+
+    #[test]
+    fn a_discarded_ground_session_is_not_saved() {
+        let mut t = Tracker::default();
+        t.step(&snap(FlightPhase::TaxiOut, FlightState::Active, 0));
+        let changes = t.step(&snap(FlightPhase::Shutdown, FlightState::Discarded, 0));
+        assert!(!changes.iter().any(|c| matches!(c, Change::FlightSaved { .. })), "{changes:?}");
     }
 
     #[test]

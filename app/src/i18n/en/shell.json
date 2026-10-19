@@ -174,7 +174,8 @@
       "duplicate": "already in the logbook – skipped",
       "ok": "ok",
       "approx": "approx. {value}"
-    }
+    },
+    "closeWhileImporting": "The import is running – the window closes as soon as it is done."
   },
   "dispatch": {
     "user": {
@@ -185,6 +186,7 @@
     },
     "load": "Load flight plan",
     "reload": "Reload",
+    "ofp": "SimBrief flight plan",
     "remove": "Remove flight plan",
     "empty": {
       "title": "No flight plan loaded",
@@ -412,6 +414,7 @@
     },
     "navShortcut": "{label} (Ctrl+{key})",
     "flightSaved": "Flight saved · {dep} → {arr} · {block}",
+    "flightDiscarded": "Ground session discarded · no take-off, no flight – it is in the trash",
     "logbookTab": {
       "label": "Logbook sections",
       "flights": "Flights",
@@ -438,6 +441,7 @@
     },
     "flightEvent": {
       "started": "Flight started (off-block)",
+      "discarded": "Ground session discarded (no take-off, in the trash)",
       "interrupted": "Flight saved as interrupted",
       "saved": "Flight saved (on-block)",
       "touchdown": "Landing {rate}, {g}",
@@ -490,6 +494,13 @@
       "lostBody": "Your flight is saved and continues as soon as the simulator is back.",
       "back": "Simulator is back",
       "backBody": "Recording continues."
+    },
+    "privacy": {
+      "onTitle": "Streamer mode on",
+      "onBody": "Registrations, callsigns, airline, SimBrief ID and user paths are hidden.",
+      "offTitle": "Streamer mode off",
+      "offBody": "Everything is shown in full again.",
+      "failed": "Streamer mode not switched"
     }
   },
   "status": {

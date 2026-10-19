@@ -1,5 +1,9 @@
 {
   "map": {
+    "unavailable": {
+      "title": "Karte nicht verfügbar",
+      "body": "Die Karte braucht WebGL2. Grafiktreiber aktualisieren oder VectaSim neu starten – die Aufzeichnung läuft weiter."
+    },
     "toolbar": {
       "follow": "Folgen",
       "followTitle": "Karte folgt dem Flugzeug",
@@ -109,6 +113,7 @@
       "close": "Flugkarte schließen",
       "closeTitle": "Schließen (Esc)",
       "compass": "N NNO NO ONO O OSO SO SSO S SSW SW WSW W WNW NW NNW",
+      "photoTitle": "Foto",
       "photo": {
         "credit": "Foto: {photographer} · Planespotters.net",
         "creditPlain": "Foto: Planespotters.net",

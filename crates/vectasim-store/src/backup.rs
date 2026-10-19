@@ -336,8 +336,10 @@ fn stage_restore(db: &Path, src: &Path) -> Result<()> {
 
 /// Put a staged restore in place (called by `Store::open*` before connecting). The current
 /// file is checkpointed and replaced; its `-wal`/`-shm` go with it. A staged file that
-/// fails [`inspect`] is set aside as `.restore-failed` and the current logbook stays.
-/// True when a restore was applied.
+/// fails [`inspect`] – or that cannot be put in place (checkpoint or rename failing, e.g. a
+/// virus scanner or a second instance holding a file) while the current logbook is still
+/// there – is set aside as `.restore-failed` and the current logbook opens, instead of every
+/// start failing the same way. True when a restore was applied.
 pub fn apply_pending_restore(db: &Path) -> Result<bool> {
     let pending = pending_restore_path(db);
     if !pending.is_file() {
@@ -348,6 +350,21 @@ pub fn apply_pending_restore(db: &Path) -> Result<bool> {
         let _ = std::fs::rename(&pending, sibling(db, ".restore-failed"));
         return Ok(false);
     }
+    match put_restore_in_place(db, &pending) {
+        Ok(()) => Ok(true),
+        // the current logbook is still there: open it, the restore can be repeated from the backup
+        Err(e) if db.is_file() => {
+            log::error!("staged restore {} could not be applied, keeping the current logbook: {e}", pending.display());
+            if let Err(e) = std::fs::rename(&pending, sibling(db, ".restore-failed")) {
+                log::error!("staged restore {} could not be set aside either: {e}", pending.display());
+            }
+            Ok(false)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+fn put_restore_in_place(db: &Path, pending: &Path) -> Result<()> {
     let replaced = sibling(db, ".replaced");
     if db.is_file() {
         {
@@ -362,7 +379,7 @@ pub fn apply_pending_restore(db: &Path) -> Result<bool> {
     for suffix in ["-wal", "-shm"] {
         let _ = std::fs::remove_file(sibling(db, suffix));
     }
-    if let Err(e) = with_retries(|| std::fs::rename(&pending, db)) {
+    if let Err(e) = with_retries(|| std::fs::rename(pending, db)) {
         if replaced.is_file() {
             let _ = std::fs::rename(&replaced, db);
         }
@@ -370,7 +387,7 @@ pub fn apply_pending_restore(db: &Path) -> Result<bool> {
     }
     // the pre-restore backup in the backup folder is the way back
     let _ = std::fs::remove_file(&replaced);
-    Ok(true)
+    Ok(())
 }
 
 /// Name of the sync service or network share `path` lies on, by path heuristics:

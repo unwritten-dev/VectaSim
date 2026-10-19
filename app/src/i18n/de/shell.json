@@ -174,7 +174,8 @@
       "duplicate": "schon im Logbuch – wird übersprungen",
       "ok": "ok",
       "approx": "ca. {value}"
-    }
+    },
+    "closeWhileImporting": "Der Import läuft – das Fenster schließt sich, sobald er fertig ist."
   },
   "dispatch": {
     "user": {
@@ -185,6 +186,7 @@
     },
     "load": "Flugplan laden",
     "reload": "Neu laden",
+    "ofp": "SimBrief-Flugplan",
     "remove": "Flugplan entfernen",
     "empty": {
       "title": "Kein Flugplan geladen",
@@ -412,6 +414,7 @@
     },
     "navShortcut": "{label} (Strg+{key})",
     "flightSaved": "Flug gespeichert · {dep} → {arr} · {block}",
+    "flightDiscarded": "Bodensitzung verworfen · ohne Start kein Flug – liegt im Papierkorb",
     "logbookTab": {
       "label": "Logbuch-Bereiche",
       "flights": "Flüge",
@@ -438,6 +441,7 @@
     },
     "flightEvent": {
       "started": "Flug begonnen (Off-Block)",
+      "discarded": "Bodensitzung verworfen (kein Start, im Papierkorb)",
       "interrupted": "Flug unterbrochen gespeichert",
       "saved": "Flug gespeichert (On-Block)",
       "touchdown": "Landung {rate}, {g}",
@@ -490,6 +494,13 @@
       "lostBody": "Dein Flug ist gesichert und läuft weiter, sobald der Simulator zurück ist.",
       "back": "Simulator wieder da",
       "backBody": "Die Aufzeichnung läuft weiter."
+    },
+    "privacy": {
+      "onTitle": "Streamer-Modus an",
+      "onBody": "Kennzeichen, Rufzeichen, Airline, SimBrief-ID und Benutzerpfade sind ausgeblendet.",
+      "offTitle": "Streamer-Modus aus",
+      "offBody": "Alle Angaben werden wieder vollständig angezeigt.",
+      "failed": "Streamer-Modus nicht umgeschaltet"
     }
   },
   "status": {

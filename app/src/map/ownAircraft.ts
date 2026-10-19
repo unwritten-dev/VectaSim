@@ -11,6 +11,7 @@ import { OWN_AIRCRAFT, type ThemeDef } from "../themes";
 import { pointFeature } from "./common";
 import { iconSizeExpr, type WakeCategory, WAKE_SIZE } from "./aircraftIcons";
 import { altToCurtainM } from "./trackChunks";
+import { addLayerOnce, addSourceOnce } from "./styleOnce";
 
 /** Own-aircraft layers, bottom to top; always the topmost layers of the map. */
 export const OWN_LAYERS = ["aircraft-halo", "aircraft"] as const;
@@ -123,7 +124,7 @@ export function haloOpacity(k: number): maplibregl.ExpressionSpecification {
  * keeps them there). Icons must be loaded (aircraftIcons.loadAircraftIcons).
  */
 export function addOwnAircraftLayers(map: maplibregl.Map, sourceId = "aircraft"): void {
-  map.addSource(sourceId, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  addSourceOnce(map, sourceId, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   const common: maplibregl.SymbolLayerSpecification["layout"] = {
     "icon-rotation-alignment": "map",
     "icon-pitch-alignment": "map",
@@ -132,14 +133,14 @@ export function addOwnAircraftLayers(map: maplibregl.Map, sourceId = "aircraft")
     // 3D fallback without the model: the flat symbol at the curtain's height (0 in 2D)
     "symbol-height-offset": ["coalesce", ["get", "hM"], 0],
   };
-  map.addLayer({
+  addLayerOnce(map, {
     id: OWN_LAYERS[0],
     type: "symbol",
     source: sourceId,
     layout: { ...common, "icon-image": "ac-own-halo", "icon-size": iconSizeExpr(OWN_HALO_SIZE) },
     paint: { "icon-opacity": haloOpacity(PULSE_MIN) },
   });
-  map.addLayer({
+  addLayerOnce(map, {
     id: OWN_LAYERS[1],
     type: "symbol",
     source: sourceId,

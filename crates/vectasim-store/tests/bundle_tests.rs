@@ -392,3 +392,40 @@ fn notes_tags_rating_and_corrections_travel_with_the_bundle() {
     assert_eq!(r.flights_user_filled, 0);
     assert_eq!(c.get_flight(&ids[0]).unwrap().unwrap().flight.notes.as_deref(), Some("meine"));
 }
+
+/// Security: a registration from `airframes.jsonl` is never a path – `..\x`, an absolute path or a
+/// lower-case value is skipped with a warning, a normal registration imports its picture.
+#[test]
+fn crafted_registrations_cannot_write_outside_the_picture_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let images = dir.path().join("img");
+    let target = dir.path().join("victim");
+    std::fs::write(target.with_extension("png"), b"keep me").unwrap();
+    let abs = target.display().to_string();
+    let line = |reg: &str| {
+        serde_json::json!({
+            "airframe": { "registration": reg, "image_url": "x", "image_source": "user", "created_ms": 1, "updated_ms": 1 },
+            "imageFile": "images/pic.png",
+        })
+        .to_string()
+    };
+    let lines = [line(r"..\..\victim"), line("../victim"), line(&abs), line("D-EVIL")].join("\n");
+    let manifest = r#"{"format":1,"app":"VectaSim","appVersion":"9","schemaVersion":10,"createdMs":0,"createdUtc":"","flights":0,"flightsDeleted":0,"tracks":0,"airframes":4,"images":1,"trackEncoding":"vstk1"}"#;
+    let p = dir.path().join("evil.vectasim");
+    let mut z = zip::ZipWriter::new(std::fs::File::create(&p).unwrap());
+    for (n, body) in [("manifest.json", manifest.as_bytes()), ("airframes.jsonl", lines.as_bytes()), ("images/pic.png", b"\x89PNG evil".as_slice())] {
+        z.start_file(n, zip::write::SimpleFileOptions::default()).unwrap();
+        std::io::Write::write_all(&mut z, body).unwrap();
+    }
+    z.finish().unwrap();
+
+    let b = Store::open(&dir.path().join("b.db")).unwrap();
+    let r = b.import_bundle(&p, &merge(&images)).unwrap();
+    assert_eq!(r.airframes_added, 1, "only the normal registration: {r:?}");
+    assert_eq!(r.images_added, 1);
+    assert_eq!(r.warnings.iter().filter(|w| w.contains("ungültiger Registrierung")).count(), 3, "{:?}", r.warnings);
+    assert_eq!(std::fs::read(target.with_extension("png")).unwrap(), b"keep me");
+    assert!(images.join("D_EVIL.png").exists());
+    let files: Vec<_> = std::fs::read_dir(&images).unwrap().map(|e| e.unwrap().file_name()).collect();
+    assert_eq!(files.len(), 1, "{files:?}");
+}

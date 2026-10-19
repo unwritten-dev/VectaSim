@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { NNBSP, fmt, fmtClock, fmtDateTime, fmtNum, fmtSigned, fmtWind } from "../i18n/number";
 import { useT, type TFunction } from "../i18n";
 import { usePrivacy } from "../prefs";
-import { userMessage } from "../errors";
+import { rawText, userMessage } from "../errors";
 import TrackMap from "../map/TrackMap";
 import Panel from "../ui/Panel";
 import { KV } from "../ui/Stat";
@@ -33,6 +33,7 @@ import {
   indexFormulaLines,
   indexText,
   isDerivedRunway,
+  isRated,
   keySentence,
   landingIndex,
   lateralMeasurable,
@@ -61,6 +62,8 @@ import type { LandingAnalysis, LandingDebriefData } from "./types";
 import HistoryPanel from "./HistoryPanel";
 import "./landing.css";
 import { gLoadProtocol } from "../gload";
+import { acquireModal } from "../ui/modalStack";
+import { Segmented } from "../ui/Segmented";
 
 /** "0,3 Dots" / "0.3 dots", "1 Dot" / "1 dot". */
 function dotsText(t: TFunction, v: number, digits = 0): string {
@@ -160,7 +163,7 @@ function DebriefModal({ target }: { target: DebriefTarget }) {
   const [approachPick, setApproachPick] = useState<number | null>(target.approachIndex);
   const [data, setData] = useState<LandingDebriefData | null>(null);
   /** `final`: retrying cannot help (the flight has no landing). */
-  const [error, setError] = useState<{ title: string; hint?: string; final?: boolean } | null>(null);
+  const [error, setError] = useState<DebriefError | null>(null);
   const [approaches, setApproaches] = useState<ApproachList>(null);
   /** "Erneut versuchen" after a failed analysis re-runs both loads. */
   const [attempt, setAttempt] = useState(0);
@@ -181,15 +184,7 @@ function DebriefModal({ target }: { target: DebriefTarget }) {
     setError(null);
     invoke<LandingDebriefData>("landing_analysis", { flightId: target.flightId, touchdownIndex: index })
       .then((d) => alive && setData(d))
-      .catch((e) => {
-        if (!alive) return;
-        const raw = String(e);
-        if (/keine Landung|no landing/i.test(raw)) setError({ title: raw, final: true });
-        else {
-          const m = userMessage(e, "logbook");
-          setError({ title: m.title, hint: m.hint });
-        }
-      });
+      .catch((e) => alive && setError(debriefErrorOf(e)));
     return () => {
       alive = false;
     };
@@ -210,11 +205,10 @@ function DebriefModal({ target }: { target: DebriefTarget }) {
   // controls), Tab cycles inside, Esc closes, focus moves in and back to where it came from.
   useEffect(() => {
     const before = document.activeElement as HTMLElement | null;
-    const behind = document.querySelector<HTMLElement>(".shell-body");
-    behind?.setAttribute("inert", "");
-    document.body.classList.add("modal-open");
+    const modal = acquireModal();
     closeRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
+      if (!modal.isTop()) return;
       // bubble phase on window: an open popover inside (source chip) gets Esc first on
       // document and stops it there, so Esc closes the innermost layer only
       if (e.key === "Escape" && !e.defaultPrevented) {
@@ -225,8 +219,7 @@ function DebriefModal({ target }: { target: DebriefTarget }) {
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("keydown", onKey);
-      behind?.removeAttribute("inert");
-      document.body.classList.remove("modal-open");
+      modal.release();
       restoreFocus(before);
     };
   }, []);
@@ -265,13 +258,17 @@ function DebriefModal({ target }: { target: DebriefTarget }) {
         <div className="debrief-bar">
           <span className="debrief-kicker" id={kickerId}>{isGoAround ? t("debrief.bar.kickerApproach") : t("debrief.bar.kickerLanding")}</span>
           {showPicker ? (
-            <span className="segmented approach-picker" role="radiogroup" aria-label={t("debrief.bar.pickApproach")}>
-              {list.map((a) => (
-                <button key={a.index} role="radio" aria-checked={selected?.index === a.index} className={selected?.index === a.index ? "active" : ""} onClick={() => pickApproach(a)}>
-                  {approachLabel(a)}
-                </button>
-              ))}
-            </span>
+            <Segmented
+              inline
+              className="approach-picker"
+              aria-label={t("debrief.bar.pickApproach")}
+              options={list.map((a) => ({ value: a.index, label: approachLabel(a) }))}
+              value={selected?.index ?? -1}
+              onChange={(i) => {
+                const a = list.find((x) => x.index === i);
+                if (a) pickApproach(a);
+              }}
+            />
           ) : (
             count > 1 && (
               <span className="debrief-pager" role="group" aria-label={t("debrief.bar.pickLanding")}>
@@ -304,9 +301,9 @@ function DebriefModal({ target }: { target: DebriefTarget }) {
           <GoAroundBody a={selected} flight={data?.flight ?? null} titleId={titleId} />
         ) : error ? (
           <div className="debrief-state">
-            <strong>{error.title}</strong>
-            {error.hint && <div className="detail">{error.hint}</div>}
-            {!error.final && (
+            <strong>{error.kind === "noLanding" ? t("debrief.state.noLanding") : error.title}</strong>
+            {error.kind === "failed" && error.hint && <div className="detail">{error.hint}</div>}
+            {error.kind === "failed" && (
               <div>
                 <button
                   className="btn-sm"
@@ -330,6 +327,19 @@ function DebriefModal({ target }: { target: DebriefTarget }) {
       </div>
     </div>
   );
+}
+
+/**
+ * Why the analysis could not be shown. "No landing" is a state, not an error (no retry); the
+ * backend says so in German (landing.rs → landing_analysis), so it is recognised here and the
+ * text comes from i18n – the raw sentence is never shown.
+ */
+export type DebriefError = { kind: "noLanding" } | { kind: "failed"; title: string; hint: string };
+
+export function debriefErrorOf(e: unknown): DebriefError {
+  if (/keine Landung|no landing/i.test(rawText(e))) return { kind: "noLanding" };
+  const m = userMessage(e, "logbook");
+  return { kind: "failed", title: m.title, hint: m.hint };
 }
 
 /**
@@ -579,6 +589,8 @@ export function DebriefBody({ d, approach, titleId, onRunwayChanged }: { d: Land
   const f = d.flight;
   const hints = useMemo(() => buildHints(d, apr), [d, apr]);
   const sentence = useMemo(() => keySentence(d), [d]);
+  // slewed / fast-forwarded down: no landing rate (never "0 fpm", no band)
+  const rated = isRated(d.analysis.touchdown);
   const src = useMemo(() => provenance(d), [d]);
   const index = useMemo(() => landingIndex(a, apr), [a, apr]);
   const place = d.airport?.ident ?? rwy?.airport ?? null;
@@ -731,12 +743,18 @@ export function DebriefBody({ d, approach, titleId, onRunwayChanged }: { d: Land
         <Hero
           size="xl"
           label={t("debrief.hero.rate")}
-          value={fmt(td.landingRateFpm, 0)}
-          unit="fpm"
-          band={a.vsBand}
+          value={rated ? fmt(td.landingRateFpm, 0) : t("band.unrated")}
+          unit={rated ? "fpm" : undefined}
+          band={rated ? a.vsBand : null}
           source={src.rate}
-          title={t("debrief.hero.bandsTitle", { bands: VS_BANDS })}
-          sub={td.landingRateSource === "sim" ? t("debrief.hero.rateSubSim", { measured: fmt(td.vsFpmMeasured, 0, "fpm") }) : t("debrief.hero.rateSubMeasured")}
+          title={rated ? t("debrief.hero.bandsTitle", { bands: VS_BANDS }) : t("band.unratedTitle")}
+          sub={
+            !rated
+              ? t("band.unratedTitle")
+              : td.landingRateSource === "sim"
+                ? t("debrief.hero.rateSubSim", { measured: fmt(td.vsFpmMeasured, 0, "fpm") })
+                : t("debrief.hero.rateSubMeasured")
+          }
         />
         <Hero
           label={t("debrief.hero.point")}
@@ -1002,7 +1020,9 @@ export function DebriefBody({ d, approach, titleId, onRunwayChanged }: { d: Land
             ],
             [
               t("debrief.protocol.landingRate"),
-              td.landingRateSource === "sim"
+              !isRated(td)
+                ? `${t("band.unrated")} – ${t("debrief.protocol.rateMeasured", { measured: fmt(td.vsFpmMeasured, 0, "fpm") })}`
+                : td.landingRateSource === "sim"
                 ? t("debrief.protocol.rateSim", { sim: fmt(td.vsFpmSim, 0, "fpm"), measured: fmt(td.vsFpmMeasured, 0, "fpm") })
                 : t("debrief.protocol.rateMeasured", { measured: fmt(td.vsFpmMeasured, 0, "fpm") }),
             ],

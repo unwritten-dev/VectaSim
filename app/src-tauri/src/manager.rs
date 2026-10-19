@@ -46,7 +46,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use vectasim_core::diag::{RawDiag, SharedRawDiag};
-use vectasim_core::flight::TouchdownOutcomeEvent;
+use vectasim_core::flight::{FlightDiscardedEvent, TouchdownOutcomeEvent};
 use vectasim_core::touchdown::TouchdownOutcome;
 use vectasim_core::{
     AircraftInfo, FlightDebug, FlightEvent, FlightPhase, FlightSession, FlightState, FlightSummary, MockProvider, ProviderEvent, SimProvider,
@@ -769,8 +769,10 @@ impl<O: Outbox> Forwarder<O> {
             log::error!("logbook write failed: {e}");
         }
         let outcomes = self.record_outcomes();
-        self.announce(&events, closing);
+        let discarded = self.record_discarded(t.timestamp_ms);
+        self.announce(&events, closing, &discarded);
         self.announce_outcomes(&outcomes);
+        self.announce_discarded(&discarded);
         self.check_resumable(&t);
 
         self.frames_since_stats += 1;
@@ -811,19 +813,23 @@ impl<O: Outbox> Forwarder<O> {
     /// Flight events that came without a sample (sim event, reconnect, provider stop).
     /// A reset or reload can settle a pending touchdown (`Unknown`) without any flight event.
     fn flight_events(&mut self, events: Vec<FlightEvent>) {
+        let ts = self.last_ts.unwrap_or_else(now_ms);
         if events.is_empty() {
             let outcomes = self.record_outcomes();
+            let discarded = self.record_discarded(ts);
             self.announce_outcomes(&outcomes);
+            self.announce_discarded(&discarded);
             return;
         }
-        let ts = self.last_ts.unwrap_or_else(now_ms);
         let closing = self.recorder.current_flight_id().map(str::to_owned);
         if let Err(e) = self.recorder.on_events(self.session.summary(), &events, ts) {
             log::error!("logbook write failed: {e}");
         }
         let outcomes = self.record_outcomes();
-        self.announce(&events, closing);
+        let discarded = self.record_discarded(ts);
+        self.announce(&events, closing, &discarded);
         self.announce_outcomes(&outcomes);
+        self.announce_discarded(&discarded);
         if !self.superseded() {
             lock(&self.status).flight = Some(self.session.summary().clone());
             emit(&self.out, "sim:flight", self.session.summary());
@@ -832,7 +838,8 @@ impl<O: Outbox> Forwarder<O> {
 
     /// Tell the UI and the background jobs about flight events the recorder has handled.
     /// `closing`: the flight the recorder had open before these events.
-    fn announce(&mut self, events: &[FlightEvent], closing: Option<String>) {
+    /// `discarded`: ground sessions that ended in these events (no „Flug gespeichert“ for them).
+    fn announce(&mut self, events: &[FlightEvent], closing: Option<String>, discarded: &[FlightDiscardedEvent]) {
         for fe in events {
             log::info!("flight event: {fe:?}");
             self.capture_metar(fe);
@@ -844,7 +851,10 @@ impl<O: Outbox> Forwarder<O> {
             if let (FlightEvent::FlightEnded { .. }, Some(id)) = (fe, &closing) {
                 self.out.flight_closed(&self.store, id);
             }
-            self.notify_event(fe, closing.as_deref());
+            let was_discarded = matches!(fe, FlightEvent::FlightEnded { timestamp_ms, .. } if discarded.iter().any(|d| d.timestamp_ms == *timestamp_ms));
+            if !was_discarded {
+                self.notify_event(fe, closing.as_deref());
+            }
         }
         // a flight cut off in this session (reload at the same spot) may be continued
         if events.iter().any(|e| matches!(e, FlightEvent::FlightEnded { interrupted: true, .. })) {
@@ -866,6 +876,34 @@ impl<O: Outbox> Forwarder<O> {
             log::error!("logbook touchdown outcome failed: {e}");
         }
         outcomes
+    }
+
+    /// Drain the session's discarded ground sessions into the recorder (state `discarded`, into
+    /// the Papierkorb). Called after the recorder saw the events of the same call.
+    fn record_discarded(&mut self, now: u64) -> Vec<FlightDiscardedEvent> {
+        let discarded = self.session.take_discarded_flights();
+        if !discarded.is_empty()
+            && let Err(e) = self.recorder.on_discarded(&discarded, now)
+        {
+            log::error!("logbook discard failed: {e}");
+        }
+        discarded
+    }
+
+    /// `sim:flight-event` `flightDiscarded` and a notification per discarded ground session.
+    fn announce_discarded(&self, discarded: &[FlightDiscardedEvent]) {
+        if discarded.is_empty() {
+            return;
+        }
+        for d in discarded {
+            log::info!("flight discarded: {d:?}");
+            emit(&self.out, "sim:flight-event", d);
+            if !self.superseded() {
+                let (title, body) = discarded_text(crate::lang::current());
+                self.out.notify(crate::notify::Kind::Saved, title, body);
+            }
+        }
+        emit(&self.out, "logbook:changed", &());
     }
 
     /// Outcomes go out after the sample's flight events, so the UI always has the touchdown
@@ -991,6 +1029,14 @@ pub(crate) fn set_ui_visible(visible: bool, manager: tauri::State<'_, ProviderMa
 #[tauri::command(async)]
 pub(crate) fn get_live_track_since(ts_ms: u64, manager: tauri::State<'_, ProviderManager>) -> Vec<TrackSample> {
     manager.live_track_since(ts_ms)
+}
+
+/// Notification for a discarded ground session (title, body).
+pub(crate) fn discarded_text(l: crate::lang::Lang) -> (&'static str, &'static str) {
+    (
+        l.tr("Bodensitzung verworfen", "Ground session discarded"),
+        l.tr("Ohne Start kein Flug (im Papierkorb).", "No take-off, no flight (in the trash)."),
+    )
 }
 
 #[cfg(test)]
@@ -1119,6 +1165,31 @@ mod tests {
         assert_eq!(lock(&out.closed).as_slice(), [id]);
         let ended = lock(&out.emitted).iter().any(|(e, v)| e == "sim:flight-event" && v["kind"] == "flightEnded" && v["interrupted"] == true);
         assert!(ended, "the UI heard about the interrupted flight");
+    }
+
+    #[test]
+    fn a_ground_session_cut_off_by_a_provider_switch_is_discarded_into_the_trash() {
+        let store = Store::open_in_memory().unwrap();
+        let out = FakeOutbox::default();
+        let m = ProviderManager::new();
+        // the mock taxis first: stop it before the take-off
+        let (p, sent) = fake(MockVariant::Circuit, 60.0);
+        m.start_with(out.clone(), store.clone(), Arc::new(NoAirports), p).unwrap();
+        settle(&m, &sent, 600);
+        let id = m.current_flight_id().expect("the taxi started a recording");
+        let (p, _) = fake(MockVariant::Standard, 0.0);
+        m.start_with(out.clone(), store.clone(), Arc::new(NoAirports), p).unwrap();
+        let trash = store.list_deleted_flights().unwrap();
+        assert_eq!(trash.len(), 1);
+        assert_eq!((trash[0].flight.id.as_str(), trash[0].flight.state.as_str()), (id.as_str(), "discarded"));
+        assert!(store.list_flights(10, 0).unwrap().is_empty());
+        let discarded = lock(&out.emitted).iter().any(|(e, v)| e == "sim:flight-event" && v["kind"] == "flightDiscarded" && v["shutDown"] == false);
+        assert!(discarded, "the UI heard about the discard");
+        let titles: Vec<String> = lock(&out.notified).iter().map(|(_, t)| t.clone()).collect();
+        // a superseded session notifies nothing; never „Flug gespeichert“ for a discard
+        assert!(!titles.iter().any(|t| t == "Flug gespeichert"), "{titles:?}");
+        assert_eq!(discarded_text(crate::lang::Lang::De), ("Bodensitzung verworfen", "Ohne Start kein Flug (im Papierkorb)."));
+        assert_eq!(discarded_text(crate::lang::Lang::En).0, "Ground session discarded");
     }
 
     #[test]

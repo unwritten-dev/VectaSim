@@ -30,6 +30,19 @@ describe("raw value view", () => {
     expect(fmtConverted(v({ valueText: "A320", valueUnit: "Text" }))).toBe("A320");
   });
 
+  it("translates the backend's German unit words (Anzahl/Nadel/Index)", () => {
+    expect(fmtConverted(v({ value: 3, valueUnit: "Anzahl" }))).toMatch(/^3\s?Anzahl$/u);
+    setLanguageSetting("en");
+    try {
+      const sep = fmtConverted(v({ value: 3, valueUnit: "Anzahl" })).charAt(1);
+      expect(fmtConverted(v({ value: 3, valueUnit: "Anzahl" }))).toBe(`3${sep}count`);
+      expect(fmtConverted(v({ value: 1, valueUnit: "Nadel" }))).toBe(`1${sep}needle`);
+      expect(fmtConverted(v({ value: 2, valueUnit: "Index" }))).toBe(`2${sep}index`);
+    } finally {
+      setLanguageSetting("de");
+    }
+  });
+
   it("age and rate", () => {
     expect(fmtAge(null)).toBe("–");
     expect(fmtAge(16)).toBe("16 ms");

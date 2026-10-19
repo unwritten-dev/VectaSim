@@ -308,7 +308,8 @@ const isWeatherLayer = (l: StyleLayer) => l.id === SOURCE.radar || l.id === SOUR
 /**
  * Where a weather layer goes: above every basemap fill and line (vector or imagery), under
  * the basemap's place names and under all our own layers (track, airports, aircraft).
- * The 3D curtain (fill-extrusion, inserted low) does not count. Clouds go under the radar.
+ * Custom WebGL layers (curtain, 3D models) are not in getStyle().layers and do not count, nor
+ * does the curtain's fill-extrusion fallback (inserted low). Clouds go under the radar.
  */
 export function weatherBeforeId(layers: StyleLayer[], kind: WeatherKind): string | undefined {
   if (kind === "clouds" && layers.some((l) => l.id === SOURCE.radar)) return SOURCE.radar;

@@ -6,7 +6,9 @@ import { fmt } from "./i18n/number";
 import { useT } from "./i18n";
 import ErrorNotice from "./ErrorNotice";
 import { usePrefs } from "./prefs";
-import { countedFlights } from "./totals";
+import { demoLeftOut } from "./totals";
+import { visitedAirportCounts } from "./activitiesData";
+import { latestOnly } from "./latest";
 
 interface Visited {
   icao: string;
@@ -24,36 +26,28 @@ export default function Activities() {
   const [error, setError] = useState<string | null>(null);
   const { showDemo } = usePrefs();
   const t = useT();
+  const [latest] = useState(latestOnly);
 
   const refresh = useCallback(async () => {
+    const isLatest = latest();
     let all: FlightRow[];
     try {
       all = await invoke<FlightRow[]>("list_flights", { limit: 100000 });
+      if (!isLatest()) return;
       setError(null);
     } catch (e) {
-      setError(String(e));
+      if (isLatest()) setError(String(e));
       return;
     }
-    const flights = countedFlights(all, showDemo);
-    setDemoHidden(all.length - flights.length);
-    const counts = new Map<string, { departures: number; arrivals: number }>();
-    for (const f of flights) {
-      if (f.depIcao) {
-        const c = counts.get(f.depIcao) ?? { departures: 0, arrivals: 0 };
-        c.departures += 1;
-        counts.set(f.depIcao, c);
-      }
-      if (f.arrIcao) {
-        const c = counts.get(f.arrIcao) ?? { departures: 0, arrivals: 0 };
-        c.arrivals += 1;
-        counts.set(f.arrIcao, c);
-      }
-    }
+    // statistics rule (flightStats.ts): no discarded ground sessions, no taxi-only rows
+    setDemoHidden(demoLeftOut(all, showDemo));
+    const counts = visitedAirportCounts(all, showDemo);
     // local airport DB, queried in parallel; an unknown ICAO just shows without name/country
     const entries = [...counts.entries()];
     const details = await Promise.all(
       entries.map(([icao]) => invoke<{ airport: Airport } | null>("get_airport", { ident: icao }).catch(() => null)),
     );
+    if (!isLatest()) return;
     const countrySet = new Set<string>();
     const rows: Visited[] = entries.map(([icao, c], i) => {
       const a = details[i]?.airport;
@@ -63,7 +57,7 @@ export default function Activities() {
     rows.sort((a, b) => b.departures + b.arrivals - (a.departures + a.arrivals));
     setVisited(rows);
     setCountries([...countrySet].sort());
-  }, [showDemo]);
+  }, [showDemo, latest]);
 
   useEffect(() => {
     refresh();

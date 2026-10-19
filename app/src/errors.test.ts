@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { dllMissingText, isDllMissing, networkContext, triedDllPaths, userMessage } from "./errors";
-import { computeTotals, countedFlights } from "./totals";
+import { computeTotals, countedFlights, demoLeftOut } from "./totals";
 import type { FlightRow } from "./types";
 import { setLanguageSetting } from "./i18n";
 
@@ -96,7 +96,8 @@ describe("totals without demo flights", () => {
       aircraft: { title: "", atcModel: "", atcType: "", atcId: "", atcAirline: "", atcFlightNumber: "" },
       hasOfp: false,
       integrity: {} as FlightRow["integrity"],
-      landingCount: 0,
+      // flown (a touchdown): counts in statistics (flightStats.ts)
+      landingCount: 1,
       ...p,
     }) as FlightRow;
   const flights = [
@@ -112,5 +113,18 @@ describe("totals without demo flights", () => {
     expect(t.distanceNm).toBe(350);
     expect(t.avgLandingVsFpm).toBe(-150);
     expect(computeTotals(countedFlights(flights, true)).flights).toBe(3);
+  });
+  it("leaves discarded ground sessions and taxi-only rows out of the totals", () => {
+    const more = [
+      ...flights,
+      row({ provider: "simconnect", state: "discarded", offBlockMs: 0, onBlockMs: 900_000, landingCount: 0 }),
+      row({ provider: "simconnect", state: "completed", offBlockMs: 0, onBlockMs: 600_000, distanceNm: 2, landingCount: 0 }),
+    ];
+    const t = computeTotals(countedFlights(more, false));
+    expect(t.flights).toBe(2);
+    expect(t.blockTimeMs).toBe(3_600_000);
+    expect(t.distanceNm).toBe(350);
+    expect(demoLeftOut(more, false)).toBe(1);
+    expect(demoLeftOut([row({ provider: "mock", state: "discarded", landingCount: 0 })], false)).toBe(0);
   });
 });

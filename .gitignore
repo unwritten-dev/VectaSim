@@ -20,3 +20,14 @@ Thumbs.db
 .env.*
 *.key
 *.pem
+
+# Local data: logbooks and backups (SQLite), sim recordings, diagnostics packages and
+# exports. Test fixtures are the exception.
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.vsdump
+!crates/*/tests/fixtures/*.vsdump
+*.zip

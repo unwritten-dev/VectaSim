@@ -2,7 +2,13 @@
 # GitHub release with latest.json – the file the in-app updater polls
 # (tauri.conf.json → plugins.updater.endpoints). Publish the draft to ship it.
 #
-# Trigger: push a tag like v0.2.0 (the tag must match app/src-tauri/tauri.conf.json → version).
+# Trigger: a tag like v0.2.0 on the public repository, created by the snapshot script
+# (docs/releasing.md). The `versions` job fails the run when the tag and the version fields
+# in the tree differ.
+#
+# Every third-party action is pinned to a full commit SHA (the comment names the release):
+# the release job holds the updater signing key and a token that can write releases, so a
+# moved tag must not slip into it. The Rust toolchain comes from rust-toolchain.toml.
 name: Release
 
 on:
@@ -10,27 +16,72 @@ on:
     tags:
       - "v*"
 
+# Read-only by default; only the job that creates the release gets write access.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  versions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Tag matches every version field
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          node - <<'JS'
+          const fs = require("fs");
+          const want = process.env.TAG.replace(/^v/, "");
+          const json = (f) => JSON.parse(fs.readFileSync(f, "utf8"));
+          const found = [];
+          const pkg = json("app/package.json");
+          found.push(["app/package.json", pkg.version]);
+          const lock = json("app/package-lock.json");
+          found.push(["app/package-lock.json (version)", lock.version]);
+          found.push(['app/package-lock.json (packages[""])', lock.packages[""].version]);
+          found.push(["app/src-tauri/tauri.conf.json", json("app/src-tauri/tauri.conf.json").version]);
+          const cargo = fs.readFileSync("Cargo.toml", "utf8");
+          const section = (cargo.split(/^\[workspace\.package\]\s*$/m)[1] || "").split(/^\[/m)[0];
+          const ws = /^version\s*=\s*"([^"]+)"/m.exec(section);
+          found.push(["Cargo.toml [workspace.package]", ws && ws[1]]);
+          const cargoLock = fs.readFileSync("Cargo.lock", "utf8");
+          for (const m of cargoLock.matchAll(/^name = "(vectasim[^"]*)"\r?\nversion = "([^"]+)"/gm)) {
+            found.push([`Cargo.lock ${m[1]}`, m[2]]);
+          }
+          if (!found.some(([where]) => where.startsWith("Cargo.lock"))) found.push(["Cargo.lock vectasim*", "missing"]);
+          let bad = 0;
+          for (const [where, v] of found) {
+            if (v === want) console.log(`ok     ${where} = ${v}`);
+            else { console.log(`::error::${where} is ${v}, the tag says ${want}`); bad++; }
+          }
+          if (bad) process.exit(1);
+          JS
+
   release:
+    needs: versions
     runs-on: windows-latest
+    permissions:
+      contents: write # tauri-action creates the draft release and uploads the assets
     defaults:
       run:
         working-directory: app
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: app/package-lock.json
 
-      - uses: dtolnay/rust-toolchain@stable
+      # installs the pinned toolchain named in rust-toolchain.toml
+      - run: rustup toolchain install
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: ". -> target"
 
@@ -45,7 +96,8 @@ jobs:
           projectPath: app
           tagName: ${{ github.ref_name }}
           releaseName: "VectaSim ${{ github.ref_name }}"
-          releaseBody: "Siehe CHANGELOG.md. Der Installer aktualisiert bestehende Installationen; die App findet neue Versionen selbst."
+          # becomes `notes` in latest.json, shown in the app under Settings → Updates
+          releaseBody: "What's new is listed in CHANGELOG.md. The installer updates an existing installation."
           releaseDraft: true
           prerelease: false
           includeUpdaterJson: true

@@ -14,6 +14,7 @@ import { shallowEqual, useFlight, useFlightHead, useTelemetry, useTelemetrySelec
 import Stat, { KV } from "../ui/Stat";
 import { TabPanel, Tabs } from "../ui/Tabs";
 import { Chevron } from "../ui/Panel";
+import Collapsible from "../ui/Collapsible";
 import { ToastViewport } from "../ui/Toast";
 import { useAirport, useMetar, useNearestIcao, useStoredState } from "./hooks";
 import { etaMs, remainingNm } from "./progress";
@@ -29,6 +30,7 @@ import { isDebriefOpen, openDebrief, useDebrief } from "../landing/debriefStore"
 import { G_HARD } from "../landing/facts";
 import { liveMaxG, liveMaxGTitle } from "../gload";
 import { useEventLog } from "./eventLog";
+import { isRated } from "../landing/rated";
 
 interface Props {
   /**
@@ -273,8 +275,13 @@ export default function LiveView({
               <FlightSection aircraft={aircraft} ofp={ofp} routeText={routeText} wxIcao={wxIcao} wx={wx} wxError={wxError} onOpenFlight={onOpenFlight} />
               <SystemsSection ofp={ofp} />
               <div className="side-stack">
-                <div className="side-group">
-                  <div className="side-group-title">{t("live.events.title")}</div>
+                <Collapsible
+                  id="live.events"
+                  className="side-group"
+                  headClassName="side-group-title"
+                  title={t("live.events.title")}
+                  summary={events.length ? `${events.length} · ${events[events.length - 1].text}` : undefined}
+                >
                   {events.length === 0 ? (
                     <div className="detail">{t("live.events.empty")}</div>
                   ) : (
@@ -286,7 +293,7 @@ export default function LiveView({
                       ))}
                     </ul>
                   )}
-                </div>
+                </Collapsible>
               </div>
             </TabPanel>
           )}
@@ -437,6 +444,16 @@ function FlightSection({
     return `${t(label, { value: fmtPvaValue(l.kind, l.plan) })}${d ? ` · ${d}` : ""}`;
   };
   const lastTd = f?.touchdowns.length ? f.touchdowns[f.touchdowns.length - 1] : null;
+  // folded "Zeiten": the latest of off-block, take-off, landing, on-block that happened
+  const lastTime = (
+    [
+      [f?.onBlockMs, "live.flight.onBlock"],
+      [f?.landingMs, "live.flight.landing"],
+      [f?.takeoffMs, "live.flight.takeoff"],
+      [f?.offBlockMs, "live.flight.offBlock"],
+    ] as const
+  ).find(([ms]) => ms != null);
+  const timesSummary = lastTime ? `${t(lastTime[1])} ${fmtClock(lastTime[0])}` : undefined;
   const aircraftLine = aircraft
     ? [aircraft.atcModel, priv.mask(aircraft.atcId, "registration"), priv.mask(`${aircraft.atcAirline} ${aircraft.atcFlightNumber}`.trim(), "callsign")].filter(Boolean).join(" · ")
     : "";
@@ -456,22 +473,30 @@ function FlightSection({
 
   return (
     <div className="side-stack">
-      <div className="flight-head">
-        <div className="flight-route num">{routeText}</div>
-        <div className="flight-aircraft" title={aircraftTitle ?? undefined}>
-          {aircraftTitle ?? t("live.flight.noAircraft")}
+      <Collapsible
+        id="live.overview"
+        className="side-group"
+        headClassName="side-group-title"
+        title={t("live.section.overview")}
+        summary={[routeText, aircraft?.atcModel].filter(Boolean).join(" · ")}
+      >
+        <div className="flight-head">
+          <div className="flight-route num">{routeText}</div>
+          <div className="flight-aircraft" title={aircraftTitle ?? undefined}>
+            {aircraftTitle ?? t("live.flight.noAircraft")}
+          </div>
+          {aircraftLine && <div className="detail">{aircraftLine}</div>}
+          {airframe && f?.state === "active" && (
+            <button className="af-live" onClick={() => navigate({ kind: "airframe", registration: airframe.registration })} title={t("live.flight.openAirframe")}>
+              <AirframeImage airframe={airframe} />
+              <span className="af-live-text">
+                <strong className="num">{priv.mask(airframe.registration, "registration")}</strong>
+                <span className="detail">{airframeName(airframe) !== airframe.registration ? shownAirframeName(airframe, priv.on) : t("live.flight.bookedOn")}</span>
+              </span>
+            </button>
+          )}
         </div>
-        {aircraftLine && <div className="detail">{aircraftLine}</div>}
-        {airframe && f?.state === "active" && (
-          <button className="af-live" onClick={() => navigate({ kind: "airframe", registration: airframe.registration })} title={t("live.flight.openAirframe")}>
-            <AirframeImage airframe={airframe} />
-            <span className="af-live-text">
-              <strong className="num">{priv.mask(airframe.registration, "registration")}</strong>
-              <span className="detail">{airframeName(airframe) !== airframe.registration ? shownAirframeName(airframe, priv.on) : t("live.flight.bookedOn")}</span>
-            </span>
-          </button>
-        )}
-      </div>
+      </Collapsible>
 
       {issues.length > 0 && (
         <div className="alert warn-alert compact" role="status">
@@ -486,8 +511,7 @@ function FlightSection({
         </div>
       )}
 
-      <div className="side-group">
-        <div className="side-group-title">{t("live.flight.times")}</div>
+      <Collapsible id="live.times" className="side-group" headClassName="side-group-title" title={t("live.flight.times")} summary={timesSummary}>
         <div className="stat-grid cols-4">
           <Stat size="sm" label={t("live.flight.offBlock")} value={fmtClock(f?.offBlockMs)} sub={planSub(L.offBlock)} />
           <Stat size="sm" label={t("live.flight.takeoff")} value={fmtClock(f?.takeoffMs)} sub={planSub(L.takeoff)} />
@@ -500,10 +524,15 @@ function FlightSection({
             warn={pva.arrival?.status === "late" ? t("live.flight.onBlockLate", { punctuality: fmtPunctuality(pva.arrival) }) : null}
           />
         </div>
-      </div>
+      </Collapsible>
 
-      <div className="side-group">
-        <div className="side-group-title">{ofp ? t("live.flight.vsPlan") : t("live.flight.flight")}</div>
+      <Collapsible
+        id="live.vsPlan"
+        className="side-group"
+        headClassName="side-group-title"
+        title={ofp ? t("live.flight.vsPlan") : t("live.flight.flight")}
+        summary={`${fmtDuration(blockMs)} · ${fmt(f?.distanceNm, 1, "nm")}`}
+      >
         <div className="stat-grid cols-2">
           <Stat label={t("live.flight.blockTime")} value={fmtDuration(blockMs)} sub={planSub(L.block)} warn={L.block?.warn ?? null} />
           <Stat label={t("live.flight.airTime")} title={t("live.flight.airTimeTitle")} value={fmtDuration(flightMs)} sub={planSub(L.air)} />
@@ -519,10 +548,15 @@ function FlightSection({
           <Stat label={t("live.flight.fuelOnBoard")} value={fmtWeightNum(tel?.fuelTotalKg)} unit={weightUnit} sub={planSub(L.landingFuel, "live.flight.planLanding")} />
           {liveMaxG(f?.gLoad) && <Stat label={t("gload.live.label")} title={liveMaxGTitle()} value={liveMaxG(f?.gLoad)} />}
         </div>
-      </div>
+      </Collapsible>
 
-      <div className="side-group">
-        <div className="side-group-title">{t("live.flight.weather")}</div>
+      <Collapsible
+        id="live.weather"
+        className="side-group"
+        headClassName="side-group-title"
+        title={t("live.flight.weather")}
+        summary={wxIcao ? `${wxIcao}${wx && wx.category !== "UNKNOWN" ? ` · ${wx.category}` : ""}` : undefined}
+      >
         {wxIcao ? (
           <>
             <MetarInline icao={wxIcao} metar={wx} error={wxError} />
@@ -531,26 +565,34 @@ function FlightSection({
         ) : (
           <div className="detail">{t("live.flight.noAirportWeather")}</div>
         )}
-      </div>
+      </Collapsible>
 
-      <div className="side-group" aria-live="polite">
-        <div className="side-group-title">
-          {t("live.flight.lastLanding")}
-          {lastTd && onOpenFlight && (
+      <Collapsible
+        id="live.lastLanding"
+        className="side-group"
+        headClassName="side-group-title"
+        aria-live="polite"
+        title={t("live.flight.lastLanding")}
+        summary={lastTd ? (isRated(lastTd) ? fmt(lastTd.landingRateFpm, 0, "fpm") : t("band.unrated")) : undefined}
+        actions={
+          lastTd && onOpenFlight ? (
             <button className="link-btn" onClick={onOpenFlight}>
               {t("live.flight.inLogbook")}
             </button>
-          )}
-        </div>
+          ) : undefined
+        }
+      >
         {lastTd ? (
           <div className="stat-grid cols-4">
             <Stat
               size="sm"
               label={t("live.flight.landingRate")}
-              value={fmt(lastTd.landingRateFpm, 0)}
+              // unrated (slewed / fast-forwarded down): no value, "nicht bewertbar" below
+              value={isRated(lastTd) ? fmt(lastTd.landingRateFpm, 0) : "–"}
               unit="fpm"
-              sub={lastTd.landingRateSource === "sim" ? t("live.flight.simValue") : t("live.flight.measured")}
-              warn={lastTd.landingRateFpm <= -600 ? t("live.flight.hardLanding", { rate: 600 }) : null}
+              sub={!isRated(lastTd) ? t("band.unrated") : lastTd.landingRateSource === "sim" ? t("live.flight.simValue") : t("live.flight.measured")}
+              title={isRated(lastTd) ? undefined : t("band.unratedTitle")}
+              warn={isRated(lastTd) && lastTd.landingRateFpm <= -600 ? t("live.flight.hardLanding", { rate: 600 }) : null}
             />
             <Stat size="sm" label={t("live.flight.measuredValue")} value={fmt(lastTd.vsFpmMeasured, 0)} unit="fpm" sub={t("live.flight.lastSample")} />
             <Stat
@@ -565,7 +607,7 @@ function FlightSection({
         ) : (
           <div className="detail">{t("live.flight.noLandingYet")}</div>
         )}
-      </div>
+      </Collapsible>
     </div>
   );
 }
@@ -585,8 +627,7 @@ function SystemsSection({ ofp }: { ofp: Ofp | null }) {
   const withMax = (value: number | null | undefined, max: number | null | undefined) => t("live.systems.withMax", { value: fmtWeight(value), max: fmtWeight(max) });
   return (
     <div className="side-stack">
-      <div className="side-group">
-        <div className="side-group-title">{t("live.systems.config")}</div>
+      <Collapsible id="live.systems.config" className="side-group" headClassName="side-group-title" title={t("live.systems.config")} summary={gear}>
         <KV
           rows={[
             [t("live.systems.gear"), gear],
@@ -598,9 +639,8 @@ function SystemsSection({ ofp }: { ofp: Ofp | null }) {
             [t("live.systems.transponder"), String(tel.transponderCode).padStart(4, "0")],
           ]}
         />
-      </div>
-      <div className="side-group">
-        <div className="side-group-title">{t("live.systems.enginesFuel")}</div>
+      </Collapsible>
+      <Collapsible id="live.systems.enginesFuel" className="side-group" headClassName="side-group-title" title={t("live.systems.enginesFuel")} summary={fmtWeight(tel.fuelTotalKg)}>
         <KV
           rows={[
             [t("live.systems.engines"), t("live.systems.enginesRunning", { running: tel.enginesRunning, total: tel.numEngines })],
@@ -609,9 +649,8 @@ function SystemsSection({ ofp }: { ofp: Ofp | null }) {
             ...(ofp ? ([[t("live.systems.planRampLanding"), `${fmtWeight(ofp.fuel.planRampKg)} / ${fmtWeight(ofp.fuel.planLandingKg)}`]] as Array<[string, string]>) : []),
           ]}
         />
-      </div>
-      <div className="side-group">
-        <div className="side-group-title">{t("live.systems.weights")}</div>
+      </Collapsible>
+      <Collapsible id="live.systems.weights" className="side-group" headClassName="side-group-title" title={t("live.systems.weights")} summary={fmtWeight(tel.totalWeightKg)}>
         <KV
           rows={[
             [t("live.systems.grossWeight"), fmtWeight(tel.totalWeightKg)],
@@ -624,9 +663,8 @@ function SystemsSection({ ofp }: { ofp: Ofp | null }) {
               : []),
           ]}
         />
-      </div>
-      <div className="side-group">
-        <div className="side-group-title">{t("live.systems.lights")}</div>
+      </Collapsible>
+      <Collapsible id="live.systems.lights" className="side-group" headClassName="side-group-title" title={t("live.systems.lights")} summary={t("live.section.lightsOn", { on: LIGHT_LABEL.filter(([k]) => tel.lights[k]).length, total: LIGHT_LABEL.length })}>
         <ul className="light-list">
           {LIGHT_LABEL.map(([k, label]) => (
             <li key={k} className={tel.lights[k] ? "on" : "off"}>
@@ -636,9 +674,8 @@ function SystemsSection({ ofp }: { ofp: Ofp | null }) {
             </li>
           ))}
         </ul>
-      </div>
-      <div className="side-group">
-        <div className="side-group-title">{t("live.systems.simulation")}</div>
+      </Collapsible>
+      <Collapsible id="live.systems.simulation" className="side-group" headClassName="side-group-title" title={t("live.systems.simulation")} summary={`${fmt(tel.simRate, 1, "×")}${tel.paused ? ` · ${t("live.systems.paused")}` : ""}`}>
         <KV
           rows={[
             [t("live.systems.simRate"), `${fmt(tel.simRate, 1, "×")}${tel.paused ? ` · ${t("live.systems.paused")}` : ""}`, tel.simRate > 1.01 ? t("live.systems.timeAccel") : null],
@@ -649,7 +686,7 @@ function SystemsSection({ ofp }: { ofp: Ofp | null }) {
             [t("live.systems.position"), fmtCoord(tel.latitude, tel.longitude, 4)],
           ]}
         />
-      </div>
+      </Collapsible>
     </div>
   );
 }

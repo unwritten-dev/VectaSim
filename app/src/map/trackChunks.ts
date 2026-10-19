@@ -8,6 +8,7 @@
 // becomes a handful of features instead of 600 (cruise: one).
 
 import type { TrackPoint } from "./common";
+import { unwrapLon } from "./geo";
 
 /** 600 points = 10 min at 1 Hz. */
 export const CHUNK_POINTS = 600;
@@ -23,10 +24,25 @@ function band(altFt: number, bandFt: number): number {
 }
 
 /**
+ * Where the segment a → b crosses the antimeridian: null when it does not (|Δlon| ≤ 180), else
+ * the latitude at the crossing and the side `a` is on (+180 or -180).
+ */
+export function antimeridianCrossing(a: { lon: number; lat: number }, b: { lon: number; lat: number }): { lat: number; side: 180 | -180 } | null {
+  if (!(Math.abs(b.lon - a.lon) > 180)) return null;
+  const side = a.lon > 0 ? 180 : -180;
+  // b on the same side's continuation (e.g. -179.9 → 180.1 when a is on +180)
+  const bx = b.lon + (side === 180 ? 360 : -360);
+  const t = bx === a.lon ? 0 : (side - a.lon) / (bx - a.lon);
+  return { lat: a.lat + (b.lat - a.lat) * Math.min(1, Math.max(0, t)), side };
+}
+
+/**
  * Altitude-banded runs of `points[from..to]` (inclusive). Each segment's altitude is the mean
  * of its ends, as before; consecutive segments in the same band share one LineString whose
- * `alt` is the band centre. Feature ids are `idBase + run index` (unique per chunk when
- * `idBase` is chunk × CHUNK_POINTS — a block never has more runs than points).
+ * `alt` is the band centre. A segment across the antimeridian (Pacific flights) splits its run at
+ * ±180 – one LineString ends on one side, the next starts on the other – instead of drawing a
+ * line around the whole world. Feature ids are `idBase + run index` (unique per chunk when
+ * `idBase` is chunk × 2 × CHUNK_POINTS — a block never has more runs than points plus crossings).
  */
 export function bandedRuns(points: TrackPoint[], from = 0, to = points.length - 1, idBase?: number, bandFt = ALT_BAND_FT): GeoJSON.Feature[] {
   const out: GeoJSON.Feature[] = [];
@@ -47,17 +63,19 @@ export function bandedRuns(points: TrackPoint[], from = 0, to = points.length - 
     const a = points[i - 1];
     const b = points[i];
     const bd = band((a.altFt + b.altFt) / 2, bandFt);
-    if (coords && bd === curBand) {
-      coords.push([b.lon, b.lat]);
-    } else {
+    if (!coords || bd !== curBand) {
       flush();
       curBand = bd;
       // a new run starts at the previous run's last point: no gap in the line
-      coords = [
-        [a.lon, a.lat],
-        [b.lon, b.lat],
-      ];
+      coords = [[a.lon, a.lat]];
     }
+    const x = antimeridianCrossing(a, b);
+    if (x) {
+      coords.push([x.side, x.lat]);
+      flush();
+      coords = [[-x.side, x.lat]];
+    }
+    coords.push([b.lon, b.lat]);
   }
   flush();
   return out;
@@ -132,7 +150,8 @@ export function curtainRuns(points: TrackPoint[]): GeoJSON.Feature[] {
   const out: GeoJSON.Feature[] = [];
   for (let i = 1; i < points.length; i++) {
     const a = points[i - 1];
-    const b = points[i];
+    // across the antimeridian: b on a's side (lon beyond ±180), a 6 m wide rectangle, not one around the world
+    const b = { ...points[i], lon: unwrapLon(points[i].lon, a.lon) };
     const altA = Number.isFinite(a.altFt) ? a.altFt : 0;
     const altB = Number.isFinite(b.altFt) ? b.altFt : 0;
     // colour by altitude MSL (as the 2D line), height above the map's ground (withGroundHeights)
@@ -250,7 +269,8 @@ export class ChunkedTrack {
   }
 
   chunkFeatures(k: number): GeoJSON.Feature[] {
-    return bandedRuns(this.points, k * this.chunk, (k + 1) * this.chunk, k * this.chunk);
+    // ids leave room for the extra runs of antimeridian splits (bandedRuns)
+    return bandedRuns(this.points, k * this.chunk, (k + 1) * this.chunk, 2 * k * this.chunk);
   }
 
   /** All closed chunks (seed / theme change / remount). */

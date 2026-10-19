@@ -130,3 +130,28 @@ fn interrupted_flight_keeps_the_held_back_seconds() {
     assert_eq!(sim.session.summary().state, FlightState::Interrupted);
     assert!((g.max.unwrap().g - 1.45).abs() < 1e-9, "{g:?}");
 }
+
+#[test]
+fn stray_on_ground_flag_at_altitude_keeps_the_g_peak() {
+    // audit 0.5.0 N3: the tracker took the raw flag, so a spurious "on ground" in the cruise
+    // dropped the 3 s before it as a touchdown window
+    let mut sim = Sim::new();
+    sim.run(5.0, 0.0, gs(12.0, 0.0));
+    sim.run(5.0, 0.0, gs(90.0, 0.0));
+    sim.run(40.0, 6_000.0, gs(200.0, 9_000.0));
+    sim.run(30.0, 6_000.0, gs(250.0, 0.0));
+    sim.run(3.0, 6_000.0, |t, s| {
+        gs(250.0, 0.0)(t, s);
+        if s < 1.5 {
+            t.g_force = 1.8;
+        }
+    });
+    // MSFS can claim "on ground" for a frame at altitude; AGL does not back it
+    sim.run(0.1, 6_000.0, |t, s| {
+        gs(250.0, 0.0)(t, s);
+        t.on_ground = true;
+    });
+    sim.run(20.0, 6_000.0, gs(250.0, 0.0));
+    let max = sim.session.summary().g_load.max.expect("max");
+    assert!((max.g - 1.8).abs() < 1e-9, "{max:?}");
+}

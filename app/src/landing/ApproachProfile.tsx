@@ -7,6 +7,7 @@ import { M_PER_NM, drawWidthM } from "./geometry";
 import { niceStep, ticks, useWidth } from "./chartUtils";
 import { sampleAt, timeAtValue, useReplayCursor, useReplayStore } from "./replayStore";
 import type { ApproachAnalysis, ApproachProfilePoint, MarkerKind } from "./approachTypes";
+import { Segmented } from "../ui/Segmented";
 
 /**
  * Long approach profile from approach_analysis: height above touchdown (HAT) over the flown
@@ -125,20 +126,12 @@ export default function ApproachProfile({ a }: { a: ApproachAnalysis }) {
 
   const switcher = (
     <div className="ac-toolbar">
-      <div className="segmented" role="radiogroup" aria-label={t("approach.profile.rangeAria")}>
-        {RANGES.map((r) => (
-          <button
-            key={r}
-            role="radio"
-            aria-checked={range === r}
-            className={range === r ? "active" : ""}
-            onClick={() => setRange(r)}
-            title={r === "tod" && !a.markers.some((m) => m.kind === "tod") ? t("approach.profile.noTod") : undefined}
-          >
-            {RANGE_LABEL[r]}
-          </button>
-        ))}
-      </div>
+      <Segmented
+        aria-label={t("approach.profile.rangeAria")}
+        options={RANGES.map((r) => ({ value: r, label: RANGE_LABEL[r], title: r === "tod" && !a.markers.some((m) => m.kind === "tod") ? t("approach.profile.noTod") : undefined }))}
+        value={range}
+        onChange={setRange}
+      />
     </div>
   );
 

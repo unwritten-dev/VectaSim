@@ -7,6 +7,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { planespottersLink } from "./photoLink";
 import type { Pilot } from "../types";
 import { DASH, fmt, fmtAltitude, fmtDuration } from "../i18n/number";
 import { useT, type TKey } from "../i18n";
@@ -14,6 +15,7 @@ import { usePrivacy } from "../prefs";
 import { useAirport } from "../live/hooks";
 import { AirframeSilhouette } from "../airframes/AirframeImage";
 import { isDebriefOpen } from "../landing/debriefStore";
+import Collapsible from "../ui/Collapsible";
 import { NETWORK_LABEL } from "./online";
 import {
   GONE_CLOSE_MS,
@@ -57,7 +59,8 @@ function Photo({ pilot }: { pilot: Pilot }) {
   const url = "url" in photo ? (photo.url ?? photo.thumbUrl) : null;
   useEffect(() => setBroken(false), [url]);
   const show = photo.status === "found" && !!url && !broken;
-  const link = "link" in photo ? photo.link : null;
+  // only Planespotters pages are opened (security audit N4: the link comes from the API or an import)
+  const link = planespottersLink("link" in photo ? photo.link : null);
   const credit =
     "photographer" in photo && photo.photographer
       ? t("map.trafficCard.photo.credit", { photographer: photo.photographer })
@@ -214,7 +217,9 @@ export default function TrafficCard({ sel, own, following, routeShown, onFollow,
         </button>
       </div>
 
-      <Photo pilot={p} />
+      <Collapsible id="traffic.photo" className="traffic-more" headClassName="traffic-more-head" title={t("map.trafficCard.photoTitle")} summary={trafficRegistration(p) ?? undefined}>
+        <Photo pilot={p} />
+      </Collapsible>
 
       {hasPlan ? (
         <div className="traffic-route">
@@ -295,16 +300,14 @@ export default function TrafficCard({ sel, own, following, routeShown, onFollow,
       </dl>
 
       {p.route?.trim() && (
-        <details className="traffic-more">
-          <summary>{t("map.trafficCard.route")}</summary>
+        <Collapsible id="traffic.route" defaultOpen={false} className="traffic-more" headClassName="traffic-more-head" title={t("map.trafficCard.route")}>
           <p className="num">{p.route}</p>
-        </details>
+        </Collapsible>
       )}
       {p.remarks?.trim() && (
-        <details className="traffic-more">
-          <summary>{t("map.trafficCard.remarks")}</summary>
+        <Collapsible id="traffic.remarks" defaultOpen={false} className="traffic-more" headClassName="traffic-more-head" title={t("map.trafficCard.remarks")}>
           <p className="num">{p.remarks}</p>
-        </details>
+        </Collapsible>
       )}
 
     </section>

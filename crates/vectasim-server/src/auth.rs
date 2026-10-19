@@ -78,7 +78,7 @@ pub fn is_loopback_host(host: &str) -> bool {
     n == "localhost" || n == "127.0.0.1" || n == "[::1]"
 }
 
-fn is_loopback_peer(ip: IpAddr) -> bool {
+pub(crate) fn is_loopback_peer(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => v4.is_loopback(),
         IpAddr::V6(v6) => v6.is_loopback() || v6.to_ipv4_mapped().is_some_and(|v4| v4.is_loopback()),

@@ -11,6 +11,8 @@
     "normal": "normal",
     "firm": "firm",
     "hard": "hard",
+    "unrated": "unrated",
+    "unratedTitle": "No landing rate measurable: no airborne sample before the contact (slewed or time-accelerated onto the ground). Does not count in statistics.",
     "vsScale": "smooth < {smooth} · normal < {normal} · firm < {firm} · hard ≥ {firm} fpm"
   },
   "time": {

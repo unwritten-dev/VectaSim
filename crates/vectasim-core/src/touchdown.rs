@@ -57,9 +57,15 @@
 //! made while fast-forwarding is therefore not evaluated by either; back at 1× on the
 //! ground, both see the landing at the first real-time sample (the phase engine fires
 //! Landing, the detector opens the report). Slewing and fast-forwarding drop the V/S ring
-//! buffer, so the rate is the sim's touchdown value or, without one, the V/S of that
-//! sample – never a V/S from before the skipped stretch. The flight carries
-//! `time_acceleration_detected` either way.
+//! buffer, so the rate is the sim's touchdown value or, without one, not measurable: the
+//! report gets [`LandingRateSource::Unrated`] (its `landing_rate_fpm` is the V/S of that
+//! ground sample, ≈ 0, and means nothing) – never a V/S from before the skipped stretch, and
+//! never a "perfect" 0 fpm that counts. An unrated touchdown is recorded like any other, but
+//! it is not the flight's landing rate ([`crate::flight`]) and belongs in no statistic. The
+//! flight carries `slew_detected` / `time_acceleration_detected` either way.
+//!
+//! First-contact `peak_g` is sanitised like every later sample: outside 0–5 g (or not a
+//! number) it counts as 1 g, so a sim glitch in the contact frame is no "5 g" landing.
 
 use crate::Telemetry;
 use crate::clock::MonoClock;
@@ -102,6 +108,10 @@ pub enum LandingRateSource {
     /// Last airborne V/S sample before contact (sim reported none).
     #[default]
     Measured,
+    /// Not measurable: no airborne sample before the contact (slewed or fast-forwarded down
+    /// to the ground) and no sim value. `landing_rate_fpm` is no landing rate then; it must
+    /// not count as the flight's rate, in rankings or in statistics.
+    Unrated,
 }
 
 impl LandingRateSource {
@@ -109,11 +119,21 @@ impl LandingRateSource {
         match self {
             LandingRateSource::Sim => "sim",
             LandingRateSource::Measured => "measured",
+            LandingRateSource::Unrated => "unrated",
         }
     }
 
     pub fn parse(s: &str) -> Self {
-        if s == "sim" { LandingRateSource::Sim } else { LandingRateSource::Measured }
+        match s {
+            "sim" => LandingRateSource::Sim,
+            "unrated" => LandingRateSource::Unrated,
+            _ => LandingRateSource::Measured,
+        }
+    }
+
+    /// The touchdown has a landing rate that may be shown and counted.
+    pub fn is_rated(self) -> bool {
+        self != LandingRateSource::Unrated
     }
 }
 
@@ -298,6 +318,9 @@ pub struct TouchdownDetector {
     outcome: Option<(TouchdownOutcome, u64)>,
     /// Wall-clock time of the latest sample (time of an outcome decided by a reset).
     last_wall_ms: u64,
+    /// [`TouchdownDetector::restore_qualified`] was called: the next evaluated sample
+    /// continues a qualified flight.
+    restore_qualified: bool,
 }
 
 impl Default for TouchdownDetector {
@@ -366,7 +389,17 @@ impl TouchdownDetector {
             clock: MonoClock::new(),
             outcome: None,
             last_wall_ms: 0,
+            restore_qualified: false,
         }
+    }
+
+    /// The session found the position continuous across a context reset in the air (see
+    /// [`crate::flight`]): the next evaluated sample continues a qualified flight, so a ground
+    /// contact right after the reset is a landing again. The V/S history stays empty – the
+    /// rate comes from the samples after the reset, the sim's value, or is unrated.
+    pub fn restore_qualified(&mut self) {
+        self.qualify_ms = QUALIFY_AIRBORNE_MS;
+        self.restore_qualified = true;
     }
 
     /// Drop the V/S history and the airborne latch (data stream discontinuity). Returns
@@ -376,6 +409,7 @@ impl TouchdownDetector {
     /// [`TouchdownOutcome::Unknown`] (see [`TouchdownDetector::take_outcome`]).
     pub fn reset(&mut self, resume_airborne: bool) -> Option<TouchdownReport> {
         self.ring.clear();
+        self.restore_qualified = false;
         self.qualify_ms = if resume_airborne { MS_REQUALIFY_AFTER_RESET } else { QUALIFY_AIRBORNE_MS };
         match std::mem::replace(&mut self.state, State::Ground) {
             State::Settling(ev) if ev.confirmed => {
@@ -444,6 +478,9 @@ impl TouchdownDetector {
         let g = if (0.0..=G_MAX_PLAUSIBLE).contains(&t.g_force) { t.g_force } else { 1.0 };
         let on_ground = ground_contact_corroborated(t);
         self.push(Sample { ts: now, vs: t.vertical_speed_fpm, on_ground });
+        if std::mem::take(&mut self.restore_qualified) && matches!(self.state, State::Ground) {
+            self.state = State::Airborne { since: now, qualified: true };
+        }
 
         let out = match std::mem::replace(&mut self.state, State::Ground) {
             State::Ground => {
@@ -456,7 +493,7 @@ impl TouchdownDetector {
                 if on_ground {
                     if qualified {
                         self.qualify_ms = QUALIFY_AIRBORNE_MS;
-                        let mut ev = self.first_contact(t, now);
+                        let mut ev = self.first_contact(t, now, g);
                         ev.note_sim(t.touchdown_vs_fpm);
                         self.state = State::Settling(Box::new(ev));
                     } else {
@@ -581,9 +618,15 @@ impl TouchdownDetector {
         self.ring.iter().rev().find(|s| !s.on_ground).map(|s| s.vs)
     }
 
-    fn first_contact(&self, t: &Telemetry, now: u64) -> Event {
-        let vs_measured = self.last_airborne_vs().unwrap_or(t.vertical_speed_fpm);
-        let (rate, source) = compute_landing_rate(0.0, vs_measured);
+    fn first_contact(&self, t: &Telemetry, now: u64, g: f64) -> Event {
+        let last_air_vs = self.last_airborne_vs();
+        let vs_measured = last_air_vs.unwrap_or(t.vertical_speed_fpm);
+        // nothing airborne to measure (slewed / fast-forwarded down): unrated until the sim
+        // reports a value or a bounce brings a measured one
+        let (rate, source) = match last_air_vs {
+            Some(vs) => compute_landing_rate(0.0, vs),
+            None => (t.vertical_speed_fpm.round(), LandingRateSource::Unrated),
+        };
         Event {
             report: TouchdownReport {
                 timestamp_ms: t.timestamp_ms,
@@ -591,7 +634,7 @@ impl TouchdownDetector {
                 // filled by `note_sim` once the sim reports this touchdown
                 vs_fpm_sim: 0.0,
                 vs_fpm_hardest: vs_measured,
-                peak_g: t.g_force.clamp(0.0, G_MAX_PLAUSIBLE),
+                peak_g: g,
                 pitch_deg: t.pitch_deg,
                 bank_deg: t.bank_deg,
                 ground_speed_kt: t.ground_speed_kt,
@@ -638,6 +681,8 @@ impl Event {
     fn consider(&mut self, (rate, source): (f64, LandingRateSource)) {
         let r = &mut self.report;
         let replace = match (r.landing_rate_source, source) {
+            (LandingRateSource::Unrated, _) => true,
+            (_, LandingRateSource::Unrated) => false,
             (LandingRateSource::Measured, LandingRateSource::Sim) => true,
             (LandingRateSource::Sim, LandingRateSource::Measured) => false,
             _ => rate.abs() > r.landing_rate_fpm.abs(),
@@ -878,6 +923,74 @@ mod tests {
         f.run(8.0, ground(20.0, 121.0));
         assert_eq!(f.out.len(), 2);
         assert_eq!(f.outcomes, vec![TouchdownOutcome::TouchAndGo, TouchdownOutcome::FullStop]);
+    }
+
+    #[test]
+    fn glitch_g_in_the_contact_frame_is_no_peak() {
+        // audit 0.5.0 N4: 7 g in the contact frame was clamped to a "5 g" landing
+        let mut f = Feed::new(50);
+        f.run(70.0, air(1500.0, -700.0, 0.0));
+        f.run(2.0, air(10.0, -150.0, 0.0));
+        f.run(0.05, |t| {
+            ground(120.0, 150.0)(t);
+            t.g_force = 7.0;
+        });
+        f.run(8.0, |t| {
+            ground(100.0, 150.0)(t);
+            t.g_force = 1.25;
+        });
+        assert_eq!(f.out.len(), 1);
+        assert_eq!(f.out[0].peak_g, 1.25);
+    }
+
+    #[test]
+    fn contact_without_airborne_samples_is_unrated_unless_the_sim_has_a_value() {
+        // audit 0.5.0 M2: slewed down to the ground, the V/S of the ground sample (0) was the rate
+        let slewed_down = |f: &mut Feed, sim: f64| {
+            f.run(70.0, air(1500.0, -700.0, 0.0));
+            f.run(10.0, |t| {
+                air(800.0, -2000.0, 0.0)(t);
+                t.slew = true;
+            });
+            f.run(1.0, |t| {
+                ground(0.0, sim)(t);
+                t.slew = true;
+            });
+            f.run(8.0, ground(0.0, sim));
+        };
+        let mut f = Feed::new(250);
+        slewed_down(&mut f, 0.0);
+        assert_eq!(f.out.len(), 1);
+        assert_eq!(f.out[0].landing_rate_source, LandingRateSource::Unrated, "{:?}", f.out[0]);
+        assert!(!f.out[0].landing_rate_source.is_rated());
+        assert_eq!(LandingRateSource::parse(LandingRateSource::Unrated.as_str()), LandingRateSource::Unrated);
+        // a fresh sim touchdown value is a real rate
+        let mut f = Feed::new(250);
+        slewed_down(&mut f, 220.0);
+        assert_eq!((f.out[0].landing_rate_fpm, f.out[0].landing_rate_source), (-220.0, LandingRateSource::Sim));
+    }
+
+    #[test]
+    fn restored_qualification_makes_the_next_contact_a_landing() {
+        // audit 0.5.0 M1: after a reset in the air with a continuous position the session
+        // requalifies the detector at once
+        let mut f = Feed::new(250);
+        f.run(70.0, air(1500.0, -700.0, 0.0));
+        f.run(2.0, air(80.0, -600.0, 0.0));
+        f.det.reset(true);
+        f.det.restore_qualified();
+        f.run(3.0, air(40.0, -600.0, 0.0));
+        f.run(8.0, ground(20.0, 0.0));
+        assert_eq!(f.out.len(), 1, "landing 3 s after the reset");
+        assert_eq!((f.out[0].landing_rate_fpm, f.out[0].landing_rate_source), (-600.0, LandingRateSource::Measured));
+        // without the restore the same contact is a hop (needs 10 s of air time first)
+        let mut f = Feed::new(250);
+        f.run(70.0, air(1500.0, -700.0, 0.0));
+        f.run(2.0, air(80.0, -600.0, 0.0));
+        f.det.reset(true);
+        f.run(3.0, air(40.0, -600.0, 0.0));
+        f.run(8.0, ground(20.0, 0.0));
+        assert!(f.out.is_empty());
     }
 
     #[test]

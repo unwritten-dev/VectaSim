@@ -5,7 +5,10 @@
       "completed": "completed",
       "active": "recording",
       "interrupted": "incomplete",
-      "interruptedShort": "interrupted"
+      "interruptedShort": "interrupted",
+      "discarded": "discarded (ground session)",
+      "discardedShort": "discarded",
+      "discardedTitle": "Ground session: never took off – does not count as a flight or in statistics"
     },
     "filter": {
       "all": "All",
@@ -134,6 +137,7 @@
       "cancel": "Cancel",
       "deletePermanentTitle": "Delete permanently (Del)",
       "deleteTitle": "Move to the trash (Del)",
+      "deleteRecording": "This flight is being recorded",
       "delete": "Delete",
       "noTrackImported": "Not recorded – from an import file.",
       "noTrack": "No track was recorded for this flight.",

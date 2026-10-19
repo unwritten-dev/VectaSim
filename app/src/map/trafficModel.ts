@@ -10,9 +10,11 @@
 // smaller, the own model stays on top (aircraftModel.ts resets the depth under its footprint).
 //
 // Labels and the click target stay MapLibre symbols (online.ts `traffic-3d-sym`) at the model's
-// height via `symbol-height-offset`, fed at 1 Hz with the dead-reckoned positions; the 2D symbols
-// of the aircraft drawn in 3D are filtered out meanwhile. Repaints are throttled to 5 Hz while
-// anything moves; nothing is redrawn while the traffic stands still and the camera does not move.
+// height via `symbol-height-offset`, fed at 1 Hz with the dead-reckoned positions (the selected
+// aircraft's at 10 Hz from its own source); the 2D symbols of the aircraft drawn in 3D are filtered
+// out meanwhile. Repaints are throttled to 5 Hz while anything moves – every frame while the
+// selected aircraft moves (Traffic3D.selectedLoop); nothing is redrawn while the traffic stands
+// still and the camera does not move.
 
 import * as maplibregl from "maplibre-gl";
 import type { Airport, Pilot } from "../types";
@@ -27,14 +29,19 @@ import {
   buildInstances,
   fieldsOf,
   fixOf,
+  historyPoints,
   pickTraffic,
   tileUnits,
+  trafficRefTile,
   traffic3dActive,
   type FieldRef,
   type InstanceInput,
+  type TrafficHistoryFix,
+  type TrafficPose,
   type ViewBox,
 } from "./traffic3d";
-import { pointFeature } from "./common";
+import { addCurtainLayers, drawCurtainTrack, pointFeature, setCurtainVisible, type TrackPoint } from "./common";
+import { replaceCustomLayer } from "./styleOnce";
 
 /** Traffic models relative to the own model's size (the 2D traffic symbol peaks at ~0.62 × own). */
 export const TRAFFIC_MODEL_SCALE = 0.62;
@@ -57,6 +64,11 @@ const LABEL_EVERY = 5;
 export const TRAFFIC_MODEL_LAYER = "traffic-models";
 export const TRAFFIC_3D_SOURCE = "traffic-3d";
 export const TRAFFIC_3D_SYMBOLS = "traffic-3d-sym";
+/** One-feature source of the selected aircraft's label (online.ts `traffic-3d-sel-sym`), fed at 10 Hz. */
+export const TRAFFIC_3D_SEL_SOURCE = "traffic-3d-sel";
+const SEL_LABEL_MS = 100;
+/** Curtain layer id of the selected aircraft's flown track. */
+export const TRAFFIC_CURTAIN = "traffic-curtain";
 /** 2D layers that hide the aircraft drawn as models. */
 const FLAT_LAYERS = ["vatsim-pilots", "vatsim-pilots-label"];
 
@@ -364,17 +376,21 @@ export class TrafficModelLayer implements maplibregl.CustomLayerInterface {
       return;
     }
 
-    // one reference tile around the map centre; every instance in the world copy nearest to it
+    // one reference tile around the map centre; every instance in the world copy nearest to it.
+    // On the globe a vertex beyond ±32767 tile units is pulled to a pole: a coarser tile when
+    // the picked aircraft reach that far (tilted view, zoom ≥ 8: spikes towards the pole otherwise)
     const zoom = map.getZoom();
-    const tz = Math.max(0, Math.min(18, Math.floor(zoom)));
-    const n = 2 ** tz;
     const c = map.getCenter();
     const cm = maplibregl.MercatorCoordinate.fromLngLat(c);
-    const tx = Math.min(n - 1, Math.max(0, Math.floor(cm.x * n)));
-    const ty = Math.min(n - 1, Math.max(0, Math.floor(cm.y * n)));
-    const inputs: InstanceInput[] = frame.items.map((it) => {
-      const mx = (it.lon + 180) / 360;
-      const [x, y] = tileUnits(it.lon, it.lat, tx, ty, tz, Math.round(cm.x - mx));
+    const wraps = frame.items.map((it) => Math.round(cm.x - (it.lon + 180) / 360));
+    const merc = frame.items.map((it, i) => {
+      const m = maplibregl.MercatorCoordinate.fromLngLat([it.lon, Math.max(-85.0511, Math.min(85.0511, it.lat))]);
+      return [m.x + wraps[i], m.y] as const;
+    });
+    const { tx, ty, tz } = trafficRefTile(cm.x, cm.y, zoom, merc);
+    const n = 2 ** tz;
+    const inputs: InstanceInput[] = frame.items.map((it, i) => {
+      const [x, y] = tileUnits(it.lon, it.lat, tx, ty, tz, wraps[i]);
       return { kind: it.kind, x, y, altM: altToCurtainM(it.hFt), headingDeg: it.headingDeg, size: it.size, selected: it.selected };
     });
     const instances = buildInstances(inputs);
@@ -496,6 +512,11 @@ function boxOf(map: maplibregl.Map): ViewBox {
  * Owner of the 3D traffic: keeps the feed's aircraft (dead-reckoned), the airport elevations
  * around the view, the picked ≤ 200, the custom layer, the 3D label source and the filter that
  * hides the drawn aircraft from the 2D layers. `attach` after every style load (theme change).
+ *
+ * The selected aircraft (traffic card) gets more: its model is repainted every animation frame
+ * while it moves (the crowd stays at 5 Hz), its callsign follows at 10 Hz from its own source,
+ * and its flown track (`fetchTrack`, the backend's history of the feed) stands as an altitude
+ * curtain in the accent colour, growing with every feed update and reaching up to the model.
  */
 export class Traffic3D {
   readonly tracks = new TrafficTracks();
@@ -504,6 +525,8 @@ export class Traffic3D {
   active = false;
   /** Off switch for the performance comparison (and a later setting); default on. */
   enabled = true;
+  /** Called every animation frame while the selected aircraft is drawn as a model (the follow camera). */
+  onSelectedFrame?: (nowMs: number) => void;
   private pilots: Pilot[] = [];
   private fields: FieldRef[] = [];
   private fieldBox: ViewBox | null = null;
@@ -514,22 +537,43 @@ export class Traffic3D {
   private map: maplibregl.Map | null = null;
   layer: TrafficModelLayer | null = null;
   private timer: number | undefined;
+  private raf: number | undefined;
   private ticks = 0;
   private filterKey = "";
+  private selLabelAt = -Infinity;
+  /** History of the selected aircraft (raw fixes) and the curtain points built from it. */
+  private history: { key: string; fixes: TrafficHistoryFix[] } | null = null;
+  private curtainPoints: TrackPoint[] = [];
+  private curtainShown = false;
+  private historySeq = 0;
+  /** Arrival time of the selected aircraft's fix the history was asked for (a new report asks again). */
+  private historyFixT = -1;
+  private historyKey: string | null = null;
 
-  constructor(private fetchAirports: (box: ViewBox) => Promise<Airport[]>) {}
+  constructor(
+    private fetchAirports: (box: ViewBox) => Promise<Airport[]>,
+    private fetchTrack: (network: string, cid: number) => Promise<TrafficHistoryFix[]> = () => Promise.resolve([]),
+  ) {}
 
-  /** Adds the custom layer below the flat traffic symbols (labels and hit targets stay above it). */
-  attach(map: maplibregl.Map, colors: TrafficModelColors) {
+  /** Adds the custom layer below the flat traffic symbols (labels and hit targets stay above it), the curtain below `curtainBefore`. */
+  attach(map: maplibregl.Map, colors: TrafficModelColors, curtainBefore?: string) {
     this.map = map;
     this.filterKey = "";
+    this.curtainShown = false;
     const layer = new TrafficModelLayer(colors, () => this.frame());
     layer.onFail = () => {
       this.active = false;
       this.applyLayers();
     };
-    map.addLayer(layer, map.getLayer(FLAT_LAYERS[0]) ? FLAT_LAYERS[0] : undefined);
+    replaceCustomLayer(map, layer, FLAT_LAYERS[0]);
     this.layer = layer;
+    // the selected aircraft's curtain: below the own curtain (drawn first, the own track and
+    // model stay on top), one colour – the accent of the selected model, never the own yellow
+    addCurtainLayers(map, TRAFFIC_CURTAIN, curtainBefore && map.getLayer(curtainBefore) ? curtainBefore : undefined, {
+      ramp: [[0, colors.accent]],
+      fallback: false,
+    });
+    this.drawCurtain(null);
     this.applyLayers();
     if (this.timer === undefined) this.timer = window.setInterval(() => this.tick(), TICK_MS);
   }
@@ -537,6 +581,8 @@ export class Traffic3D {
   dispose() {
     window.clearInterval(this.timer);
     this.timer = undefined;
+    if (this.raf !== undefined) cancelAnimationFrame(this.raf);
+    this.raf = undefined;
     this.map = null;
     this.layer = null;
   }
@@ -551,11 +597,15 @@ export class Traffic3D {
     this.refresh(true);
   }
 
-  /** The aircraft with the traffic card open (accent colour, always among the models). */
+  /** The aircraft with the traffic card open (accent colour, always among the models, curtain). */
   setSelected(key: string | null) {
     if (key === this.selected) return;
     this.selected = key;
-    this.refresh();
+    this.history = null;
+    this.curtainPoints = [];
+    this.historyFixT = -1;
+    this.historySeq++;
+    this.refresh(true);
     this.map?.triggerRepaint();
   }
 
@@ -564,6 +614,18 @@ export class Traffic3D {
     this.view3d = view3d;
     this.shown = trafficShown;
     this.refresh();
+  }
+
+  /** Drawn pose of the selected aircraft while it is a model (3D), else null – the follow camera's target. */
+  selectedPose(nowMs = performance.now()): TrafficPose | null {
+    const sel = this.selected;
+    if (!this.active || !sel || !this.picked.includes(sel)) return null;
+    return this.tracks.poseAt(sel, nowMs);
+  }
+
+  /** Is the selected aircraft drawn as a model right now? */
+  private selectedDrawn(): boolean {
+    return this.active && !!this.selected && this.picked.includes(this.selected);
   }
 
   /** `labels`: new positions (feed data) – the label source is rebuilt even if the picked set stays. */
@@ -581,7 +643,9 @@ export class Traffic3D {
       this.picked = [];
     }
     this.applyLayers(labels);
+    this.syncCurtain();
     if (was !== this.active || this.active) map.triggerRepaint();
+    this.kick();
   }
 
   /** Airport elevations for the height reference: the view plus 15 nm, re-asked only when the view leaves the fetched box. */
@@ -595,13 +659,61 @@ export class Traffic3D {
       .then((list) => {
         if (seq !== this.fieldSeq) return;
         this.fields = fieldsOf(list);
-        // recompute the heights of the current fixes (unchanged reports keep their timing)
+        // recompute the heights of the current fixes (unchanged reports keep their timing) and the curtain
+        if (this.history) this.curtainPoints = historyPoints(this.history.fixes, this.fields);
         this.setPilots(this.pilots);
       })
       // embedded airport DB; without it the heights stay MSL − 0
       .catch(() => {
         if (seq === this.fieldSeq) this.fieldBox = null;
       });
+  }
+
+  /**
+   * The curtain of the selected aircraft: shown while it is a model; its history is asked for
+   * when it becomes one and again with every new report of it (the backend adds the same fix).
+   */
+  private syncCurtain() {
+    const map = this.map;
+    if (!map) return;
+    const on = this.selectedDrawn();
+    if (on !== this.curtainShown) {
+      this.curtainShown = on;
+      setCurtainVisible(map, TRAFFIC_CURTAIN, on);
+    }
+    const sel = this.selected;
+    const fix = sel ? this.tracks.get(sel) : undefined;
+    if (!on || !sel || !fix) {
+      if (!on) this.drawCurtain(null);
+      return;
+    }
+    // (also after a theme change: the curtain layer is new and empty)
+    this.drawCurtain(performance.now());
+    if (fix.tMs === this.historyFixT && this.historyKey === sel) return;
+    this.historyFixT = fix.tMs;
+    this.historyKey = sel;
+    const seq = ++this.historySeq;
+    this.fetchTrack(fix.network, fix.cid)
+      .then((fixes) => {
+        if (seq !== this.historySeq || this.selected !== sel) return;
+        this.history = { key: sel, fixes };
+        this.curtainPoints = historyPoints(fixes, this.fields);
+        this.drawCurtain(performance.now());
+      })
+      // no history (feed restarted, old backend): the curtain just starts at the model
+      .catch(() => {});
+  }
+
+  /** Curtain = history plus the stretch up to the model's drawn pose (`nowMs`); null clears it. */
+  private drawCurtain(nowMs: number | null) {
+    const map = this.map;
+    if (!map) return;
+    const pose = nowMs != null && this.history?.key === this.selected ? this.selectedPose(nowMs) : null;
+    if (!pose) {
+      drawCurtainTrack(map, TRAFFIC_CURTAIN, [], null);
+      return;
+    }
+    drawCurtainTrack(map, TRAFFIC_CURTAIN, this.curtainPoints, { lon: pose.lon, lat: pose.lat, altFt: pose.hFt, hFt: pose.hFt });
   }
 
   /**
@@ -613,46 +725,45 @@ export class Traffic3D {
   private applyLayers(labels = true) {
     const map = this.map;
     if (!map) return;
-    const key = this.active ? [...this.picked].sort().join(",") : "";
+    const key = this.active ? [...this.picked].sort().join(",") + `|${this.selected ?? ""}` : "";
     const changed = key !== this.filterKey;
     if (changed) {
       this.filterKey = key;
       const filter: maplibregl.FilterSpecification | null = this.active && this.picked.length ? ["!", ["in", ["get", "key"], ["literal", this.picked]]] : null;
       for (const id of FLAT_LAYERS) if (map.getLayer(id)) map.setFilter(id, filter);
+      if (map.getLayer("traffic-selected")) {
+        // the ring lies on the ground; the model itself turns accent while drawn in 3D
+        map.setPaintProperty("traffic-selected", "circle-stroke-opacity", this.selectedDrawn() ? 0 : 1);
+      }
     }
-    if (map.getLayer("traffic-selected")) {
-      // the ring lies on the ground; the model itself turns accent while drawn in 3D
-      const ringHidden = this.active && !!this.selected && this.picked.includes(this.selected);
-      map.setPaintProperty("traffic-selected", "circle-stroke-opacity", ringHidden ? 0 : 1);
+    if (changed || labels) {
+      this.drawLabels();
+      this.drawSelectedLabel();
     }
-    if (changed || labels) this.drawLabels();
   }
 
-  /** Callsign labels and click targets at the models' dead-reckoned positions and heights. */
+  /** Callsign labels and click targets at the models' dead-reckoned positions and heights (the selected one: drawSelectedLabel). */
   private drawLabels(nowMs = performance.now()) {
     const src = this.map?.getSource(TRAFFIC_3D_SOURCE) as maplibregl.GeoJSONSource | undefined;
     if (!src) return;
     const features: GeoJSON.Feature[] = [];
     if (this.active) {
       for (const k of this.picked) {
-        const f = this.tracks.get(k);
-        const pose = this.tracks.poseAt(k, nowMs);
-        if (!f || !pose) continue;
-        features.push(
-          pointFeature(pose.lon, pose.lat, {
-            key: f.key,
-            network: f.network,
-            cid: f.cid,
-            callsign: f.callsign,
-            cat: f.cat,
-            sizeFactor: f.size,
-            heading: pose.headingDeg,
-            hM: altToCurtainM(pose.hFt),
-          }),
-        );
+        if (k === this.selected) continue;
+        const f = labelFeature(this.tracks, k, nowMs);
+        if (f) features.push(f);
       }
     }
     src.setData({ type: "FeatureCollection", features });
+  }
+
+  /** The selected aircraft's label and click target (one feature, its own source). */
+  private drawSelectedLabel(nowMs = performance.now()) {
+    const src = this.map?.getSource(TRAFFIC_3D_SEL_SOURCE) as maplibregl.GeoJSONSource | undefined;
+    if (!src) return;
+    this.selLabelAt = nowMs;
+    const f = this.selectedDrawn() ? labelFeature(this.tracks, this.selected!, nowMs) : null;
+    src.setData({ type: "FeatureCollection", features: f ? [f] : [] });
   }
 
   /** What the layer draws now. */
@@ -678,4 +789,44 @@ export class Traffic3D {
     map.triggerRepaint();
     if (++this.ticks % LABEL_EVERY === 0) this.drawLabels(now);
   }
+
+  /** Starts the per-frame loop of the selected aircraft (no-op while it runs or nothing is selected). */
+  private kick() {
+    if (this.raf === undefined && this.map && this.selectedDrawn()) this.raf = requestAnimationFrame((t) => this.selectedLoop(t));
+  }
+
+  /**
+   * Every animation frame while the selected aircraft is a model: repaint (it moves smoothly next
+   * to the own model instead of in 5 Hz steps), the curtain's head on the model, the label at
+   * 10 Hz, the follow camera. Stops by itself when the selection closes or leaves 3D.
+   */
+  private selectedLoop(_t: number) {
+    this.raf = undefined;
+    const map = this.map;
+    if (!map || !this.selectedDrawn()) return;
+    this.raf = requestAnimationFrame((t) => this.selectedLoop(t));
+    if (document.hidden || map.getCanvas().clientWidth === 0) return;
+    const now = performance.now();
+    this.onSelectedFrame?.(now);
+    if (!this.tracks.moving(now, [this.selected!])) return;
+    map.triggerRepaint();
+    this.drawCurtain(now);
+    if (now - this.selLabelAt >= SEL_LABEL_MS) this.drawSelectedLabel(now);
+  }
+}
+
+function labelFeature(tracks: TrafficTracks, k: string, nowMs: number): GeoJSON.Feature | null {
+  const f = tracks.get(k);
+  const pose = tracks.poseAt(k, nowMs);
+  if (!f || !pose) return null;
+  return pointFeature(pose.lon, pose.lat, {
+    key: f.key,
+    network: f.network,
+    cid: f.cid,
+    callsign: f.callsign,
+    cat: f.cat,
+    sizeFactor: f.size,
+    heading: pose.headingDeg,
+    hM: altToCurtainM(pose.hFt),
+  });
 }

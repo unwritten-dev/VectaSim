@@ -4,7 +4,7 @@
 //! `vectasim-photos` client); the store only keeps what was found.
 
 use crate::Result;
-use crate::store::{LANDING_RATE_SQL, Store};
+use crate::store::{RATED_LANDING_RATE_SQL, Store, counts_in_stats_sql};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
 
@@ -314,6 +314,7 @@ impl Store {
     /// All airframes with aggregates; demo (mock) flights count only with `include_demo`.
     pub fn list_airframes(&self, include_demo: bool) -> Result<Vec<AirframeRow>> {
         let conn = self.conn();
+        let counts = counts_in_stats_sql("f");
         let mut stmt = conn.prepare(&format!(
             "SELECT {AIRFRAME_COLS},
                 COUNT(f.id),
@@ -321,13 +322,13 @@ impl Store {
                 COALESCE(SUM(CASE WHEN f.landing_ms IS NOT NULL AND f.takeoff_ms IS NOT NULL THEN f.landing_ms - f.takeoff_ms END), 0),
                 COALESCE(SUM(f.distance_nm), 0),
                 (SELECT COUNT(*) FROM touchdowns t JOIN flights f2 ON f2.id = t.flight_id
-                    WHERE f2.airframe_reg = a.registration AND f2.deleted_ms IS NULL AND t.touch_and_go = 0 AND {DEMO_F2}),
-                (SELECT AVG({LANDING_RATE_SQL}) FROM touchdowns t JOIN flights f2 ON f2.id = t.flight_id
-                    WHERE f2.airframe_reg = a.registration AND f2.deleted_ms IS NULL AND t.touch_and_go = 0 AND {DEMO_F2}),
+                    WHERE f2.airframe_reg = a.registration AND f2.deleted_ms IS NULL AND f2.state <> 'discarded' AND t.touch_and_go = 0 AND {DEMO_F2}),
+                (SELECT AVG({RATED_LANDING_RATE_SQL}) FROM touchdowns t JOIN flights f2 ON f2.id = t.flight_id
+                    WHERE f2.airframe_reg = a.registration AND f2.deleted_ms IS NULL AND f2.state <> 'discarded' AND t.touch_and_go = 0 AND {DEMO_F2}),
                 MAX(COALESCE(f.off_block_ms, f.created_ms)),
                 (SELECT COUNT(*) FROM flights f3 WHERE f3.airframe_reg = a.registration AND f3.deleted_ms IS NULL)
              FROM airframes a LEFT JOIN flights f ON f.airframe_reg = a.registration AND f.deleted_ms IS NULL
-                AND (?1 OR COALESCE(f.provider, '') <> 'mock')
+                AND {counts} AND (?1 OR COALESCE(f.provider, '') <> 'mock')
              GROUP BY a.registration
              ORDER BY MAX(COALESCE(f.off_block_ms, f.created_ms)) IS NULL, MAX(COALESCE(f.off_block_ms, f.created_ms)) DESC,
                 a.registration"

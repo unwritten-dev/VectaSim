@@ -29,22 +29,37 @@ pub const DEFAULT_PORT: u16 = 8095;
 pub const MAX_WS_CLIENTS: usize = 16;
 /// WebSocket telemetry interval (2 Hz).
 pub const STREAM_INTERVAL: Duration = Duration::from_millis(500);
-/// Most HTTP connections at once (WebSockets are counted by [`MAX_WS_CLIENTS`] once upgraded).
+/// Most HTTP connections at once, counted separately for this PC (loopback) and for other
+/// devices (LAN), so the LAN can never take the slots of the local OBS overlays. WebSockets
+/// are counted by [`MAX_WS_CLIENTS`] once upgraded.
 pub const MAX_CONNECTIONS: usize = 64;
+/// Most connections at once from one LAN address (a tablet needs a handful).
+pub const MAX_CONNECTIONS_PER_IP: usize = 16;
 /// Longest time a client may take for a request head – also the idle limit of a keep-alive
 /// connection (hyper starts the timer when it waits for the next request).
 pub const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(10);
+/// The same for other devices: shorter, so idle LAN connections give their slot back soon.
+pub const LAN_HEADER_READ_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Connection limits of the HTTP side (tests shorten them).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
+    /// Per pool: loopback connections wait for a free slot, LAN connections beyond it are closed.
     pub max_connections: usize,
+    /// LAN connections from one address beyond this are closed.
+    pub max_connections_per_ip: usize,
     pub header_read_timeout: Duration,
+    pub lan_header_read_timeout: Duration,
 }
 
 impl Default for Limits {
     fn default() -> Self {
-        Self { max_connections: MAX_CONNECTIONS, header_read_timeout: HEADER_READ_TIMEOUT }
+        Self {
+            max_connections: MAX_CONNECTIONS,
+            max_connections_per_ip: MAX_CONNECTIONS_PER_IP,
+            header_read_timeout: HEADER_READ_TIMEOUT,
+            lan_header_read_timeout: LAN_HEADER_READ_TIMEOUT,
+        }
     }
 }
 

@@ -10,12 +10,13 @@ import type { Airport, Controller, Facility, LocatedController, Metar, Network, 
 import { fmtMetarLine, fmtWind } from "../i18n/number";
 import { CATEGORY_COLOR, COLOR, FACILITY_COLOR } from "../theme";
 import { pointFeature } from "./common";
+import { addLayerOnce, addSourceOnce } from "./styleOnce";
 import { WAKE_LABEL, WAKE_SIZE, iconSizeByZoom, loadAircraftIcons, trafficColors, wakeCategory } from "./aircraftIcons";
 
 export type OnlineLayerGroup = "traffic" | "atc" | "weather";
 
 export const LAYER_GROUPS: Record<OnlineLayerGroup, string[]> = {
-  traffic: ["vatsim-pilots", "vatsim-pilots-label", "traffic-3d-sym", "traffic-selected", "traffic-route-casing", "traffic-route-line"],
+  traffic: ["vatsim-pilots", "vatsim-pilots-label", "traffic-3d-sym", "traffic-3d-sel-sym", "traffic-selected", "traffic-route-casing", "traffic-route-line"],
   atc: ["vatsim-atc-dot", "vatsim-atc-label"],
   weather: ["metar-ring"],
 };
@@ -44,13 +45,18 @@ export const FACILITY_LABEL: Record<Facility, string> = {
 /** Traffic symbol opacity: 0.65 up to zoom 7, full from zoom 9 (the own aircraft stays opaque). */
 export const TRAFFIC_OPACITY_BY_ZOOM: maplibregl.ExpressionSpecification = ["interpolate", ["linear"], ["zoom"], 7, 0.65, 9, 1];
 
-/** Layers are inserted below `before` (the own-aircraft layer) so the user's plane stays on top. */
-export async function addOnlineLayers(map: maplibregl.Map, before?: string) {
+/**
+ * Layers are inserted below `before` (the own-aircraft layer) so the user's plane stays on top.
+ * `isCurrent`: false once the style was replaced while the icons loaded – then nothing is added
+ * (the newer style load adds its own); the result says whether the layers were added.
+ */
+export async function addOnlineLayers(map: maplibregl.Map, before?: string, isCurrent: () => boolean = () => true): Promise<boolean> {
   await loadAircraftIcons(map);
+  if (!isCurrent()) return false;
   const labels = trafficColors();
 
-  map.addSource("metars", { type: "geojson", data: EMPTY });
-  map.addLayer(
+  addSourceOnce(map, "metars", { type: "geojson", data: EMPTY });
+  addLayerOnce(map,
     {
       id: "metar-ring",
       type: "circle",
@@ -67,8 +73,8 @@ export async function addOnlineLayers(map: maplibregl.Map, before?: string) {
     before,
   );
 
-  map.addSource("vatsim-atc", { type: "geojson", data: EMPTY });
-  map.addLayer(
+  addSourceOnce(map, "vatsim-atc", { type: "geojson", data: EMPTY });
+  addLayerOnce(map,
     {
       id: "vatsim-atc-dot",
       type: "circle",
@@ -84,7 +90,7 @@ export async function addOnlineLayers(map: maplibregl.Map, before?: string) {
     },
     before,
   );
-  map.addLayer(
+  addLayerOnce(map,
     {
       id: "vatsim-atc-label",
       type: "symbol",
@@ -103,8 +109,8 @@ export async function addOnlineLayers(map: maplibregl.Map, before?: string) {
     before,
   );
 
-  map.addSource("vatsim-pilots", { type: "geojson", data: EMPTY });
-  map.addLayer(
+  addSourceOnce(map, "vatsim-pilots", { type: "geojson", data: EMPTY });
+  addLayerOnce(map,
     {
       id: "vatsim-pilots",
       type: "symbol",
@@ -128,7 +134,7 @@ export async function addOnlineLayers(map: maplibregl.Map, before?: string) {
     },
     before,
   );
-  map.addLayer(
+  addLayerOnce(map,
     {
       id: "vatsim-pilots-label",
       type: "symbol",
@@ -154,8 +160,8 @@ export async function addOnlineLayers(map: maplibregl.Map, before?: string) {
   );
   // 3D view from zoom 8: callsign and click target of the aircraft drawn as models
   // (trafficModel.ts), raised to the model's height; the icon itself is invisible
-  map.addSource("traffic-3d", { type: "geojson", data: EMPTY });
-  map.addLayer(
+  addSourceOnce(map, "traffic-3d", { type: "geojson", data: EMPTY });
+  addLayerOnce(map,
     {
       id: "traffic-3d-sym",
       type: "symbol",
@@ -184,10 +190,44 @@ export async function addOnlineLayers(map: maplibregl.Map, before?: string) {
     },
     before,
   );
+  // the selected aircraft's callsign and click target in 3D: its own one-feature source, fed
+  // ~10× a second so the label stays on the moving model (the source above changes once a second;
+  // re-sending 200 labels that often restarted their placement and made them flicker)
+  addSourceOnce(map, "traffic-3d-sel", { type: "geojson", data: EMPTY });
+  addLayerOnce(map,
+    {
+      id: "traffic-3d-sel-sym",
+      type: "symbol",
+      source: "traffic-3d-sel",
+      layout: {
+        "icon-image": ["concat", "ac-traffic-", ["coalesce", ["get", "cat"], "medium"]],
+        "icon-size": ["*", ["coalesce", ["get", "sizeFactor"], 1.3], 0.9],
+        "icon-rotate": ["get", "heading"],
+        "icon-rotation-alignment": "map",
+        "icon-allow-overlap": true,
+        "icon-ignore-placement": true,
+        "symbol-height-offset": ["coalesce", ["get", "hM"], 0],
+        "text-field": ["get", "callsign"],
+        "text-font": ["Noto Sans Regular"],
+        "text-size": 10,
+        "text-offset": [0, -1.5],
+        "text-anchor": "bottom",
+        "text-allow-overlap": true,
+        "text-ignore-placement": true,
+      },
+      paint: {
+        "icon-opacity": 0,
+        "text-color": COLOR.accent,
+        "text-halo-color": COLOR.halo,
+        "text-halo-width": 1.4,
+      },
+    },
+    before,
+  );
   // the selected aircraft's planned great circle (TrafficCard "Route zeigen"): above the traffic
   // symbols, so a busy hub does not hide it, with a halo so it reads over the aircraft
-  map.addSource("traffic-route", { type: "geojson", data: EMPTY });
-  map.addLayer(
+  addSourceOnce(map, "traffic-route", { type: "geojson", data: EMPTY });
+  addLayerOnce(map,
     {
       id: "traffic-route-casing",
       type: "line",
@@ -197,7 +237,7 @@ export async function addOnlineLayers(map: maplibregl.Map, before?: string) {
     },
     before,
   );
-  map.addLayer(
+  addLayerOnce(map,
     {
       id: "traffic-route-line",
       type: "line",
@@ -208,8 +248,8 @@ export async function addOnlineLayers(map: maplibregl.Map, before?: string) {
     before,
   );
   // outline ring around the selected aircraft (TrafficCard); above the traffic, below the own plane
-  map.addSource("traffic-selected", { type: "geojson", data: EMPTY });
-  map.addLayer(
+  addSourceOnce(map, "traffic-selected", { type: "geojson", data: EMPTY });
+  addLayerOnce(map,
     {
       id: "traffic-selected",
       type: "circle",
@@ -226,6 +266,7 @@ export async function addOnlineLayers(map: maplibregl.Map, before?: string) {
   );
 
   attachPopups(map);
+  return true;
 }
 
 export function setGroupVisible(map: maplibregl.Map, group: OnlineLayerGroup, visible: boolean) {
@@ -380,7 +421,7 @@ function attachPopups(map: maplibregl.Map) {
 
   // aircraft: no popup – a click opens the traffic card (TrafficCard via onPilotClick);
   // in 3D the invisible symbol at the model's height is the click target
-  for (const layer of ["vatsim-pilots", "traffic-3d-sym"]) {
+  for (const layer of ["vatsim-pilots", "traffic-3d-sym", "traffic-3d-sel-sym"]) {
     map.on("mouseenter", layer, () => {
       map.getCanvas().style.cursor = "pointer";
     });

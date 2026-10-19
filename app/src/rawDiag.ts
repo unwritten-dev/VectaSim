@@ -1,6 +1,6 @@
 import type { DiagEvent, Telemetry, VarDiag } from "./types";
 import { fmt, fmtNum, fmtSigned } from "./i18n/number";
-import { t } from "./i18n";
+import { t, type TKey } from "./i18n";
 
 /** Raw value exactly as received: full precision (JS shortest round-trip), strings quoted. */
 export function fmtRaw(v: VarDiag): string {
@@ -10,6 +10,15 @@ export function fmtRaw(v: VarDiag): string {
 }
 
 const DIGITS: Record<string, number> = { ft: 1, kt: 1, fpm: 0, kg: 0, g: 2, "×": 2, "%": 0, s: 0, Index: 0, Anzahl: 0, Nadel: 0 };
+
+/** Unit names the backend sends in German (decoder.rs, datarefs.rs) → i18n; others are symbols. */
+const UNIT_KEY: Record<string, TKey> = { Anzahl: "live.raw.units.count", Nadel: "live.raw.units.needle", Index: "live.raw.units.index" };
+
+/** The converted value's unit as shown (translated where it is a word). */
+export function unitLabel(unit: string): string {
+  const key = UNIT_KEY[unit];
+  return key ? t(key) : unit;
+}
 
 /** Converted value (what VectaSim uses), in its unit. */
 export function fmtConverted(v: VarDiag): string {
@@ -24,7 +33,7 @@ export function fmtConverted(v: VarDiag): string {
       // coordinates need the digits, angles do not
       return fmt(v.value, /LATITUDE|LONGITUDE/.test(v.name) ? 6 : 1, "°");
     default:
-      return fmt(v.value, DIGITS[v.valueUnit] ?? 2, v.valueUnit);
+      return fmt(v.value, DIGITS[v.valueUnit] ?? 2, unitLabel(v.valueUnit));
   }
 }
 

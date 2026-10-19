@@ -11,6 +11,7 @@ import { showToast } from "./ui/Toast";
 import { setPref, usePrefs, type Prefs } from "./prefs";
 import type { DiscordStatus, NotifyResult } from "./types";
 import "./integrations.css";
+import { errorToast } from "./ui/errorToast";
 
 const SETTING_DISCORD_APP_ID = "discord_app_id";
 const DISCORD_POLL_MS = 5000;
@@ -69,7 +70,7 @@ export default function IntegrationsPanel({ onError }: { onError?: (e: string) =
   const [storedAppId, setStoredAppId] = useState("");
   const [trayActive, setTrayActive] = useState<boolean | null>(null);
   const [testing, setTesting] = useState(false);
-  const fail = (e: unknown) => (onError ? onError(String(e)) : showToast({ tone: "warn", title: tGlobal("settings.notSaved"), body: String(e) }));
+  const fail = (e: unknown) => (onError ? onError(String(e)) : showToast({ tone: "warn", ...errorToast(tGlobal("settings.notSaved"), e, "settings") }));
 
   useEffect(() => {
     invoke<[string, string][]>("get_settings")

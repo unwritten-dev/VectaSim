@@ -7,6 +7,7 @@ import { useT } from "./i18n";
 import { PROFILE } from "./theme";
 import { minMaxBucketIndices } from "./map/downsample";
 import { sampleAt, useReplayCursor, useReplayStore } from "./landing/replayStore";
+import { rateText } from "./landing/rated";
 
 /**
  * Altitude / speed profile of a recorded flight, plain SVG.
@@ -240,7 +241,7 @@ export default function ProfileChart({ samples, phases, touchdowns }: Props) {
               <line x1={tx} x2={tx} y1={M.top} y2={M.top + plotH} stroke={PROFILE.touchdown} strokeWidth={1} opacity={0.8} />
               <path d={`M${tx - 5},${M.top + plotH - 9}L${tx + 5},${M.top + plotH - 9}L${tx},${M.top + plotH - 1}Z`} fill={PROFILE.touchdown} />
               <text x={tx - 4} y={M.top + plotH - 13} textAnchor="end" className="pc-td-label">
-                {fmt(t.landingRateFpm, 0, "fpm")}
+                {rateText(t)}
               </text>
             </g>
           );

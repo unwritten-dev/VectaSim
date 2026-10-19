@@ -32,7 +32,7 @@ app/src-tauri/windows/hooks.nsi  NSIS installer hooks (offer the SimConnect down
 app/src                     frontend (live/, landing/, map/, airframes/, ui/, i18n/)
 scripts/update-airports.py  updates the embedded OurAirports CSVs
 scripts/update-countries.py updates the country list and country borders (Natural Earth, CLDR names)
-.github/workflows           ci.yml (Clippy, tests, cargo audit, ESLint, tsc, Vitest), release.yml (tag v* → signed installer)
+.github/workflows           ci.yml (Clippy, tests, cargo audit, ESLint, tsc, Vitest), release.yml (tag v* → version check, signed installer, draft release)
 ```
 
 ## Prerequisites
@@ -173,14 +173,18 @@ Tools:
 | Natural Earth 1:110m Admin-0 | country borders for the *Countries* view (`countries.geojson.zst`) | public domain |
 | Unicode CLDR | country names German/English (`countries.csv`) | Unicode License v3 |
 | OpenFreeMap / OpenMapTiles / OpenStreetMap | basemap vector tiles | ODbL – attribution stays visible |
+| EOxCloudless 2017 (EOX) | satellite background, only with “Satellite” on | CC BY 4.0 (the 2018+ editions are NC and not used) |
+| RainViewer | precipitation radar, only with that weather layer on, every 10 min | free for personal/educational use, credit with link |
+| EUMETSAT EUMETView | cloud layer, only with that weather layer on | Core Data, CC BY 4.0 |
 | aviationweather.gov (NOAA) | METAR | public domain; own user agent, ≤ 60 req/min, 10 min cache |
 | VATSIM data feed v3 | traffic/ATC | only with traffic on, never more often than every 15 s |
+| VATSIM METAR (`metar.vatsim.net`) | METAR fallback when aviationweather.gov fails – independent of the traffic switch | VATSIM data usage terms |
 | IVAO Whazzup v2 | traffic/ATC | only with IVAO traffic on, at most one request every 15 s |
 | SimBrief (Navigraph) | OFP fetch on request | Navigraph Developer Terms |
 | Planespotters.net | aircraft photos by registration | credit + link required, ≤ 1 req/s, 7-day cache |
 | SimConnect.dll | **not** bundled, loaded at runtime; fetched on click from Microsoft’s SDK download (see below) | MSFS SDK EULA |
 
-Deliberately not used: Navigraph charts/FMS data (embedding not allowed), RainViewer (private use only from 2026), OpenAIP (CC BY-NC).
+Deliberately not used: Navigraph charts/FMS data (embedding not allowed), OpenAIP (CC BY-NC). The complete list with license terms, crates and npm packages is [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md); the installer ships it next to `vectasim.exe` (`bundle.resources` in `tauri.conf.json`, together with `LICENSE.txt`) – regenerate the tables when dependencies change.
 
 ### SimConnect.dll (origin, updating)
 
@@ -259,7 +263,7 @@ New remote content in the webview (e.g. another map provider) needs an entry her
 - Rust: doc comments explain the *why*; `unsafe` only in the SimConnect FFI with a `SAFETY` comment; Clippy without warnings.
 - Frontend: serde fields camelCase, types mirrored in `app/src/types.ts`; UI texts through i18n (German reference, English second – see “Languages” below), flight phases in English; numbers via `format.ts` / `i18n/number.ts` (UTC with “z”, thousands separators, a real minus sign).
 - No new dependencies without a reason; charts are hand-written SVG.
-- **Languages of the project:** the app is bilingual German/English; the public documentation (README, `docs/installation.md`, `docs/overlay-api.md`, `docs/releasing.md`, `docs/sim-pc-checklist.md`, this file, `CHANGELOG.md`) is written in English.
+- **Languages of the project:** the app is bilingual German/English; the public documentation (README, `docs/installation.md`, `docs/overlay-api.md`, `docs/releasing.md`, `docs/sim-pc-checklist.md`, `docs/brand/README.md`, `app/README.md`, `THIRD-PARTY-NOTICES.md`, script comments, this file, `CHANGELOG.md`) is written in English; `README.de.md` is the German twin of the README.
 - **README pairs:** [README.md](README.md) (English) and [README.de.md](README.de.md) (German) list the same features and are updated together on every feature change – same sections, same feature list.
 - **CHANGELOG:** new entries in English under `## Unreleased`, one line per change.
 

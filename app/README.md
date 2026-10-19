@@ -1,3 +1,3 @@
 # VectaSim – Frontend
 
-Nutzersicht und Funktionen: [../README.md](../README.md). Entwicklung, Struktur und Checks: [../DEVELOPMENT.md](../DEVELOPMENT.md).
+What the app does and how to use it: [../README.md](../README.md). Development, structure and checks: [../DEVELOPMENT.md](../DEVELOPMENT.md).

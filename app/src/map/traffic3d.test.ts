@@ -1,16 +1,20 @@
 import { describe, expect, it } from "vitest";
 import type { Airport, Pilot } from "../types";
 import {
+  TILE_COORD_LIMIT,
+  trafficRefTile,
   DR_MAX_S,
   FIX_BLEND_MS,
   INSTANCE_FLOATS,
   TRAFFIC3D_MAX,
   TrafficTracks,
+  blendWeight,
   buildInstances,
   deadReckon,
   distNm,
   fieldsOf,
   fixOf,
+  historyPoints,
   inView,
   nearestField,
   pickTraffic,
@@ -211,5 +215,94 @@ describe("instance buffers", () => {
     expect(f.kind).toBe("widebody");
     expect(f.cat).toBe("heavy");
     expect(f.tMs).toBe(5);
+  });
+});
+
+describe("blended correction of a new fix", () => {
+  const fix = (o: Partial<TrafficFix> = {}): TrafficFix => ({ ...fixOf(pilot({ groundSpeedKt: 450, headingDeg: 0, altitudeFt: 30000 }), [], 0), ...o });
+  it("smoothstep: full at the start, gone at FIX_BLEND_MS, flat at both ends", () => {
+    expect(blendWeight(0)).toBe(1);
+    expect(blendWeight(FIX_BLEND_MS)).toBe(0);
+    expect(blendWeight(FIX_BLEND_MS / 2)).toBeCloseTo(0.5, 9);
+    expect(blendWeight(-5)).toBe(1);
+    // slope at the ends ≈ 0 (no kink in speed when the fix arrives or the blend ends)
+    expect(1 - blendWeight(16)).toBeLessThan(0.001);
+    expect(blendWeight(FIX_BLEND_MS - 16)).toBeLessThan(0.001);
+  });
+  it("frame by frame across a feed update: no jump, the correction spread over the blend", () => {
+    // the feed corrects the reckoned position by 0.3 nm (a turn the reckoning did not know of)
+    const t = new TrafficTracks();
+    const k = fix().key;
+    t.update([fix()], 0);
+    const steps: number[] = [];
+    let prev = t.poseAt(k, 14_000)!;
+    for (let ms = 14_000 + 1000 / 60; ms < 18_000; ms += 1000 / 60) {
+      if (ms >= 15_000 && ms - 1000 / 60 < 15_000) {
+        const drawn = t.poseAt(k, 15_000)!;
+        t.update([fix({ lat: drawn.lat - 0.3 / 60 })], 15_000);
+      }
+      const p = t.poseAt(k, ms)!;
+      steps.push(distNm(prev.lat, prev.lon, p.lat, p.lon));
+      prev = p;
+    }
+    const nominal = (450 / 3600) * (1 / 60); // nm per frame at 450 kt
+    // a snap would move 0.3 nm in one frame (~144 frames' worth); blended the worst frame
+    // moves 0.3 nm × max smoothstep slope (1.5 / 90 frames) against the flight direction
+    const worst = Math.max(...steps.map((s) => Math.abs(s - nominal)));
+    expect(worst).toBeLessThan(0.3 * (1.5 / ((FIX_BLEND_MS / 1000) * 60)) + 1e-6);
+    expect(worst).toBeLessThan(0.006);
+  });
+  it("a new height reference glides instead of jumping", () => {
+    const t = new TrafficTracks();
+    const k = fix().key;
+    t.update([fix({ hFt: 30000 })], 0);
+    t.update([fix({ hFt: 29000 })], 5000); // same report, airports loaded: 1000 ft lower
+    expect(t.poseAt(k, 5000)!.hFt).toBeCloseTo(30000, 6);
+    expect(t.poseAt(k, 5000 + FIX_BLEND_MS / 2)!.hFt).toBeCloseTo(29500, 6);
+    expect(t.poseAt(k, 5000 + FIX_BLEND_MS)!.hFt).toBe(29000);
+    // dead reckoning kept its timing: 7 s after the fix, not 2 s
+    expect(t.poseAt(k, 7000)!.lat).toBeCloseTo(EDDF.lat + (450 * 7) / 3600 / 60, 4);
+  });
+});
+
+describe("historyPoints", () => {
+  it("curtain points on the models' height scale, invalid fixes skipped", () => {
+    const pts = historyPoints(
+      [
+        { tMs: 0, latitude: EDDF.lat, longitude: EDDF.lon, altitudeFt: 380, groundSpeedKt: 10 },
+        { tMs: 15_000, latitude: EDDF.lat, longitude: east(5), altitudeFt: 2364, groundSpeedKt: 160 },
+        { tMs: 30_000, latitude: NaN, longitude: 8, altitudeFt: 3000, groundSpeedKt: 160 },
+      ],
+      [EDDF],
+    );
+    expect(pts).toHaveLength(2);
+    expect(pts[0]).toMatchObject({ lon: EDDF.lon, lat: EDDF.lat, altFt: 380, hFt: 0 });
+    expect(pts[1].hFt).toBeCloseTo(2000, 0);
+  });
+});
+describe("trafficRefTile (globe: no vertex beyond the shader's tile-coordinate range)", () => {
+  const merc = (lon: number, lat: number): [number, number] => {
+    const s = Math.sin((lat * Math.PI) / 180);
+    return [(lon + 180) / 360, 0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)];
+  };
+  it("keeps the map's zoom while every instance is close", () => {
+    const [cx, cy] = merc(8.57, 50.03);
+    expect(trafficRefTile(cx, cy, 9.4, [merc(8.6, 50.1), merc(8.5, 49.9)]).tz).toBe(9);
+  });
+
+  it("coarsens the tile when a picked aircraft lies far up the tilted view (zoom 8, 550 km north)", () => {
+    const [cx, cy] = merc(8.57, 50.03);
+    const far = merc(8.57, 55);
+    const t = trafficRefTile(cx, cy, 8.2, [merc(8.6, 50.1), far]);
+    expect(t.tz).toBeLessThan(8);
+    const n = 2 ** t.tz;
+    for (const [x, y] of [far, merc(8.6, 50.1)]) {
+      expect(Math.abs((x * n - t.tx) * 8192)).toBeLessThanOrEqual(TILE_COORD_LIMIT);
+      expect(Math.abs((y * n - t.ty) * 8192)).toBeLessThanOrEqual(TILE_COORD_LIMIT);
+    }
+  });
+
+  it("falls back to zoom 0 at worst", () => {
+    expect(trafficRefTile(0.5, 0.5, 12, [[0.01, 0.02], [0.99, 0.98]]).tz).toBeLessThanOrEqual(2);
   });
 });

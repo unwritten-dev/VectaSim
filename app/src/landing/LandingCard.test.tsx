@@ -140,6 +140,14 @@ describe("cardFileName", () => {
     const d = data({ runway: null, touchdownPoint: null, distanceRef: "touchdown" }, { airport: { ident: "EDDF" } as LandingDebriefData["airport"] });
     expect(cardFileName(d)).toBe("VectaSim_EDDF_2026-10-17.png");
   });
+  it("names a card without airport after the UI language", () => {
+    const d = data({ runway: null, touchdownPoint: null, distanceRef: "touchdown" });
+    d.airport = null;
+    expect(cardFileName(d)).toBe("VectaSim_Landung_2026-10-17.png");
+    setLanguageSetting("en");
+    expect(cardFileName(d)).toBe("VectaSim_Landing_2026-10-17.png");
+    expect(autoCardFileName(d)).toMatch(/^VectaSim_Landing_2026-10-17_\d{4}\.png$/);
+  });
 });
 
 describe("autoCardFileName", () => {

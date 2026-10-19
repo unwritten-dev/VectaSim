@@ -1,39 +1,39 @@
 # Third-Party Notices
 
-VectaSim itself is licensed under the [MIT License](LICENSE). This document lists the third-party libraries, fonts, data and services the app uses at runtime, together with their licenses. The license texts of the packages are included in each package (npm: `node_modules/<package>/LICENSE`, Rust: the crates.io source).
+VectaSim itself is licensed under the [MIT License](LICENSE). This document lists the third-party libraries, fonts, data and services the app uses at runtime, together with their licenses. The license texts of the packages are included in each package (npm: `node_modules/<package>/LICENSE`, Rust: the crates.io source). The installer places this file and VectaSim’s `LICENSE.txt` in the installation folder, next to `vectasim.exe`.
 
-Generated from `npx license-checker-rseidelsohn --production` (in `app/`) and `cargo tree --workspace -e normal --target x86_64-pc-windows-msvc` (as of version 0.5.0). Where a license is given with “OR”, VectaSim chooses the MIT option if available. The descriptions in the tables below are in German.
+Generated from `npx license-checker-rseidelsohn --production` (in `app/`) and `cargo tree --workspace -e normal --target x86_64-pc-windows-msvc` (as of version 0.5.1). Where a license is given with “OR”, VectaSim chooses the MIT option if available.
 
-## Daten und Dienste
+## Data and services
 
-| Quelle | Nutzung in VectaSim | Lizenz / Bedingungen |
+| Source | Use in VectaSim | License / terms |
 |---|---|---|
-| © [OpenStreetMap](https://www.openstreetmap.org/copyright)-Mitwirkende | Kartendaten der Basemap | [ODbL 1.0](https://opendatacommons.org/licenses/odbl/1-0/); Attribution bleibt auf der Karte sichtbar |
-| [OpenMapTiles](https://openmaptiles.org) | Vektortile-Schema der Basemap | Schema [CC-BY 4.0](https://github.com/openmaptiles/openmaptiles/blob/master/LICENSE.md); © OpenMapTiles |
-| [OpenFreeMap](https://openfreemap.org) | Tile-Hosting und Kartenstil (`dark`), in der App je Theme umgefärbt | Dienst kostenlos ohne Schlüssel; Stil aus [openfreemap-styles](https://github.com/hyperknot/openfreemap-styles), abgeleitet von den OpenMapTiles-Styles (Code BSD-3-Clause, Design CC-BY 4.0); Daten ODbL |
-| [EOxCloudless](https://cloudless.eox.at) – Sentinel-2 cloudless 2017 (EOX IT Services GmbH), Kacheln von `tiles.maps.eox.at` (Layer `s2cloudless-2017_3857`) | Satellitenbild als Kartengrund (Schalter „Satellit“, nur dann abgerufen) | „EOxCloudless https://cloudless.eox.at by EOX IT Services GmbH (Contains modified Copernicus Sentinel data 2017)“ – [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) laut WMTS-Capabilities von EOX; die späteren Jahrgänge (2018 ff.) sind nur CC BY-NC-SA und werden **nicht** genutzt. Attribution steht im Attributionsfeld der Karte. Kostenloser Kacheldienst ohne Schlüssel und ohne Verfügbarkeitszusage |
-| [RainViewer](https://www.rainviewer.com/api.html) Weather Maps API (`api.rainviewer.com`, Kacheln `tilecache.rainviewer.com`) | Niederschlagsradar auf der Live-Karte (Wetter → Radar, nur dann abgerufen; alle 10 min) | Laut RainViewer kostenlos für persönliche und Bildungszwecke, Nennung „RainViewer“ mit Link erbeten (steht im Attributionsfeld); freie Stufe seit 2026: Zoom ≤ 7, nur Farbschema „Universal Blue“, 100 Anfragen/IP/Minute |
-| [EUMETSAT](https://www.eumetsat.int) EUMETView (`view.eumetsat.int`, WMS) | Wolken auf der Live-Karte (Wetter → Wolken, nur dann abgerufen): IR 10,8 µm, Meteosat 0° und Indischer Ozean (stündlich) über dem weltweiten geostationären Ring | Stündliche SEVIRI-Daten sind „Core Data“ der [EUMETSAT Data Policy](https://www-cdn.eumetsat.int/files/2026-01/45173%20-%20Data_Policy.pdf) (Art. 5: frei und uneingeschränkt unter CC BY 4.0); Attribution „Contains modified EUMETSAT Meteosat data“ im Attributionsfeld. In VectaSim zu Wolken umgefärbt (Helligkeit → Deckkraft) |
-| [OurAirports](https://ourairports.com/data/) | Flughäfen und Runways, eingebettet in `crates/vectasim-data/data`; Kontinent je Land (`countries.csv`) | Public Domain |
-| [Natural Earth](https://www.naturalearthdata.com/) | Ländergrenzen 1:110m (Admin-0 Countries) für die Ansicht *Länder*, vereinfacht eingebettet in `crates/vectasim-data/data/countries.geojson.zst` (`scripts/update-countries.py`) | Public Domain ([Nutzungsbedingungen](https://www.naturalearthdata.com/about/terms-of-use/)); Quelle wird auf der Karte genannt |
-| [Unicode CLDR](https://cldr.unicode.org/) | Deutsche und englische Ländernamen in `crates/vectasim-data/data/countries.csv` | [Unicode License v3](https://www.unicode.org/license.txt) – © 1991–2026 Unicode, Inc. |
-| NOAA / [aviationweather.gov](https://aviationweather.gov) | METAR-Wetter | US-Regierungswerk, Public Domain |
-| [VATSIM](https://vatsim.net) data feed v3 | Online-Verkehr und ATC (nur wenn „Verkehr“ eingeschaltet) | VATSIM-Datennutzungsbedingungen; Abruf höchstens alle 15 s |
-| [IVAO](https://ivao.aero) Whazzup v2 (`api.ivao.aero/v2/tracker/whazzup`) | Online-Verkehr und ATC (nur wenn „Verkehr“ mit IVAO oder „Beide“ eingeschaltet) | Öffentliche Datei ohne Anmeldung/API-Key; laut [IVAO-Dokumentation](https://wiki.ivao.aero/en/home/devops/api/whazuup/how-to-retrieve-v2) höchstens ein Abruf alle 15 s (häufiger führt zur IP-Sperre), VectaSim hält das ein |
-| [SimBrief](https://www.simbrief.com) (Navigraph) | OFP-Abruf auf Knopfdruck | Navigraph/SimBrief-Nutzungsbedingungen |
-| [Planespotters.net](https://www.planespotters.net) | Flugzeugfotos zur Registrierung | Foto © jeweiliger Fotograf; Credit und Link zur Fotoseite werden bei jedem Foto angezeigt |
-| Microsoft Flight Simulator SDK | `SimConnect.dll`, zur Laufzeit geladen, **nicht** mitgeliefert; auf Klick des Nutzers (in der App oder nach Rückfrage im Installer) aus dem offiziellen SDK-Download (`sdk.flightsimulator.com`, MSFS 2020 SDK Core 0.24.6.0) nach `%LOCALAPPDATA%\io.vectasim.app\simconnect\` geladen | [MSFS SDK EULA](https://docs.flightsimulator.com/html/Introduction/SDK_EULA.htm), siehe unten |
-| [X-Plane 12 Web API](https://developer.x-plane.com/article/x-plane-web-api/) (Laminar Research) | Telemetrie aus X-Plane 12.1.1+ über die eingebaute lokale REST/WebSocket-Schnittstelle (`localhost:8086`); kein Plugin, kein SDK-Code in VectaSim | Schnittstelle von X-Plane, keine zusätzlichen Lizenzbedingungen; VectaSim liest nur |
+| © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors | Map data of the base map | [ODbL 1.0](https://opendatacommons.org/licenses/odbl/1-0/); the attribution stays visible on the map |
+| [OpenMapTiles](https://openmaptiles.org) | Vector tile schema of the base map | Schema [CC-BY 4.0](https://github.com/openmaptiles/openmaptiles/blob/master/LICENSE.md); © OpenMapTiles |
+| [OpenFreeMap](https://openfreemap.org) | Tile hosting and map style (`dark`), recoloured per theme in the app | Free service without a key; style from [openfreemap-styles](https://github.com/hyperknot/openfreemap-styles), derived from the OpenMapTiles styles (code BSD-3-Clause, design CC-BY 4.0); data ODbL |
+| [EOxCloudless](https://cloudless.eox.at) – Sentinel-2 cloudless 2017 (EOX IT Services GmbH), tiles from `tiles.maps.eox.at` (layer `s2cloudless-2017_3857`) | Satellite imagery as the map background (“Satellite” switch, fetched only then) | “EOxCloudless https://cloudless.eox.at by EOX IT Services GmbH (Contains modified Copernicus Sentinel data 2017)” – [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) according to EOX’s WMTS capabilities; the later editions (2018 onwards) are CC BY-NC-SA only and are **not** used. The attribution is shown in the map’s attribution box. Free tile service without a key and without an availability guarantee |
+| [RainViewer](https://www.rainviewer.com/api.html) Weather Maps API (`api.rainviewer.com`, tiles `tilecache.rainviewer.com`) | Precipitation radar on the live map (Weather → Radar, fetched only then; every 10 min) | Free for personal and educational use according to RainViewer, credit “RainViewer” with a link requested (shown in the attribution box); free tier since 2026: zoom ≤ 7, colour scheme “Universal Blue” only, 100 requests/IP/minute |
+| [EUMETSAT](https://www.eumetsat.int) EUMETView (`view.eumetsat.int`, WMS) | Clouds on the live map (Weather → Clouds, fetched only then): IR 10.8 µm, Meteosat 0° and Indian Ocean (hourly) over the worldwide geostationary ring | Hourly SEVIRI data are “Core Data” under the [EUMETSAT Data Policy](https://www-cdn.eumetsat.int/files/2026-01/45173%20-%20Data_Policy.pdf) (Art. 5: free and unrestricted under CC BY 4.0); attribution “Contains modified EUMETSAT Meteosat data” in the attribution box. Recoloured as clouds in VectaSim (brightness → opacity) |
+| [OurAirports](https://ourairports.com/data/) | Airports and runways, embedded in `crates/vectasim-data/data`; continent per country (`countries.csv`) | Public domain |
+| [Natural Earth](https://www.naturalearthdata.com/) | Country borders 1:110m (Admin-0 Countries) for the *Countries* view, simplified and embedded in `crates/vectasim-data/data/countries.geojson.zst` (`scripts/update-countries.py`) | Public domain ([terms of use](https://www.naturalearthdata.com/about/terms-of-use/)); the source is credited on the map |
+| [Unicode CLDR](https://cldr.unicode.org/) | German and English country names in `crates/vectasim-data/data/countries.csv` | [Unicode License v3](https://www.unicode.org/license.txt) – © 1991–2026 Unicode, Inc. |
+| NOAA / [aviationweather.gov](https://aviationweather.gov) | METAR weather | US government work, public domain |
+| [VATSIM](https://vatsim.net) data feed v3 and `metar.vatsim.net` | Online traffic and ATC (only when “Traffic” is turned on); METAR fallback when aviationweather.gov does not answer | VATSIM data usage terms; the data feed is fetched at most every 15 s |
+| [IVAO](https://ivao.aero) Whazzup v2 (`api.ivao.aero/v2/tracker/whazzup`) | Online traffic and ATC (only when “Traffic” is turned on with IVAO or “Both”) | Public file without login or API key; according to the [IVAO documentation](https://wiki.ivao.aero/en/home/devops/api/whazuup/how-to-retrieve-v2) at most one request every 15 s (more often leads to an IP ban), which VectaSim keeps to |
+| [SimBrief](https://www.simbrief.com) (Navigraph) | OFP download on request | Navigraph/SimBrief terms of use |
+| [Planespotters.net](https://www.planespotters.net) | Aircraft photos by registration | Photo © the respective photographer; credit and a link to the photo page are shown with every photo |
+| Microsoft Flight Simulator SDK | `SimConnect.dll`, loaded at runtime, **not** shipped; downloaded on the user’s click (in the app, or after a question in the installer) from the official SDK download (`sdk.flightsimulator.com`, MSFS 2020 SDK Core 0.24.6.0) to `%LOCALAPPDATA%\io.vectasim.app\simconnect\` | [MSFS SDK EULA](https://docs.flightsimulator.com/html/Introduction/SDK_EULA.htm), see below |
+| [X-Plane 12 Web API](https://developer.x-plane.com/article/x-plane-web-api/) (Laminar Research) | Telemetry from X-Plane 12.1.1+ via the built-in local REST/WebSocket interface (`localhost:8086`); no plugin, no SDK code in VectaSim | Interface of X-Plane, no additional license terms; VectaSim only reads |
 
 ### Microsoft Flight Simulator SDK – SimConnect.dll
 
-Die `SimConnect.dll` ist Eigentum der Microsoft Corporation und wird **nicht** mit VectaSim verteilt (weder im Repository noch im Installer). Die Schaltfläche *SimConnect herunterladen* – bzw. nach Zustimmung des Nutzers schon der Installer am Ende der Installation – lädt das offizielle SDK-Archiv von Microsofts Server, prüft es per SHA-256 und behält davon nur die DLL. Für diese Datei gelten allein die „Microsoft Software License Terms“ des Microsoft Flight Simulator SDK (Microsoft Corporation): https://docs.flightsimulator.com/html/Introduction/SDK_EULA.htm (MSFS 2024: https://docs.flightsimulator.com/msfs2024/html/1_Introduction/SDK_EULA.htm). Die MIT-Lizenz von VectaSim gilt für sie nicht.
+`SimConnect.dll` is the property of Microsoft Corporation and is **not** distributed with VectaSim (neither in the repository nor in the installer). The *Download SimConnect* button – or, with the user’s consent, the installer at the end of the installation – downloads the official SDK archive from Microsoft’s server, verifies it by SHA-256 and keeps only the DLL. This file is governed solely by the “Microsoft Software License Terms” of the Microsoft Flight Simulator SDK (Microsoft Corporation): https://docs.flightsimulator.com/html/Introduction/SDK_EULA.htm (MSFS 2024: https://docs.flightsimulator.com/msfs2024/html/1_Introduction/SDK_EULA.htm). VectaSim’s MIT license does not apply to it.
 
-## Schriften
+## Fonts
 
-Alle Schriften sind über [Fontsource](https://fontsource.org) gebündelt und stehen unter der **SIL Open Font License 1.1** (https://openfontlicense.org).
+All fonts are bundled via [Fontsource](https://fontsource.org) and are licensed under the **SIL Open Font License 1.1** (https://openfontlicense.org).
 
-| Schrift | Urheber |
+| Font | Author |
 |---|---|
 | Inter, Inter Tight | © The Inter Project Authors |
 | Geist, Geist Mono | © Vercel |
@@ -41,11 +41,11 @@ Alle Schriften sind über [Fontsource](https://fontsource.org) gebündelt und st
 | Atkinson Hyperlegible Next, Atkinson Hyperlegible Mono | © Braille Institute of America |
 | B612, B612 Mono | © Airbus / Intactile Design / ENAC |
 
-Die Wortmarke im Logo verwendet Inter (© The Inter Project Authors, SIL OFL 1.1) als Konturen.
+The word mark in the logo uses Inter (© The Inter Project Authors, SIL OFL 1.1) as outlines.
 
-## npm-Pakete (Frontend, Produktion)
+## npm packages (frontend, production)
 
-| Paket | Version | Lizenz |
+| Package | Version | License |
 |---|---|---|
 | `@fontsource-variable/atkinson-hyperlegible-mono` | 5.3.0 | OFL-1.1 |
 | `@fontsource-variable/atkinson-hyperlegible-next` | 5.3.0 | OFL-1.1 |
@@ -91,23 +91,18 @@ Die Wortmarke im Logo verwendet Inter (© The Inter Project Authors, SIL OFL 1.1
 | `scheduler` | 0.28.0 | MIT |
 | `tinyqueue` | 3.0.0 | ISC |
 
-Zusammenfassung: 20× MIT, 13× ISC, 10× OFL-1.1, 5× BSD-3-Clause, 4× MIT OR Apache-2.0, 2× BSD-2-Clause, 1× Apache-2.0 OR MIT, 1× BlueOak-1.0.0.
+Summary (43 packages): 14× MIT, 10× OFL-1.1, 8× ISC, 4× MIT OR Apache-2.0, 3× BSD-3-Clause, 2× BSD-2-Clause, 1× Apache-2.0 OR MIT, 1× (MIT OR Apache-2.0).
 
-## Rust-Crates (Backend, Windows-Build)
+## Rust crates (backend, Windows build)
 
-Die mitgelieferte SQLite-Bibliothek (3.53.2, über `libsqlite3-sys`, Feature `bundled`) ist Public Domain.
+The bundled SQLite library (3.53.2, via `libsqlite3-sys`, feature `bundled`) is in the public domain.
 
-| Crate | Version | Lizenz |
+| Crate | Version | License |
 |---|---|---|
 | `adler2` | 2.0.1 | 0BSD OR MIT OR Apache-2.0 |
 | `aho-corasick` | 1.1.5 | Unlicense OR MIT |
 | `alloc-no-stdlib` | 3.0.0 | BSD-3-Clause |
 | `alloc-stdlib` | 0.3.0 | BSD-3-Clause |
-| `anstream` | 1.0.0 | MIT OR Apache-2.0 |
-| `anstyle` | 1.0.14 | MIT OR Apache-2.0 |
-| `anstyle-parse` | 1.0.0 | MIT OR Apache-2.0 |
-| `anstyle-query` | 1.1.5 | MIT OR Apache-2.0 |
-| `anstyle-wincon` | 3.0.11 | MIT OR Apache-2.0 |
 | `anyhow` | 1.0.104 | MIT OR Apache-2.0 |
 | `async-compression` | 0.4.51 | MIT OR Apache-2.0 |
 | `atomic-waker` | 1.1.2 | Apache-2.0 OR MIT |
@@ -126,12 +121,11 @@ Die mitgelieferte SQLite-Bibliothek (3.53.2, über `libsqlite3-sys`, Feature `bu
 | `byteorder` | 1.5.0 | Unlicense OR MIT |
 | `bytes` | 1.12.1 | MIT |
 | `camino` | 1.2.6 | MIT OR Apache-2.0 |
-| `cargo-platform` | 0.1.9 | MIT OR Apache-2.0 |
 | `cargo_metadata` | 0.19.2 | MIT |
+| `cargo-platform` | 0.1.9 | MIT OR Apache-2.0 |
 | `cfb` | 0.14.0 | MIT |
 | `cfg-if` | 1.0.5 | MIT OR Apache-2.0 |
 | `chacha20` | 0.10.2 | MIT OR Apache-2.0 |
-| `colorchoice` | 1.0.5 | MIT OR Apache-2.0 |
 | `compression-codecs` | 0.4.46 | MIT OR Apache-2.0 |
 | `compression-core` | 0.4.34 | MIT OR Apache-2.0 |
 | `const-oid` | 0.10.2 | Apache-2.0 OR MIT |
@@ -167,8 +161,6 @@ Die mitgelieferte SQLite-Bibliothek (3.53.2, über `libsqlite3-sys`, Feature `bu
 | `dtoa-short` | 0.3.5 | MPL-2.0 |
 | `dunce` | 1.0.5 | CC0-1.0 OR MIT-0 OR Apache-2.0 |
 | `dyn-clone` | 1.0.20 | MIT OR Apache-2.0 |
-| `env_filter` | 2.0.0 | MIT OR Apache-2.0 |
-| `env_logger` | 0.11.11 | MIT OR Apache-2.0 |
 | `equivalent` | 1.0.3 | Apache-2.0 OR MIT |
 | `erased-serde` | 0.4.10 | MIT OR Apache-2.0 |
 | `fallible-iterator` | 0.3.0 | MIT/Apache-2.0 |
@@ -221,10 +213,7 @@ Die mitgelieferte SQLite-Bibliothek (3.53.2, über `libsqlite3-sys`, Feature `bu
 | `indexmap` | 2.14.2 | Apache-2.0 OR MIT |
 | `infer` | 0.22.0 | MIT |
 | `ipnet` | 2.12.2 | MIT OR Apache-2.0 |
-| `is_terminal_polyfill` | 1.70.2 | MIT OR Apache-2.0 |
 | `itoa` | 1.0.18 | MIT OR Apache-2.0 |
-| `jiff` | 0.2.38 | Unlicense OR MIT |
-| `jiff-core` | 0.1.1 | Unlicense OR MIT |
 | `json-patch` | 4.2.0 | MIT/Apache-2.0 |
 | `jsonptr` | 0.7.1 | MIT OR Apache-2.0 |
 | `keyboard-types` | 0.8.3 | MIT OR Apache-2.0 |
@@ -247,7 +236,6 @@ Die mitgelieferte SQLite-Bibliothek (3.53.2, über `libsqlite3-sys`, Feature `bu
 | `notify-rust` | 4.18.2 | MIT OR Apache-2.0 |
 | `num-conv` | 0.2.2 | MIT OR Apache-2.0 |
 | `once_cell` | 1.21.4 | MIT OR Apache-2.0 |
-| `once_cell_polyfill` | 1.70.2 | MIT OR Apache-2.0 |
 | `open` | 5.4.4 | MIT |
 | `option-ext` | 0.2.0 | MPL-2.0 |
 | `parking_lot` | 0.12.5 | MIT OR Apache-2.0 |
@@ -268,11 +256,11 @@ Die mitgelieferte SQLite-Bibliothek (3.53.2, über `libsqlite3-sys`, Feature `bu
 | `proc-macro2` | 1.0.107 | MIT OR Apache-2.0 |
 | `quick-xml` | 0.42.0 | MIT |
 | `quote` | 1.0.47 | MIT OR Apache-2.0 |
-| `rand` | 0.9.5 | MIT OR Apache-2.0 |
 | `rand` | 0.10.3 | MIT OR Apache-2.0 |
+| `rand` | 0.9.5 | MIT OR Apache-2.0 |
 | `rand_chacha` | 0.9.0 | MIT OR Apache-2.0 |
-| `rand_core` | 0.9.5 | MIT OR Apache-2.0 |
 | `rand_core` | 0.10.1 | MIT OR Apache-2.0 |
+| `rand_core` | 0.9.5 | MIT OR Apache-2.0 |
 | `raw-window-handle` | 0.6.2 | MIT OR Apache-2.0 OR Zlib |
 | `regex` | 1.13.1 | MIT OR Apache-2.0 |
 | `regex-automata` | 0.4.18 | MIT OR Apache-2.0 |
@@ -295,7 +283,6 @@ Die mitgelieferte SQLite-Bibliothek (3.53.2, über `libsqlite3-sys`, Feature `bu
 | `selectors` | 0.38.0 | MPL-2.0 |
 | `semver` | 1.0.28 | MIT OR Apache-2.0 |
 | `serde` | 1.0.229 | MIT OR Apache-2.0 |
-| `serde-untagged` | 0.1.9 | MIT OR Apache-2.0 |
 | `serde_core` | 1.0.229 | MIT OR Apache-2.0 |
 | `serde_derive` | 1.0.229 | MIT OR Apache-2.0 |
 | `serde_derive_internals` | 0.29.1 | MIT OR Apache-2.0 |
@@ -306,6 +293,7 @@ Die mitgelieferte SQLite-Bibliothek (3.53.2, über `libsqlite3-sys`, Feature `bu
 | `serde_urlencoded` | 0.7.1 | MIT/Apache-2.0 |
 | `serde_with` | 3.24.0 | MIT OR Apache-2.0 |
 | `serde_with_macros` | 3.24.0 | MIT OR Apache-2.0 |
+| `serde-untagged` | 0.1.9 | MIT OR Apache-2.0 |
 | `serialize-to-javascript` | 0.1.2 | MIT OR Apache-2.0 |
 | `serialize-to-javascript-impl` | 0.1.2 | MIT OR Apache-2.0 |
 | `servo_arc` | 0.4.3 | MIT OR Apache-2.0 |
@@ -379,13 +367,12 @@ Die mitgelieferte SQLite-Bibliothek (3.53.2, über `libsqlite3-sys`, Feature `bu
 | `url` | 2.5.8 | MIT OR Apache-2.0 |
 | `urlpattern` | 0.6.0 | MIT |
 | `utf8_iter` | 1.0.4 | Apache-2.0 OR MIT |
-| `utf8parse` | 0.2.2 | Apache-2.0 OR MIT |
-| `uuid` | 1.28.0 | Apache-2.0 OR MIT |
 | `uuid` | 0.8.2 | Apache-2.0 OR MIT |
+| `uuid` | 1.28.0 | Apache-2.0 OR MIT |
 | `walkdir` | 2.5.0 | Unlicense/MIT |
 | `want` | 0.3.2 | MIT |
-| `web-time` | 1.1.0 | MIT OR Apache-2.0 |
 | `web_atoms` | 0.2.6 | MIT OR Apache-2.0 |
+| `web-time` | 1.1.0 | MIT OR Apache-2.0 |
 | `webpki-roots` | 1.0.9 | CDLA-Permissive-2.0 |
 | `webview2-com` | 0.39.1 | MIT |
 | `webview2-com-macros` | 0.8.1 | MIT |
@@ -393,6 +380,7 @@ Die mitgelieferte SQLite-Bibliothek (3.53.2, über `libsqlite3-sys`, Feature `bu
 | `winapi-util` | 0.1.11 | Unlicense OR MIT |
 | `window-vibrancy` | 0.8.1 | Apache-2.0 OR MIT |
 | `windows` | 0.62.2 | MIT OR Apache-2.0 |
+| `windows_x86_64_msvc` | 0.53.1 | MIT OR Apache-2.0 |
 | `windows-collections` | 0.3.2 | MIT OR Apache-2.0 |
 | `windows-core` | 0.62.2 | MIT OR Apache-2.0 |
 | `windows-future` | 0.3.2 | MIT OR Apache-2.0 |
@@ -408,7 +396,6 @@ Die mitgelieferte SQLite-Bibliothek (3.53.2, über `libsqlite3-sys`, Feature `bu
 | `windows-targets` | 0.53.5 | MIT OR Apache-2.0 |
 | `windows-threading` | 0.2.1 | MIT OR Apache-2.0 |
 | `windows-version` | 0.1.7 | MIT OR Apache-2.0 |
-| `windows_x86_64_msvc` | 0.53.1 | MIT OR Apache-2.0 |
 | `winnow` | 1.0.4 | MIT |
 | `writeable` | 0.6.4 | Unicode-3.0 |
 | `wry` | 0.57.0 | Apache-2.0 OR MIT |
@@ -428,11 +415,11 @@ Die mitgelieferte SQLite-Bibliothek (3.53.2, über `libsqlite3-sys`, Feature `bu
 | `zstd-safe` | 7.3.0 | BSD-3-Clause |
 | `zstd-sys` | 2.1.2+zstd.1.5.7 | BSD-3-Clause |
 
-Zusammenfassung: 141× MIT OR Apache-2.0, 56× MIT, 29× Apache-2.0 OR MIT, 18× Unicode-3.0, 6× Unlicense OR MIT, 6× MIT/Apache-2.0, 5× BSD-3-Clause, 5× MPL-2.0, 4× Unlicense/MIT, 3× ISC, 2× Apache-2.0 OR ISC OR MIT, 2× MIT OR Zlib OR Apache-2.0, 2× Apache-2.0, 1× 0BSD OR MIT OR Apache-2.0, 1× BSD-3-Clause AND MIT, 1× BSD-3-Clause/MIT, 1× Apache-2.0 AND MIT, 1× CC0-1.0 OR MIT-0 OR Apache-2.0, 1× Apache-2.0 / MIT, 1× Zlib, 1× MIT OR Apache-2.0 OR Zlib, 1× Apache-2.0 AND ISC, 1× Apache-2.0 OR BSL-1.0, 1× (MIT OR Apache-2.0) AND Unicode-3.0, 1× CDLA-Permissive-2.0, 1× BSD-2-Clause OR Apache-2.0 OR MIT.
+Summary (315 crates): 152× MIT OR Apache-2.0, 63× MIT, 34× Apache-2.0 OR MIT, 18× Unicode-3.0, 6× MIT/Apache-2.0, 5× BSD-3-Clause, 5× MPL-2.0, 4× Unlicense OR MIT, 4× Unlicense/MIT, 3× ISC, 2× Apache-2.0, 2× Apache-2.0 OR ISC OR MIT, 2× MIT OR Zlib OR Apache-2.0, 2× Zlib, 1× (MIT OR Apache-2.0) AND Unicode-3.0, 1× 0BSD OR MIT OR Apache-2.0, 1× Apache-2.0 / MIT, 1× Apache-2.0 AND ISC, 1× Apache-2.0 AND MIT, 1× Apache-2.0 OR BSL-1.0, 1× BSD-2-Clause OR Apache-2.0 OR MIT, 1× BSD-3-Clause AND MIT, 1× BSD-3-Clause/MIT, 1× CC0-1.0 OR MIT-0 OR Apache-2.0, 1× CDLA-Permissive-2.0, 1× MIT AND BSD-3-Clause, 1× MIT OR Apache-2.0 OR Zlib.
 
-## MapLibre GL JS – Lizenztext
+## MapLibre GL JS – license text
 
-MapLibre GL JS 6.12.0 (BSD-3-Clause) verlangt die Weitergabe des folgenden Hinweises mit jeder Binärverteilung (Text aus `node_modules/maplibre-gl/LICENSE.txt`):
+MapLibre GL JS 6.12.0 (BSD-3-Clause) requires the following notice to be reproduced with every binary distribution (text from `node_modules/maplibre-gl/LICENSE.txt`):
 
 ```text
 Copyright (c) 2023, MapLibre contributors

@@ -171,8 +171,8 @@
   color: var(--accent);
 }
 
-.traffic-more summary {
-  cursor: pointer;
+/* foldable parts of the card (ui/Collapsible.tsx; photo, route, remarks), remembered per part */
+.traffic-more-head {
   font-size: var(--fs-sm);
   color: var(--text-muted);
 }

@@ -33,17 +33,30 @@ The release workflow needs, under *Repository → Settings → Secrets and varia
 
 ## Creating a release
 
-1. Bump the version in `app/src-tauri/tauri.conf.json` (`version`) and `app/package.json`, add to `CHANGELOG.md` (in English), commit.
-2. Create and push the tag:
+1. Bump the version everywhere it is written down, add the section to `CHANGELOG.md` (in English) and commit:
+
+   | File | Field |
+   |---|---|
+   | `app/package.json` | `version` |
+   | `app/package-lock.json` | `version` and `packages[""].version` (two places; `npm install` in `app/` rewrites both) |
+   | `app/src-tauri/tauri.conf.json` | `version` – the installer and the updater use this one |
+   | `Cargo.toml` | `[workspace.package] version` (all crates inherit it) |
+   | `Cargo.lock` | the `vectasim*` entries – run any `cargo` command (e.g. `cargo check`) after the Cargo.toml bump |
+   | `THIRD-PARTY-NOTICES.md` | “as of version …” in the header, when the tables are regenerated |
+   | `README.md`, `README.de.md` | the *Status* line (“Beta 0.5 …”), when the minor version changes |
+
+2. Tag the release on the **public snapshot**, not in a development checkout. Releases are built from a snapshot of the development tree that the maintainer’s snapshot script publishes as a single commit; the same script creates the tag `vX.Y.Z` on that commit and pushes it. Never push a tag from a development checkout to the public repository: its commits contain history that is not part of the snapshot. To make that impossible by accident, the development checkout has no push URL for the public remote:
    ```bash
-   git tag v0.2.0 && git push origin v0.2.0
+   git remote set-url --push origin no_push
    ```
-3. The workflow `.github/workflows/release.yml` builds the NSIS installer on `windows-latest`, signs the updater artifact and creates a **draft release** with `VectaSim_0.2.0_x64-setup.exe`, `…-setup.exe.sig` and `latest.json` (takes about 10–15 min).
-4. Check the draft and publish it – from then on, running installations find the update.
+3. The workflow `.github/workflows/release.yml` first checks that the tag matches every version field above that it can read (package.json, package-lock.json ×2, tauri.conf.json, Cargo.toml, Cargo.lock) and stops if one differs. It then builds the NSIS installer on `windows-latest`, signs the updater artifact and creates a **draft release** with `VectaSim_X.Y.Z_x64-setup.exe`, `…-setup.exe.sig` and `latest.json` (takes about 10–15 min). The release text – also the `notes` in `latest.json`, shown in *Settings → Updates* – is a short English pointer to the CHANGELOG.
+4. Check the draft and publish it **without** the pre-release flag (the updater reads `releases/latest`, which skips pre-releases) – from then on, running installations find the update.
 
-The workflow `ci.yml` runs `cargo test`, `clippy -D warnings`, `tsc` and `npm test` on every push.
+The workflow `ci.yml` runs `cargo clippy -D warnings`, `cargo test`, `cargo audit`, `npm audit`, `eslint`, `tsc` and `npm test` on every push to `main` and on every pull request. The release workflow does not repeat them; tag a commit whose CI run is green.
 
-The release workflow pins `tauri-apps/tauri-action` to a fixed commit SHA (the comment names the version), so that a moved tag cannot slip unnoticed into the build that has access to the signing key. When updating, change the SHA and the comment together.
+Both workflows pin every third-party action to a full commit SHA (the comment names the release), check out without persisting the token (`persist-credentials: false`) and run with read-only permissions; only the release job gets `contents: write`. A moved tag of an action therefore cannot slip unnoticed into the build that has access to the signing key. When updating an action, change the SHA and the comment together and verify the SHA, e.g. `gh api repos/<owner>/<repo>/git/ref/tags/<tag>` (an annotated tag needs one more step: `gh api repos/<owner>/<repo>/git/tags/<sha>`). The Rust toolchain is installed with `rustup toolchain install` from `rust-toolchain.toml`.
+
+The installer ships `LICENSE.txt` (VectaSim’s MIT license) and `THIRD-PARTY-NOTICES.md` next to `vectasim.exe` (`tauri.conf.json` → `bundle.resources`). Regenerate the notices when dependencies change.
 
 ## Testing locally
 

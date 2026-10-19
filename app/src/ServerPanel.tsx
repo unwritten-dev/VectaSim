@@ -25,6 +25,7 @@ import {
   type Tone,
 } from "./serverLinks";
 import "./server.css";
+import { errorToast } from "./ui/errorToast";
 
 /** Client count and "läuft seit" refresh while the panel is open. */
 const POLL_MS = 3000;
@@ -48,7 +49,7 @@ async function copy(text: string, copiedTitle: string): Promise<boolean> {
     showToast({ id: "server-copy", tone: "ok", title: copiedTitle, durationMs: 2500 });
     return true;
   } catch (e) {
-    showToast({ id: "server-copy", tone: "warn", title: t("settings.server.copyFailed"), body: String(e) });
+    showToast({ id: "server-copy", tone: "warn", ...errorToast(t("settings.server.copyFailed"), e, "settings") });
     return false;
   }
 }
@@ -87,7 +88,7 @@ export default function ServerPanel({
       later(() => setCopiedId((c) => (c === id ? null : c)));
     });
   const copyLabel = (id: string) => (copiedId === id ? t("settings.server.copiedButton") : t("shell.action.copy"));
-  const fail = (e: unknown) => (onError ? onError(String(e)) : showToast({ tone: "warn", title: t("settings.notSaved"), body: String(e) }));
+  const fail = (e: unknown) => (onError ? onError(String(e)) : showToast({ tone: "warn", ...errorToast(t("settings.notSaved"), e, "settings") }));
 
   useEffect(() => {
     let alive = true;

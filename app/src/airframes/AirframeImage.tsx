@@ -5,7 +5,7 @@ import type { Airframe } from "../types";
 import { silhouettePath, wakeCategory } from "../map/aircraftIcons";
 import { usePrefs } from "../prefs";
 import { privacy } from "../format";
-import { needsPhotoLookup, photoCredit } from "./airframe";
+import { needsPhotoLookup, photoCredit, safePhotoLink } from "./airframe";
 import { useT } from "../i18n";
 
 // One lazy lookup per registration and app session; the backend caches and rate-limits,
@@ -62,6 +62,8 @@ export default function AirframeImage({ airframe: a, size = "thumb", credit = fa
   const [broken, setBroken] = useState(false);
   useEffect(() => setBroken(false), [url]);
   const line = a ? photoCredit(a) : null;
+  /** Only Planespotters photo pages are opened (Security N4). */
+  const link = safePhotoLink(a?.imageLink);
   const show = !!url && !broken;
   // Planespotters requires the photographer credit and a link on every displayed photo; where
   // the caption line is not shown (thumbnails, inside buttons) a small "©" overlay carries both.
@@ -69,7 +71,7 @@ export default function AirframeImage({ airframe: a, size = "thumb", credit = fa
   const openLink = (e: React.SyntheticEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (a?.imageLink) openUrl(a.imageLink).catch(() => {});
+    if (link) openUrl(link).catch(() => {});
   };
   return (
     <figure className={`af-image af-${size} ${className}`}>
@@ -82,9 +84,9 @@ export default function AirframeImage({ airframe: a, size = "thumb", credit = fa
         {overlay && (
           <span
             className="af-credit-badge"
-            role={a?.imageLink ? "link" : undefined}
-            tabIndex={a?.imageLink ? 0 : undefined}
-            title={a?.imageLink ? t("logbook.airframe.openPhoto", { credit: line! }) : line!}
+            role={link ? "link" : undefined}
+            tabIndex={link ? 0 : undefined}
+            title={link ? t("logbook.airframe.openPhoto", { credit: line! }) : line!}
             aria-label={line!}
             onClick={openLink}
             onMouseDown={(e) => e.stopPropagation()}
@@ -99,8 +101,8 @@ export default function AirframeImage({ airframe: a, size = "thumb", credit = fa
       {credit && size === "large" && (
         <figcaption className="af-credit detail">
           {show && line ? (
-            a?.imageLink ? (
-              <button className="link-btn" onClick={() => openUrl(a.imageLink!).catch(() => {})} title={a.imageLink}>
+            link ? (
+              <button className="link-btn" onClick={() => openUrl(link).catch(() => {})} title={link}>
                 {line}
               </button>
             ) : (

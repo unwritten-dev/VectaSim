@@ -50,7 +50,7 @@
   white-space: nowrap;
 }
 .hist-n {
-  color: var(--text-faint);
+  color: var(--text-muted); /* sample size is information (never --text-faint) */
 }
 .hist-delta {
   display: flex;
@@ -191,7 +191,7 @@
   border-top: 1px dashed var(--text-faint);
 }
 .tr-unit {
-  fill: var(--text-faint);
+  fill: var(--text-muted); /* axis unit is information */
 }
 /* narrow windows: the tables scroll sideways, the first column (date / period) stays in view */
 .tr .dp-table-scroll table.data-table th:first-child,

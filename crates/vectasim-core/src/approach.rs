@@ -1288,7 +1288,7 @@ pub fn find_attempts(track: &[ApproachSample], phases: &[PhaseMark], touchdowns:
         let descended = (0..i)
             .rev()
             // a descent into this point: nothing lower in between, no ground contact
-            .take_while(|&k| s.t_ms - track[k].t_ms <= lookback_ms && !track[k].on_ground && track[k].altitude_msl_ft >= s.altitude_msl_ft)
+            .take_while(|&k| s.t_ms.saturating_sub(track[k].t_ms) <= lookback_ms && !track[k].on_ground && track[k].altitude_msl_ft >= s.altitude_msl_ft)
             .any(|k| track[k].altitude_msl_ft >= s.altitude_msl_ft + cfg.ga_min_descent_ft);
         if !descended || near_touchdown(s.t_ms, track[j].t_ms) {
             continue;
@@ -1632,7 +1632,7 @@ fn exceedances(pts: &[ApproachProfilePoint], lo: usize, hi: usize, top_ft: f64, 
         let idx: Vec<usize> =
             (lo..=hi).filter(|&l| !pts[l].on_ground && pts[l].hat_ft <= top_ft && pts[l].hat_ft >= sp.floor_ft && pts[l].hat_ft <= sp.ceil_ft).collect();
         let vals: Vec<Option<f64>> = idx.iter().map(|&l| measure(sp.kind, pts, l)).collect();
-        let dur = |a: usize, b: usize| (pts[idx[b]].t_ms - pts[idx[a]].t_ms) as f64 / 1000.0 + 1.0;
+        let dur = |a: usize, b: usize| (pts[idx[b]].t_ms.saturating_sub(pts[idx[a]].t_ms)) as f64 / 1000.0 + 1.0;
         let mut k = 0;
         while k < idx.len() {
             if !vals[k].is_some_and(|v| outside(v, sp.s1)) {

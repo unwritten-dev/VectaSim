@@ -175,7 +175,7 @@
     "reset": "Reset",
     "folder": "Folder",
     "savedMark": "✓ saved",
-    "about": "VectaSim {version} · Your logbook lives only on this PC – no account, no cloud. Data: map © OpenStreetMap contributors, OpenFreeMap · airports OurAirports (public domain) · weather NOAA aviationweather.gov (fallback VATSIM) · online traffic VATSIM · IVAO · flight plans SimBrief (Navigraph) · aircraft photos Planespotters.net ·",
+    "about": "VectaSim {version} · Your logbook lives only on this PC – no account, no cloud. Data: map © OpenStreetMap contributors, OpenFreeMap · airports OurAirports (public domain) · weather NOAA aviationweather.gov (fallback VATSIM) · online traffic VATSIM · IVAO · flight plans SimBrief (Navigraph) · aircraft photos Planespotters.net · satellite imagery EOxCloudless 2017 by EOX IT Services GmbH (contains modified Copernicus Sentinel data, CC BY 4.0) · precipitation radar RainViewer · clouds EUMETSAT (contains modified Meteosat data) · country borders Natural Earth (public domain) · Thanks to npooky for the first flight test ·",
     "thirdParty": "Third-party licenses",
     "sim": {
       "textLanding": "Show the landing rate in the simulator (MSFS)",

@@ -6,6 +6,7 @@ import "../map/maplibreWorker";
 import { followLanguage, loadBasemapStyle } from "../map/basemap";
 import { applyProjection, useGlobe, withProjection } from "../map/common";
 import { COLOR } from "../theme";
+import MapUnavailable from "../map/MapUnavailable";
 import { t as tGlobal, useLanguage, useT } from "../i18n";
 import { fmtDate } from "../i18n/number";
 import { countryName, geometryBounds, globeZoomFor, landingsLabel, type Country, type CountryVisit, type VisitedAirport } from "./countries.ts";
@@ -131,6 +132,8 @@ export default function CountryMap({ outlines, countries, visits, airports, show
   const readyRef = useRef(false);
   const hoverRef = useRef<string | null>(null);
   const [hover, setHover] = useState<Hover | null>(null);
+  /** The map could not be created (no WebGL2): MapUnavailable instead of a blank area. */
+  const [mapFailed, setMapFailed] = useState(false);
   /** Globe (default) or flat world map: the same choice as the live and track maps. */
   const [globe] = useGlobe();
   const globeRef = useRef(globe);
@@ -184,8 +187,11 @@ export default function CountryMap({ outlines, countries, visits, airports, show
       map.touchZoomRotate.disableRotation();
       map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
       mapRef.current = map;
-      map.on("load", () => {
+      // one handler for every style load: the first, a theme change and a WebGL context restore
+      // (sync adds the layers only when the new style lacks them)
+      map.on("style.load", () => {
         applyProjection(map, globeRef.current);
+        hoverRef.current = null;
         readyRef.current = true;
         syncRef.current();
       });
@@ -209,26 +215,29 @@ export default function CountryMap({ outlines, countries, visits, airports, show
         select(iso && iso !== cur ? iso : null);
       });
       let themeSeq = 0;
-      const onTheme = () => {
+      const reloadStyle = () => {
         const mySeq = ++themeSeq;
         void loadBasemapStyle().then((next) => {
           if (mySeq !== themeSeq || mapRef.current !== map) return;
           readyRef.current = false;
           hoverRef.current = null;
-          map.once("style.load", () => {
-            readyRef.current = true;
-            syncRef.current();
-          });
           map.setStyle(withProjection(next, globeRef.current, COLOR.bg), { diff: false });
         });
       };
-      window.addEventListener("theme:changed", onTheme);
+      window.addEventListener("theme:changed", reloadStyle);
+      // WebGL context lost (GPU reset): nothing to draw until the restore, which loads a fresh
+      // style like a theme change (the serialized one MapLibre re-applies would do as well, but
+      // the fresh one keeps one path for both)
+      map.on("webglcontextlost", () => {
+        readyRef.current = false;
+      });
+      map.on("webglcontextrestored", reloadStyle);
       // basemap names follow the UI language (map/basemap.ts)
       const offLang = followLanguage(map);
       const ro = new ResizeObserver(() => map.resize());
       ro.observe(container);
       return () => {
-        window.removeEventListener("theme:changed", onTheme);
+        window.removeEventListener("theme:changed", reloadStyle);
         offLang();
         ro.disconnect();
         map.remove();
@@ -238,10 +247,16 @@ export default function CountryMap({ outlines, countries, visits, airports, show
     };
     let disposed = false;
     let teardown: (() => void) | undefined;
-    void loadBasemapStyle().then((style) => {
-      if (disposed || !containerRef.current || mapRef.current) return;
-      teardown = setupMap(containerRef.current, style);
-    });
+    void loadBasemapStyle()
+      .then((style) => {
+        if (disposed || !containerRef.current || mapRef.current) return;
+        teardown = setupMap(containerRef.current, style);
+      })
+      // no WebGL2: a hint instead of a blank area
+      .catch((e) => {
+        console.error("country map: could not create the map", e);
+        if (!disposed) setMapFailed(true);
+      });
     return () => {
       disposed = true;
       teardown?.();
@@ -295,6 +310,7 @@ export default function CountryMap({ outlines, countries, visits, airports, show
   return (
     <div className="country-map-wrap">
       <div ref={containerRef} className="map country-map" aria-hidden="true" />
+      {mapFailed && <MapUnavailable />}
       {hover && hc && (
         <div className="country-tooltip" style={{ left: hover.x + 14, top: hover.y + 14 }} role="presentation">
           <strong>{countryName(hc, lang)}</strong>

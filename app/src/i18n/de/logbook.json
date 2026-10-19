@@ -5,7 +5,10 @@
       "completed": "abgeschlossen",
       "active": "Aufzeichnung läuft",
       "interrupted": "unvollständig",
-      "interruptedShort": "unterbrochen"
+      "interruptedShort": "unterbrochen",
+      "discarded": "verworfen (Bodensitzung)",
+      "discardedShort": "verworfen",
+      "discardedTitle": "Bodensitzung: nie gestartet – zählt nicht als Flug und nicht in Statistiken"
     },
     "filter": {
       "all": "Alle",
@@ -134,6 +137,7 @@
       "cancel": "Abbrechen",
       "deletePermanentTitle": "Endgültig löschen (Entf)",
       "deleteTitle": "In den Papierkorb legen (Entf)",
+      "deleteRecording": "Der Flug wird gerade aufgezeichnet",
       "delete": "Löschen",
       "noTrackImported": "Ohne Aufzeichnung – aus Importdatei.",
       "noTrack": "Für diesen Flug wurde kein Track aufgezeichnet.",

@@ -30,7 +30,7 @@ VectaSim läuft neben Microsoft Flight Simulator 2020/2024 und X-Plane 12.1.1 od
 |---|---|
 | **Automatisch** | Verbindet sich mit MSFS oder X-Plane 12.1.1+, erkennt Off-Block, Start, Landung und On-Block und legt den Flug ins Logbuch – ohne Knopfdruck. Pause, Slew und Zeitraffer werden markiert, nicht mitgezählt. |
 | **Anflug & Landung** | „Stabil ab … ft“, Gates bei 10 nm, FAF, 1000 und 500 ft, Landerate mit Herkunft, Aufsetzpunkt auf der Piste, Bounces, Go-arounds als Entscheidung statt als Fehler. |
-| **Live-Karte** | Weltansicht als Globus (umschaltbar auf flach), eigenes Flugzeug, höhencodierter Track, auf Wunsch als 3D-Höhenprofil im Raum mit einem schlichten 3D-Modell deiner Flugzeugklasse in Flughöhe, Flughäfen mit Taxiways und Gates, Online-Verkehr und Lotsen von VATSIM und/oder IVAO (Klick auf ein Flugzeug öffnet eine Flugkarte mit Route, Höhe/Trend, Entfernung und Planespotters-Foto, wenn das Kennzeichen bekannt ist, mit Folgen und Großkreis-Route), METAR-Ringe nach Flugkategorie (VFR/MVFR/IFR/LIFR, erklärt in einer kleinen Legende), auf Wunsch Regenradar und Wolken, Satellitenbild als alternativer Kartengrund, SimBrief-Route, HUD mit Phase, Höhe, Speed, Sinkrate, Restdistanz und ETA. |
+| **Live-Karte** | Weltansicht als Globus (umschaltbar auf flach), eigenes Flugzeug, höhencodierter Track, auf Wunsch als 3D-Höhenprofil im Raum mit einem schlichten 3D-Modell deiner Flugzeugklasse in Flughöhe, Flughäfen mit Taxiways und Gates, Online-Verkehr und Lotsen von VATSIM und/oder IVAO (Klick auf ein Flugzeug öffnet eine Flugkarte mit Route, Höhe/Trend, Entfernung und Planespotters-Foto, wenn das Kennzeichen bekannt ist, mit Folgen, Großkreis-Route und, in 3D, dem geflogenen Weg der letzten zwei Stunden als Höhenvorhang), METAR-Ringe nach Flugkategorie (VFR/MVFR/IFR/LIFR, erklärt in einer kleinen Legende), auf Wunsch Regenradar und Wolken, Satellitenbild als alternativer Kartengrund, SimBrief-Route, HUD mit Phase, Höhe, Speed, Sinkrate, Restdistanz und ETA; jeder Block des Seitenpanels lässt sich einklappen und merkt sich das. |
 | **Logbuch** | Flight-Strips mit Route, Blockzeiten, Landerate und Mini-Runway; Flotte nach Kennzeichen mit Fotos; Flughäfen; Streubilder deiner Aufsetzpunkte und Anflüge; Notizen, Tags, Sterne; Jahresrückblick. |
 | **Länder** | Weltkarte als Globus, auf der jedes Land eingefärbt ist, in dem du gelandet bist – mit Fortschritt je Kontinent. |
 | **Deine Daten** | Eine SQLite-Datei auf deinem PC, tägliche Sicherung in einen Ordner deiner Wahl (OneDrive, NAS …), Papierkorb, Export als CSV, GPX, KML und JSON, Import alter Logbücher (Volanta, SimToolkitPro, VA-CSV). |
@@ -123,7 +123,7 @@ Updates meldet VectaSim beim Start und installiert sie nach Bestätigung. Mehr D
 ## Deine Daten & Datenschutz
 
 - Dein Logbuch liegt in `%APPDATA%\io.vectasim.app\`; Protokolle und der Standardordner für Sicherungen liegen in `%LOCALAPPDATA%\io.vectasim.app\`.
-- VectaSim nimmt nur Kontakt auf zu: OpenFreeMap (Kartenkacheln), EOX (Satellitenkacheln, nur mit „Satellit“), RainViewer und EUMETSAT (Radar und Wolken, nur wenn eingeschaltet), aviationweather.gov (METAR), VATSIM und IVAO (nur wenn eingeschaltet), SimBrief (nur mit deiner Pilot-ID), Planespotters.net (Flugzeugfotos, abschaltbar), GitHub (Updates) und dem SDK-Server von Microsoft (nur für den SimConnect-Download).
+- VectaSim nimmt nur Kontakt auf zu: OpenFreeMap (Kartenkacheln), EOX (Satellitenkacheln, nur mit „Satellit“), RainViewer und EUMETSAT (Radar und Wolken, nur wenn eingeschaltet), aviationweather.gov (METAR; fällt es aus, `metar.vatsim.net` – auch bei ausgeschaltetem VATSIM-Verkehr), VATSIM und IVAO (Verkehr, nur wenn eingeschaltet), SimBrief (nur mit deiner Pilot-ID), Planespotters.net (Flugzeugfotos, abschaltbar), GitHub (Updates), dem SDK-Server von Microsoft (nur für den SimConnect-Download) und Discord (nur der lokale Discord-Client, nur mit eingeschaltetem Discord-Status).
 
 ## Deinstallieren
 
@@ -154,6 +154,8 @@ Alles für Entwicklerinnen und Entwickler – Stack, Bauen aus dem Quellcode, Ar
 Karte: © [OpenStreetMap](https://www.openstreetmap.org/copyright)-Mitwirkende, Tiles von [OpenFreeMap](https://openfreemap.org) · Satellitenbild: [EOxCloudless](https://cloudless.eox.at) von EOX IT Services GmbH (enthält veränderte Copernicus-Sentinel-Daten 2017, CC BY 4.0) · Flughäfen: [OurAirports](https://ourairports.com) (Public Domain) · Ländergrenzen: [Natural Earth](https://www.naturalearthdata.com) (Public Domain) · Wetter: NOAA aviationweather.gov, Radar von [RainViewer](https://www.rainviewer.com), Wolken: enthält veränderte Meteosat-Daten von [EUMETSAT](https://www.eumetsat.int) · Online-Verkehr: [VATSIM](https://vatsim.net) · [IVAO](https://ivao.aero) · Flugpläne: [SimBrief](https://www.simbrief.com) · Flugzeugfotos: [Planespotters.net](https://www.planespotters.net) mit Fotografen-Credit.
 
 SimConnect ist Bestandteil des Microsoft Flight Simulator SDK und wird nicht mitgeliefert; auf Wunsch lädt VectaSim die `SimConnect.dll` aus dem offiziellen SDK-Download von Microsoft.
+
+Danke an **npooky** für den ersten Flugtest im echten Simulator.
 
 Lizenzen der verwendeten Bibliotheken, Schriften und Daten: [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 

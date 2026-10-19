@@ -15,6 +15,7 @@
 import type { Airport, Network, Pilot } from "../types";
 import { WAKE_SIZE, wakeCategory } from "./aircraftIcons";
 import { modelKind, type ModelKind } from "./aircraftMeshes";
+import type { TrackPoint } from "./common";
 
 /** Models from this zoom (pitched view only). */
 export const TRAFFIC3D_MIN_ZOOM = 8;
@@ -33,8 +34,8 @@ export const GROUND_GS_KT = 40;
 export const GROUND_NEAR_FT = 250;
 /** Dead reckoning runs at most this long past the last fix. */
 export const DR_MAX_S = 20;
-/** A new fix blends in from the drawn position over this time. */
-export const FIX_BLEND_MS = 1200;
+/** A new fix blends in from the drawn position over this time (smoothstep, blendWeight). */
+export const FIX_BLEND_MS = 1500;
 /** A fix further than this (degrees) from the drawn position is a jump, not blended. */
 const JUMP_DEG = 0.2;
 
@@ -182,10 +183,22 @@ export function fixOf(p: Pilot, fields: readonly FieldRef[], tMs: number): Traff
 
 const lerpAngle = (a: number, b: number, f: number) => a + dLon(a, b) * f;
 
+/**
+ * Share of a correction still applied `dtMs` after it started: 1 → 0 over FIX_BLEND_MS along a
+ * smoothstep, so the correction starts and ends with zero speed – the aircraft neither jerks when
+ * a fix arrives nor when the blend ends (a linear fade did both: a kink in speed at each end).
+ */
+export function blendWeight(dtMs: number): number {
+  const t = Math.min(1, Math.max(0, dtMs / FIX_BLEND_MS));
+  return 1 - t * t * (3 - 2 * t);
+}
+
 interface Track {
   fix: TrafficFix;
-  /** Drawn pose minus the new fix at its arrival; decays to 0 over FIX_BLEND_MS. */
+  /** Drawn pose minus the new fix when the correction started; decays to 0 over FIX_BLEND_MS. */
   off: TrafficPose | null;
+  /** Start of the correction (ms, performance.now clock). */
+  offT: number;
 }
 
 /**
@@ -215,7 +228,15 @@ export class TrafficTracks {
       const old = this.tracks.get(f.key);
       if (old && old.fix.lat === f.lat && old.fix.lon === f.lon && old.fix.headingDeg === f.headingDeg && old.fix.gsKt === f.gsKt) {
         // same report: keep timing and blend, refresh the rest (height reference may have loaded)
-        next.set(f.key, { fix: { ...f, tMs: old.fix.tMs }, off: old.off });
+        const fix = { ...f, tMs: old.fix.tMs };
+        if (fix.hFt === old.fix.hFt) {
+          next.set(f.key, { fix, off: old.off, offT: old.offT });
+          continue;
+        }
+        // a new height reference: glide to the new height instead of jumping
+        const drawn = this.pose(old, nowMs);
+        const [lat, lon] = deadReckon(fix.lat, fix.lon, fix.headingDeg, fix.gsKt, (nowMs - fix.tMs) / 1000);
+        next.set(f.key, { fix, off: { lat: drawn.lat - lat, lon: dLon(lon, drawn.lon), headingDeg: dLon(fix.headingDeg, drawn.headingDeg), hFt: drawn.hFt - fix.hFt }, offT: nowMs });
         continue;
       }
       let off: TrafficPose | null = null;
@@ -224,7 +245,7 @@ export class TrafficTracks {
         const jump = Math.abs(drawn.lat - f.lat) + Math.abs(dLon(f.lon, drawn.lon)) > JUMP_DEG;
         if (!jump) off = { lat: drawn.lat - f.lat, lon: dLon(f.lon, drawn.lon), headingDeg: dLon(f.headingDeg, drawn.headingDeg), hFt: drawn.hFt - f.hFt };
       }
-      next.set(f.key, { fix: { ...f, tMs: nowMs }, off });
+      next.set(f.key, { fix: { ...f, tMs: nowMs }, off, offT: nowMs });
     }
     this.tracks = next;
   }
@@ -232,7 +253,7 @@ export class TrafficTracks {
   private pose(t: Track, nowMs: number): TrafficPose {
     const f = t.fix;
     const [lat, lon] = deadReckon(f.lat, f.lon, f.headingDeg, f.gsKt, (nowMs - f.tMs) / 1000);
-    const k = t.off ? 1 - Math.min(1, Math.max(0, (nowMs - f.tMs) / FIX_BLEND_MS)) : 0;
+    const k = t.off ? blendWeight(nowMs - t.offT) : 0;
     if (!t.off || k <= 0) return { lat, lon, headingDeg: f.headingDeg, hFt: f.hFt };
     let l = lon + t.off.lon * k;
     if (l > 180) l -= 360;
@@ -251,10 +272,33 @@ export class TrafficTracks {
     const list = keys ? [...keys].map((k) => this.tracks.get(k)).filter((t): t is Track => !!t) : this.tracks.values();
     for (const t of list) {
       const age = nowMs - t.fix.tMs;
-      if ((t.fix.gsKt > 1 && age < DR_MAX_S * 1000) || (t.off && age < FIX_BLEND_MS)) return true;
+      if ((t.fix.gsKt > 1 && age < DR_MAX_S * 1000) || (t.off && nowMs - t.offT < FIX_BLEND_MS)) return true;
     }
     return false;
   }
+}
+
+/** One fix of an aircraft's flown track as the backend keeps it (`traffic_track`, vectasim_online::history). */
+export interface TrafficHistoryFix {
+  tMs: number;
+  latitude: number;
+  longitude: number;
+  altitudeFt: number;
+  groundSpeedKt: number;
+  onGround?: boolean;
+}
+
+/**
+ * Curtain points of a flown track: heights on the traffic models' scale (trafficHeightFt with the
+ * airports around the view), so the curtain's top edge meets the model.
+ */
+export function historyPoints(fixes: readonly TrafficHistoryFix[], fields: readonly FieldRef[]): TrackPoint[] {
+  const out: TrackPoint[] = [];
+  for (const f of fixes) {
+    if (!Number.isFinite(f.latitude) || !Number.isFinite(f.longitude)) continue;
+    out.push({ lon: f.longitude, lat: f.latitude, altFt: f.altitudeFt, hFt: trafficHeightFt(f, fields) });
+  }
+  return out;
 }
 
 /** View box as MapLibre reports it (longitudes may run past ±180). */
@@ -338,6 +382,30 @@ export function buildInstances(items: readonly InstanceInput[]): Map<ModelKind, 
     fill.set(it.kind, i + INSTANCE_FLOATS);
   }
   return out;
+}
+
+/**
+ * Largest tile coordinate the globe shader takes for a normal vertex: beyond ±32767 MapLibre's
+ * projectToSphere snaps it to a pole (the curtain uses the same limit, curtainLayer.pickTile).
+ */
+export const TILE_COORD_LIMIT = 30_000;
+
+/**
+ * Reference tile for the traffic models: the tile under the map centre (`cx`, `cy` Mercator) at
+ * the map's zoom, one level coarser at a time until every instance (`pts`, Mercator, already in
+ * the world copy nearest the centre) lies within TILE_COORD_LIMIT tile units of it.
+ */
+export function trafficRefTile(cx: number, cy: number, zoom: number, pts: ReadonlyArray<readonly [number, number]>): { tx: number; ty: number; tz: number } {
+  let z = Math.max(0, Math.min(18, Math.floor(zoom)));
+  for (;;) {
+    const n = 2 ** z;
+    const tx = Math.min(n - 1, Math.max(0, Math.floor(cx * n)));
+    const ty = Math.min(n - 1, Math.max(0, Math.floor(cy * n)));
+    let reach = 0;
+    for (const [x, y] of pts) reach = Math.max(reach, Math.abs(x * n - tx), Math.abs(y * n - ty));
+    if (z === 0 || !(reach * 8192 > TILE_COORD_LIMIT)) return { tx, ty, tz: z };
+    z--;
+  }
 }
 
 /**

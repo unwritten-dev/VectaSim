@@ -15,10 +15,16 @@ interface Props<T extends string> {
   idBase: string;
   label: string;
   className?: string;
+  /**
+   * The content sits in <TabPanel idBase id> elements (default). false: the tabs switch views that
+   * are not tab panels (logbook sections) – no aria-controls then, a reference to a missing id
+   * is invalid ARIA.
+   */
+  panels?: boolean;
 }
 
 /** WAI-ARIA tablist: roving tabindex, ←/→/Home/End move and activate. */
-export function Tabs<T extends string>({ tabs, active, onChange, idBase, label, className }: Props<T>) {
+export function Tabs<T extends string>({ tabs, active, onChange, idBase, label, className, panels = true }: Props<T>) {
   const ref = useRef<HTMLDivElement>(null);
   const onKey = (e: KeyboardEvent) => {
     const i = tabs.findIndex((t) => t.id === active);
@@ -40,7 +46,7 @@ export function Tabs<T extends string>({ tabs, active, onChange, idBase, label, 
           role="tab"
           id={`${idBase}-tab-${t.id}`}
           aria-selected={t.id === active}
-          aria-controls={`${idBase}-panel-${t.id}`}
+          aria-controls={panels ? `${idBase}-panel-${t.id}` : undefined}
           tabIndex={t.id === active ? 0 : -1}
           className={`tab${t.id === active ? " active" : ""}`}
           onClick={() => onChange(t.id)}
