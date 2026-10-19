@@ -472,6 +472,21 @@ describe("buildPirep", () => {
     expect(text).toContain("Integrität           Slew");
   });
 
+  it("carries the g-load over the flight when it was measured", () => {
+    expect(buildPirep(detail(), ofp(), null).json.gLoad).toBeNull();
+    const gLoad = {
+      max: { g: 1.4234, timestampMs: 1, phase: "climb" as const, altitudeMslFt: 3_200 },
+      min: { g: 0.7081, timestampMs: 2, phase: "descent" as const, altitudeMslFt: 9_000 },
+      highCount: 0,
+      lowCount: 1,
+      source: "track" as const,
+    };
+    const { json, text } = buildPirep(detail({ gLoad }), ofp(), null, { lang: "en" });
+    expect(json.gLoad).toEqual({ maxG: 1.42, minG: 0.71, source: "track" });
+    expect(text).toContain("G-load in flight     max. 1.42 g | min. 0.71 g");
+    expect(buildPirep(detail({ gLoad }), ofp(), null, { lang: "de" }).text).toContain("G-Last im Flug       max. 1.42 g | min. 0.71 g");
+  });
+
   it("writes the text in English for an English UI", () => {
     const { json, text } = buildPirep(detail(), ofp(), { stableFromFt: 1500, band: "stable" }, { appVersion: "0.4.0", track, lang: "en" });
     expect(text).toBe(

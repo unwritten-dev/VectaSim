@@ -29,6 +29,7 @@ pub mod decoder;
 pub mod ffi;
 pub mod mockdump;
 pub mod replay;
+pub mod text;
 pub mod watchdog;
 
 use api::{LiveApi, SimApi};
@@ -79,6 +80,8 @@ impl Default for SimConnectProvider {
 
 /// Longest block in `wait_for_dispatch` before the stop flag and watchdog are checked again.
 const MAX_WAIT: Duration = Duration::from_millis(100);
+/// Client event id of our in-sim messages (SimConnect_Text); not a system event.
+const EVT_TEXT: u32 = 0x5654;
 const INITIAL_BACKOFF: Duration = Duration::from_secs(2);
 /// Longest wait between connection attempts while no flight is open.
 const MAX_BACKOFF_IDLE: Duration = Duration::from_secs(10);
@@ -202,6 +205,7 @@ enum SentCall {
     RequestData { def: usize },
     Subscribe { event: &'static str },
     SystemState,
+    Text,
 }
 
 /// Bounded SendID → call map (registration is ~45 packets; probes add a few per minute at most).
@@ -245,6 +249,8 @@ struct Session<A: SimApi> {
     rec: Option<Arc<DumpRecorder>>,
     /// Session start: source time of the decoder's rate meters.
     epoch: Instant,
+    /// In-sim messages queued by the app ([`text::show_text`]).
+    texts: text::TextQueue,
 }
 
 impl<A: SimApi> Session<A> {
@@ -259,6 +265,7 @@ impl<A: SimApi> Session<A> {
             buf: Vec::with_capacity(1024),
             rec: None,
             epoch: now,
+            texts: text::global().clone(),
         }
     }
 
@@ -307,6 +314,7 @@ impl<A: SimApi> Session<A> {
             SentCall::RequestData { def } => format!("RequestDataOnSimObject({})", defs[def].label),
             SentCall::Subscribe { event } => format!("SubscribeToSystemEvent(\"{event}\")"),
             SentCall::SystemState => "RequestSystemState(\"Sim\")".into(),
+            SentCall::Text => "Text".into(),
         }
     }
 
@@ -366,6 +374,21 @@ impl<A: SimApi> Session<A> {
         self.send_state_probe();
     }
 
+    /// Queued in-sim messages out (a rejected one is only logged: never a recording error).
+    fn send_texts(&mut self, now: Instant) {
+        for m in self.texts.take(now) {
+            let hr = self.api.text(ffi::text_type::PRINT_WHITE, m.seconds, EVT_TEXT, &m.text);
+            if let Some(id) = self.api.last_sent_packet_id() {
+                self.sent.push(id, SentCall::Text);
+            }
+            if hr < 0 {
+                log::info!("SimConnect_Text not available or rejected (hr=0x{hr:08X}); in-sim message dropped");
+            } else {
+                log::debug!("in-sim message sent: {}", m.text);
+            }
+        }
+    }
+
     fn send_state_probe(&mut self) {
         let hr = self.api.request_system_state(REQ_STATE_SIM, "Sim");
         self.sent_call(SentCall::SystemState, hr);
@@ -401,6 +424,7 @@ impl<A: SimApi> Session<A> {
         for message in std::mem::take(&mut self.notices) {
             tx.send(ProviderEvent::Error { message }).map_err(|_| SessionEnd::ChannelClosed)?;
         }
+        self.send_texts(now);
         let mut buf = std::mem::take(&mut self.buf);
         let kind = self.api.next_dispatch(&mut buf);
         let result = match kind {
@@ -439,6 +463,11 @@ impl<A: SimApi> Session<A> {
 
     fn on_exception(&mut self, code: u32, send_id: u32, index: u32, now: Instant, w: u64) -> Vec<ProviderEvent> {
         let call = self.sent.find(send_id);
+        // an in-sim message the sim does not support: logged, never an error for the recording
+        if call == Some(SentCall::Text) {
+            log::info!("SimConnect_Text rejected with exception {} ({code}); in-sim message not shown", ffi::exception_name(code));
+            return Vec::new();
+        }
         let what = call.map(|c| self.describe(c));
         let added = match call {
             Some(SentCall::AddDef { def, var }) => Some((def, var)),

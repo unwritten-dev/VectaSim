@@ -21,6 +21,14 @@
 //! ground before it requalified (10 s of air time or > 500 ft AGL), the position cannot be
 //! continued (sim restarted at a gate, reload on the runway): the flight ends as interrupted.
 //!
+//! Start in the air (the first sample after connecting or after [`SimEvent::FlightLoaded`]
+//! is airborne, see [`crate::phase`]): a legitimate flight, recorded from that point on. It
+//! starts like any other ([`FlightEvent::FlightStarted`]); `off_block_ms` and `departure` are
+//! the start of the recording (block time from there; the recorder resolves the departure
+//! airport within its usual radius, else none), `takeoff_ms` stays empty (no lift-off seen,
+//! so no flight time), and the touchdown detector requalifies after a short stretch of air
+//! time like after a reset in the air. No teleport flag – nothing jumped.
+//!
 //! Thresholds:
 //! - teleport: position jump between two samples > `GS·Δt·3 + 1 nm` (GS = the larger of
 //!   both samples), or altitude change > 5 000 ft/s;
@@ -57,6 +65,7 @@
 //! previous value (or none) for the 10–30 s of the rollout instead of a value that flickers.
 
 use crate::clock::MonoClock;
+use crate::gload::{GLoadStats, GLoadTracker, GSample};
 use crate::phase::{FlightPhase, PhaseEngine, PhaseTransition, SkipReason};
 use crate::touchdown::{DetectorDebug, TouchdownDetector, TouchdownOutcome, TouchdownReport, ground_contact_corroborated};
 use crate::{SimEvent, Telemetry, now_ms};
@@ -155,6 +164,10 @@ pub struct FlightSummary {
     /// (touch-and-goes never count, and no flight-wide peak).
     pub landing_rate_fpm: Option<f64>,
     pub integrity: IntegrityFlags,
+    /// G-load in the air outside the touchdown windows (see [`crate::gload`]); the last
+    /// 3 s are held back until it is clear no touchdown follows.
+    #[serde(default)]
+    pub g_load: GLoadStats,
 }
 
 impl FlightSummary {
@@ -290,6 +303,10 @@ pub struct FlightSession {
     outcomes: Vec<TouchdownOutcomeEvent>,
     /// Time of the last Landing transition while no full stop has set `landing_ms` for it yet.
     landing_phase_ms: Option<u64>,
+    /// G-load of the samples this session evaluated for the open flight ...
+    gload: GLoadTracker,
+    /// ... on top of what a resumed flight brought along (`summary.g_load` = both merged).
+    gload_base: GLoadStats,
 }
 
 impl FlightSession {
@@ -366,6 +383,11 @@ impl FlightSession {
         let folded_in = self.summary.state == FlightState::Active;
         self.pending_touchdown = self.pending_touchdown.filter(|_| folded_in).map(|i| i + previous.touchdowns.len());
         self.summary = resumed_summary(previous, &self.summary, self.engine.phase(), gap_ms);
+        // the tracker keeps the folded-in flight's g-load; a dropped flight's goes with it
+        if !folded_in {
+            self.gload = GLoadTracker::default();
+        }
+        self.gload_base = previous.g_load;
         self.resume_pending = matches!(self.engine.phase(), FlightPhase::Preflight | FlightPhase::Shutdown);
     }
 
@@ -427,6 +449,10 @@ impl FlightSession {
         }
         // before the flight ends, so its summary carries the outcome
         self.apply_outcome();
+        if self.summary.state == FlightState::Active {
+            self.gload.flush();
+            self.summary.g_load = self.gload_base.merged(self.gload.stats());
+        }
         self.engine.restart();
         self.landing_phase_ms = None;
         self.last_pos = None;
@@ -504,6 +530,18 @@ impl FlightSession {
             self.summary.phase = self.engine.phase();
         }
 
+        if self.summary.state == FlightState::Active {
+            self.gload.update(GSample {
+                mono_ms: now,
+                wall_ms: t.timestamp_ms,
+                g: t.g_force,
+                on_ground: t.on_ground,
+                excluded: self.engine.last_skip().is_some(),
+                phase: self.engine.phase(),
+                altitude_msl_ft: t.altitude_msl_ft,
+            });
+            self.summary.g_load = self.gload_base.merged(self.gload.stats());
+        }
         if self.summary.state == FlightState::Active && self.engine.last_skip().is_none() {
             self.accumulate(t, now);
         }
@@ -558,6 +596,7 @@ impl FlightSession {
         }
         self.apply_outcome();
         self.engine.reset_context(resume);
+        self.gload.reset_context();
         self.last_pos = None;
         self.last_fuel_kg = None;
         self.resumed_airborne = resume;
@@ -601,7 +640,8 @@ impl FlightSession {
             }
         }
         match tr.to {
-            Climb if self.summary.takeoff_ms.is_none() => {
+            // a flight that started in the air has no lift-off to take the time from
+            Climb if self.summary.takeoff_ms.is_none() && !self.engine.started_airborne() => {
                 // Climb comes up to 45 s after lift-off; the take-off time is the lift-off itself
                 self.summary.takeoff_ms = Some(self.engine.airborne_since().unwrap_or(tr.timestamp_ms));
             }
@@ -649,6 +689,13 @@ impl FlightSession {
         // the previous flight's touchdowns are gone with its summary
         self.pending_touchdown = None;
         self.landing_phase_ms = None;
+        self.gload = GLoadTracker::default();
+        self.gload_base = GLoadStats::default();
+        if self.engine.started_airborne() {
+            // started in the air: requalify after a short stretch, like after a reset in the air
+            // (nothing is settling yet, so there is no report to keep)
+            let _ = self.detector.reset(true);
+        }
     }
 
     fn accumulate(&mut self, t: &Telemetry, now: u64) {
@@ -710,6 +757,7 @@ fn resumed_summary(previous: &FlightSummary, current: &FlightSummary, phase: Fli
         s.touchdowns.extend(current.touchdowns.iter().cloned());
         s.landing_rate_fpm = current.landing_rate_fpm.or(previous.landing_rate_fpm);
         s.integrity = previous.integrity.merged(&current.integrity);
+        s.g_load = previous.g_load.merged(&current.g_load);
     }
     s.integrity.gap_ms += gap_ms;
     s

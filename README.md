@@ -30,7 +30,7 @@ VectaSim runs alongside Microsoft Flight Simulator 2020/2024 and X-Plane 12.1.1 
 |---|---|
 | **Automatic** | Connects to MSFS or X-Plane 12.1.1+, detects off-block, takeoff, landing and on-block and files the flight in the logbook – no button to press. Pause, slew and time acceleration are flagged, not counted. |
 | **Approach & landing** | “Stable from … ft”, gates at 10 nm, FAF, 1000 and 500 ft, landing rate with its source, touchdown point on the runway, bounces, go-arounds treated as a decision rather than a mistake. |
-| **Live map** | World view as a globe (or flat), your own aircraft, altitude-coloured track, optionally as a 3D altitude profile, airports with taxiways and gates, online traffic and controllers from VATSIM and/or IVAO (click an aircraft for a flight card with route, altitude/trend, distance and a Planespotters photo when the registration is known, with follow and great-circle route), METAR, SimBrief route, HUD with phase, altitude, speed, vertical speed, remaining distance and ETA. |
+| **Live map** | World view as a globe (or flat), your own aircraft, altitude-coloured track, optionally as a 3D altitude profile with a rounded low-poly model of your aircraft class at its flown altitude, airports with taxiways and gates, online traffic and controllers from VATSIM and/or IVAO (click an aircraft for a flight card with route, altitude/trend, distance and a Planespotters photo when the registration is known, with follow and great-circle route), METAR rings by flight category (VFR/MVFR/IFR/LIFR, explained in a small legend) plus optional precipitation radar and clouds, satellite imagery as an alternative base map, SimBrief route, HUD with phase, altitude, speed, vertical speed, remaining distance and ETA. |
 | **Logbook** | Flight strips with route, block times, landing rate and a mini runway; fleet by registration with photos; airports; dispersion plots of your touchdowns and approaches; notes, tags, star ratings; year in review. |
 | **Countries** | A world globe that colours every country you have landed in – with progress per continent. |
 | **Your data** | One SQLite file on your PC, a daily backup to a folder of your choice (OneDrive, NAS …), a trash, export as CSV, GPX, KML and JSON, import of old logbooks (Volanta, SimToolkitPro, VA CSV). |
@@ -44,7 +44,7 @@ VectaSim runs alongside Microsoft Flight Simulator 2020/2024 and X-Plane 12.1.1 
 
 - **The whole approach counts**, not just the touchdown: glide path and lateral deviation in dots, speed against the flown reference, sink rate, bank and configuration at every gate – based on the EASA criteria for stabilised approaches, in four bands from “stable” to “unstable below 500 ft”. With data from the sim, VectaSim also checks against the simulator’s ILS instead of assuming 3°, and takes the sim wind on final, thrust, spoilers and landing flaps into account. ILS reference and sim wind apply to flights recorded with this version; older flights and X-Plane flights are assessed from the runway geometry and the 3° assumption. Lateral tracking gets its own metric and band (RMS and maximum in dots, offset at 500 ft and over the threshold, overshoot when intercepting, S-turns).
 - **Energy and wind:** an energy band from 10 nm down to 1000 ft, plus notes on tailwind, crosswind and wind shear on final.
-- **Landing rate by fixed, documented rules:** the sim’s touchdown value with a fallback to the last airborne vertical speed, the hardest contact across bounces, never an in-flight peak. Every number shows its source (sim · measured · derived).
+- **Landing rate by fixed, documented rules:** the sim’s touchdown value with a fallback to the last airborne vertical speed, the hardest contact across bounces, never an in-flight peak – the g-load over the whole flight is shown separately in the flight detail. Every number shows its source (sim · measured · derived).
 - **Runway top view** with touchdown point, centreline offset, touchdown zone and aiming point; **approach profile** against the 3° glide path with a replay cursor, flare, rollout and the METAR wind at the time of landing. Runways missing from the airport database are derived from your ground track (marked “derived”, threshold ±50 m); *Correct runway …* sets threshold and end exactly.
 - **A go-around is a decision:** it gets its own debrief with the lowest point, and the abandoned approach is assessed in full. *Circuits* in the flight detail lists every touch-and-go.
 - **You against yourself:** every landing is ranked against your own (“better than 70 % of your last 20 on EDDF 25C”), *Landings → Trends* shows the rolling median over weeks and months, and the dispersion plot shows your last 20 touchdowns and approaches.
@@ -70,7 +70,7 @@ VectaSim runs alongside Microsoft Flight Simulator 2020/2024 and X-Plane 12.1.1 
 </p>
 
 - **Flight strips:** callsign and type, route with block times, landing rate, “stable from … ft”, go-arounds and a small runway with the touchdown point – a list that reveals patterns. Search and filter across everything, including notes and tags.
-- **Flight detail:** altitude and speed profile with phases, track map, times, fuel, plan vs. actual (block time, trip fuel, landing fuel, punctuality) and a PIREP for VA forms as text or JSON.
+- **Flight detail:** altitude and speed profile with phases, track map with a **replay** of the whole flight (1× to 64×, the map can follow the aircraft, in 3D at its height), times, fuel, plan vs. actual (block time, trip fuel, landing fuel, punctuality) and a PIREP for VA forms as text or JSON.
 - **Fleet** (Logbook → Aircraft): flights always land on the same aircraft (registration), with a photo from Planespotters.net or your own picture, and your own Vapp and landing flap setting (e.g. 3 for CONF 3) for the approach rating.
 - **Notes, tags, stars** per flight; wrongly recorded values (callsign, airports, aircraft, registration) can be corrected – the original is kept.
 - **After a crash:** if you are back within 30 minutes and 5 nm of the last position, VectaSim offers to resume the flight; otherwise *Merge* above the logbook joins the two parts into one flight.
@@ -95,10 +95,11 @@ VectaSim runs alongside Microsoft Flight Simulator 2020/2024 and X-Plane 12.1.1 
 - **Map:** switch between globe and flat map in the map bar or under *Settings → Display*; rotate and tilt the 3D view with the right mouse button or Ctrl + drag.
 - **English and German:** *Settings → Display → Language* – System (follows your Windows display language), Deutsch or English, applies immediately. Notifications, tray menu, Discord status, overlays and the installer follow the same setting; flight phases are always shown in English.
 - **Streamer mode** (Ctrl+Shift+P) hides registrations, callsigns, airline, SimBrief ID and user paths everywhere – including the landing card and the diagnostics package.
-- **Integrations** (all optional, off by default except notifications): Discord status with route and phase (off by default, turn it on under *Settings → Integrations*; no Discord app of your own needed – activity sharing must be allowed in Discord), Windows notifications (landing, flight saved, connection, update), minimise to the notification area.
+- **Landing rate in the sim (MSFS):** a few seconds after touchdown a line at the top of the screen shows rate, band, g, bounces and touchdown point, e.g. “VectaSim · Landed -142 fpm (smooth) · 1.18 g · no bounces · 27L: 412 m past the threshold, 1 m left” (*Settings → Simulator*, on by default; depends on the MSFS version showing SimConnect text).
+- **Integrations** (all optional, off by default except notifications and the tray icon): Discord status with route and phase (off by default, turn it on under *Settings → Integrations*; no Discord app of your own needed – activity sharing must be allowed in Discord), Windows notifications (landing, flight saved, connection, update), an icon in the notification area: minimising or closing the window keeps VectaSim running there (recording included); double-click the icon to open it again, *Quit* in its menu ends the app (switchable under *Settings → Integrations*).
 - **Overlay & API** (off by default): a local server with transparent OBS overlays (HUD, landing, route); open the overlays and start page on a tablet or phone on your Wi-Fi (with token); plus a read-only JSON/WebSocket API for virtual airlines. Overlays accept `?lang=de|en` – endpoints and security in [docs/overlay-api.md](docs/overlay-api.md).
 - **Data safety:** a daily backup (the last 7 daily backups are kept), plus one before every update and every data format migration, to a folder of your choice; restore with one click; deleted flights stay in the trash for 30 days; a full export as a `.vectasim` file to move to another PC. *Empty trash* and *Delete all data* are under *Settings → Data*.
-- **Demo flight** to try things out without a simulator – it lands normally, with a few small, deliberate mistakes so the debrief has something to show. Demo flights are removed when the demo ends; until then they only appear in the logbook and statistics with the “Demo flights” filter.
+- **Demo flight** to try things out without a simulator – it starts in the air on the downwind for Frankfurt and lands after about 4 minutes, normally, with a few small, deliberate mistakes so the debrief has something to show. Demo flights are removed when the demo ends; until then they only appear in the logbook and statistics with the “Demo flights” filter.
 - **Updates:** automatic updates are verified with VectaSim’s own signature; the installer itself is not yet code-signed for Windows. During a recorded flight, updates wait until the flight is over, and quitting asks first (the flight is then saved as interrupted).
 
 ## System requirements
@@ -122,7 +123,7 @@ VectaSim announces updates at startup and installs them after you confirm. More 
 ## Your data & privacy
 
 - Your logbook lives in `%APPDATA%\io.vectasim.app\`; logs and the default backup folder are in `%LOCALAPPDATA%\io.vectasim.app\`.
-- VectaSim only contacts: OpenFreeMap (map tiles), aviationweather.gov (METAR), VATSIM and IVAO (only when turned on), SimBrief (only with your pilot ID), Planespotters.net (aircraft photos, can be turned off), GitHub (updates) and Microsoft’s SDK server (only for the SimConnect download).
+- VectaSim only contacts: OpenFreeMap (map tiles), EOX (satellite tiles, only with “Satellite” on), RainViewer and EUMETSAT (radar and clouds, only when turned on), aviationweather.gov (METAR), VATSIM and IVAO (only when turned on), SimBrief (only with your pilot ID), Planespotters.net (aircraft photos, can be turned off), GitHub (updates) and Microsoft’s SDK server (only for the SimConnect download).
 
 ## Uninstall
 
@@ -142,7 +143,7 @@ Windows *Settings → Apps → VectaSim → Uninstall*. Your logbook stays unles
 
 ## Status
 
-Beta 0.4 – MSFS 2020/2024 and X-Plane 12.1.1+ (Web API), English and German UI. Planned: Volanta JSON import, code signing – ideas welcome as an [issue](https://github.com/unwritten-dev/VectaSim/issues). What has changed is in the [CHANGELOG](CHANGELOG.md).
+Beta 0.5 – MSFS 2020/2024 and X-Plane 12.1.1+ (Web API), English and German UI. Planned: Volanta JSON import, code signing – ideas welcome as an [issue](https://github.com/unwritten-dev/VectaSim/issues). What has changed is in the [CHANGELOG](CHANGELOG.md).
 
 ## Contributing
 
@@ -150,7 +151,7 @@ Everything for developers – stack, building from source, architecture, convent
 
 ## Data and credits
 
-Map: © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors, tiles by [OpenFreeMap](https://openfreemap.org) · Airports: [OurAirports](https://ourairports.com) (public domain) · Country borders: [Natural Earth](https://www.naturalearthdata.com) (public domain) · Weather: NOAA aviationweather.gov · Online traffic: [VATSIM](https://vatsim.net) · [IVAO](https://ivao.aero) · Flight plans: [SimBrief](https://www.simbrief.com) · Aircraft photos: [Planespotters.net](https://www.planespotters.net) with photographer credit.
+Map: © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors, tiles by [OpenFreeMap](https://openfreemap.org) · Satellite imagery: [EOxCloudless](https://cloudless.eox.at) by EOX IT Services GmbH (contains modified Copernicus Sentinel data 2017, CC BY 4.0) · Airports: [OurAirports](https://ourairports.com) (public domain) · Country borders: [Natural Earth](https://www.naturalearthdata.com) (public domain) · Weather: NOAA aviationweather.gov, radar by [RainViewer](https://www.rainviewer.com), clouds: contains modified [EUMETSAT](https://www.eumetsat.int) Meteosat data · Online traffic: [VATSIM](https://vatsim.net) · [IVAO](https://ivao.aero) · Flight plans: [SimBrief](https://www.simbrief.com) · Aircraft photos: [Planespotters.net](https://www.planespotters.net) with photographer credit.
 
 SimConnect is part of the Microsoft Flight Simulator SDK and is not bundled; on request VectaSim downloads `SimConnect.dll` from Microsoft’s official SDK download.
 

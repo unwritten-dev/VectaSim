@@ -60,6 +60,7 @@ import type { ApproachAnalysis } from "./approachTypes";
 import type { LandingAnalysis, LandingDebriefData } from "./types";
 import HistoryPanel from "./HistoryPanel";
 import "./landing.css";
+import { gLoadProtocol } from "../gload";
 
 /** "0,3 Dots" / "0.3 dots", "1 Dot" / "1 dot". */
 function dotsText(t: TFunction, v: number, digits = 0): string {
@@ -1024,6 +1025,8 @@ export function DebriefBody({ d, approach, titleId, onRunwayChanged }: { d: Land
                     : "–",
             ],
             [t("debrief.protocol.integrity"), flags.length ? flags.join(" · ") : t("debrief.protocol.integrityOk")],
+            // g-load over the flight (outside the touchdowns); not measured: no row
+            ...(gLoadProtocol(f.gLoad) ? [[t("gload.protocol.label"), gLoadProtocol(f.gLoad)] as [string, string]] : []),
             [
               t("debrief.protocol.thresholds"),
               t("debrief.protocol.thresholdsValue", {

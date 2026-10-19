@@ -5,7 +5,7 @@
       "followTitle": "Map follows the aircraft",
       "center": "Centre on aircraft",
       "flatten": "Lay the map flat again",
-      "tilt": "Tilt the map and show the track's altitude profile – also rotate and tilt with the right mouse button or Ctrl + drag",
+      "tilt": "Tilt the map and show the track's altitude profile – online traffic appears as 3D models from zoom 8; also rotate and tilt with the right mouse button or Ctrl + drag",
       "globe": "Globe",
       "globeOff": "Flat world view (Mercator) instead of a globe – applies to every map",
       "globeOn": "World view as a globe – zooming in turns it into the flat map by itself; applies to every map",
@@ -13,8 +13,37 @@
       "layers": "Map layers",
       "atcTitle": "Controllers at airports",
       "atcNeedsTraffic": "Switch on “Traffic” first",
-      "weather": "Weather",
-      "weatherTitle": "METAR category from zoom {zoom}"
+      "weather": "Weather"
+    },
+    "mapStyle": {
+      "satellite": "Satellite",
+      "onTitle": "Satellite imagery as the base map (Sentinel-2, cloud-free) – places, borders and our layers stay on top; applies to the map and the track map",
+      "offTitle": "Back to the drawn map – applies to the map and the track map"
+    },
+    "weather": {
+      "groupLabel": "Weather on the map",
+      "onTitle": "Show weather: METAR category from zoom {zoom}, optionally precipitation radar and clouds – real weather, may differ from the sim's weather",
+      "offTitle": "Hide weather (METAR, radar, clouds) – radar and clouds are then no longer fetched",
+      "menu": "Weather layers",
+      "menuTitle": "Choose weather layers: METAR rings, precipitation radar, clouds",
+      "metar": "METAR rings",
+      "metarTitle": "Flight category (VFR/MVFR/IFR/LIFR) as a ring at the airports, from zoom {zoom}",
+      "radar": "Radar",
+      "radarTitle": "Precipitation radar from RainViewer, refreshed every 10 minutes – real weather, may differ from the sim's weather",
+      "clouds": "Clouds",
+      "cloudsTitle": "Clouds from the infrared satellite image (EUMETSAT, hourly) – the brighter, the higher and colder; real weather, may differ from the sim's weather",
+      "note": "Real weather – may differ from the weather in the simulator.",
+      "loading": "loading …",
+      "failed": "not refreshed",
+      "legend": {
+        "aria": "METAR colours: flight category at the airport",
+        "fromZoom": "from zoom {zoom}",
+        "vfr": "VFR: ceiling above 3,000 ft and visibility above 5 SM (about 8 km)",
+        "mvfr": "MVFR: ceiling 1,000–3,000 ft or visibility 3–5 SM (about 5–8 km)",
+        "ifr": "IFR: ceiling 500–999 ft or visibility 1 to under 3 SM (about 1.6–5 km)",
+        "lifr": "LIFR: ceiling below 500 ft or visibility below 1 SM (about 1.6 km)",
+        "unknown": "?: the METAR gives neither ceiling nor visibility"
+      }
     },
     "traffic": {
       "toggle": "Traffic",

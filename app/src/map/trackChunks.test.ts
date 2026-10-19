@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ALT_BAND_FT, ChunkedTrack, bandedRuns, bandedTrackGeoJson, curtainGeoJson, curtainRuns, thinPoints, type TimedPoint } from "./trackChunks";
+import { ALT_BAND_FT, ChunkedTrack, bandedRuns, bandedTrackGeoJson, curtainGeoJson, curtainRuns, groundHeightFt, withGroundHeights, thinPoints, type TimedPoint } from "./trackChunks";
 
 const pt = (i: number, altFt: number): TimedPoint => ({ lon: i * 0.01, lat: 50, altFt, tMs: i * 1000 });
 
@@ -158,5 +158,62 @@ describe("curtainRuns (3D view)", () => {
     expect(curtainGeoJson([]).features).toHaveLength(0);
     const pts = Array.from({ length: 20000 }, (_, i) => pt(i, 30000 + (i % 2) * 1000));
     expect(curtainGeoJson(pts, 1000).features).toHaveLength(999);
+  });
+});
+
+describe("3D height above the map's ground", () => {
+  const EDDF = 364;
+  it("on the ground the height is 0, whatever the field elevation", () => {
+    expect(groundHeightFt(364, 4, true, 364)).toBe(0);
+    expect(groundHeightFt(5400, 6, true, 0)).toBe(0);
+    // AGL near zero without the flag: practically 0 as well
+    expect(groundHeightFt(368, 4, false, 364)).toBe(4);
+  });
+  it("low: the sim's AGL; high: MSL − field elevation (level over terrain); blended in between", () => {
+    expect(groundHeightFt(1364, 1000, false, EDDF)).toBe(1000);
+    // cruise over a 3000 ft ridge: still MSL − departure elevation, not the AGL
+    expect(groundHeightFt(12_000, 9000, false, EDDF)).toBe(12_000 - EDDF);
+    const mid = groundHeightFt(2600, 2250, false, EDDF);
+    expect(mid).toBeGreaterThan(2236 - 1);
+    expect(mid).toBeLessThan(2250 + 1);
+    expect(groundHeightFt(100, Number.NaN, false, EDDF)).toBe(0);
+  });
+  it("an EDDF circuit starts and ends on the ground, the curtain there has (almost) no height", () => {
+    const circuit = [
+      { lon: 8.5, lat: 50.03, altFt: 364, aglFt: 5, onGround: true },
+      { lon: 8.52, lat: 50.03, altFt: 364, aglFt: 5, onGround: true },
+      { lon: 8.55, lat: 50.03, altFt: 1364, aglFt: 1000, onGround: false },
+      { lon: 8.6, lat: 50.05, altFt: 2364, aglFt: 2000, onGround: false },
+      { lon: 8.55, lat: 50.06, altFt: 1364, aglFt: 1000, onGround: false },
+      { lon: 8.52, lat: 50.04, altFt: 364, aglFt: 5, onGround: true },
+      { lon: 8.5, lat: 50.04, altFt: 364, aglFt: 5, onGround: true },
+    ];
+    const h = withGroundHeights(circuit).map((p) => p.hFt);
+    expect(h[0]).toBe(0);
+    expect(h[h.length - 1]).toBe(0);
+    expect(h[2]).toBe(1000);
+    const wall = curtainRuns(withGroundHeights(circuit));
+    // ground roll: the 1 m minimum, not 111 m (364 ft MSL)
+    expect(wall[0].properties!.hM).toBe(1);
+    expect(wall[wall.length - 1].properties!.hM).toBe(1);
+    // the colour still follows the altitude MSL
+    expect(wall[0].properties!.alt).toBe(364);
+  });
+  it("recorded flights: the reference runs from the departure to the arrival elevation", () => {
+    const flight = [
+      { lon: 0, lat: 0, altFt: 364, aglFt: 0, onGround: true },
+      { lon: 1, lat: 0, altFt: 35_000, aglFt: 34_000, onGround: false },
+      { lon: 2, lat: 0, altFt: 1800, aglFt: 0, onGround: true },
+    ];
+    const h = withGroundHeights(flight).map((p) => p.hFt!);
+    expect(h[1]).toBeCloseTo(35_000 - (364 + 1800) / 2, 6);
+    // live: the arrival is not known yet, the departure elevation stays the reference
+    expect(withGroundHeights(flight, true)[1].hFt).toBe(35_000 - 364);
+  });
+  it("the live track fixes the departure elevation with its first point", () => {
+    const t = new ChunkedTrack();
+    expect(t.heightFor({ altFt: 364, aglFt: 4, onGround: true })).toBe(0);
+    expect(t.groundRefFt).toBe(360);
+    expect(t.heightFor({ altFt: 20_360, aglFt: 17_000 })).toBe(20_000);
   });
 });

@@ -20,7 +20,7 @@ fn tick(session: &mut FlightSession, rec: &mut FlightRecorder, t: &Telemetry) ->
 #[test]
 fn provider_switch_closes_the_open_flight_as_interrupted() {
     let store = Store::open_in_memory().unwrap();
-    let mut flight = MockFlight::new();
+    let mut flight = MockFlight::with_variant(MockVariant::Circuit);
     let mut session = FlightSession::new();
     let mut rec = recorder(&store);
     let mut last = 0;
@@ -80,11 +80,11 @@ fn reload_mid_flight_records_an_interrupted_and_a_new_flight() {
 #[test]
 fn teleport_flag_is_stored() {
     let store = Store::open_in_memory().unwrap();
-    let mut flight = MockFlight::new();
+    let mut flight = MockFlight::with_variant(MockVariant::Circuit);
     let mut session = FlightSession::new();
     let mut rec = recorder(&store);
     let hz = 10.0;
-    for i in 1..=((MockFlight::loop_seconds() + 10.0) * hz) as u64 {
+    for i in 1..=((MockVariant::Circuit.loop_seconds() + 10.0) * hz) as u64 {
         let t_s = i as f64 / hz;
         let mut t = flight.sample(t_s, T0 + (t_s * 1000.0) as u64);
         if t_s > 200.0 {
@@ -116,12 +116,12 @@ fn failing_phase_writes_do_not_swallow_the_flight_end() {
     let path = dir.path().join("vectasim.db");
     let store = Store::open(&path).unwrap();
     fail_inserts(&path, "phase_events", true);
-    let mut flight = MockFlight::new();
+    let mut flight = MockFlight::with_variant(MockVariant::Circuit);
     let mut session = FlightSession::new();
     let mut rec = recorder(&store);
     let mut failures = 0;
     let mut ended = false;
-    for i in 1..=((MockFlight::loop_seconds() + 10.0) * 10.0) as u64 {
+    for i in 1..=((MockVariant::Circuit.loop_seconds() + 10.0) * 10.0) as u64 {
         let t_s = i as f64 / 10.0;
         let t = flight.sample(t_s, T0 + (t_s * 1000.0) as u64);
         let (events, ok) = tick(&mut session, &mut rec, &t);
@@ -143,11 +143,11 @@ fn failed_touchdown_insert_is_retried() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("vectasim.db");
     let store = Store::open(&path).unwrap();
-    let mut flight = MockFlight::new();
+    let mut flight = MockFlight::with_variant(MockVariant::Circuit);
     let mut session = FlightSession::new();
     let mut rec = recorder(&store);
     let mut failed_once = false;
-    for i in 1..=((MockFlight::loop_seconds() + 10.0) * 10.0) as u64 {
+    for i in 1..=((MockVariant::Circuit.loop_seconds() + 10.0) * 10.0) as u64 {
         let t_s = i as f64 / 10.0;
         let t = flight.sample(t_s, T0 + (t_s * 1000.0) as u64);
         let events = session.update(&t);
@@ -174,11 +174,11 @@ fn failed_flight_end_is_retried() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("vectasim.db");
     let store = Store::open(&path).unwrap();
-    let mut flight = MockFlight::new();
+    let mut flight = MockFlight::with_variant(MockVariant::Circuit);
     let mut session = FlightSession::new();
     let mut rec = recorder(&store);
     let mut blocked = false;
-    for i in 1..=((MockFlight::loop_seconds() + 10.0) * 10.0) as u64 {
+    for i in 1..=((MockVariant::Circuit.loop_seconds() + 10.0) * 10.0) as u64 {
         let t_s = i as f64 / 10.0;
         let t = flight.sample(t_s, T0 + (t_s * 1000.0) as u64);
         let events = session.update(&t);

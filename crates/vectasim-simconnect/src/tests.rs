@@ -17,6 +17,7 @@ enum Call {
     Request { req: u32, def: u32, period: u32 },
     Subscribe { name: String },
     SystemState { req: u32, state: String },
+    Text { text_type: u32, seconds: f32, text: String },
 }
 
 /// Scripted backend. Every call gets the next SendID (starting at 1).
@@ -62,6 +63,9 @@ impl SimApi for FakeApi {
     }
     fn request_system_state(&mut self, req: u32, state: &str) -> ffi::HRESULT {
         self.record(Call::SystemState { req, state: state.into() })
+    }
+    fn text(&mut self, text_type: u32, seconds: f32, _event_id: u32, text: &str) -> ffi::HRESULT {
+        self.record(Call::Text { text_type, seconds, text: text.into() })
     }
     fn last_sent_packet_id(&mut self) -> Option<u32> {
         (self.next_id > 0).then_some(self.next_id)
@@ -155,6 +159,8 @@ fn slow_values() -> Vec<f64> {
 fn session() -> (Session<FakeApi>, Sender<ProviderEvent>, Receiver<ProviderEvent>, Instant) {
     let t0 = Instant::now();
     let mut s = Session::new(FakeApi::default(), WatchdogConfig::default(), t0);
+    // own queue: tests must not race on the process-wide one
+    s.texts = text::TextQueue::default();
     s.register();
     let (tx, rx) = channel();
     (s, tx, rx, t0)
@@ -944,4 +950,30 @@ fn wake_event_times_out_unsignalled() {
     let t = Instant::now();
     assert!(!ev.wait(Duration::from_millis(30)), "nobody signalled it");
     assert!(t.elapsed() >= Duration::from_millis(20), "{:?}", t.elapsed());
+}
+
+#[test]
+fn queued_text_is_sent_once_and_its_exception_is_no_error() {
+    let (mut s, tx, rx, t0) = session();
+    s.texts.push("VectaSim · Landed -142 fpm", 15.0, t0);
+    s.step(t0, &tx).unwrap();
+    let sent: Vec<_> = s.api.calls.iter().filter(|(_, c)| matches!(c, Call::Text { .. })).cloned().collect();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].1, Call::Text { text_type: ffi::text_type::PRINT_WHITE, seconds: 15.0, text: "VectaSim · Landed -142 fpm".into() });
+    // nothing left: the next step sends nothing
+    s.step(t0, &tx).unwrap();
+    assert_eq!(s.api.calls.iter().filter(|(_, c)| matches!(c, Call::Text { .. })).count(), 1);
+    // the sim rejects it (MSFS without text support): logged only, no error event
+    let id = sent[0].0;
+    s.api.queue.push_back(Ok(msg_exception(1, id, 0)));
+    s.step(t0, &tx).unwrap();
+    assert!(errors(&drain(&rx)).is_empty());
+}
+
+#[test]
+fn stale_text_is_not_sent() {
+    let (mut s, tx, _rx, t0) = session();
+    s.texts.push("late", 10.0, t0);
+    s.step(t0 + text::MAX_AGE + Duration::from_secs(1), &tx).unwrap();
+    assert!(!s.api.calls.iter().any(|(_, c)| matches!(c, Call::Text { .. })));
 }

@@ -12,6 +12,7 @@
 import type * as maplibregl from "maplibre-gl";
 import { COLOR, getMapTheme } from "../theme";
 import { activeTheme, contrastRatio, mixHex, type ThemeDef } from "../themes";
+import { haloSvg, ownHaloColorsOf } from "./ownAircraft";
 
 export type WakeCategory = "light" | "medium" | "heavy" | "super";
 
@@ -121,10 +122,10 @@ export function iconId(kind: "own" | "traffic" | "ivao", cat: WakeCategory): str
   return `ac-${kind}-${cat}`;
 }
 
-function loadOne(map: maplibregl.Map, id: string, markup: string): Promise<void> {
+function loadOne(map: maplibregl.Map, id: string, markup: string, size = 48): Promise<void> {
   if (map.hasImage(id)) return Promise.resolve();
   return new Promise((resolve) => {
-    const img = new Image(48, 48);
+    const img = new Image(size, size);
     img.onload = () => {
       if (!map.hasImage(id)) map.addImage(id, img, { pixelRatio: 2 });
       resolve();
@@ -181,7 +182,14 @@ export function trafficColors(): TrafficColors {
 }
 
 /**
- * Registers all twelve symbols (own/VATSIM traffic/IVAO traffic × four classes) in the active theme.
+ * Outline width (in the 48 viewBox) of the own silhouette: clearly heavier than the traffic's
+ * 1.2–1.4, so the own aircraft reads as "the one with the bold edge" even at a busy hub.
+ */
+export const OWN_EDGE_WIDTH = 2.6;
+
+/**
+ * Registers all twelve symbols (own/VATSIM traffic/IVAO traffic × four classes) plus the own
+ * aircraft's halo (ownAircraft.ts) in the active theme.
  * IVAO traffic keeps the traffic fill and gets a thicker outline in the theme accent, so both
  * networks read as "other traffic" yet stay apart without a new colour. Idempotent
  * per style; a theme change re-adds them after setStyle. Light themes get the ink-outline
@@ -192,7 +200,8 @@ export async function loadAircraftIcons(map: maplibregl.Map): Promise<void> {
   const light = getMapTheme().scheme === "light";
   const fill = trafficColors().fill;
   await Promise.all([
-    ...cats.map((c) => loadOne(map, iconId("own", c), svg(SHAPES[c], COLOR.ownAircraft, COLOR.aircraftEdge, light ? 1.5 : 1.6))),
+    ...cats.map((c) => loadOne(map, iconId("own", c), svg(SHAPES[c], COLOR.ownAircraft, COLOR.aircraftEdge, OWN_EDGE_WIDTH))),
+    loadOne(map, "ac-own-halo", haloSvg(ownHaloColorsOf(activeTheme())), 128),
     ...cats.map((c) => loadOne(map, iconId("traffic", c), svg(SHAPES[c], fill, light ? COLOR.aircraftEdge : COLOR.halo, light ? 1.2 : 1.4))),
     ...cats.map((c) => loadOne(map, iconId("ivao", c), svg(SHAPES[c], fill, COLOR.accent, light ? 2.2 : 2.4))),
   ]);

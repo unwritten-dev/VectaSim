@@ -22,6 +22,7 @@ import { importSourceLabel, isDemoRow } from "./totals";
 import LandingSummary from "./landing/LandingSummary";
 import { openDebrief } from "./landing/debriefStore";
 import { BAND_VAR, G_HARD, vsBandOf } from "./landing/facts";
+import { gLoadSummary, gLoadTitle } from "./gload";
 import HistoryPanel, { useHistoryFacts } from "./landing/HistoryPanel";
 import { patternSeries } from "./landing/history";
 import { linear } from "./landing/dispersionStats";
@@ -219,7 +220,7 @@ export default function FlightDetail({ detail, track, onDelete, deleteRequest, o
 
       {detail.hasTrack || track.length > 0 ? (
         <>
-          <TrackMap samples={track} touchdowns={detail.touchdowns} departure={departure} arrival={arrival} />
+          <TrackMap samples={track} touchdowns={detail.touchdowns} departure={departure} arrival={arrival} aircraft={f.aircraft} />
           <ProfileChart samples={track} phases={detail.phases} touchdowns={detail.touchdowns} />
           {track.length > 1 && <ReplayBar />}
         </>
@@ -323,6 +324,10 @@ export default function FlightDetail({ detail, track, onDelete, deleteRequest, o
           <Stat size="sm" label={t("logbook.list.statDistance")} value={fmt(f.distanceNm, 1)} unit="nm" />
           <Stat size="sm" label={t("logbook.detail.statMaxAlt")} value={fmt(f.maxAltMslFt, 0)} unit="ft" />
           <Stat size="sm" label={t("logbook.detail.statFuel")} value={fmtWeightNum(fuelUsed)} unit={weightUnit} />
+          {/* full row: "max 1,42 g (Climb, 3 200 ft) · min 0,71 g (Descent)" */}
+          <div style={{ gridColumn: "1 / -1" }}>
+            <Stat size="sm" label={t("gload.label")} value={gLoadSummary(f.gLoad)} title={gLoadTitle(f.gLoad)} />
+          </div>
         </div>
       </div>
 

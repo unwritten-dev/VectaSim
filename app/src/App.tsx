@@ -39,6 +39,7 @@ import { ToastAnnouncer, ToastViewport, dismissToast, focusNewestToast, hasToast
 import { checkForUpdate, setRecordingCheck } from "./updater";
 import { RESUME_TOAST_MS, resumeCandidate } from "./resume";
 import { ask } from "@tauri-apps/plugin-dialog";
+import { closeAction, takeTrayHint } from "./closeToTray";
 import type {
   AircraftInfo,
   Airport,
@@ -414,8 +415,10 @@ export default function App() {
   const autoLoadOfpRef = useRef(autoLoadOfp);
   autoLoadOfpRef.current = autoLoadOfp;
 
-  // Closing or updating mid-flight ends the recording: ask first. The title-bar close button,
-  // Alt+F4 and the taskbar all arrive here as a close request.
+  // The title-bar close button, Alt+F4 and the taskbar all arrive here as a close request. With
+  // the tray icon on and "close hides" on (default) the window only goes into the notification
+  // area (closeToTray.ts); otherwise closing or updating mid-flight ends the recording: ask first.
+  // "Quit" in the tray menu sends app:quit, then the close request – that one really quits.
   useEffect(() => {
     const recording = () => getLiveState().flight?.state === "active" && !isDemo(statusRef.current);
     setRecordingCheck(recording);
@@ -425,9 +428,25 @@ export default function App() {
     } catch {
       return; // browser preview without Tauri
     }
+    let quitting = false;
+    const unQuit = listen("app:quit", () => {
+      quitting = true;
+      void win.close();
+    }).catch(() => () => {});
     const un = win
       .onCloseRequested(async (event) => {
-        if (!recording()) return;
+        const trayActive = await invoke<boolean>("tray_active").catch(() => false);
+        const action = closeAction({ quitting, trayActive, closeToTray: getPrefs().trayClose, recording: recording() });
+        quitting = false;
+        if (action === "hide") {
+          event.preventDefault();
+          await win.hide().catch(() => {});
+          void invoke("set_ui_visible", { visible: false }).catch(() => {});
+          if (takeTrayHint())
+            void invoke("notify", { kind: "tray", title: tGlobal("shell.tray.hiddenTitle"), body: tGlobal("shell.tray.hiddenBody") }).catch(() => {});
+          return;
+        }
+        if (action === "close") return;
         const quit = await ask(tGlobal("shell.quit.message"), {
           title: tGlobal("shell.quit.title"),
           kind: "warning",
@@ -439,6 +458,7 @@ export default function App() {
       .catch(() => () => {});
     return () => {
       un.then((f) => f());
+      unQuit.then((f) => f());
     };
   }, []);
 

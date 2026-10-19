@@ -3,7 +3,7 @@
 
 use vectasim_core::flight::GeoPoint;
 use vectasim_core::{
-    FlightEvent, FlightPhase, FlightSession, FlightState, FlightSummary, LandingRateSource, MockFlight, PhaseTransition, Telemetry,
+    FlightEvent, FlightPhase, FlightSession, FlightState, FlightSummary, LandingRateSource, MockFlight, MockVariant, PhaseTransition, Telemetry,
     TouchdownReport,
 };
 use vectasim_store::store::LandingFactCache;
@@ -294,18 +294,18 @@ fn mock_recorder(store: &Store) -> FlightRecorder {
     )
 }
 
-/// The app died 250 s into the mock circuit; 2 min later it is back, the aircraft flew on
+/// The app died 200 s into the mock circuit (downwind); 2 min later it is back, the aircraft flew on
 /// (a new flight started with the first sample), the pilot resumes: one flight, one landing.
 #[test]
 fn resume_after_restart_appends_to_the_interrupted_flight() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("vectasim.db");
     const HZ: f64 = 4.0;
-    const CUT_S: f64 = 250.0;
+    const CUT_S: f64 = 200.0;
     const GAP_MS: u64 = 120_000;
     let (a, samples_a) = {
         let store = Store::open(&path).unwrap();
-        let (mut flight, mut session, mut rec) = (MockFlight::new(), FlightSession::new(), mock_recorder(&store));
+        let (mut flight, mut session, mut rec) = (MockFlight::with_variant(MockVariant::Circuit), FlightSession::new(), mock_recorder(&store));
         for i in 1..=(CUT_S * HZ) as u64 {
             let t_s = i as f64 / HZ;
             let t = flight.sample(t_s, T0 + (t_s * 1000.0) as u64);
@@ -322,7 +322,7 @@ fn resume_after_restart_appends_to_the_interrupted_flight() {
     assert_eq!(store.get_flight(&a).unwrap().unwrap().flight.state, "interrupted");
     let before = store.get_flight(&a).unwrap().unwrap().flight;
 
-    let (mut flight, mut session, mut rec) = (MockFlight::new(), FlightSession::new(), mock_recorder(&store));
+    let (mut flight, mut session, mut rec) = (MockFlight::with_variant(MockVariant::Circuit), FlightSession::new(), mock_recorder(&store));
     let ts = |t_s: f64| T0 + (t_s * 1000.0) as u64 + GAP_MS;
     let mut t_s = CUT_S;
     let mut step = |session: &mut FlightSession, rec: &mut FlightRecorder, t_s: f64| {
@@ -352,7 +352,7 @@ fn resume_after_restart_appends_to_the_interrupted_flight() {
     assert_eq!(store.get_flight(&a).unwrap().unwrap().flight.state, "active");
 
     // fly the rest of the circuit
-    let end = MockFlight::loop_seconds() + 10.0;
+    let end = MockVariant::Circuit.loop_seconds() + 10.0;
     while t_s < end {
         t_s += 1.0 / HZ;
         step(&mut session, &mut rec, t_s);
@@ -367,7 +367,7 @@ fn resume_after_restart_appends_to_the_interrupted_flight() {
     assert_eq!(f.integrity.gap_ms, gap);
     assert!(f.distance_nm > before.distance_nm + 3.0, "{} vs {}", f.distance_nm, before.distance_nm);
     let track = store.get_track(&a).unwrap().unwrap();
-    assert!(track.len() > samples_a + 300, "{} samples", track.len());
+    assert!(track.len() > samples_a + 250, "{} samples", track.len());
     assert!(track.windows(2).all(|w| w[0].t_ms <= w[1].t_ms));
     // the flight started after the restart went to the Papierkorb
     let trash = store.list_deleted_flights().unwrap();
@@ -380,7 +380,7 @@ fn resume_after_restart_appends_to_the_interrupted_flight() {
 fn resume_before_the_engine_left_the_blocks_keeps_one_flight() {
     let store = Store::open_in_memory().unwrap();
     const HZ: f64 = 4.0;
-    let (mut flight, mut session, mut rec) = (MockFlight::new(), FlightSession::new(), mock_recorder(&store));
+    let (mut flight, mut session, mut rec) = (MockFlight::with_variant(MockVariant::Circuit), FlightSession::new(), mock_recorder(&store));
     let mut cut = None;
     for i in 1..=(400.0 * HZ) as u64 {
         let t_s = i as f64 / HZ;
@@ -399,7 +399,7 @@ fn resume_before_the_engine_left_the_blocks_keeps_one_flight() {
     assert_eq!(store.get_flight(&a).unwrap().unwrap().flight.state, "interrupted");
 
     // new session: one sample, still Preflight (dwell not reached), then resume
-    let (mut flight, mut session, mut rec) = (MockFlight::new(), FlightSession::new(), mock_recorder(&store));
+    let (mut flight, mut session, mut rec) = (MockFlight::with_variant(MockVariant::Circuit), FlightSession::new(), mock_recorder(&store));
     let ts = |t_s: f64| T0 + (t_s * 1000.0) as u64 + 30_000;
     let mut t_s = cut + 0.25;
     let t = flight.sample(t_s, ts(t_s));
@@ -408,7 +408,7 @@ fn resume_before_the_engine_left_the_blocks_keeps_one_flight() {
     assert!(rec.current_flight_id().is_none());
     resume(&store, &mut session, &mut rec, &a, ts(t_s));
     let mut started = 0;
-    while t_s < MockFlight::loop_seconds() + 10.0 {
+    while t_s < MockVariant::Circuit.loop_seconds() + 10.0 {
         t_s += 1.0 / HZ;
         let t = flight.sample(t_s, ts(t_s));
         let ev = session.update(&t);
@@ -426,7 +426,7 @@ fn resume_before_the_engine_left_the_blocks_keeps_one_flight() {
 /// a new one there: the logbook offers to merge them (the manual test path for the UI).
 #[test]
 fn mock_teleport_pair_and_merge_candidate() {
-    use vectasim_core::{MockVariant, ProviderEvent};
+    use vectasim_core::ProviderEvent;
     let store = Store::open_in_memory().unwrap();
     let (mut flight, mut session, mut rec) = (MockFlight::with_variant(MockVariant::Teleport), FlightSession::new(), mock_recorder(&store));
     let loop_s = MockVariant::Teleport.loop_seconds();

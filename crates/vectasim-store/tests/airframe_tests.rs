@@ -1,4 +1,4 @@
-use vectasim_core::{AircraftInfo, FlightSession, MockFlight};
+use vectasim_core::{AircraftInfo, FlightSession, MockFlight, MockVariant};
 use vectasim_store::{
     AirframeEdit, AirframePhoto, FlightRecorder, PlannedFlight, PlannedSlot, RecorderContext, Store, icao_from_atc_model,
     normalize_registration, resolve_registration,
@@ -36,7 +36,7 @@ fn atc_model_to_icao_type() {
 }
 
 fn run(rec: &mut FlightRecorder, seconds: f64) {
-    let mut flight = MockFlight::new();
+    let mut flight = MockFlight::with_variant(MockVariant::Circuit);
     let mut session = FlightSession::new();
     let hz = 10.0;
     for i in 1..=((seconds * hz) as u64) {
@@ -112,7 +112,7 @@ fn same_registration_books_onto_one_airframe_and_aggregates() {
             store.clone(),
             RecorderContext { provider: "mock".into(), aircraft: Some(MockFlight::aircraft()), ..Default::default() },
         );
-        run(&mut rec, MockFlight::loop_seconds() + 10.0);
+        run(&mut rec, MockVariant::Circuit.loop_seconds() + 10.0);
     }
     let list = store.list_airframes(true).unwrap();
     assert_eq!(list.len(), 1);

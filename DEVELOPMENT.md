@@ -236,10 +236,13 @@ Counting (`vectasim_data::countries::visited_countries`, command `visited_countr
 | `img-src` | `'self' asset: http://asset.localhost` | your own aircraft images via the asset protocol (`convertFileSrc`, scope restricted at runtime to the app’s image folder, `airframes.rs`) |
 | | `data: blob:` | SVG icons on the map (`aircraftIcons.ts`), landing card as PNG (`exportCard.ts`), MapLibre rasters from blobs |
 | | `https://tiles.openfreemap.org` | Natural Earth raster tiles of the basemap style |
+| | `https://tiles.maps.eox.at` | satellite imagery (`map/satellite.ts`; MapLibre loads rasters via fetch, so it is in `connect-src` too) |
 | | `https://*.plnspttrs.net https://*.planespotters.net` | Planespotters photos (hotlink, thumbnails on `t.plnspttrs.net`) |
 | `font-src` | `'self' data:` | bundled `@fontsource` fonts |
 | `connect-src` | `'self' ipc: http://ipc.localhost` | Tauri IPC (commands, events) |
 | | `https://tiles.openfreemap.org` | style JSON (`basemap.ts`), vector tiles, glyphs, sprites – all on this host (checked against the style `styles/dark`) |
+| | `https://tiles.maps.eox.at` | satellite tiles (EOxCloudless 2017), only while “Satellite” is on |
+| | `https://api.rainviewer.com https://tilecache.rainviewer.com https://view.eumetsat.int` | weather overlay (`map/weatherOverlay.ts`): radar index and tiles, cloud WMS and its capabilities – fetched by the `vectasim-radar://` / `vectasim-clouds://` MapLibre protocols, only while that layer is on |
 | `worker-src` | `'self' blob:` | MapLibre worker. Since MapLibre 6 it is a separate file bundled by Vite (`app/src/map/maplibreWorker.ts`: `?worker&url` + `setWorkerUrl`, same origin) – `blob:` is no longer needed for it and can be dropped after a test in the installer |
 | `object-src` / `base-uri` / `form-action` | `'none'` / `'self'` / `'none'` | hardening, none of these is needed |
 

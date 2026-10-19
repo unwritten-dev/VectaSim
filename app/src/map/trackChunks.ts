@@ -65,11 +65,63 @@ export function bandedRuns(points: TrackPoint[], from = 0, to = points.length - 
 
 /** Feet → metres. */
 const M_PER_FT = 0.3048;
+
+/**
+ * Height in metres at which the 3D view draws a height above ground (ft): the curtain's top and
+ * the own aircraft share this one scale (no exaggeration), so the aircraft sits on the curtain.
+ */
+export function altToCurtainM(heightFt: number): number {
+  return Math.max(1, (Number.isFinite(heightFt) ? heightFt : 0) * M_PER_FT);
+}
+
+/** Below this AGL the 3D height is the sim's AGL; above AGL_BLEND_HI_FT it is MSL − reference. */
+export const AGL_BLEND_LO_FT = 1500;
+export const AGL_BLEND_HI_FT = 3000;
+
+/**
+ * Height above the map's ground (ft) for the 3D view. The map has no terrain, so drawing MSL
+ * made a parked aircraft at EDDF (364 ft) float 111 m above the runway. Rules:
+ * on the ground → 0; low (AGL ≤ 1500 ft) → the sim's AGL, so take-off and landing meet the
+ * ground at every field elevation; high (AGL ≥ 3000 ft) → MSL − `refFt` (a field elevation),
+ * so the cruise curtain stays level instead of copying the terrain below; linear in between.
+ */
+export function groundHeightFt(altFt: number, aglFt: number | undefined, onGround: boolean | undefined, refFt: number): number {
+  if (onGround) return 0;
+  const msl = Number.isFinite(altFt) ? altFt : 0;
+  const fromRef = msl - (Number.isFinite(refFt) ? refFt : 0);
+  if (aglFt == null || !Number.isFinite(aglFt)) return Math.max(0, fromRef);
+  const w = Math.min(1, Math.max(0, (aglFt - AGL_BLEND_LO_FT) / (AGL_BLEND_HI_FT - AGL_BLEND_LO_FT)));
+  return Math.max(0, aglFt + (fromRef - aglFt) * w);
+}
+
+/** Ground elevation under a sample (MSL − AGL), NaN when unknown. */
+export function terrainFt(p: { altFt: number; aglFt?: number }): number {
+  return p.aglFt != null && Number.isFinite(p.aglFt) && Number.isFinite(p.altFt) ? p.altFt - p.aglFt : NaN;
+}
+
+/**
+ * Fills `hFt` of every point (groundHeightFt). The reference elevation runs linearly from the
+ * departure (ground under the first sample) to the arrival (under the last); `live` keeps the
+ * departure elevation, as the arrival is not known yet. Points without AGL keep MSL − reference.
+ */
+export function withGroundHeights<T extends TrackPoint>(points: T[], live = false): Array<T & { hFt: number }> {
+  if (!points.length) return [];
+  const first = points.find((p) => Number.isFinite(terrainFt(p)));
+  const last = [...points].reverse().find((p) => Number.isFinite(terrainFt(p)));
+  const start = first ? terrainFt(first) : 0;
+  const end = live || !last ? start : terrainFt(last);
+  const n = points.length;
+  return points.map((p, i) => ({ ...p, hFt: groundHeightFt(p.altFt, p.aglFt, p.onGround, n > 1 ? start + ((end - start) * i) / (n - 1) : start) }));
+}
+
+/** 3D height of a point: hFt when set, else the altitude. */
+const heightOf = (p: TrackPoint) => (p.hFt != null && Number.isFinite(p.hFt) ? p.hFt : Number.isFinite(p.altFt) ? p.altFt : 0);
 /** Half-width of the 3D ribbon in metres: its face, not its top, is what the eye sees. */
 const CURTAIN_HALF_W_M = 3;
 
 /**
- * 3D "curtain" of the track for a pitched map: one thin rectangle per consecutive pair of
+ * Fallback 3D "curtain" (map/curtainLayer.ts draws the smooth one; this pair of fill-extrusion
+ * layers only when its shaders fail): one thin rectangle per consecutive pair of
  * points, extruded from the ground to the pair's mean altitude (`hM`) – the wall – with a
  * solid ribbon of `ribbonM` metres at the top (fill-extrusion base/height, map/common.ts).
  * Per pair, not per altitude band: fill-extrusion has one height per feature, so a band
@@ -83,8 +135,9 @@ export function curtainRuns(points: TrackPoint[]): GeoJSON.Feature[] {
     const b = points[i];
     const altA = Number.isFinite(a.altFt) ? a.altFt : 0;
     const altB = Number.isFinite(b.altFt) ? b.altFt : 0;
+    // colour by altitude MSL (as the 2D line), height above the map's ground (withGroundHeights)
     const altFt = (altA + altB) / 2;
-    const hM = Math.max(1, altFt * M_PER_FT);
+    const hM = altToCurtainM((heightOf(a) + heightOf(b)) / 2);
     const cosLat = Math.max(0.05, Math.cos(((a.lat + b.lat) / 2) * (Math.PI / 180)));
     // segment direction in local metres, then its left normal back to degrees
     const dx = (b.lon - a.lon) * cosLat;
@@ -139,6 +192,8 @@ export class ChunkedTrack {
   points: TimedPoint[] = [];
   /** Number of closed chunks. */
   closed = 0;
+  /** Departure field elevation (ground under the first point with AGL), reference for hFt. */
+  groundRefFt = NaN;
   private readonly chunk: number;
 
   constructor(chunk = CHUNK_POINTS) {
@@ -152,6 +207,16 @@ export class ChunkedTrack {
   reset() {
     this.points = [];
     this.closed = 0;
+    this.groundRefFt = NaN;
+  }
+
+  /**
+   * 3D height of a live point (groundHeightFt against the departure elevation); the first
+   * point with AGL fixes that elevation.
+   */
+  heightFor(p: { altFt: number; aglFt?: number; onGround?: boolean }): number {
+    if (!Number.isFinite(this.groundRefFt) && Number.isFinite(terrainFt(p))) this.groundRefFt = terrainFt(p);
+    return groundHeightFt(p.altFt, p.aglFt, p.onGround, Number.isFinite(this.groundRefFt) ? this.groundRefFt : 0);
   }
 
   /**
@@ -162,7 +227,10 @@ export class ChunkedTrack {
   seed(seed: TimedPoint[]) {
     const seedLast = seed.length ? seed[seed.length - 1].tMs : -Infinity;
     const tail = this.points.filter((p) => p.tMs > seedLast);
-    this.points = [...seed, ...tail];
+    // heights against the seed's departure elevation (the live points used the same rule)
+    const first = seed.find((p) => Number.isFinite(terrainFt(p)));
+    if (first) this.groundRefFt = terrainFt(first);
+    this.points = [...withGroundHeights(seed, true), ...tail];
     this.closed = Math.max(0, Math.floor((this.points.length - 1) / this.chunk));
   }
 

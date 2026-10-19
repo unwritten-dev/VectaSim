@@ -517,6 +517,8 @@ pub(crate) fn build_snapshot(
             },
             landing_rate_fpm: f.landing_rate_fpm,
             touchdowns: f.touchdowns.len() as u32,
+            max_g: f.g_load.max.map(|p| (p.g * 100.0).round() / 100.0),
+            min_g: f.g_load.min.map(|p| (p.g * 100.0).round() / 100.0),
         }
     });
     Snapshot { status, flight, telemetry: t.map(api::Telemetry::from) }

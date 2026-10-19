@@ -8,8 +8,11 @@ import type { ApproachAnalysis, MarkerKind } from "./approachTypes";
 import type { LandingAnalysis } from "./types";
 import { t as tr } from "../i18n";
 
-export type ReplaySpeed = 1 | 2 | 4 | 8;
-export const REPLAY_SPEEDS: ReplaySpeed[] = [1, 2, 4, 8];
+export type ReplaySpeed = number;
+/** Speed steps of the debrief (a few minutes of approach). */
+export const REPLAY_SPEEDS: readonly ReplaySpeed[] = [1, 2, 4, 8];
+/** Speed steps of the logbook (whole flights: 3 h at 64× take under 3 min). */
+export const LOGBOOK_REPLAY_SPEEDS: readonly ReplaySpeed[] = [1, 4, 16, 64];
 
 export interface ReplayRange {
   startMs: number;
@@ -35,6 +38,8 @@ export interface ReplayState {
 }
 
 export interface ReplayStore {
+  /** The speed steps this store offers (transport bar buttons), ascending. */
+  readonly speeds: readonly ReplaySpeed[];
   get(): ReplayState;
   subscribe(l: () => void): () => void;
   /** Range and markers of what is shown; the cursor is clamped into the new range. */
@@ -64,7 +69,7 @@ const INITIAL: ReplayState = { tMs: null, playing: false, speed: 1, range: null,
 
 const clampTo = (t: number, r: ReplayRange | null) => (r ? Math.min(r.endMs, Math.max(r.startMs, t)) : t);
 
-export function createReplayStore(): ReplayStore {
+export function createReplayStore(speeds: readonly ReplaySpeed[] = REPLAY_SPEEDS): ReplayStore {
   let state: ReplayState = INITIAL;
   /** The cursor a hover returns to. */
   let pinned: number | null = null;
@@ -89,6 +94,7 @@ export function createReplayStore(): ReplayStore {
   };
 
   const store: ReplayStore = {
+    speeds,
     get: () => state,
     subscribe(l) {
       listeners.add(l);
@@ -130,7 +136,7 @@ export function createReplayStore(): ReplayStore {
       else store.play();
     },
     setSpeed(speed) {
-      if (REPLAY_SPEEDS.includes(speed)) set({ speed });
+      if (speeds.includes(speed)) set({ speed });
     },
     step(seconds) {
       const base = state.tMs ?? state.range?.startMs;
@@ -164,7 +170,7 @@ export function createReplayStore(): ReplayStore {
 }
 
 /** The logbook's cursor (flight detail: profile chart ↔ track map). */
-export const logbookReplay = createReplayStore();
+export const logbookReplay = createReplayStore(LOGBOOK_REPLAY_SPEEDS);
 /** The landing debrief's cursor; reset when the debrief closes. */
 export const debriefReplay = createReplayStore();
 

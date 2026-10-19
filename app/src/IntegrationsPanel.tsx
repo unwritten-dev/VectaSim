@@ -212,6 +212,10 @@ export default function IntegrationsPanel({ onError }: { onError?: (e: string) =
             <input type="checkbox" checked={prefs.trayMinimize} onChange={(e) => void setTray(e.target.checked)} />
             {t("settings.integrations.tray.enable")}
           </label>
+          <label className="check">
+            <input type="checkbox" checked={prefs.trayMinimize && prefs.trayClose} disabled={!prefs.trayMinimize} onChange={(e) => void setPref("trayClose", e.target.checked).catch(fail)} />
+            {t("settings.integrations.tray.close")}
+          </label>
           <div className="detail">{t("settings.integrations.tray.help")}</div>
           <Status tone={trayActive ? "ok" : "off"}>{trayActive ? t("settings.integrations.tray.active") : t("settings.integrations.tray.inactive")}</Status>
         </section>

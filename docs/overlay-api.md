@@ -41,8 +41,10 @@ All responses are `application/json` with `Cache-Control: no-store`. Field names
 The current flight (as in the “Flight” side panel), `null` when there is no flight.
 
 ```json
-{"id":"demo-flight","state":"active","phase":"descent","offBlockMs":1792337321178,"takeoffMs":1792338221178,"landingMs":null,"onBlockMs":null,"blockTimeMs":5401502,"flightTimeMs":4501502,"departure":"EDDF","arrival":null,"destination":"EGLL","callsign":"DLH4YA","aircraft":{"title":"Airbus A320neo Lufthansa D-AINA","icaoType":"A20N","registration":"D-AINA","airline":"Lufthansa"},"distanceNm":333.0,"maxAltitudeFt":36000.0,"remainingNm":19.0,"etaMs":1792343002996,"fuel":{"startKg":9100.0,"currentKg":4200.0,"usedKg":4900.0,"plannedRampKg":9100.0,"plannedLandingKg":4000.0},"landingRateFpm":null,"touchdowns":0}
+{"id":"demo-flight","state":"active","phase":"descent","offBlockMs":1792337321178,"takeoffMs":1792338221178,"landingMs":null,"onBlockMs":null,"blockTimeMs":5401502,"flightTimeMs":4501502,"departure":"EDDF","arrival":null,"destination":"EGLL","callsign":"DLH4YA","aircraft":{"title":"Airbus A320neo Lufthansa D-AINA","icaoType":"A20N","registration":"D-AINA","airline":"Lufthansa"},"distanceNm":333.0,"maxAltitudeFt":36000.0,"remainingNm":19.0,"etaMs":1792343002996,"fuel":{"startKg":9100.0,"currentKg":4200.0,"usedKg":4900.0,"plannedRampKg":9100.0,"plannedLandingKg":4000.0},"landingRateFpm":null,"touchdowns":0,"maxG":1.21,"minG":0.86}
 ```
+
+`maxG` / `minG`: highest and lowest g-load in the air so far, outside the touchdowns (0.3 s moving average, two decimals; the last 3 s are held back until it is clear no touchdown follows), `null` before the first airborne sample.
 
 ### `GET /api/v1/telemetry`
 

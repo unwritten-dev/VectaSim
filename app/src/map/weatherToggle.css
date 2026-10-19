@@ -1,0 +1,102 @@
+/* "Wetter" split button (WeatherToggle.tsx): frame, halves and menu come from
+   trafficToggle.css; here only the caret-only right half, the check marks and the legend. */
+
+.map-toolbar .traffic-split button.weather-caret {
+  padding-left: var(--sp-1);
+  padding-right: var(--sp-1);
+  min-width: 22px;
+  justify-content: center;
+}
+
+.weather-menu {
+  min-width: 168px;
+}
+.weather-menu button {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.weather-check {
+  display: inline-block;
+  width: 1em;
+  text-align: center;
+  color: var(--accent);
+}
+.weather-menu-note {
+  max-width: 200px;
+  padding: 4px 6px 2px;
+  border-top: 1px solid var(--hairline-strong);
+  margin-top: 2px;
+  font-size: var(--fs-2xs);
+  line-height: 1.35;
+  color: var(--text-muted);
+}
+
+/* legend bottom left, above the scale bar (and above the HUD in the live view) */
+.weather-legend {
+  position: absolute;
+  left: 10px;
+  bottom: calc(var(--hud-clearance, 112px) + 46px);
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 3px var(--sp-2);
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--r-md);
+  font-size: var(--fs-2xs);
+  color: var(--text-muted);
+  pointer-events: auto;
+}
+.weather-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.weather-legend-row .num {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.weather-legend-row.failed .num,
+.weather-legend-warn {
+  color: var(--warn);
+}
+.metar-legend {
+  gap: 7px;
+}
+.metar-legend.dim {
+  opacity: 0.75;
+}
+.metar-legend-name {
+  margin-right: 1px;
+}
+.metar-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--text);
+  cursor: help;
+}
+/* the same ring as on the map (online.ts → metar-ring), small */
+.metar-ring {
+  width: 8px;
+  height: 8px;
+  border: 2px solid;
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+.weather-swatch {
+  width: 10px;
+  height: 6px;
+  border-radius: 2px;
+}
+.weather-swatch.radar {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 45%, transparent), var(--accent));
+}
+.weather-swatch.clouds {
+  background: linear-gradient(90deg, transparent, var(--text));
+  border: 1px solid var(--hairline-strong);
+}

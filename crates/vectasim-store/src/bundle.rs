@@ -627,6 +627,27 @@ fn fill_user_fields(tx: &Transaction<'_>, cols: &Cols, f: &Map<String, Value>) -
     Ok(changed)
 }
 
+/// G-load over the flight (schema v16), one group: copied as a whole or not at all.
+const G_LOAD_COLS: &[&str] = &[
+    "g_max", "g_max_ms", "g_max_phase", "g_max_alt_ft", "g_min", "g_min_ms", "g_min_phase", "g_min_alt_ft", "g_high_count",
+    "g_low_count", "g_source",
+];
+
+/// The flight with the bundle row's id is here already without a g-load (`g_source` NULL,
+/// e.g. recorded before v16 and not opened yet): take the bundle's measured one.
+fn fill_g_load(tx: &Transaction<'_>, cols: &Cols, f: &Map<String, Value>) -> Result<()> {
+    if !G_LOAD_COLS.iter().all(|c| cols.flights.contains(*c)) || !matches!(str_of(f, "g_source"), Some("live" | "track")) {
+        return Ok(());
+    }
+    let id = str_of(f, "id").unwrap_or_default();
+    for col in G_LOAD_COLS.iter().filter(|c| **c != "g_source") {
+        let v = f.get(*col).map_or(SqlValue::Null, json_to_sql);
+        tx.execute(&format!("UPDATE flights SET \"{col}\" = ?2 WHERE id = ?1 AND g_source IS NULL"), params![id, v])?;
+    }
+    tx.execute("UPDATE flights SET g_source = ?2 WHERE id = ?1 AND g_source IS NULL", params![id, str_of(f, "g_source")])?;
+    Ok(())
+}
+
 fn insert_flight(tx: &Transaction<'_>, cols: &Cols, p: &Prepared) -> Result<()> {
     let f = &p.line.flight;
     let id = str_of(f, "id").unwrap_or_default().to_string();
@@ -1006,6 +1027,7 @@ fn run_import(store: &Store, path: &Path, opts: &ImportOptions) -> Result<Import
                 if fill_user_fields(&tx, &cols, &line.flight)? {
                     report.flights_user_filled += 1;
                 }
+                fill_g_load(&tx, &cols, &line.flight)?;
                 continue;
             }
             let track = prepare_track(&mut zip, &line, &mut report.warnings, opts.lang)?;

@@ -62,7 +62,24 @@
     "userArrIcao": null,
     "userAircraftTitle": null,
     "userRegistration": null,
-    "rating": null
+    "rating": null,
+    "gLoad": {
+      "max": {
+        "g": 1.4234,
+        "timestampMs": 1792137605000,
+        "phase": "climb",
+        "altitudeMslFt": 3212.4
+      },
+      "min": {
+        "g": 0.7081,
+        "timestampMs": 1792137608000,
+        "phase": "descent",
+        "altitudeMslFt": 9870.0
+      },
+      "highCount": 0,
+      "lowCount": 1,
+      "source": "live"
+    }
   },
   "touchdowns": [
     {

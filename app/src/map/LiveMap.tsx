@@ -7,11 +7,17 @@ import "./maplibreWorker";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { AircraftInfo, Airport, FlightEvent, Metar, NavFix, OnlineSummary, OnlineView, Pilot, TrackSample } from "../types";
-import { WAKE_SIZE, icaoFromAtcModel, iconSizeExpr, wakeCategory } from "./aircraftIcons";
+import { WAKE_SIZE, icaoFromAtcModel, trafficColors, wakeCategory } from "./aircraftIcons";
+import { Traffic3D } from "./trafficModel";
+import type { ViewBox } from "./traffic3d";
+import { OWN_LAYERS, PULSE_MIN, addOwnAircraftLayers, haloOpacity, keepOwnOnTop, ownAircraftGeoJson, prefersReducedMotion, pulseOpacity } from "./ownAircraft";
+import { AircraftModelLayer } from "./aircraftModel";
+import { modelKind, type ModelKind } from "./aircraftMeshes";
 import {
   addAirportLayers,
   addRouteLayers,
   addCurtainLayers,
+  drawCurtainTrack,
   firstSymbolLayer,
   addTrackLayers,
   applyProjection,
@@ -19,12 +25,12 @@ import {
   setPitched,
   airportsGeoJson,
   loadPlaneIcon,
-  pointFeature,
   routeGeoJson,
   useGlobe,
   withProjection,
+  type TrackPoint,
 } from "./common";
-import { ChunkedTrack, curtainGeoJson } from "./trackChunks";
+import { ChunkedTrack, altToCurtainM } from "./trackChunks";
 import {
   addOnlineLayers,
   atcGeoJson,
@@ -39,12 +45,17 @@ import {
 } from "./online";
 import TrafficCard from "./TrafficCard";
 import { useTrafficSelection } from "./trafficHooks";
+import { boundedDebounce } from "./debounce";
 import { SELECT_TRAFFIC_EVENT, greatCircle, sameTraffic, type SelectTrafficDetail, type TrafficRef } from "./trafficInfo";
 import { addAirportDiagramLayers } from "./airportDiagram";
 import AirportReadout from "./AirportReadout";
 import { COLOR, getMapTheme } from "../theme";
 import TrafficToggle from "./TrafficToggle";
 import GlobeToggle, { useMapZoom } from "./GlobeToggle";
+import MapStyleToggle from "./MapStyleToggle";
+import WeatherToggle, { WeatherLegend } from "./WeatherToggle";
+import { followSatellite } from "./satellite";
+import { attachWeather, getWeatherState } from "./weatherOverlay";
 import { useTelemetry } from "../telemetryStore";
 import { useT } from "../i18n";
 
@@ -57,12 +68,16 @@ const LAYER_STORAGE_KEY = "vectasim.mapLayers";
 /** Track sources: closed 10-min blocks (diff-updated rarely) and the open block (per sample). */
 const TRACK_HISTORY = "track-history";
 const TRACK_LIVE = "track-live";
-/** 3D view: the track as wall + ribbon at the flown altitude (rebuilt at most this often). */
+/** 3D view: the track as wall + band at the flown height (custom layer, map/curtainLayer.ts). */
 const TRACK_3D = "track-3d";
 const VIEW3D_STORAGE_KEY = "vectasim.map3d";
-const CURTAIN_MIN_INTERVAL_MS = 5_000;
+/** The own aircraft's 3D model (custom layer) and the stack kept above every other layer. */
+const MODEL_LAYER = "aircraft-model";
+const OWN_STACK = [...OWN_LAYERS, MODEL_LAYER];
 /** Follow mode re-centres only when the aircraft moved at least this far on screen. */
 const FOLLOW_MIN_PX = 1;
+/** …or when its height (3D view) changed by this much. */
+const FOLLOW_MIN_ELEVATION_M = 2;
 /** Fired by the shell when a kept-mounted, CSS-hidden map becomes visible again. */
 export const MAP_VISIBLE_EVENT = "vectasim:map-visible";
 
@@ -138,6 +153,19 @@ function viewBbox(map: maplibregl.Map) {
   return { minLon, minLat: Math.max(-90, b.getSouth()), maxLon, maxLat: Math.min(90, b.getNorth()) };
 }
 
+/** Airports of a (possibly unwrapped) box: the height reference of the 3D traffic (trafficModel.ts). */
+function airportsAround(b: ViewBox): Promise<Airport[]> {
+  const wrap = (l: number) => ((((l + 180) % 360) + 360) % 360) - 180;
+  const all = b.east - b.west >= 360;
+  return invoke<Airport[]>("airports_in_bbox", {
+    minLon: all ? -180 : wrap(b.west),
+    minLat: Math.max(-90, b.south),
+    maxLon: all ? 180 : wrap(b.east),
+    maxLat: Math.min(90, b.north),
+    limit: 2000,
+  });
+}
+
 interface Props {
   /** Identity of the own aircraft – decides silhouette and size (wake class). */
   aircraft?: AircraftInfo | null;
@@ -172,8 +200,14 @@ function drawTrack(map: maplibregl.Map, track: ChunkedTrack, full: boolean) {
   (map.getSource(TRACK_LIVE) as maplibregl.GeoJSONSource | undefined)?.setData(track.liveGeoJson());
 }
 
+/** The curtain up to the track's points (incremental: only new points are processed). */
 function drawCurtain(map: maplibregl.Map, track: ChunkedTrack) {
-  (map.getSource(TRACK_3D) as maplibregl.GeoJSONSource | undefined)?.setData(curtainGeoJson(track.points));
+  drawCurtainTrack(map, TRACK_3D, track.points);
+}
+
+/** The curtain plus the stretch from the last point to the aircraft (`now`), per sample: no gap between wall and model. */
+function drawCurtainHead(map: maplibregl.Map, track: ChunkedTrack, now: TrackPoint | null) {
+  drawCurtainTrack(map, TRACK_3D, track.points, now);
 }
 
 /**
@@ -196,7 +230,6 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
   const [globe] = useGlobe();
   const globeRef = useRef(globe);
   globeRef.current = globe;
-  const curtainAtRef = useRef(0);
   const [routeReady, setRouteReady] = useState(false);
   const zoom = useMapZoom(mapRef, routeReady);
   const [layers, setLayers] = useState<LayerState>(loadLayerState);
@@ -282,6 +315,67 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
   selKeyRef.current = trafficRef ? `${trafficRef.network}:${trafficRef.cid}` : null;
   const revealedRef = useRef<string | null>(null);
 
+  // ---- own aircraft: 2D symbol + halo, 3D model (map/ownAircraft.ts, map/aircraftModel.ts) ----
+  const modelRef = useRef<AircraftModelLayer | null>(null);
+  const ownKindRef = useRef<ModelKind>("narrowbody");
+  // ---- online traffic as 3D models (pitched view, zoom >= 8; map/trafficModel.ts) ----
+  const traffic3dRef = useRef<Traffic3D | null>(null);
+  const syncTraffic3d = () => traffic3dRef.current?.update(view3dRef.current, groupVisible("traffic"));
+  const syncTraffic3dRef = useRef(syncTraffic3d);
+  syncTraffic3dRef.current = syncTraffic3d;
+  /** Symbol data and model pose from the latest sample (each sample, theme change, 3D toggle). */
+  const drawOwn = () => {
+    const map = mapRef.current;
+    if (!map) return;
+    const t = telemetryRef.current;
+    const model = modelRef.current;
+    const modelOn = !!model && !model.failed;
+    const pose =
+      t && Number.isFinite(t.latitude) && Number.isFinite(t.longitude)
+        ? {
+            lon: t.longitude,
+            lat: t.latitude,
+            headingDeg: t.headingTrueDeg,
+            // height above the map's ground, like the curtain (MSL would float a parked aircraft at the field elevation)
+            altFt: trackRef.current.heightFor({ altFt: t.altitudeMslFt, aglFt: t.altitudeAglFt, onGround: t.onGround }),
+            cat: ownCatRef.current,
+          }
+        : null;
+    (map.getSource("aircraft") as maplibregl.GeoJSONSource | undefined)?.setData(ownAircraftGeoJson(pose, view3dRef.current, modelOn));
+    model?.setPose(t && pose ? { ...pose, pitchDeg: t.pitchDeg, bankDeg: t.bankDeg, size: WAKE_SIZE[pose.cat], kind: ownKindRef.current } : null);
+  };
+  const drawOwnRef = useRef(drawOwn);
+  drawOwnRef.current = drawOwn;
+  /**
+   * A slow breath of the halo while the camera does not follow the aircraft (it may be anywhere
+   * on screen then); still when following, in 3D (the model replaces the halo) or with
+   * prefers-reduced-motion. ~15 paint updates per second, only while it runs.
+   */
+  const pulseRef = useRef<() => void>(() => {});
+  const hasTelemetry = telemetry != null;
+  useEffect(() => {
+    let timer: number | undefined;
+    const stop = () => {
+      window.clearInterval(timer);
+      timer = undefined;
+      const map = mapRef.current;
+      if (map?.getLayer(OWN_LAYERS[0])) map.setPaintProperty(OWN_LAYERS[0], "icon-opacity", haloOpacity(PULSE_MIN));
+    };
+    const update = () => {
+      const run = !follow && !view3d && routeReady && hasTelemetry && !prefersReducedMotion();
+      if (!run) return stop();
+      if (timer !== undefined) return;
+      timer = window.setInterval(() => {
+        const map = mapRef.current;
+        if (!map || !readyRef.current || document.hidden || map.getCanvas().clientWidth === 0) return;
+        if (map.getLayer(OWN_LAYERS[0])) map.setPaintProperty(OWN_LAYERS[0], "icon-opacity", haloOpacity(pulseOpacity(performance.now())));
+      }, 66);
+    };
+    pulseRef.current = update;
+    update();
+    return stop;
+  }, [follow, view3d, routeReady, hasTelemetry]);
+
   // ---- map setup -------------------------------------------------------------------
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -292,14 +386,19 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
         center: [8.57, 50.03],
         zoom: 9,
         attributionControl: { compact: true },
+        // the 3D follow camera looks at the aircraft's height (no terrain: otherwise clamped to 0)
+        centerClampedToGround: false,
       });
       map.addControl(new maplibregl.NavigationControl({ showCompass: true, visualizePitch: true }), "top-right");
       map.addControl(new maplibregl.ScaleControl({ unit: "nautical" }), "bottom-left");
       mapRef.current = map;
+      const traffic3d = new Traffic3D(airportsAround);
+      traffic3dRef.current = traffic3d;
 
       // Online traffic/ATC: re-filtered from the backend's cached VATSIM snapshot on every
-      // move and every poll (online:summary); debounced so a fling pans into one request.
-      let onlineTimer: number | undefined;
+      // move and every poll (online:summary); debounced so a fling pans into one request, but at
+      // most 1 s late: the 3D follow camera ends a move several times a second while airborne,
+      // a plain debounce never fired then (cold start with 3D on: no traffic, ATC, METAR rings).
       // last data sent per source: a pan that keeps the same pilots in view (or a poll without
       // changes) does not re-tile the layer; cleared after a theme change (sources are new)
       const sentKeys = new Map<string, string>();
@@ -311,31 +410,37 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
         sentKeys.set(id, key);
         src.setData(data);
       };
-      const refreshOnline = () => {
-        window.clearTimeout(onlineTimer);
-        onlineTimer = window.setTimeout(() => {
+      // a failing refresh is logged once per path (the map shows nothing else about it)
+      const warned = new Set<string>();
+      const warnOnce = (what: string) => (e: unknown) => {
+        if (warned.has(what)) return;
+        warned.add(what);
+        console.warn(`live map: ${what} failed`, e);
+      };
+      const refreshOnline = boundedDebounce(
+        () => {
+          // an online:summary before the first style load: no sources yet, the load handler asks again
+          if (!readyRef.current) return;
           const c = map.getCenter();
           invoke<OnlineView>("online_snapshot_in_bbox", { ...viewBbox(map), limit: 1500 })
             .then((v) => {
               setIfChanged("vatsim-pilots", pilotsGeoJson(v.pilots));
+              traffic3d.setPilots(v.pilots);
               setIfChanged("vatsim-atc", atcGeoJson(v.controllers));
               onOnlineViewRef.current?.(v.summary.enabled ? v : null, { lat: c.lat, lon: c.lng });
             })
             // filters the cached snapshot locally; feed errors surface via online:summary.lastError
-            .catch(() => {});
-        }, 250);
-      };
+            .catch(warnOnce("online refresh"));
+        },
+        250,
+        1000,
+      );
 
       // METARs only for the biggest airports in view (<= 40), only when zoomed in and the
       // layer is on; the backend caches each station for 10 min, so re-asking is cheap.
-      let metarTimer: number | undefined;
-      const refreshMetars = () => {
-        window.clearTimeout(metarTimer);
-        if (map.getZoom() < METAR_MIN_ZOOM || !layersRef.current.weather) {
-          setIfChanged("metars", { type: "FeatureCollection", features: [] });
-          return;
-        }
-        metarTimer = window.setTimeout(() => {
+      // Debounced like the online refresh, at most 1.5 s late (the follow camera moves on).
+      const queryMetars = boundedDebounce(
+        () => {
           const zoom = map.getZoom();
           const candidates = [...airportsRef.current.values()]
             .filter((a) => a.kind === "large" || a.kind === "medium" || (zoom >= 9 && a.kind === "small"))
@@ -345,8 +450,18 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
           invoke<Metar[]>("metars", { icaos: candidates.map((a) => a.ident) })
             .then((list) => setIfChanged("metars", metarsGeoJson(list, airportsRef.current)))
             // map badges are best effort; the flight bar shows METAR errors for the relevant station
-            .catch(() => {});
-        }, 600);
+            .catch(warnOnce("METAR refresh"));
+        },
+        600,
+        1500,
+      );
+      const refreshMetars = () => {
+        if (map.getZoom() < METAR_MIN_ZOOM || !layersRef.current.weather || !getWeatherState().prefs.metar) {
+          queryMetars.cancel();
+          setIfChanged("metars", { type: "FeatureCollection", features: [] });
+          return;
+        }
+        queryMetars();
       };
 
       const refreshAirports = () => {
@@ -365,8 +480,10 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
             refreshMetars();
           })
           // embedded airport DB; on failure the previous dots simply stay
-          .catch(() => {});
+          .catch(warnOnce("airport refresh"));
       };
+      // on moveend: the 3D follow camera ends a move several times a second while airborne
+      const refreshAirportsSoon = boundedDebounce(refreshAirports, 150, 500);
 
       // Our layers on top of the basemap. Runs on the first load and again after a theme
       // change (setStyle drops every source, layer and image); colours come from theme.ts.
@@ -381,49 +498,26 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
         setCurtainVisible(map, TRACK_3D, view3dRef.current);
         await addOnlineLayers(map);
         for (const g of Object.keys(layersRef.current) as OnlineLayerGroup[]) setGroupVisible(map, g, groupVisible(g));
+        // traffic models below the flat traffic symbols, so callsigns and click targets stay above them
+        traffic3d.attach(map, { body: trafficColors().fill, accent: COLOR.accent, dark: COLOR.aircraftEdge, light: getMapTheme().scheme === "light" });
+        syncTraffic3dRef.current();
         await loadPlaneIcon(map);
-        map.addSource("aircraft", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
-        // halo + ring so the own aircraft stands out from the traffic; on light themes the yellow
-        // disc alone vanishes on paper, so the ring is drawn in the dark aircraft edge colour
-        const lightMap = getMapTheme().scheme === "light";
-        map.addLayer({
-          id: "aircraft-halo",
-          type: "circle",
-          source: "aircraft",
-          paint: {
-            "circle-radius": ["*", ["coalesce", ["get", "sizeFactor"], 1.3], 16],
-            "circle-color": COLOR.ownAircraft,
-            "circle-opacity": lightMap ? 0.3 : 0.14,
-            "circle-blur": lightMap ? 0.2 : 0.6,
-          },
-        });
-        map.addLayer({
-          id: "aircraft-ring",
-          type: "circle",
-          source: "aircraft",
-          paint: {
-            "circle-radius": ["*", ["coalesce", ["get", "sizeFactor"], 1.3], 14],
-            "circle-color": "rgba(0,0,0,0)",
-            "circle-stroke-color": lightMap ? COLOR.aircraftEdge : COLOR.ownAircraft,
-            "circle-stroke-width": 2,
-            "circle-stroke-opacity": lightMap ? 0.8 : 0.85,
-            "circle-pitch-alignment": "map",
-          },
-        });
-        map.addLayer({
-          id: "aircraft",
-          type: "symbol",
-          source: "aircraft",
-          layout: {
-            "icon-image": ["concat", "ac-own-", ["coalesce", ["get", "cat"], "medium"]],
-            "icon-size": iconSizeExpr(1.3),
-            "icon-rotate": ["get", "heading"],
-            "icon-rotation-alignment": "map",
-            "icon-allow-overlap": true,
-            "icon-ignore-placement": true,
-          },
-        });
+        // own aircraft last, so it starts above traffic and labels (keepOwnOnTop keeps it there):
+        // halo + bold-edged symbol in 2D, the low-poly model at the curtain's height in 3D
+        addOwnAircraftLayers(map, "aircraft");
+        const model = new AircraftModelLayer(MODEL_LAYER, { body: COLOR.ownAircraft, dark: COLOR.aircraftEdge, light: getMapTheme().scheme === "light" });
+        // shaders refused: the flat symbol stays, raised to the curtain height instead
+        model.onFail = () => drawOwnRef.current();
+        map.addLayer(model);
+        modelRef.current = model;
+        model.setEnabled(view3dRef.current);
+        drawOwnRef.current();
+        pulseRef.current();
       };
+      // anything added later (weather overlay, diagram, traffic) goes below the own aircraft
+      map.on("styledata", () => {
+        if (map.getLayer(MODEL_LAYER)) keepOwnOnTop(map, OWN_STACK);
+      });
 
       map.on("load", async () => {
         // style URL fallback (offline) carries no projection: set it here
@@ -440,7 +534,9 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
         invoke<TrackSample[]>("get_live_track")
           .then((samples) => {
             if (mapRef.current !== map) return;
-            trackRef.current.seed(samples.map((s) => ({ lon: s.longitude, lat: s.latitude, altFt: s.altitudeMslFt, tMs: s.tMs })));
+            trackRef.current.seed(
+              samples.map((s) => ({ lon: s.longitude, lat: s.latitude, altFt: s.altitudeMslFt, aglFt: s.altitudeAglFt, onGround: s.onGround, tMs: s.tMs })),
+            );
             drawTrack(map, trackRef.current, true);
             if (view3dRef.current) drawCurtain(map, trackRef.current);
           })
@@ -466,12 +562,7 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
             src("route")?.setData(routeGeoJson(routeRef.current ?? []));
             src("traffic-selected")?.setData(selectedGeoJson(selectedPosRef.current));
             src("traffic-route")?.setData(routeLineGeoJson(trafficRouteRef.current));
-            const t = telemetryRef.current;
-            if (t)
-              src("aircraft")?.setData({
-                type: "FeatureCollection",
-                features: [pointFeature(t.longitude, t.latitude, { heading: t.headingTrueDeg, cat: ownCatRef.current, sizeFactor: WAKE_SIZE[ownCatRef.current] })],
-              });
+            drawOwnRef.current();
             refreshOnline();
             refreshMetars();
           });
@@ -481,6 +572,9 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
       window.addEventListener("theme:changed", onTheme);
       // basemap names follow the UI language (map/basemap.ts)
       const offLang = followLanguage(map);
+      // Karte / Satellit and the radar / cloud overlay (map/satellite.ts, map/weatherOverlay.ts)
+      const offSat = followSatellite(map);
+      const offWeather = attachWeather(map);
 
       // offline hint: a failed tile/style fetch sets it, the next tile that arrives clears it
       let offline = false;
@@ -498,8 +592,10 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
       const onBrowserOffline = () => setOffline(true);
       window.addEventListener("offline", onBrowserOffline);
 
-      map.on("moveend", refreshAirports);
+      map.on("moveend", refreshAirportsSoon);
       map.on("moveend", refreshOnline);
+      // zoom threshold and the picked <= 200 follow the camera
+      map.on("moveend", () => syncTraffic3dRef.current());
       // dragging takes the camera: neither the own aircraft nor a selected one is followed
       map.on("dragstart", () => {
         followRef.current = false;
@@ -533,7 +629,7 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
         }
       });
 
-      const unlistenOnline = listen<OnlineSummary>("online:summary", refreshOnline);
+      const unlistenOnline = listen<OnlineSummary>("online:summary", () => refreshOnline());
       const onLayersChanged = () => refreshMetars();
       window.addEventListener("vectasim:layers", onLayersChanged);
 
@@ -541,13 +637,18 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
         ro.disconnect();
         window.removeEventListener("resize", resize);
         window.removeEventListener(MAP_VISIBLE_EVENT, resize);
-        window.clearTimeout(onlineTimer);
-        window.clearTimeout(metarTimer);
+        refreshOnline.cancel();
+        queryMetars.cancel();
+        refreshAirportsSoon.cancel();
         window.removeEventListener("vectasim:layers", onLayersChanged);
         window.removeEventListener("theme:changed", onTheme);
         offLang();
+        offSat();
+        offWeather();
         window.removeEventListener("offline", onBrowserOffline);
         diagramOff?.();
+        traffic3d.dispose();
+        traffic3dRef.current = null;
         unlisten.then((u) => u());
         unlistenOnline.then((u) => u());
         map.remove();
@@ -583,15 +684,18 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
   }, [route, routeReady]);
 
   // ---- telemetry updates -------------------------------------------------------------
-  const ownCat = wakeCategory(icaoFromAtcModel(aircraft?.atcModel), aircraft?.title, telemetry?.totalWeightKg);
+  const ownIcao = icaoFromAtcModel(aircraft?.atcModel);
+  const ownCat = wakeCategory(ownIcao, aircraft?.title, telemetry?.totalWeightKg);
   ownCatRef.current = ownCat;
+  // 3D model shape: like the 2D silhouette by wake class, refined to prop / turboprop / helicopter
+  const ownKind = modelKind(ownIcao, aircraft?.title, telemetry?.totalWeightKg);
+  ownKindRef.current = ownKind;
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !readyRef.current) return;
     if (!telemetry) {
       // provider gone or switched (demo ended): no aircraft, no stale track
-      const empty = { type: "FeatureCollection" as const, features: [] };
-      (map.getSource("aircraft") as maplibregl.GeoJSONSource | undefined)?.setData(empty);
+      drawOwn();
       if (trackRef.current.points.length) {
         trackRef.current.reset();
         drawTrack(map, trackRef.current, true);
@@ -602,31 +706,32 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
     const { latitude: lat, longitude: lon } = telemetry;
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
 
-    (map.getSource("aircraft") as maplibregl.GeoJSONSource | undefined)?.setData({
-      type: "FeatureCollection",
-      features: [pointFeature(lon, lat, { heading: telemetry.headingTrueDeg, cat: ownCat, sizeFactor: WAKE_SIZE[ownCat] })],
-    });
+    drawOwn();
 
     const track = trackRef.current;
     if (telemetry.timestampMs - track.lastMs >= TRACK_POINT_INTERVAL_MS) {
-      const closedChunk = track.push({ lon, lat, altFt: telemetry.altitudeMslFt, tMs: telemetry.timestampMs });
+      const sample = { altFt: telemetry.altitudeMslFt, aglFt: telemetry.altitudeAglFt, onGround: telemetry.onGround };
+      const closedChunk = track.push({ lon, lat, ...sample, hFt: track.heightFor(sample), tMs: telemetry.timestampMs });
       // a closed 10-min block moves to the history source as a diff (no full re-send)
       if (closedChunk?.length) (map.getSource(TRACK_HISTORY) as maplibregl.GeoJSONSource | undefined)?.updateData({ add: closedChunk });
       if (track.points.length >= 2) drawTrack(map, track, false);
-      // the 3D curtain is one polygon set for the whole track: rebuilt every few seconds, not per sample
-      if (view3dRef.current && telemetry.timestampMs - curtainAtRef.current >= CURTAIN_MIN_INTERVAL_MS) {
-        curtainAtRef.current = telemetry.timestampMs;
-        drawCurtain(map, track);
-      }
     }
+    // 3D: the wall reaches the aircraft; heights above the map's ground (no terrain), 0 when on the ground
+    if (view3dRef.current) drawCurtainHead(map, track, { lon, lat, altFt: telemetry.altitudeMslFt, hFt: track.heightFor({ altFt: telemetry.altitudeMslFt, aglFt: telemetry.altitudeAglFt, onGround: telemetry.onGround }) });
 
     // hidden (CSS display:none) or not moved by a pixel: no camera animation
     if (followRef.current && map.getCanvas().clientWidth > 0) {
       const target = map.project([lon, lat]);
       const here = map.project(map.getCenter());
-      if (Math.hypot(target.x - here.x, target.y - here.y) >= FOLLOW_MIN_PX) map.easeTo({ center: [lon, lat], duration: 150, easing: (t) => t });
+      // 3D: the camera looks at the aircraft in the air (its model height), not at the ground below it –
+      // zoomed in at cruise level the model would otherwise sit far above the screen
+      const elevation = view3dRef.current
+        ? altToCurtainM(trackRef.current.heightFor({ altFt: telemetry.altitudeMslFt, aglFt: telemetry.altitudeAglFt, onGround: telemetry.onGround }))
+        : 0;
+      const climbed = Math.abs(map.getCenterElevation() - elevation) >= FOLLOW_MIN_ELEVATION_M;
+      if (Math.hypot(target.x - here.x, target.y - here.y) >= FOLLOW_MIN_PX || climbed) map.easeTo({ center: [lon, lat], elevation, duration: 150, easing: (t) => t });
     }
-  }, [telemetry, ownCat]);
+  }, [telemetry, ownCat, ownKind]);
 
   // ---- selected traffic: ring, follow, route ------------------------------------------
   const selLon = sel?.pilot?.longitude;
@@ -653,6 +758,12 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
         map.easeTo({ center: [pos.lon, pos.lat], offset: insetOffset(insets), duration: 500 });
     }
   }, [selLon, selLat, routeReady]);
+
+  // the selected aircraft: accent colour and always among the 3D models
+  const selKey = trafficRef ? `${trafficRef.network}:${trafficRef.cid}` : null;
+  useEffect(() => {
+    traffic3dRef.current?.setSelected(selKey);
+  }, [selKey, routeReady]);
 
   const dep = sel?.pilot?.departure ?? "";
   const arr = sel?.pilot?.arrival ?? "";
@@ -741,6 +852,7 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
     }
     const map = mapRef.current;
     if (map && readyRef.current) setGroupVisible(map, g, groupVisible(g, next));
+    if (g === "traffic") syncTraffic3d();
     if (g === "weather") window.dispatchEvent(new Event("vectasim:layers"));
   };
 
@@ -750,6 +862,7 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
     if (!map || !readyRef.current) return;
     setGroupVisible(map, "traffic", groupVisible("traffic"));
     setGroupVisible(map, "atc", groupVisible("atc"));
+    syncTraffic3dRef.current();
   }, [trafficOn, routeReady]);
 
   const toggle3d = () => {
@@ -764,11 +877,11 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
     const map = mapRef.current;
     if (!map || !readyRef.current) return;
     setCurtainVisible(map, TRACK_3D, next);
-    if (next) {
-      curtainAtRef.current = telemetryRef.current?.timestampMs ?? 0;
-      drawCurtain(map, trackRef.current);
-    }
+    if (next) drawCurtain(map, trackRef.current);
+    modelRef.current?.setEnabled(next);
+    drawOwn();
     setPitched(map, next);
+    syncTraffic3d();
   };
 
   const center = () => {
@@ -804,6 +917,7 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
           3D
         </button>
         <GlobeToggle zoom={zoom} />
+        <MapStyleToggle />
         <div className="map-toggle-group" role="group" aria-label={t("map.toolbar.layers")}>
           {/* Verkehr + VATSIM / IVAO / beide; turning traffic on also re-shows a hidden traffic layer */}
           <TrafficToggle on={trafficOn} onEnable={() => !layersRef.current.traffic && toggleLayer("traffic")} />
@@ -816,13 +930,14 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
           >
             ATC
           </button>
-          <button className="toggle" onClick={() => toggleLayer("weather")} aria-pressed={layers.weather} title={t("map.toolbar.weatherTitle", { zoom: METAR_MIN_ZOOM })}>
-            {t("map.toolbar.weather")}
-          </button>
+          {/* Wetter + METAR / Radar / Wolken (WeatherToggle.tsx) */}
+          <WeatherToggle on={layers.weather} onToggle={() => toggleLayer("weather")} metarZoom={METAR_MIN_ZOOM} />
         </div>
       </div>
-      </div>
+      {/* in the same column as the pill and the toolbar: below them, never over them, also when the toolbar wraps */}
       <AirportReadout mapRef={mapRef} ready={routeReady} />
+      </div>
+      <WeatherLegend zoom={zoom} metarZoom={METAR_MIN_ZOOM} />
       {trafficRef && sel && (
         <TrafficCard
           sel={sel}

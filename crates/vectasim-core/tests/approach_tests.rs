@@ -107,9 +107,13 @@ fn mock_circuit_is_a_stable_approach_to_25c() {
         assert!(a.exceedances.is_empty());
         let sf = a.stability.stable_from_ft.expect("stable");
         assert!(sf >= 1000.0, "loop {n}: stable from {sf}");
-        for k in [GateKind::TenNm, GateKind::Faf, GateKind::Ft1000, GateKind::Ft500] {
+        for k in [GateKind::Faf, GateKind::Ft1000, GateKind::Ft500] {
             gate_ok(a, k);
         }
+        // the demo starts on the downwind, < 10 nm track distance out: that gate is not
+        // reached – no sample, no criteria, so nothing that could fail
+        let ten = approach::gate(a, GateKind::TenNm).unwrap();
+        assert!(!ten.reached && ten.criteria.is_empty() && ten.sample.is_none(), "{ten:?}");
         assert!(approach::gate(a, GateKind::Ft50).unwrap().reached);
         // within the gate limits at 1000 and 500 ft, measurable lateral/glidepath at both
         for k in [GateKind::Ft1000, GateKind::Ft500] {

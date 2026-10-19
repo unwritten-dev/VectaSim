@@ -1,12 +1,20 @@
 //! A fake sim that flies an endless circuit at EDDF, so the UI, recorder,
 //! phase engine and landing debrief can be developed on a machine without a sim.
 //!
-//! One loop: start-up at a stand north of RWY 25C, taxi, rolling take-off on
+//! The textbook loop: start-up at a stand north of RWY 25C, taxi, rolling take-off on
 //! 25C, left-hand circuit at 2 500 ft AGL (level long enough to count as a
 //! cruise, then a descending downwind and base turn), a 3° straight-in to 25C and
 //! a landing, rollout to 30 kt, vacate to the north and park.
 //!
-//! The standard variant (the "Demo-Flug") flies a normal, stable approach with a few
+//! The standard variant (the "Demo-Flug") starts in the air, in the second half of the
+//! left-hand downwind of 25C (2 500 ft AGL, 220 kt, flaps 1, gear up, engines running – no
+//! start-up, taxi or take-off; see `DEMO_START_S` and below), so the first contact comes
+//! after ~3:52 and a loop takes 5 min.
+//! It flies the same descending end of the downwind, base turn and final as the textbook
+//! circuit, lands, rolls out, vacates to a stand just off the runway and shuts down; ~20 s
+//! later the next loop starts on the downwind again with a `FlightLoaded` event, as a sim
+//! loading a new flight would (so each loop is a flight of its own, never a teleport). It has
+//! a normal, stable approach with a few
 //! deliberate small errors so the debrief has something to show (see the
 //! `DEMO_*` constants below): fast at the FAF, a little high at 1000 ft, an
 //! overshoot when turning onto the final and a gentle S, late landing flaps, a short
@@ -22,7 +30,9 @@
 //! so the sim's "last touchdown" value differs between consecutive landings).
 //!
 //! `MockFlight` is the deterministic generator (also used by tests);
-//! `MockProvider` runs it on a thread at a fixed rate. `VECTASIM_MOCK=bounce`
+//! `MockProvider` runs it on a thread at a fixed rate. `VECTASIM_MOCK=circuit` selects the
+//! full textbook circuit from the stand (start-up, taxi, take-off; ~7:50 to the first
+//! contact), `VECTASIM_MOCK=bounce`
 //! selects a variant with one bounce, `VECTASIM_MOCK=goaround` one that goes around
 //! from 300 ft on the first final, flies the circuit again and lands (longer loop).
 //!
@@ -54,8 +64,11 @@ pub const EDDF_07C_THRESHOLD: (f64, f64) = (50.0326, 8.53463);
 const ELEVATION_FT: f64 = 364.0;
 /// Magnetic variation at EDDF, east positive.
 const VARIATION_DEG: f64 = 3.0;
-/// One loop of the flight; the end is padded with "parked, engines off".
+/// One loop of the textbook flight (circuit, bounce, reconnect); the end is padded with "parked, engines off".
 const LOOP_S: f64 = 600.0;
+/// Loop of the demo flight (standard variant): ~20 s parked with the engines off after the
+/// path ends (shutdown), then the next loop starts on the downwind.
+const LOOP_DEMO_S: f64 = DEMO_LOOP_S;
 /// Loop of the go-around variant (two circuits).
 const LOOP_GA_S: f64 = 1_080.0;
 /// Loop of the teleport variant: the flight is cut short by the reload.
@@ -128,6 +141,23 @@ const DEMO_GS_DOT_DEG: f64 = 0.35;
 const DEMO_LOC_DOTS: [(f64, f64); 6] = [(-9_000.0, 0.0), (-7_750.0, 0.62), (-6_650.0, 0.0), (-4_650.0, 0.40), (-3_200.0, -0.42), (-2_050.0, 0.38)];
 const DEMO_LATERAL_END_S: f64 = -800.0;
 const DEMO_LOC_DOT_M_AT_THRESHOLD: f64 = 52.0;
+// ---- Demo-Flug: start in the air on the downwind (standard variant only) ----
+// At real speeds (sim rate 1, GS = the movement). The loop starts mid-downwind, level at
+// the circuit height with the engines running, flaps 1 and the gear up; after the landing
+// a short taxi to a stand right off the runway and the shutdown. The base turn (radius,
+// speeds, descent) and the final are the textbook ones, so every gate and demo hint stays put.
+/// Start of the loop: metres past the 25C threshold on the downwind (2 × the circuit radius
+/// left of the centreline, flying the reciprocal of 25C), ~3:50 before the first contact.
+const DEMO_START_S: f64 = -5_430.0;
+/// Fuel already used at the start (start-up, taxi, take-off and climb-out of the sim's flight).
+const DEMO_START_FUEL_USED_KG: f64 = 420.0;
+/// Level downwind ground speed (≈ 208 kt IAS at 2 900 ft MSL), and the length of the
+/// descending end of the downwind (decelerating to the textbook 200 kt at the base turn).
+const DEMO_DOWNWIND_GS_KT: f64 = 220.0;
+const DEMO_DOWNWIND_DESCENT_M: f64 = 2_800.0;
+const DEMO_DOWNWIND_DESCENT_FPM: f64 = 1_000.0;
+/// Length of a demo loop: the path (~4:40, parked at the stand) + ~20 s with the engines off.
+const DEMO_LOOP_S: f64 = 300.0;
 
 // ---- approach data (track v2) of the mock world ----
 /// Wind at the aircraft, everywhere and at every height: 250° true / 8 kt (a typical
@@ -155,6 +185,9 @@ const DESIGN_VC_KT: f64 = 350.0;
 pub enum MockVariant {
     #[default]
     Standard,
+    /// The full textbook circuit from the stand: start-up, taxi, take-off, circuit, the
+    /// textbook approach and landing, taxi-in and shutdown (no discontinuities).
+    Circuit,
     /// A firm first contact, ~4 ft back into the air, second contact ~2.5 s later.
     Bounce,
     /// Go-around from 300 ft on the first final, second circuit, normal landing.
@@ -166,13 +199,14 @@ pub enum MockVariant {
 }
 
 impl MockVariant {
-    /// `VECTASIM_MOCK=bounce|goaround|teleport|reconnect` selects the variant.
+    /// `VECTASIM_MOCK=circuit|bounce|goaround|teleport|reconnect` selects the variant.
     pub fn from_env() -> Self {
         std::env::var("VECTASIM_MOCK").map(|v| Self::parse(&v)).unwrap_or_default()
     }
 
     pub fn parse(s: &str) -> Self {
         match s.trim().to_ascii_lowercase().as_str() {
+            "circuit" => MockVariant::Circuit,
             "bounce" => MockVariant::Bounce,
             "goaround" | "go-around" | "ga" => MockVariant::GoAround,
             "teleport" => MockVariant::Teleport,
@@ -184,6 +218,7 @@ impl MockVariant {
     /// Length of one loop of this variant, seconds.
     pub fn loop_seconds(self) -> f64 {
         match self {
+            MockVariant::Standard => LOOP_DEMO_S,
             MockVariant::GoAround => LOOP_GA_S,
             MockVariant::Teleport => LOOP_TP_S,
             _ => LOOP_S,
@@ -424,14 +459,33 @@ struct Builder {
 
 impl Builder {
     fn new(p: Params, hf: f64) -> Self {
-        let cur = Pt { s: 30.0, x: 300.0, theta: -FRAC_PI_2, brake: true, gear: 100.0, g: 1.0, ..Default::default() };
+        let cur = if p.demo {
+            // in the air on the downwind, level, as the sim would load it
+            let (agl, gs) = (CIRCUIT_AGL_FT, DEMO_DOWNWIND_GS_KT);
+            let pitch = (5.5 * (130.0 / ias_of(gs, ELEVATION_FT + agl)).powi(2)).clamp(1.5, 9.0);
+            Pt {
+                s: DEMO_START_S,
+                x: -2.0 * CIRCUIT_R_M,
+                theta: -PI,
+                agl,
+                gs_kt: gs,
+                pitch,
+                g: 1.0,
+                flaps: 1,
+                engines: 2,
+                fuel_used: DEMO_START_FUEL_USED_KG,
+                ..Default::default()
+            }
+        } else {
+            Pt { s: 30.0, x: 300.0, theta: -FRAC_PI_2, brake: true, gear: 100.0, g: 1.0, ..Default::default() }
+        };
         Self {
             p,
             pts: vec![cur],
             cur,
-            target_agl: 0.0,
+            target_agl: cur.agl,
             max_fpm: 0.0,
-            ctrl_agl: 0.0,
+            ctrl_agl: cur.agl,
             ctrl_vs: 0.0,
             hf,
             flare: None,
@@ -449,14 +503,28 @@ impl Builder {
         use Vert::*;
         let variant = p.variant;
         let climb = Ctrl { target: CIRCUIT_AGL_FT, fpm: 2_500.0 };
+        if p.demo {
+            // from mid-downwind: the rest of the level part, the descending end, the base turn
+            let mut legs = vec![
+                Leg::new(Line { len: DEMO_START_S - FINAL_S - DEMO_DOWNWIND_DESCENT_M }, To(DEMO_DOWNWIND_GS_KT), climb).flaps(1).gear_up(),
+                Leg::new(Line { len: DEMO_DOWNWIND_DESCENT_M }, To(200.0), Ctrl { target: INTERCEPT_AGL_FT, fpm: DEMO_DOWNWIND_DESCENT_FPM })
+                    .flaps(1)
+                    .gear_up(),
+                Leg::new(Arc { radius: CIRCUIT_R_M, sweep: -PI }, To(DEMO_BASE_END_GS_KT), Ctrl { target: INTERCEPT_AGL_FT, fpm: 900.0 }).flaps(2),
+            ];
+            legs.extend(Self::arrival(variant, true));
+            return legs;
+        }
+        let base_end_gs = BASE_END_GS_KT;
+        // downwind: level part (length, speed) and the descending end
         let downwind_len = CROSSWIND_S - FINAL_S;
-        let base_end_gs = if p.demo { DEMO_BASE_END_GS_KT } else { BASE_END_GS_KT };
+        let (level_len, level_gs, descent_len, descent_fpm) = (downwind_len * 0.7, 215.0, downwind_len * 0.3, 900.0);
         let circuit = [
             // crosswind/downwind turn (left), level-off at 2 500 ft
             Leg::new(Arc { radius: CIRCUIT_R_M, sweep: -PI }, To(215.0), climb).gear_up(),
-            Leg::new(Line { len: downwind_len * 0.7 }, To(215.0), climb).gear_up(),
+            Leg::new(Line { len: level_len }, To(level_gs), climb).gear_up(),
             // descending end of the downwind and base turn (left) onto a 9 km final
-            Leg::new(Line { len: downwind_len * 0.3 }, To(200.0), Ctrl { target: INTERCEPT_AGL_FT, fpm: 900.0 }).gear_up(),
+            Leg::new(Line { len: descent_len }, To(200.0), Ctrl { target: INTERCEPT_AGL_FT, fpm: descent_fpm }).gear_up(),
             Leg::new(Arc { radius: CIRCUIT_R_M, sweep: -PI }, To(base_end_gs), Ctrl { target: INTERCEPT_AGL_FT, fpm: 900.0 }).flaps(2),
         ];
         let mut legs = Self::departure(climb);
@@ -514,6 +582,19 @@ impl Builder {
             Leg::new(Line { len: if variant == MockVariant::Bounce { f64::INFINITY } else { 0.0 } }, Accel(-1.5), Bounce)
                 .flaps(4)
                 .runway(),
+        ]);
+        if demo {
+            // rollout to 30 kt, vacate right (north) onto a stand just off the runway
+            legs.extend([
+                Leg::new(Line { len: 800.0 }, To(30.0), Ground).flaps(4).runway(),
+                Leg::new(Line { len: 100.0 }, To(15.0), Ground).flaps(4).runway(),
+                Leg::new(Arc { radius: 40.0, sweep: FRAC_PI_2 }, To(12.0), Ground),
+                Leg::new(Line { len: 25.0 }, To(0.0), Ground),
+                Leg::hold(2.0, 2),
+            ]);
+            return legs;
+        }
+        legs.extend([
             // rollout to 30 kt, vacate right (north) and taxi to the stand
             Leg::new(Line { len: 950.0 }, To(30.0), Ground).flaps(4).runway(),
             Leg::new(Line { len: 150.0 }, To(15.0), Ground).flaps(4).runway(),
@@ -887,8 +968,9 @@ impl MockFlight {
     }
 
     /// Everything the provider sends for the tick at `t_s`: usually one telemetry sample,
-    /// plus the discontinuity events of the teleport / reconnect variants, or nothing
-    /// while the reconnect variant's link is down.
+    /// plus the discontinuity events of the teleport / reconnect variants (and the demo's
+    /// `FlightLoaded` at the start of every loop after the first), or nothing while the
+    /// reconnect variant's link is down.
     pub fn step(&mut self, t_s: f64, timestamp_ms: u64) -> Vec<ProviderEvent> {
         let loop_s = self.variant.loop_seconds();
         let n = (t_s / loop_s).floor().max(0.0) as u64;
@@ -896,6 +978,10 @@ impl MockFlight {
         let crossed = |at: f64, last: Option<(u64, f64)>| last.is_some_and(|(ln, l)| ln == n && l < at) && lt >= at;
         let last = self.last_step.replace((n, lt));
         let mut out = Vec::new();
+        if self.variant == MockVariant::Standard && last.is_some_and(|(ln, _)| ln < n) {
+            // the next demo loop starts in the air again: the sim "loads a new flight" first
+            out.push(ProviderEvent::Sim(SimEvent::FlightLoaded { path: "mock/demo-downwind.FLT".into() }));
+        }
         match self.variant {
             MockVariant::Teleport if crossed(self.track.teleport_s, last) => {
                 out.push(ProviderEvent::Sim(SimEvent::FlightLoaded { path: "mock/stand.FLT".into() }));
@@ -921,9 +1007,16 @@ impl MockFlight {
         out
     }
 
-    /// Loop length of the standard and bounce variants (see [`MockVariant::loop_seconds`]).
+    /// Loop length of the standard variant, the demo flight (see [`MockVariant::loop_seconds`]).
     pub fn loop_seconds() -> f64 {
-        LOOP_S
+        MockVariant::Standard.loop_seconds()
+    }
+
+    /// One complete demo flight: from the start in the air to just before the next loop
+    /// (landed, parked, shut down). Run a [`MockFlight::new`] this long for exactly one
+    /// flight; the next loop starts in the air again as a new flight.
+    pub fn flight_seconds() -> f64 {
+        MockVariant::Standard.loop_seconds() - 1.0
     }
 
     /// The runway the mock lands on (25C), as the landing analysis sees it.
@@ -1188,7 +1281,7 @@ mod tests {
     #[test]
     fn every_loop_fits_and_hits_its_touchdown_aim() {
         // (teleport / reconnect fly the standard path)
-        for variant in [MockVariant::Standard, MockVariant::Bounce, MockVariant::GoAround] {
+        for variant in [MockVariant::Standard, MockVariant::Circuit, MockVariant::Bounce, MockVariant::GoAround] {
             for n in 0..4 {
                 let tr = build(Params::for_loop(variant, n));
                 let end = tr.pts.last().unwrap().t;
@@ -1210,6 +1303,7 @@ mod tests {
         assert_eq!(MockVariant::parse("GoAround"), MockVariant::GoAround);
         assert_eq!(MockVariant::parse("teleport"), MockVariant::Teleport);
         assert_eq!(MockVariant::parse("Reconnect"), MockVariant::Reconnect);
+        assert_eq!(MockVariant::parse("circuit"), MockVariant::Circuit);
     }
 
     #[test]
@@ -1223,5 +1317,62 @@ mod tests {
             let pt = p(&rc, t);
             assert!(pt.agl > 1_000.0, "link loss above 1 000 ft AGL: {:.0} ft at {t:.0} s", pt.agl);
         }
+    }
+    fn first_contact_s(tr: &Track) -> f64 {
+        tr.pts.iter().find(|p| p.td_fpm > 0.0).expect("touchdown").t
+    }
+
+    #[test]
+    fn demo_flight_starts_on_the_downwind_and_lands_within_four_minutes() {
+        // in the air mid-downwind, as a sim would load it; all at sim rate 1
+        for n in 0..4 {
+            let tr = build(Params::for_loop(MockVariant::Standard, n));
+            let p0 = tr.pts[0];
+            assert_eq!((p0.agl, p0.gs_kt, p0.flaps, p0.engines, p0.gear, p0.brake), (CIRCUIT_AGL_FT, 220.0, 1, 2, 0.0, false));
+            assert!(p0.x < -3_000.0 && p0.s < 0.0, "left-hand downwind of 25C: {p0:?}");
+            let td = first_contact_s(&tr);
+            assert!((200.0..=240.0).contains(&td), "loop {n}: first contact after {td:.0} s");
+            let parked = tr.pts.last().unwrap().t;
+            assert!((40.0..=60.0).contains(&(parked - td)), "loop {n}: parked {:.0} s after the contact", parked - td);
+            // ~20 s with the engines off before the next loop
+            assert!((15.0..=25.0).contains(&(LOOP_DEMO_S - parked)), "loop {n}: {:.0} s parked", LOOP_DEMO_S - parked);
+            // never faster than 250 kt below FL100, and no time acceleration
+            assert!(tr.pts.iter().all(|p| p.gs_kt <= 250.0));
+        }
+        assert_eq!(MockFlight::loop_seconds(), LOOP_DEMO_S);
+    }
+
+    #[test]
+    fn demo_loops_start_with_a_flight_loaded_event() {
+        let mut f = MockFlight::new();
+        let loaded = |evs: &[ProviderEvent]| evs.iter().any(|e| matches!(e, ProviderEvent::Sim(SimEvent::FlightLoaded { .. })));
+        let mut at = Vec::new();
+        for i in 1..=(LOOP_DEMO_S * 2.5 * 10.0) as u64 {
+            let t = i as f64 / 10.0;
+            let evs = f.step(t, 0);
+            assert!(matches!(evs.last(), Some(ProviderEvent::Telemetry(_))), "the sample follows the event");
+            if loaded(&evs) {
+                at.push(t);
+            }
+        }
+        assert_eq!(at, [LOOP_DEMO_S, 2.0 * LOOP_DEMO_S], "not at the very start (the provider just connected)");
+    }
+
+    #[test]
+    fn textbook_variants_keep_their_circuit() {
+        // the quicker circuit is the demo's only: the other variants fly the circuit as before
+        for (variant, td_s, end_s) in [
+            (MockVariant::Circuit, 469.4, 557.5),
+            (MockVariant::Bounce, 468.9, 563.0),
+            (MockVariant::GoAround, 857.8, 945.8),
+            (MockVariant::Reconnect, 469.4, 557.5),
+        ] {
+            for n in 0..4 {
+                let tr = build(Params::for_loop(variant, n));
+                let (td, end) = (first_contact_s(&tr), tr.pts.last().unwrap().t);
+                assert!((td - td_s).abs() < 0.3 && (end - end_s).abs() < 0.4, "{variant:?}/{n}: contact {td:.2} s, path end {end:.2} s");
+            }
+        }
+        assert_eq!([MockVariant::Circuit, MockVariant::Bounce, MockVariant::Reconnect].map(MockVariant::loop_seconds), [LOOP_S, LOOP_S, LOOP_S]);
     }
 }

@@ -150,6 +150,27 @@ export interface FlightSummary {
   /** Headline rate of the last full-stop touchdown (touch-and-goes excluded). */
   landingRateFpm?: number | null;
   integrity: IntegrityFlags;
+  /** G-load in the air outside the touchdowns (the last 3 s are held back). */
+  gLoad?: GLoadStats | null;
+}
+
+/** `vectasim_core::gload::GLoadPoint`: one extreme (0.3 s moving average). */
+export interface GLoadPoint {
+  g: number;
+  timestampMs: number;
+  phase: FlightPhase;
+  altitudeMslFt: number;
+}
+
+/** `vectasim_core::gload::GLoadStats`: g-load over the whole flight, touchdowns excluded. */
+export interface GLoadStats {
+  max?: GLoadPoint | null;
+  min?: GLoadPoint | null;
+  /** Excursions above 1.5 g / below 0.5 g of at least 0.5 s. */
+  highCount: number;
+  lowCount: number;
+  /** live: recorded; track: derived afterwards from the 1 Hz track. */
+  source: "live" | "track";
 }
 
 export interface PhaseTransition {
@@ -267,6 +288,8 @@ export interface FlightRow {
   arrMetarMs?: number | null;
   /** Registration of the airframe the flight is booked onto. */
   airframeReg?: string | null;
+  /** G-load over the flight (schema v16); null/absent = not measured. */
+  gLoad?: GLoadStats | null;
 }
 
 export interface PhaseEventRow {

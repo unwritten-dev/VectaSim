@@ -4,6 +4,7 @@
 import approach from "./approach.json";
 import common from "./common.json";
 import countries from "./countries.json";
+import gload from "./gload.json";
 import landing from "./landing.json";
 import live from "./live.json";
 import logbook from "./logbook.json";
@@ -12,5 +13,5 @@ import review from "./review.json";
 import settings from "./settings.json";
 import shell from "./shell.json";
 
-const de = { ...approach, ...common, ...countries, ...landing, ...live, ...logbook, ...map,...review, ...settings, ...shell };
+const de = { ...approach, ...common, ...countries, ...gload, ...landing, ...live, ...logbook, ...map,...review, ...settings, ...shell };
 export default de;

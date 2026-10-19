@@ -44,6 +44,7 @@ import SimConnectDownload from "./SimConnectDownload";
 import SimulatorSelect from "./SimulatorSelect";
 import { statusLine as serverStatusLine, type ServerStatus } from "./serverLinks";
 import { useGlobe } from "./map/projection";
+import { useMapStyle } from "./map/satellite";
 import { NETWORK_LABEL, networkStatuses, networksWith, onlineDiagRows, onlineLine, onlineTone } from "./onlineText";
 
 interface Props {
@@ -162,6 +163,7 @@ export default function Settings({ providers, onProvider, online, status, flight
   /** Overlay server, for its Diagnose row (the panel itself polls on its own). */
   const [server, setServer] = useState<ServerStatus | null>(null);
   const [globe, setGlobe] = useGlobe();
+  const [mapStyle, setMapStyle] = useMapStyle();
 
   const loadInfo = () =>
     invoke<AppInfo>("app_info")
@@ -491,6 +493,11 @@ export default function Settings({ providers, onProvider, online, status, flight
           {(dllMissing || (info && !info.simconnectDll)) && !dllPath && (
             <div className="detail">{t("settings.sim.dll.elsewhere")}</div>
           )}
+          <label className="check">
+            <input type="checkbox" checked={prefs.simTextLanding} onChange={(e) => toggle("simTextLanding", e.target.checked)} />
+            {t("settings.sim.textLanding")}
+          </label>
+          <div className="detail">{t("settings.sim.textLandingHint")}</div>
         </Panel>
 
         <Panel title={t("settings.planning.title")} description={t("settings.planning.description")}>
@@ -645,6 +652,12 @@ export default function Settings({ providers, onProvider, online, status, flight
           {t("settings.display.globe.label")}
         </label>
         <div className="detail">{t("settings.display.globe.help")}</div>
+        {/* the same choice as the Satellit button on the live and track map (map/satellite.ts) */}
+        <label className="check">
+          <input type="checkbox" checked={mapStyle === "satellite"} onChange={(e) => setMapStyle(e.target.checked ? "satellite" : "map")} />
+          {t("settings.display.satellite.label")}
+        </label>
+        <div className="detail">{t("settings.display.satellite.help")}</div>
         <IntegrationStatus tone={onlineTone(online)}>{onlineLine(online)}</IntegrationStatus>
         <div className="setting-row">
           <span className="setting-label" id="online-networks-label">

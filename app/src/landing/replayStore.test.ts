@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLanguageSetting } from "../i18n";
 import mockJson from "./fixtures/approach-mock.json";
 import type { ApproachAnalysis } from "./approachTypes";
-import { ReplayContext, createReplayStore, debriefReplayPlan, lerpHeading, nearestIndex, sampleAt, timeAtValue, trackBearingAt } from "./replayStore";
+import { LOGBOOK_REPLAY_SPEEDS, REPLAY_SPEEDS, ReplayContext, createReplayStore, debriefReplayPlan, logbookReplay, lerpHeading, nearestIndex, sampleAt, timeAtValue, trackBearingAt } from "./replayStore";
 
 // useThemeId is a useSyncExternalStore without a server snapshot
 vi.mock("../themes", async (importOriginal) => ({ ...(await importOriginal<typeof import("../themes")>()), useThemeId: () => "default" }));
@@ -96,6 +96,22 @@ describe("replayStore", () => {
     expect(s.get().speed).toBe(1);
     s.setSpeed(8);
     expect(s.get().speed).toBe(8);
+    s.setSpeed(64);
+    expect(s.get().speed).toBe(8); // the debrief stops at 8×
+  });
+
+  it("offers the logbook's own speed steps up to 64×", () => {
+    const s = createReplayStore(LOGBOOK_REPLAY_SPEEDS);
+    expect(s.speeds).toEqual([1, 4, 16, 64]);
+    s.configure({ startMs: 0, endMs: 3 * 3600_000 });
+    s.setSpeed(64);
+    s.play();
+    s.advance(500);
+    expect(s.get().tMs).toBe(32_000);
+    s.setSpeed(8);
+    expect(s.get().speed).toBe(64);
+    expect(logbookReplay.speeds).toBe(LOGBOOK_REPLAY_SPEEDS);
+    expect(createReplayStore().speeds).toBe(REPLAY_SPEEDS);
   });
 
   it("steps ±s, pauses and clamps", () => {

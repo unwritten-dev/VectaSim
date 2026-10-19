@@ -1,7 +1,7 @@
 //! Backup folder: create, list, rotate, restore (temp directories only).
 
 use std::path::Path;
-use vectasim_core::{FlightSession, MockFlight};
+use vectasim_core::{FlightSession, MockFlight, MockVariant};
 use vectasim_store::backup::{self, BackupKind, KEEP_DAILY, KEEP_EVENT};
 use vectasim_store::{FlightRecorder, RecorderContext, SCHEMA_VERSION, Store, StoreError};
 
@@ -10,11 +10,11 @@ const DAY: u64 = 86_400_000;
 const T0: u64 = 1_800_000_000_000 - 1_800_000_000_000 % DAY;
 
 fn record_mock_flight(store: &Store) {
-    let mut flight = MockFlight::new();
+    let mut flight = MockFlight::with_variant(MockVariant::Circuit);
     let mut session = FlightSession::new();
     let mut rec = FlightRecorder::new(store.clone(), RecorderContext { provider: "mock".into(), ..Default::default() });
     let hz = 5.0;
-    for i in 1..=((MockFlight::loop_seconds() + 10.0) * hz) as u64 {
+    for i in 1..=((MockVariant::Circuit.loop_seconds() + 10.0) * hz) as u64 {
         let t_s = i as f64 / hz;
         let t = flight.sample(t_s, 1_700_000_000_000 + (t_s * 1000.0) as u64);
         let events = session.update(&t);

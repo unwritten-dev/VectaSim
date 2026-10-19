@@ -1,0 +1,20 @@
+/* Airport readout (zoom ≥ 13, AirportReadout.tsx). It lives in the top-left column of the live
+   map (.map-topleft: status pill, map toolbar, readout), so it always sits below the toolbar –
+   also when the toolbar wraps in a narrow window – instead of floating at a fixed offset over it. */
+.map-topleft .airport-readout {
+  position: static;
+  max-height: min(50vh, 420px);
+  overflow-y: auto;
+}
+
+/* Dragging the map across an overlay must not select its text (blue runway list). Text that is
+   worth copying keeps it explicitly: the METAR line in the HUD, the traffic card's details. */
+.map-wrap,
+.hud {
+  -webkit-user-select: none;
+  user-select: none;
+}
+.hud .metar-line {
+  -webkit-user-select: text;
+  user-select: text;
+}

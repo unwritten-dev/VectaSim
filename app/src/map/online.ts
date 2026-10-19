@@ -15,7 +15,7 @@ import { WAKE_LABEL, WAKE_SIZE, iconSizeByZoom, loadAircraftIcons, trafficColors
 export type OnlineLayerGroup = "traffic" | "atc" | "weather";
 
 export const LAYER_GROUPS: Record<OnlineLayerGroup, string[]> = {
-  traffic: ["vatsim-pilots", "vatsim-pilots-label", "traffic-selected", "traffic-route-casing", "traffic-route-line"],
+  traffic: ["vatsim-pilots", "vatsim-pilots-label", "traffic-3d-sym", "traffic-selected", "traffic-route-casing", "traffic-route-line"],
   atc: ["vatsim-atc-dot", "vatsim-atc-label"],
   weather: ["metar-ring"],
 };
@@ -40,6 +40,9 @@ export const FACILITY_LABEL: Record<Facility, string> = {
   ctr: "CTR",
   fss: "FSS",
 };
+
+/** Traffic symbol opacity: 0.65 up to zoom 7, full from zoom 9 (the own aircraft stays opaque). */
+export const TRAFFIC_OPACITY_BY_ZOOM: maplibregl.ExpressionSpecification = ["interpolate", ["linear"], ["zoom"], 7, 0.65, 9, 1];
 
 /** Layers are inserted below `before` (the own-aircraft layer) so the user's plane stays on top. */
 export async function addOnlineLayers(map: maplibregl.Map, before?: string) {
@@ -120,6 +123,8 @@ export async function addOnlineLayers(map: maplibregl.Map, before?: string) {
         "icon-allow-overlap": true,
         "icon-ignore-placement": true,
       },
+      // zoomed out (a hub is a cluster of symbols) the traffic steps back so the own aircraft pops out
+      paint: { "icon-opacity": TRAFFIC_OPACITY_BY_ZOOM },
     },
     before,
   );
@@ -138,7 +143,44 @@ export async function addOnlineLayers(map: maplibregl.Map, before?: string) {
         "text-optional": true,
       },
       // light themes: darker label colours (>= 4.5:1 on the land colour, aircraftIcons.trafficColors)
-      paint: { "text-color": ["match", ["get", "network"], "ivao", labels.ivaoLabel, labels.label], "text-halo-color": COLOR.halo, "text-halo-width": 1.4 },
+      paint: {
+        "text-color": ["match", ["get", "network"], "ivao", labels.ivaoLabel, labels.label],
+        "text-halo-color": COLOR.halo,
+        "text-halo-width": 1.4,
+        "text-opacity": ["interpolate", ["linear"], ["zoom"], 6, 0.8, 9, 1],
+      },
+    },
+    before,
+  );
+  // 3D view from zoom 8: callsign and click target of the aircraft drawn as models
+  // (trafficModel.ts), raised to the model's height; the icon itself is invisible
+  map.addSource("traffic-3d", { type: "geojson", data: EMPTY });
+  map.addLayer(
+    {
+      id: "traffic-3d-sym",
+      type: "symbol",
+      source: "traffic-3d",
+      layout: {
+        "icon-image": ["concat", "ac-traffic-", ["coalesce", ["get", "cat"], "medium"]],
+        "icon-size": ["*", ["coalesce", ["get", "sizeFactor"], 1.3], 0.9],
+        "icon-rotate": ["get", "heading"],
+        "icon-rotation-alignment": "map",
+        "icon-allow-overlap": true,
+        "icon-ignore-placement": true,
+        "symbol-height-offset": ["coalesce", ["get", "hM"], 0],
+        "text-field": ["get", "callsign"],
+        "text-font": ["Noto Sans Regular"],
+        "text-size": 10,
+        "text-offset": [0, -1.5],
+        "text-anchor": "bottom",
+        "text-optional": true,
+      },
+      paint: {
+        "icon-opacity": 0,
+        "text-color": ["match", ["get", "network"], "ivao", labels.ivaoLabel, labels.label],
+        "text-halo-color": COLOR.halo,
+        "text-halo-width": 1.4,
+      },
     },
     before,
   );
@@ -212,6 +254,8 @@ export function pilotsGeoJson(pilots: Pilot[]): GeoJSON.FeatureCollection {
     features: pilots.map((p) =>
       pointFeature(p.longitude, p.latitude, {
         network: p.network ?? "vatsim",
+        // network:cid – the 3D view filters the aircraft drawn as models out of the 2D layers
+        key: `${p.network ?? "vatsim"}:${p.cid}`,
         cid: p.cid,
         callsign: p.callsign,
         cat: wakeCategory(p.aircraftShort),
@@ -334,22 +378,25 @@ function attachPopups(map: maplibregl.Map) {
     });
   };
 
-  // aircraft: no popup – a click opens the traffic card (TrafficCard via onPilotClick)
-  map.on("mouseenter", "vatsim-pilots", () => {
-    map.getCanvas().style.cursor = "pointer";
-  });
-  map.on("mouseleave", "vatsim-pilots", () => {
-    map.getCanvas().style.cursor = "";
-  });
-  map.on("click", "vatsim-pilots", (e) => {
-    const f = e.features?.[0];
-    if (!f || f.geometry.type !== "Point") return;
-    const p = f.properties ?? {};
-    const cid = Number(p.cid);
-    if (!Number.isFinite(cid)) return;
-    const [lon, lat] = f.geometry.coordinates as [number, number];
-    pilotClick.get(map)?.({ network: p.network === "ivao" ? "ivao" : "vatsim", cid, lon, lat });
-  });
+  // aircraft: no popup – a click opens the traffic card (TrafficCard via onPilotClick);
+  // in 3D the invisible symbol at the model's height is the click target
+  for (const layer of ["vatsim-pilots", "traffic-3d-sym"]) {
+    map.on("mouseenter", layer, () => {
+      map.getCanvas().style.cursor = "pointer";
+    });
+    map.on("mouseleave", layer, () => {
+      map.getCanvas().style.cursor = "";
+    });
+    map.on("click", layer, (e) => {
+      const f = e.features?.[0];
+      if (!f || f.geometry.type !== "Point") return;
+      const p = f.properties ?? {};
+      const cid = Number(p.cid);
+      if (!Number.isFinite(cid)) return;
+      const [lon, lat] = f.geometry.coordinates as [number, number];
+      pilotClick.get(map)?.({ network: p.network === "ivao" ? "ivao" : "vatsim", cid, lon, lat });
+    });
+  }
 
   hover("vatsim-atc-dot", (p) => {
     let stations: Array<Pick<Controller, "network" | "callsign" | "frequency" | "facility" | "atisCode">> = [];

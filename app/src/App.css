@@ -3535,3 +3535,59 @@ table.csv-map .csv-sample {
 .sc-download .setting-row {
   margin: 0;
 }
+
+/* ---- scrollbars: thin, from the theme tokens, in every scroll container ---------------- */
+/* WebView2 (Chromium) gets the ::-webkit-scrollbar parts: 10 px, transparent track, no arrow
+   buttons, a rounded thumb from --text-muted (45 % at rest ≈ 2:1, 80 % on hover and 100 %
+   while dragged ≥ 3.7:1 against --bg/--surface-1 in all six themes; light themes get a dark
+   thumb because their --text-muted is dark). The 2 px transparent border insets the thumb
+   (6 px, 8 px on hover). Chromium ignores these parts once scrollbar-width/-color are set,
+   so the standard properties only apply where the parts are not supported. */
+:root {
+  --scrollbar-thumb: color-mix(in srgb, var(--text-muted) 45%, transparent);
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--text-muted) 80%, transparent);
+  --scrollbar-thumb-active: var(--text-muted);
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+  background: transparent;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+::-webkit-scrollbar-thumb {
+  min-height: 32px;
+  min-width: 32px;
+  border: 2px solid transparent;
+  border-radius: var(--r-pill);
+  background: var(--scrollbar-thumb) padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  border-width: 1px;
+  background: var(--scrollbar-thumb-hover) padding-box;
+}
+::-webkit-scrollbar-thumb:active {
+  border-width: 1px;
+  background: var(--scrollbar-thumb-active) padding-box;
+}
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb-hover) transparent;
+  }
+}
+/* the long scroll panes keep their width when the scrollbar comes and goes (settings
+   sections opening, the debrief loading, the logbook list filling) */
+.layout:not(.layout-live):not(.layout-fill),
+.side-body,
+.flight-list,
+.detail-pane {
+  scrollbar-gutter: stable;
+}

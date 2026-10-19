@@ -39,7 +39,8 @@
       "tray": {
         "title": "Infobereich (Tray)",
         "enable": "Symbol im Infobereich · Minimieren versteckt das Fenster dorthin",
-        "help": "Doppelklick auf das Symbol öffnet VectaSim wieder; das Menü zeigt den Aufzeichnungsstatus, schaltet den Debug-Modus und beendet die App. Die Aufzeichnung läuft im Infobereich unverändert weiter, Beenden fragt während eines Flugs nach.",
+        "close": "Schließen (X) versteckt VectaSim im Infobereich, statt die App zu beenden",
+        "help": "Doppelklick auf das Symbol öffnet VectaSim wieder; das Menü zeigt den Aufzeichnungsstatus, schaltet den Debug-Modus und beendet die App („Beenden“). Die Aufzeichnung läuft im Infobereich unverändert weiter, Beenden fragt während eines Flugs nach.",
         "active": "Symbol im Infobereich aktiv",
         "inactive": "Kein Symbol im Infobereich"
       }
@@ -177,6 +178,8 @@
     "about": "VectaSim {version} · Dein Logbuch liegt nur auf diesem PC – ohne Konto, ohne Cloud. Daten: Karte © OpenStreetMap-Mitwirkende, OpenFreeMap · Flughäfen OurAirports (Public Domain) · Wetter NOAA aviationweather.gov (Ersatz VATSIM) · Online-Verkehr VATSIM · IVAO · Flugpläne SimBrief (Navigraph) · Flugzeugfotos Planespotters.net ·",
     "thirdParty": "Lizenzen Dritter",
     "sim": {
+      "textLanding": "Landerate im Simulator anzeigen (MSFS)",
+      "textLandingHint": "Nach dem Aufsetzen zeigt MSFS oben im Bild 20 Sekunden lang eine Zeile wie „VectaSim · Gelandet −142 fpm (sanft) · 1,18 g · keine Bounces · 27L: 412 m hinter der Schwelle, 1 m links“. Ob sie erscheint, hängt von der MSFS-Version ab – ohne Anzeige ändert sich an der Aufzeichnung nichts.",
       "description": "VectaSim erkennt MSFS 2020/2024 und X-Plane 12 automatisch, sobald der Simulator läuft. Die Aufzeichnung startet beim Losrollen – du musst nichts starten.",
       "demoTitle": "Ein simulierter Flug, um VectaSim ohne Simulator kennenzulernen",
       "demoHint": "ohne Simulator ausprobieren",
@@ -240,6 +243,10 @@
       "globe": {
         "label": "Weltkarte als Globus",
         "help": "Gilt für Karte, Track-Karte und Länder – dieselbe Wahl wie der Knopf „Globus“ auf den Karten. Beim Hineinzoomen wird der Globus von selbst zur flachen Karte."
+      },
+      "satellite": {
+        "label": "Satellitenbild als Kartengrund",
+        "help": "Wolkenfreies Sentinel-2-Mosaik (EOxCloudless 2017) statt der gezeichneten Karte, mit Ortsnamen und Grenzen darüber. Gilt für Karte und Track-Karte – dieselbe Wahl wie der Knopf „Satellit“. Die Kacheln lädt die App nur, solange das an ist."
       },
       "online": {
         "hint": "wie „Verkehr“ auf der Karte · ruft den öffentlichen Feed des Netzes ab",

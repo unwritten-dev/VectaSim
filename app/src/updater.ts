@@ -9,6 +9,7 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { invoke } from "@tauri-apps/api/core";
 import { showToast } from "./ui/Toast";
 import { userMessage } from "./errors";
+import { t } from "./i18n";
 
 export type UpdatePhase = "idle" | "checking" | "none" | "available" | "downloading" | "ready" | "error";
 
@@ -56,7 +57,7 @@ export async function checkForUpdate(opts: { silent?: boolean } = {}): Promise<U
     if (!update) {
       pending = null;
       set({ phase: "none", version: undefined, checkedMs });
-      if (!opts.silent) showToast({ id: "update", tone: "ok", title: "VectaSim ist aktuell", durationMs: 4000 });
+      if (!opts.silent) showToast({ id: "update", tone: "ok", title: t("shell.update.current"), durationMs: 4000 });
       return state;
     }
     pending = update;
@@ -64,17 +65,17 @@ export async function checkForUpdate(opts: { silent?: boolean } = {}): Promise<U
     showToast({
       id: "update",
       tone: "info",
-      title: `Update ${update.version} verfügbar`,
-      body: "Der Download läuft im Hintergrund; danach startet VectaSim neu.",
+      title: t("shell.update.availableVersion", { version: update.version }),
+      body: t("shell.update.toastBody"),
       durationMs: null,
-      actions: [{ label: "Jetzt installieren", onClick: () => void installUpdate() }],
+      actions: [{ label: t("shell.update.install"), onClick: () => void installUpdate() }],
     });
     return state;
   } catch (e) {
     const msg = String(e);
     set({ phase: "error", error: msg, checkedMs: Date.now() });
     if (!opts.silent) {
-      showToast({ id: "update", tone: "err", title: "Update-Prüfung fehlgeschlagen", body: userMessage(msg, "settings").hint });
+      showToast({ id: "update", tone: "err", title: t("shell.update.checkFailed"), body: userMessage(msg, "settings").hint });
     }
     return state;
   }
@@ -94,8 +95,8 @@ export async function installUpdate(): Promise<void> {
     showToast({
       id: "update",
       tone: "warn",
-      title: "Aufzeichnung läuft – Update nach dem Flug",
-      body: `Die Installation startet VectaSim neu. Installiere Version ${state.version ?? ""} nach dem Flug unter Einstellungen → Updates.`,
+      title: t("shell.update.recordingTitle"),
+      body: t("shell.update.recordingBody", { version: state.version ?? "" }),
       durationMs: 8000,
     });
     return;
@@ -111,8 +112,8 @@ export async function installUpdate(): Promise<void> {
     showToast({
       id: "update-backup",
       tone: "warn",
-      title: "Sicherung vor dem Update fehlgeschlagen",
-      body: `${String(e)} – das Update läuft trotzdem.`,
+      title: t("shell.update.backupFailed"),
+      body: t("shell.update.backupFailedBody", { error: String(e) }),
       durationMs: 8000,
     });
   }
@@ -128,14 +129,14 @@ export async function installUpdate(): Promise<void> {
     showToast({
       id: "update",
       tone: "ok",
-      title: "Update installiert",
-      body: "VectaSim startet jetzt neu.",
+      title: t("shell.update.installed"),
+      body: t("shell.update.installedBody"),
       durationMs: 3000,
     });
     await relaunch();
   } catch (e) {
     const msg = String(e);
     set({ phase: "error", error: msg });
-    showToast({ id: "update", tone: "err", title: "Update fehlgeschlagen", body: userMessage(msg, "settings").hint });
+    showToast({ id: "update", tone: "err", title: t("shell.update.failed"), body: userMessage(msg, "settings").hint });
   }
 }

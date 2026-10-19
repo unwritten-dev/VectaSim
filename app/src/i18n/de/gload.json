@@ -1,0 +1,29 @@
+{
+  "gload": {
+    "label": "G-Last im Flug",
+    "summary": "max {max} ({maxPhase}, {maxAlt}) · min {min} ({minPhase})",
+    "notMeasured": "nicht gemessen",
+    "notMeasuredTitle": "Für diesen Flug liegt keine G-Last vor: vor dieser Version aufgezeichnet und ohne gespeicherten Track.",
+    "title": "Höchste und tiefste G-Last in der Luft – ohne Pause, Slew und Zeitraffer und ohne {window} um jedes Aufsetzen (die zählen als Lande-G). Gleitender Mittelwert über {smoothing}, damit einzelne Ausreißer nicht zählen.",
+    "counts": "Über {high}: {highCount} ×, unter {low}: {lowCount} × (je mindestens {min} am Stück)",
+    "sourceLive": "Quelle: live aus dem Telemetriestrom.",
+    "sourceTrack": "Quelle: aus Track, 1 Hz – nachträglich berechnet; kürzere Spitzen fehlen, Pausen nur an der eingefrorenen Position erkannt.",
+    "hint": {
+      "high": "G-Last im Flug bis {g} ({phase}, {alt}) – deutlich mehr als die 1 g des Geradeausflugs (steiles Ziehen, Kurve, Turbulenz){source}",
+      "highWarn": "G-Last im Flug bis {g} ({phase}, {alt}) – nahe am Grenzlastvielfachen eines Verkehrsflugzeugs (+2,5 g){source}",
+      "low": "G-Last im Flug nur {g} ({phase}, {alt}) – stark entlastet (Abfangen, Nachdrücken, Turbulenz){source}",
+      "lowWarn": "Negative G-Last im Flug: {g} ({phase}, {alt}) – Verkehrsflugzeuge sind nur bis −1 g ausgelegt{source}",
+      "track": " (aus Track, 1 Hz)"
+    },
+    "protocol": {
+      "label": "G-Last im Flug",
+      "value": "{summary} · {counts} · {source}",
+      "sourceLive": "live, gleitender Mittelwert {smoothing}",
+      "sourceTrack": "aus Track, 1 Hz"
+    },
+    "live": {
+      "label": "Max. g bisher",
+      "title": "Höchste G-Last in der Luft bisher (ohne Aufsetzen, Mittelwert über {smoothing}; die letzten {window} folgen, sobald klar ist, dass kein Aufsetzen folgt)"
+    }
+  }
+}

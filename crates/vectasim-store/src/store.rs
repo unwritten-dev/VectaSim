@@ -10,11 +10,12 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 use vectasim_core::approach::{self, ApproachAnalysis, ApproachBand, ElevationSource, EnergyBand, FafReason, GateKind, GoAroundSource, LateralBand, LocalizerSource, MarkerKind, Severity};
 use vectasim_core::landing::{CriterionKind, RunwayEnd, RunwayFrame, RunwayGeometrySource, angle_diff_deg, blend_runway, opposite_ident};
+use vectasim_core::gload::{GLoadPoint, GLoadSource, GLoadStats};
 use vectasim_core::{AircraftInfo, FlightPhase, FlightSummary, IntegrityFlags, LandingRateSource, TouchdownReport};
 
 /// Newest schema this build writes. A file with a higher version is refused
 /// ([`StoreError::NewerSchema`]) instead of being opened by an older app.
-pub const SCHEMA_VERSION: i64 = 15;
+pub const SCHEMA_VERSION: i64 = 16;
 
 /// Days a deleted flight stays in the Papierkorb before `purge_deleted` removes it.
 pub const TRASH_RETENTION_DAYS: u32 = 30;
@@ -241,6 +242,25 @@ const MIGRATION_V14_COLUMNS: &[(&str, &str)] = &[
     ("rating", "INTEGER"),
 ];
 
+/// v16: g-load over the whole flight (`vectasim_core::gload`): highest / lowest load in
+/// the air with time, phase and altitude, and the excursions above 1.5 g / below 0.5 g.
+/// `g_source`: `live` (recorded), `track` (derived later from the 1 Hz track), `none`
+/// (derived, nothing measurable); NULL = not derived yet (flights recorded before v16 –
+/// filled the first time the flight is opened, see [`Store::get_flight`]).
+const MIGRATION_V16_COLUMNS: &[(&str, &str)] = &[
+    ("g_max", "REAL"),
+    ("g_max_ms", "INTEGER"),
+    ("g_max_phase", "TEXT"),
+    ("g_max_alt_ft", "REAL"),
+    ("g_min", "REAL"),
+    ("g_min_ms", "INTEGER"),
+    ("g_min_phase", "TEXT"),
+    ("g_min_alt_ft", "REAL"),
+    ("g_high_count", "INTEGER"),
+    ("g_low_count", "INTEGER"),
+    ("g_source", "TEXT"),
+];
+
 /// Version of the cached approach facts; bump whenever the rules in
 /// `vectasim_core::approach` (or the row mapping below) change, so old rows are recomputed.
 /// 2: displaced thresholds move the runway geometry (glidepath origin, distances).
@@ -421,6 +441,18 @@ const MIGRATIONS: &[MigrationStep] = &[
             Ok(())
         },
     },
+    MigrationStep {
+        to: 16,
+        // idempotent like v9-v15
+        apply: |c| {
+            for (col, ty) in MIGRATION_V16_COLUMNS {
+                if !has_column(c, "flights", col)? {
+                    c.execute_batch(&format!("ALTER TABLE flights ADD COLUMN {col} {ty}"))?;
+                }
+            }
+            Ok(())
+        },
+    },
 ];
 
 /// Schema version of an open file; 0 = empty (no `schema_version` table yet).
@@ -511,6 +543,11 @@ pub struct FlightRow {
     /// Personal rating of the flight 1-5 (not of the landing).
     #[serde(default)]
     pub rating: Option<u8>,
+    /// G-load over the flight outside the touchdowns; `None` = not measured (recorded
+    /// before v16 without a usable track). `source` says whether it was recorded live or
+    /// derived from the 1 Hz track.
+    #[serde(default)]
+    pub g_load: Option<GLoadStats>,
 }
 
 /// Longest note [`Store::update_flight_user`] accepts (characters).
@@ -1361,6 +1398,7 @@ impl Store {
                 i.gap_ms as i64,
             ],
         )?;
+        write_g_load(&self.conn(), id, Some(&s.g_load))?;
         Ok(())
     }
 
@@ -1452,7 +1490,12 @@ impl Store {
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
 
+    /// One flight with its touchdowns and phases. A flight recorded before v16 gets its
+    /// g-load derived from the track here, once (a failure only logs: the flight still opens).
     pub fn get_flight(&self, id: &str) -> Result<Option<FlightDetail>> {
+        if let Err(e) = self.ensure_g_load(id) {
+            log::warn!("flight {id}: g-load from the track failed: {e}");
+        }
         let conn = self.conn();
         let flight = conn
             .query_row(&format!("SELECT {FLIGHT_COLS} FROM flights f WHERE id = ?1"), params![id], row_to_flight)
@@ -1505,6 +1548,28 @@ impl Store {
         let ofp_json: Option<String> =
             conn.query_row("SELECT ofp_json FROM flights WHERE id = ?1", params![id], |r| r.get(0))?;
         Ok(Some(FlightDetail { flight, touchdowns, phases, has_track, ofp_json }))
+    }
+
+    /// Derive and store the g-load of a finished flight that has none yet (`g_source` NULL):
+    /// from the 1 Hz track (`track`), or `none` without a track / without airborne values.
+    pub fn ensure_g_load(&self, id: &str) -> Result<()> {
+        let pending: bool = self
+            .conn()
+            .query_row("SELECT g_source IS NULL AND state != 'active' FROM flights WHERE id = ?1", params![id], |r| r.get(0))
+            .optional()?
+            .unwrap_or(false);
+        if !pending {
+            return Ok(());
+        }
+        let track = self.get_track(id)?;
+        let phases: Vec<(FlightPhase, u64)> = {
+            let conn = self.conn();
+            let mut stmt = conn.prepare("SELECT to_phase, timestamp_ms FROM phase_events WHERE flight_id = ?1 ORDER BY timestamp_ms, id")?;
+            stmt.query_map(params![id], |r| Ok((phase_from_str(&r.get::<_, String>(0)?), r.get::<_, i64>(1)?.max(0) as u64)))?
+                .collect::<std::result::Result<_, _>>()?
+        };
+        let g = track.and_then(|t| g_load_from_track(&t, &phases));
+        write_g_load(&self.conn(), id, g.as_ref())
     }
 
     pub fn get_track(&self, id: &str) -> Result<Option<Vec<TrackSample>>> {
@@ -2152,7 +2217,7 @@ impl Store {
 }
 
 /// Number of columns in [`FLIGHT_COLS`] (queries append their own after it).
-pub(crate) const FLIGHT_COL_COUNT: usize = 58;
+pub(crate) const FLIGHT_COL_COUNT: usize = 69;
 
 pub(crate) const FLIGHT_COLS: &str = "f.id, f.state, f.phase, f.created_ms, f.updated_ms, f.off_block_ms, f.takeoff_ms, f.landing_ms,
     f.on_block_ms, f.dep_lat, f.dep_lon, f.arr_lat, f.arr_lon, f.max_alt_msl_ft, f.distance_nm, f.fuel_start_kg,
@@ -2165,7 +2230,9 @@ pub(crate) const FLIGHT_COLS: &str = "f.id, f.state, f.phase, f.created_ms, f.up
        FROM touchdowns t WHERE t.flight_id = f.id AND t.touch_and_go = 0 ORDER BY t.timestamp_ms DESC LIMIT 1),
     (SELECT COUNT(*) FROM touchdowns t WHERE t.flight_id = f.id),
     f.dep_metar, f.dep_metar_ms, f.arr_metar, f.arr_metar_ms, f.airframe_reg, f.teleport_detected, f.gap_ms,
-    f.notes, f.tags, f.user_callsign, f.user_dep_icao, f.user_arr_icao, f.user_aircraft_title, f.user_registration, f.rating";
+    f.notes, f.tags, f.user_callsign, f.user_dep_icao, f.user_arr_icao, f.user_aircraft_title, f.user_registration, f.rating,
+    f.g_max, f.g_max_ms, f.g_max_phase, f.g_max_alt_ft, f.g_min, f.g_min_ms, f.g_min_phase, f.g_min_alt_ft,
+    f.g_high_count, f.g_low_count, f.g_source";
 
 pub(crate) fn row_to_flight(r: &Row<'_>) -> rusqlite::Result<FlightRow> {
     let opt_u64 = |i: usize| -> rusqlite::Result<Option<u64>> { Ok(r.get::<_, Option<i64>>(i)?.map(|v| v as u64)) };
@@ -2232,7 +2299,104 @@ pub(crate) fn row_to_flight(r: &Row<'_>) -> rusqlite::Result<FlightRow> {
         user_aircraft_title: r.get(55)?,
         user_registration: r.get(56)?,
         rating: r.get::<_, Option<i64>>(57)?.filter(|v| (1..=5).contains(v)).map(|v| v as u8),
+        g_load: g_load_from_row(r, 58)?,
     })
+}
+
+/// The 11 g-load columns from `first` on (order of [`FLIGHT_COLS`]); `None` unless `g_source`
+/// is `live` or `track`.
+fn g_load_from_row(r: &Row<'_>, first: usize) -> rusqlite::Result<Option<GLoadStats>> {
+    let Some(source) = r.get::<_, Option<String>>(first + 10)?.as_deref().and_then(GLoadSource::parse) else {
+        return Ok(None);
+    };
+    let point = |i: usize| -> rusqlite::Result<Option<GLoadPoint>> {
+        let Some(g) = r.get::<_, Option<f64>>(i)? else { return Ok(None) };
+        Ok(Some(GLoadPoint {
+            g,
+            timestamp_ms: r.get::<_, Option<i64>>(i + 1)?.unwrap_or(0).max(0) as u64,
+            phase: r.get::<_, Option<String>>(i + 2)?.as_deref().map(phase_from_str).unwrap_or_default(),
+            altitude_msl_ft: r.get::<_, Option<f64>>(i + 3)?.unwrap_or(0.0),
+        }))
+    };
+    Ok(Some(GLoadStats {
+        max: point(first)?,
+        min: point(first + 4)?,
+        high_count: r.get::<_, Option<i64>>(first + 8)?.unwrap_or(0).max(0) as u32,
+        low_count: r.get::<_, Option<i64>>(first + 9)?.unwrap_or(0).max(0) as u32,
+        source,
+    }))
+}
+
+/// Write a flight's g-load columns: `Some` with its source, `None` → `g_source = 'none'`
+/// (derived, nothing measurable). See [`clear_g_load`] for "derive again".
+pub(crate) fn write_g_load(conn: &Connection, id: &str, g: Option<&GLoadStats>) -> Result<()> {
+    let pt = |p: Option<GLoadPoint>| {
+        (p.map(|p| p.g), p.map(|p| p.timestamp_ms as i64), p.map(|p| phase_str(p.phase)), p.map(|p| p.altitude_msl_ft))
+    };
+    let (max, min) = (pt(g.and_then(|g| g.max)), pt(g.and_then(|g| g.min)));
+    conn.execute(
+        "UPDATE flights SET g_max = ?2, g_max_ms = ?3, g_max_phase = ?4, g_max_alt_ft = ?5, g_min = ?6, g_min_ms = ?7,
+            g_min_phase = ?8, g_min_alt_ft = ?9, g_high_count = ?10, g_low_count = ?11, g_source = ?12
+         WHERE id = ?1",
+        params![
+            id,
+            max.0,
+            max.1,
+            max.2,
+            max.3,
+            min.0,
+            min.1,
+            min.2,
+            min.3,
+            g.map(|g| g.high_count),
+            g.map(|g| g.low_count),
+            g.map_or("none", |g| g.source.as_str()),
+        ],
+    )?;
+    Ok(())
+}
+
+/// Forget a flight's g-load so it is derived from the track again on the next read.
+pub(crate) fn clear_g_load(conn: &Connection, id: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE flights SET g_max = NULL, g_max_ms = NULL, g_max_phase = NULL, g_max_alt_ft = NULL, g_min = NULL,
+            g_min_ms = NULL, g_min_phase = NULL, g_min_alt_ft = NULL, g_high_count = NULL, g_low_count = NULL,
+            g_source = NULL
+         WHERE id = ?1",
+        params![id],
+    )?;
+    Ok(())
+}
+
+/// G-load of a stored track (flights recorded before v16), see `vectasim_core::gload`. The
+/// track carries no pause/slew flag: a sample frozen on the previous one (same position and
+/// altitude) counts as paused, a gap of more than 5 s breaks the smoothing. `phases`:
+/// `(to_phase, timestamp_ms)` of the flight's phase events. `None` without one airborne value.
+pub fn g_load_from_track(track: &[TrackSample], phases: &[(FlightPhase, u64)]) -> Option<GLoadStats> {
+    use vectasim_core::gload::{GLoadTracker, GSample, phase_at};
+    let mut tr = GLoadTracker::new(GLoadSource::Track);
+    let mut prev: Option<&TrackSample> = None;
+    for s in track {
+        let frozen = prev.is_some_and(|p| {
+            p.latitude == s.latitude && p.longitude == s.longitude && p.altitude_msl_ft == s.altitude_msl_ft && !s.on_ground
+        });
+        if prev.is_some_and(|p| s.t_ms.saturating_sub(p.t_ms) > 5_000) {
+            tr.reset_context();
+        }
+        tr.update(GSample {
+            mono_ms: s.t_ms,
+            wall_ms: s.t_ms,
+            g: s.g_force,
+            on_ground: s.on_ground,
+            excluded: frozen,
+            phase: phase_at(phases, s.t_ms),
+            altitude_msl_ft: s.altitude_msl_ft,
+        });
+        prev = Some(s);
+    }
+    tr.flush();
+    let g = *tr.stats();
+    (!g.is_empty()).then_some(g)
 }
 
 /// Phases are stored as their serde names so SQL stays readable.

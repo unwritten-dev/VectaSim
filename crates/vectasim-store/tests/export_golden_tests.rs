@@ -4,7 +4,7 @@
 //! review the diff of the golden files like code.
 
 use std::path::PathBuf;
-use vectasim_core::{AircraftInfo, FlightPhase, IntegrityFlags, LandingRateSource, TouchdownReport};
+use vectasim_core::{AircraftInfo, FlightPhase, GLoadPoint, GLoadSource, GLoadStats, IntegrityFlags, LandingRateSource, TouchdownReport};
 use vectasim_store::export::{LogbookPlan, export_csv, export_flight, export_logbook_csv, export_logbook_csv_with_plans};
 use vectasim_store::{ExportFormat, FlightDetail, FlightRow, PhaseEventRow, TrackSample};
 
@@ -49,6 +49,14 @@ fn flight() -> FlightRow {
             atc_flight_number: "4AB".into(),
         },
         integrity: IntegrityFlags { paused_ms: 61_000, pause_count: 1, max_sim_rate: 1.0, ..Default::default() },
+        // g-load over the flight (v16); golden-2 of the logbook CSV has none ("not measured")
+        g_load: Some(GLoadStats {
+            max: Some(GLoadPoint { g: 1.4234, timestamp_ms: T0 + 5_000, phase: FlightPhase::Climb, altitude_msl_ft: 3_212.4 }),
+            min: Some(GLoadPoint { g: 0.7081, timestamp_ms: T0 + 8_000, phase: FlightPhase::Descent, altitude_msl_ft: 9_870.0 }),
+            high_count: 0,
+            low_count: 1,
+            source: GLoadSource::Live,
+        }),
         ..Default::default()
     }
 }
@@ -168,6 +176,7 @@ fn logbook_csv_matches_golden() {
     second.notes = Some("=Umleitung nach Gatwick,\nWetter".into());
     second.tags = vec!["Diversion".into(), "vatsim".into()];
     second.rating = Some(3);
+    second.g_load = None;
     second.integrity = IntegrityFlags {
         slew_detected: true,
         time_acceleration_detected: true,
@@ -182,7 +191,7 @@ fn logbook_csv_matches_golden() {
     // the plain export is the same without the OFP columns
     let plain = export_logbook_csv(&[flight(), second]);
     assert_eq!(plain.lines().next(), csv.lines().next());
-    assert!(plain.lines().nth(1).unwrap().ends_with(",Mock Sim,,,,,3900,,,,"), "{plain}");
+    assert!(plain.lines().nth(1).unwrap().ends_with(",Mock Sim,,,,,3900,,,,,1.42,climb,3212,0.71,descent,9870,0,1,live"), "{plain}");
 }
 
 #[test]

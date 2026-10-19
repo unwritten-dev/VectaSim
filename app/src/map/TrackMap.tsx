@@ -4,26 +4,34 @@ import type { StyleSpecification } from "maplibre-gl";
 import { followLanguage, loadBasemapStyle } from "./basemap";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./maplibreWorker";
-import type { TouchdownReport, TrackSample } from "../types";
+import type { AircraftInfo, TouchdownReport, TrackSample } from "../types";
 import {
   addCurtainLayers,
   addTrackLayers,
+  drawCurtainTrack,
   applyProjection,
   firstSymbolLayer,
   pointFeature,
   samplesToPoints,
   setCurtainVisible,
   setPitched,
+  trackHeightAt,
   trackPoseAt,
   useGlobe,
   withProjection,
 } from "./common";
 import { useReplayStore } from "../landing/replayStore";
-import { bandedTrackGeoJson, curtainGeoJson, thinPoints } from "./trackChunks";
+import { bandedTrackGeoJson, thinPoints, withGroundHeights } from "./trackChunks";
 import { addAirportDiagramLayers } from "./airportDiagram";
-import { COLOR, TRACK_MARKER } from "../theme";
+import { COLOR, TRACK_MARKER, getMapTheme } from "../theme";
 import { useT } from "../i18n";
 import GlobeToggle from "./GlobeToggle";
+import { AircraftModelLayer, type ModelPose } from "./aircraftModel";
+import { modelKind } from "./aircraftMeshes";
+import { WAKE_SIZE, icaoFromAtcModel, wakeCategory } from "./aircraftIcons";
+import MapStyleToggle from "./MapStyleToggle";
+import { followSatellite } from "./satellite";
+import { altToCurtainM } from "./trackChunks";
 
 /** First draw of a long track: this many points at most; the full line follows once idle. */
 const QUICK_POINTS = 1500;
@@ -33,10 +41,16 @@ interface Props {
   touchdowns: TouchdownReport[];
   departure?: { latitude: number; longitude: number } | null;
   arrival?: { latitude: number; longitude: number } | null;
+  /** Flown aircraft: picks the 3D model's shape and size (generic narrow-body without it). */
+  aircraft?: AircraftInfo | null;
 }
 
 /** Pixel radius around the track within which a click picks the nearest moment. */
 const PICK_PX = 16;
+/** Follow mode re-centres only when the aircraft moved at least this far on screen. */
+const FOLLOW_MIN_PX = 1;
+/** Switching follow on zooms in to at least this level (a whole long-haul track is useless to follow). */
+const FOLLOW_MIN_ZOOM = 11;
 
 /** The cursor marker: an arrow pointing along the heading (rotated by MapLibre with the map). */
 function cursorElement(): HTMLDivElement {
@@ -53,7 +67,7 @@ function cursorElement(): HTMLDivElement {
  * points, and the shared replay cursor (landing/replayStore.ts) as an arrow on the track;
  * a click near the track sets the cursor to that moment.
  */
-export default function TrackMap({ samples, touchdowns, departure, arrival }: Props) {
+export default function TrackMap({ samples, touchdowns, departure, arrival, aircraft }: Props) {
   const t = useT();
   const store = useReplayStore();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -69,6 +83,19 @@ export default function TrackMap({ samples, touchdowns, departure, arrival }: Pr
   const [globe] = useGlobe();
   const globeRef = useRef(globe);
   globeRef.current = globe;
+  /** 3D view: the low-poly aircraft at the cursor (or the track's end) at the curtain's height. */
+  const modelRef = useRef<AircraftModelLayer | null>(null);
+  /** Follow: the camera stays on the replay aircraft (cursor); dragging the map ends it. */
+  const [follow, setFollowState] = useState(false);
+  const followRef = useRef(false);
+  const easeUntilRef = useRef(0);
+  const setFollowFlag = (v: boolean) => {
+    followRef.current = v;
+    setFollowState(v);
+  };
+  const icao = icaoFromAtcModel(aircraft?.atcModel);
+  const cat = wakeCategory(icao, aircraft?.title);
+  const kind = modelKind(icao, aircraft?.title);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -103,8 +130,16 @@ export default function TrackMap({ samples, touchdowns, departure, arrival }: Pr
             "circle-stroke-width": ["match", ["get", "kind"], "touchdown", 1.5, 2],
           },
         });
+        const model = new AircraftModelLayer("aircraft-model", { body: COLOR.ownAircraft, dark: COLOR.aircraftEdge, light: getMapTheme().scheme === "light" });
+        map.addLayer(model);
+        modelRef.current = model;
+        model.setEnabled(view3dRef.current);
       };
       map.on("click", (e) => clickRef.current(e));
+      // dragging takes the camera (only a user's drag carries an originalEvent)
+      map.on("dragstart", (e) => {
+        if (e.originalEvent && followRef.current) setFollowFlag(false);
+      });
       map.on("load", () => {
         applyProjection(map, globeRef.current);
         addOwnLayers();
@@ -129,11 +164,14 @@ export default function TrackMap({ samples, touchdowns, departure, arrival }: Pr
       window.addEventListener("theme:changed", onTheme);
       // basemap names follow the UI language (map/basemap.ts)
       const offLang = followLanguage(map);
+      // Karte / Satellit (map/satellite.ts), re-applied after every theme change
+      const offSat = followSatellite(map);
       const ro = new ResizeObserver(() => map.resize());
       ro.observe(container);
       return () => {
         window.removeEventListener("theme:changed", onTheme);
         offLang();
+        offSat();
         diagramOff?.();
         ro.disconnect();
         cursorRef.current?.remove();
@@ -162,7 +200,8 @@ export default function TrackMap({ samples, touchdowns, departure, arrival }: Pr
     placeRef.current();
     const points = samplesToPoints(samples);
     const trackSrc = () => map.getSource("track") as maplibregl.GeoJSONSource | undefined;
-    (map.getSource("track-3d") as maplibregl.GeoJSONSource | undefined)?.setData(view3dRef.current ? curtainGeoJson(points) : { type: "FeatureCollection", features: [] });
+    // 3D curtain: built once per track (thinned, smoothed; map/curtainLayer.ts)
+    drawCurtainTrack(map, "track-3d", view3dRef.current ? withGroundHeights(points) : [], null);
     // Altitude-banded runs (a few hundred features instead of one per sample). Long tracks are
     // first drawn thinned so the map appears at once; the full resolution follows when the
     // map is idle (after the fit below) – it only matters when zoomed in.
@@ -184,6 +223,8 @@ export default function TrackMap({ samples, touchdowns, departure, arrival }: Pr
     const id = samples.length ? `${samples[0].tMs}` : `${departure?.latitude},${departure?.longitude},${arrival?.latitude},${arrival?.longitude}`;
     if (id === fittedRef.current) return;
     fittedRef.current = id;
+    // another flight: start with the whole track, not following
+    if (followRef.current) setFollowFlag(false);
     const coords = points.map((p) => [p.lon, p.lat] as [number, number]);
     for (const m of markers) coords.push((m.geometry as GeoJSON.Point).coordinates as [number, number]);
     if (coords.length >= 2) {
@@ -209,7 +250,24 @@ export default function TrackMap({ samples, touchdowns, departure, arrival }: Pr
   const placeCursor = () => {
     const map = mapRef.current;
     if (!map) return;
-    const pose = trackPoseAt(samplesRef.current, store.get().tMs);
+    const list = samplesRef.current;
+    const tMs = store.get().tMs;
+    if (view3dRef.current) {
+      // 3D: no flat arrow on the ground – the model at the cursor, else at the end of the track
+      cursorRef.current?.remove();
+      cursorRef.current = null;
+      const at = tMs ?? (list.length ? list[list.length - 1].tMs : null);
+      const p = trackPoseAt(list, at);
+      // height above the map's ground, on the curtain's scale (0 on the ground)
+      const pose: ModelPose | null = p
+        ? { lon: p.lon, lat: p.lat, headingDeg: p.headingDeg ?? 0, pitchDeg: p.pitchDeg, bankDeg: p.bankDeg, altFt: trackHeightAt(list, at) ?? 0, size: WAKE_SIZE[cat], kind }
+        : null;
+      modelRef.current?.setPose(pose);
+      if (pose) followCamera(pose.lon, pose.lat, altToCurtainM(pose.altFt));
+      return;
+    }
+    modelRef.current?.setPose(null);
+    const pose = trackPoseAt(list, tMs);
     if (!pose) {
       cursorRef.current?.remove();
       cursorRef.current = null;
@@ -220,13 +278,41 @@ export default function TrackMap({ samples, touchdowns, departure, arrival }: Pr
     }
     cursorRef.current.setLngLat([pose.lon, pose.lat]).setRotation(pose.headingDeg ?? 0);
     cursorRef.current.getElement().classList.toggle("no-heading", pose.headingDeg == null);
+    followCamera(pose.lon, pose.lat, 0);
+  };
+  /** Follow: keep the aircraft centred (3D: looking at its height, not at the ground below). */
+  const followCamera = (lon: number, lat: number, elevation: number, animate = false) => {
+    const map = mapRef.current;
+    if (!map || !followRef.current || map.getCanvas().clientWidth === 0) return;
+    if (animate) {
+      map.easeTo({ center: [lon, lat], elevation, zoom: Math.max(map.getZoom(), FOLLOW_MIN_ZOOM), duration: 600 });
+      easeUntilRef.current = performance.now() + 650;
+      return;
+    }
+    // let the switch-on animation finish (a jump would cut it off)
+    if (performance.now() < easeUntilRef.current) return;
+    const target = map.project([lon, lat]);
+    const here = map.project(map.getCenter());
+    if (Math.hypot(target.x - here.x, target.y - here.y) >= FOLLOW_MIN_PX || Math.abs(map.getCenterElevation() - elevation) >= 2) map.jumpTo({ center: [lon, lat], elevation });
+  };
+  const toggleFollow = () => {
+    const next = !followRef.current;
+    setFollowFlag(next);
+    if (!next) return;
+    const list = samplesRef.current;
+    if (list.length === 0) return;
+    // nothing to follow without a cursor: start at the beginning of the flight (3D shows the end)
+    if (store.get().tMs == null && !view3dRef.current) store.setCursor(list[0].tMs);
+    const at = store.get().tMs ?? list[list.length - 1].tMs;
+    const p = trackPoseAt(list, at);
+    if (p) followCamera(p.lon, p.lat, view3dRef.current ? altToCurtainM(trackHeightAt(list, at) ?? 0) : 0, true);
   };
   const placeRef = useRef(placeCursor);
   placeRef.current = placeCursor;
   useEffect(() => {
     placeRef.current();
     return store.subscribe(() => placeRef.current());
-  }, [store, samples]);
+  }, [store, samples, cat, kind]);
 
   // click near the track → the nearest sample's time (pinned, playback paused)
   const onClick = (e: maplibregl.MapMouseEvent) => {
@@ -261,7 +347,9 @@ export default function TrackMap({ samples, touchdowns, departure, arrival }: Pr
     const map = mapRef.current;
     if (!map || !readyRef.current) return;
     setCurtainVisible(map, "track-3d", next);
-    (map.getSource("track-3d") as maplibregl.GeoJSONSource | undefined)?.setData(next ? curtainGeoJson(samplesToPoints(samplesRef.current)) : { type: "FeatureCollection", features: [] });
+    drawCurtainTrack(map, "track-3d", next ? withGroundHeights(samplesToPoints(samplesRef.current)) : [], null);
+    modelRef.current?.setEnabled(next);
+    placeRef.current();
     setPitched(map, next);
   };
 
@@ -269,6 +357,9 @@ export default function TrackMap({ samples, touchdowns, departure, arrival }: Pr
     <div className="track-map-wrap">
       <div ref={containerRef} className="map track-map" />
       <div className="map-toolbar track-map-toolbar">
+        <button className="toggle" onClick={toggleFollow} aria-pressed={follow} title={t("map.toolbar.followTitle")}>
+          {t("map.toolbar.follow")}
+        </button>
         <button
           className="toggle"
           onClick={toggle3d}
@@ -278,6 +369,7 @@ export default function TrackMap({ samples, touchdowns, departure, arrival }: Pr
           3D
         </button>
         <GlobeToggle />
+        <MapStyleToggle />
       </div>
     </div>
   );

@@ -169,6 +169,15 @@
       "clean": { "one": "{count} Flug ganz ohne Sternchen", "other": "{count} Flüge ganz ohne Sternchen" },
       "note": "Ein Sternchen ist kein Makel – es zeigt nur, wo Pause, Zeitraffer, Slew oder ein Sprung im Spiel waren."
     },
+    "lightbox": {
+      "open": "„{card}“ groß öffnen",
+      "openHint": "Klicken, um die Karte groß anzusehen",
+      "close": "Schließen",
+      "prev": "Vorherige Karte",
+      "next": "Nächste Karte",
+      "position": "{n} von {total}",
+      "hint": "← → blättern · Esc schließt"
+    },
     "footer": "Jahresrückblick",
     "export": {
       "pngFilter": "PNG-Bild",

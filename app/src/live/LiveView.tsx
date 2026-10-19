@@ -27,6 +27,7 @@ import AfterFlightCard, { type AfterFlight } from "./AfterFlightCard";
 import ReadyCard from "./ReadyCard";
 import { isDebriefOpen, openDebrief, useDebrief } from "../landing/debriefStore";
 import { G_HARD } from "../landing/facts";
+import { liveMaxG, liveMaxGTitle } from "../gload";
 import { useEventLog } from "./eventLog";
 
 interface Props {
@@ -516,6 +517,7 @@ function FlightSection({
           />
           <Stat label={t("live.flight.maxAltitude")} value={fmt(f?.maxAltitudeMslFt, 0)} unit="ft" sub={planSub(L.cruise)} />
           <Stat label={t("live.flight.fuelOnBoard")} value={fmtWeightNum(tel?.fuelTotalKg)} unit={weightUnit} sub={planSub(L.landingFuel, "live.flight.planLanding")} />
+          {liveMaxG(f?.gLoad) && <Stat label={t("gload.live.label")} title={liveMaxGTitle()} value={liveMaxG(f?.gLoad)} />}
         </div>
       </div>
 

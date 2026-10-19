@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { Airport, FlightRow } from "../types";
@@ -16,6 +16,8 @@ import ReviewCard, { cardHasData, visibleCards } from "./ReviewCards";
 import { copyReviewCard, saveAllReviewCards, saveReviewCard, saveReviewStack, type CardSource } from "./exportReview";
 import { FACTS_WINDOW, buildReview, demoLeftOut, flightTimeMs, inPeriod, periodLabel, periodOf, periodTitle, reviewFlights, yearsWithFlights, type LonLat, type PeriodMode, type YearReview as Review } from "./stats";
 import { cardTitle, formatLabel, type CardFormat } from "./text";
+import ReviewLightbox from "./ReviewLightbox";
+import { reviewGridLayout, type GridLayout } from "./layout";
 import "./review.css";
 
 interface RunwayFactsResult {
@@ -61,6 +63,45 @@ async function lookupCoords(idents: string[]): Promise<void> {
   );
 }
 
+/** Gap between the preview cards (px, also set inline on the grid). */
+const GRID_GAP = 16;
+/** Height of a card's caption (title + Save/Copy) before one was measured. */
+const CAPTION_FALLBACK = 72;
+/** Space kept free under the first row inside the scroll area (its bottom padding). */
+const BOTTOM_ROOM = 16;
+
+/**
+ * Measures the grid's width and the height left for its first row in the scrolling main area
+ * (ResizeObserver on both) and returns the column count and card width from reviewGridLayout.
+ * null until measured (the CSS auto-fill grid stands in).
+ */
+function useReviewGrid(count: number, format: CardFormat, enabled: boolean) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [layout, setLayout] = useState<GridLayout | null>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!enabled || !el) return;
+    const scroller = el.closest<HTMLElement>("main") ?? document.documentElement;
+    const measure = () => {
+      const width = el.clientWidth;
+      if (width <= 0) return;
+      const box = scroller.getBoundingClientRect();
+      const top = el.getBoundingClientRect().top - box.top + scroller.scrollTop;
+      const height = scroller.clientHeight - top - BOTTOM_ROOM;
+      const cap = el.querySelector("figcaption");
+      const caption = cap ? cap.getBoundingClientRect().height + 8 : CAPTION_FALLBACK;
+      const next = reviewGridLayout({ width, height, count, format, gap: GRID_GAP, caption });
+      setLayout((prev) => (prev && prev.columns === next.columns && prev.cardWidth === next.cardWidth && prev.rows === next.rows ? prev : next));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    ro.observe(scroller);
+    return () => ro.disconnect();
+  }, [count, format, enabled]);
+  return { ref, layout };
+}
+
 const MODES: PeriodMode[] = ["year", "last12"];
 const FORMATS: CardFormat[] = ["portrait", "landscape"];
 
@@ -99,6 +140,8 @@ export default function YearReview() {
   const [storedFormat, setFormat] = useStoredState<string>("vectasim.review.format", "portrait");
   const [year, setYear] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+  /** Index (in the shown cards) of the card open in the single-card view. */
+  const [open, setOpen] = useState<number | null>(null);
   const mode: PeriodMode = storedMode === "last12" ? "last12" : "year";
   const format: CardFormat = storedFormat === "landscape" ? "landscape" : "portrait";
 
@@ -180,6 +223,10 @@ export default function YearReview() {
   const hideReg = privacyMode || cardHideReg;
   const demoOut = data ? demoLeftOut(data.flights, showDemo) : 0;
   const notes = review ? reviewNotes(review, t) : [];
+  const cards = useMemo(() => (review ? visibleCards(review) : []), [review]);
+  const showGrid = !!src && !!review && review.flights > 0;
+  const grid = useReviewGrid(cards.length, format, showGrid);
+  const openIndex = open != null && open < cards.length && showGrid ? open : null;
 
   const run = async (job: () => Promise<unknown>) => {
     setBusy(true);
@@ -264,33 +311,65 @@ export default function YearReview() {
         <EmptyState title={mode === "year" ? t("review.view.emptyYear", { year: String(shownYear) }) : t("review.view.emptyLast12")} text={t("review.view.emptyText")} />
       )}
 
-      {src && review && review.flights > 0 && (
-        <div className={`review-grid review-${format}`}>
-          {visibleCards(review).map((id) => {
+      {src && review && showGrid && (
+        <div
+          ref={grid.ref}
+          className={`review-grid review-${format}${grid.layout ? " review-grid-fit" : ""}`}
+          style={grid.layout ? { gap: GRID_GAP, gridTemplateColumns: `repeat(${grid.layout.columns}, ${grid.layout.cardWidth}px)` } : { gap: GRID_GAP }}
+        >
+          {cards.map((id, i) => {
             const has = cardHasData(id, review);
             const title = cardTitle(id, lang);
             const why = has ? undefined : t("review.view.noDataHint");
             return (
               <figure key={id} className={`review-card${has ? "" : " review-card-empty"}`}>
-                <div className="review-card-img">
+                <button type="button" className="review-card-img" aria-label={t("review.lightbox.open", { card: title })} title={t("review.lightbox.openHint")} onClick={() => setOpen(i)}>
                   <ReviewCard id={id} format={format} review={review} colors={colors} hideReg={hideReg} outlines={src.outlines} countryNames={countryNames} idPrefix="pv" />
-                </div>
+                </button>
                 <figcaption>
                   <span className="review-card-title">{title}</span>
                   {!has && <span className="detail">{t("review.view.noData")}</span>}
                   <div className="spacer" />
-                  <button className="btn btn-sm" disabled={busy || !has} title={why} aria-label={t("review.view.saveCard", { card: title })} onClick={() => run(() => saveReviewCard(id, format, src))}>
-                    {t("review.view.save")}
-                  </button>
-                  <button className="btn btn-sm" disabled={busy || !has} title={why} aria-label={t("review.view.copyCard", { card: title })} onClick={() => run(() => copyReviewCard(id, format, src))}>
-                    {t("review.view.copy")}
-                  </button>
+                  <CardActions title={title} has={has} why={why} busy={busy} onSave={() => run(() => saveReviewCard(id, format, src))} onCopy={() => run(() => copyReviewCard(id, format, src))} />
                 </figcaption>
               </figure>
             );
           })}
         </div>
       )}
+
+      {src && review && openIndex != null && (() => {
+        const id = cards[openIndex];
+        const has = cardHasData(id, review);
+        const title = cardTitle(id, lang);
+        return (
+          <ReviewLightbox
+            titles={cards.map((c) => cardTitle(c, lang))}
+            index={openIndex}
+            format={format}
+            onIndex={setOpen}
+            onClose={() => setOpen(null)}
+            actions={<CardActions title={title} has={has} why={has ? undefined : t("review.view.noDataHint")} busy={busy} onSave={() => run(() => saveReviewCard(id, format, src))} onCopy={() => run(() => copyReviewCard(id, format, src))} />}
+          >
+            <ReviewCard id={id} format={format} review={review} colors={colors} hideReg={hideReg} outlines={src.outlines} countryNames={countryNames} idPrefix="lb" />
+          </ReviewLightbox>
+        );
+      })()}
     </section>
+  );
+}
+
+/** Save / Copy of one card, under each preview and in the single-card view. */
+function CardActions({ title, has, why, busy, onSave, onCopy }: { title: string; has: boolean; why?: string; busy: boolean; onSave: () => void; onCopy: () => void }) {
+  const t = useT();
+  return (
+    <>
+      <button className="btn btn-sm" disabled={busy || !has} title={why} aria-label={t("review.view.saveCard", { card: title })} onClick={onSave}>
+        {t("review.view.save")}
+      </button>
+      <button className="btn btn-sm" disabled={busy || !has} title={why} aria-label={t("review.view.copyCard", { card: title })} onClick={onCopy}>
+        {t("review.view.copy")}
+      </button>
+    </>
   );
 }

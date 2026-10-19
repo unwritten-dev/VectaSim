@@ -407,6 +407,116 @@ fn mock_reconnect_variant_lands_once() {
     assert_eq!(s.integrity.pause_count, 0, "a link loss with the sim clock running is no pause");
 }
 
+// ---- start in the air ----------------------------------------------
+
+#[test]
+fn start_in_the_air_records_a_flight_from_there() {
+    // connected mid-flight: the first sample is in the cruise
+    let mut sim = Sim::new(500);
+    sim.run(90.0, air(8_000.0, 0.0, 250.0));
+    assert_eq!(sim.phases(), vec![Cruise], "straight into the phase the sample shows, no take-off");
+    let started: Vec<u64> = sim.events.iter().filter_map(|e| if let FlightEvent::FlightStarted { timestamp_ms } = e { Some(*timestamp_ms) } else { None }).collect();
+    assert_eq!(started, vec![1_000_500]);
+    let s = sim.session.summary().clone();
+    assert_eq!(s.state, FlightState::Active);
+    assert_eq!(s.off_block_ms, Some(1_000_500), "block time from the start of the recording");
+    assert_eq!(s.takeoff_ms, None, "no lift-off seen");
+    assert!(s.departure.is_some());
+    sim.approach_and_land();
+    assert_eq!(sim.phases(), vec![Cruise, Descent, Approach, Final, Landing, TaxiIn]);
+    assert_eq!(sim.touchdowns(), 1);
+    sim.run(10.0, |t| {
+        ground(0.0)(t);
+        t.engines_running = 0;
+    });
+    let s = sim.session.summary();
+    assert_eq!(s.state, FlightState::Completed);
+    assert!(s.landing_ms.is_some() && s.on_block_ms.is_some() && s.landing_rate_fpm.is_some());
+    assert_eq!((s.takeoff_ms, s.flight_time_ms()), (None, None));
+    assert!(s.block_time_ms().is_some());
+    assert!(!s.integrity.teleport_detected);
+}
+
+#[test]
+fn start_in_the_air_picks_the_phase_from_the_first_sample() {
+    for (agl, vs, phase) in [(9_000.0, 1_500.0, Climb), (9_000.0, -1_500.0, Descent), (2_500.0, 0.0, Cruise), (2_500.0, -800.0, Approach), (900.0, -700.0, Final)] {
+        let mut sim = Sim::new(500);
+        sim.run(1.0, air(agl, vs, 200.0));
+        assert_eq!(sim.phases(), vec![phase], "{agl} ft, {vs} fpm");
+        assert_eq!(sim.session.summary().state, FlightState::Active);
+    }
+}
+
+#[test]
+fn start_on_short_final_lands_after_a_short_stretch_of_air_time() {
+    // loaded at 600 ft on the final: below the 500 ft / 60 s qualification of a normal flight
+    // only after the descent, so the short requalification of a start in the air applies
+    let mut sim = Sim::new(500);
+    sim.climb(600.0, 20.0, 700.0, 140.0);
+    sim.run(2.0, air(10.0, -150.0, 140.0));
+    sim.run(10.0, |t| {
+        ground(100.0)(t);
+        t.touchdown_vs_fpm = 150.0;
+    });
+    sim.run(15.0, |t| {
+        ground(15.0)(t);
+        t.touchdown_vs_fpm = 150.0;
+    });
+    assert_eq!(sim.phases(), vec![Final, Landing, TaxiIn]);
+    assert_eq!(sim.touchdowns(), 1);
+}
+
+#[test]
+fn airborne_in_preflight_after_ground_contact_is_a_take_off() {
+    // the start-in-the-air rule needs the very first samples in the air
+    let mut sim = Sim::new(500);
+    sim.run(5.0, |t| {
+        ground(0.0)(t);
+        t.engines_running = 0;
+    });
+    sim.run(5.0, air(3_000.0, 0.0, 200.0));
+    assert_eq!(sim.phases(), vec![Takeoff, Climb]);
+    assert!(sim.session.summary().takeoff_ms.is_some());
+}
+
+#[test]
+fn mock_demo_loops_are_one_flight_each() {
+    // every demo loop starts in the air after a `FlightLoaded`: one completed flight with one
+    // landing per loop, never interrupted, never a teleport
+    let mut flight = MockFlight::new();
+    let mut session = FlightSession::new();
+    let (hz, loops) = (20.0, 3);
+    let mut done = Vec::new();
+    let mut started = 0;
+    for i in 1..=((loops as f64 * MockFlight::loop_seconds() + 10.0) * hz) as u64 {
+        let t_s = i as f64 / hz;
+        for pe in flight.step(t_s, 1_000_000 + (t_s * 1000.0) as u64) {
+            let evs = match pe {
+                ProviderEvent::Telemetry(t) => session.update(&t),
+                ProviderEvent::Sim(e) => session.on_sim_event(&e),
+                _ => Vec::new(),
+            };
+            for e in evs {
+                match e {
+                    FlightEvent::FlightStarted { .. } => started += 1,
+                    FlightEvent::FlightEnded { interrupted, .. } => done.push((interrupted, session.summary().clone())),
+                    _ => {}
+                }
+            }
+        }
+    }
+    assert_eq!(started, loops + 1);
+    assert_eq!(done.len(), loops);
+    for (interrupted, s) in &done {
+        assert!(!interrupted);
+        assert_eq!(s.state, FlightState::Completed);
+        assert_eq!(s.touchdowns.len(), 1);
+        assert!(s.landing_ms.is_some() && s.on_block_ms.is_some() && s.takeoff_ms.is_none());
+        assert!(!s.integrity.teleport_detected);
+    }
+    assert_eq!((session.summary().state, session.phase()), (FlightState::Active, Cruise));
+}
+
 // ---- time base ------------------------------------------------------
 
 /// Final approach down to 10 ft AGL from the cruise of `fly_to_cruise`.

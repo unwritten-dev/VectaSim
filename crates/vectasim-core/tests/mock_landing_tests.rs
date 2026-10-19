@@ -33,8 +33,9 @@ fn fly_loop(variant: MockVariant, n: u64) -> (Vec<LandingSample>, Vec<TouchdownR
     let mut session = FlightSession::new();
     let (mut track, mut tds) = (Vec::new(), Vec::new());
     let hz = 20.0;
-    let start = n as f64 * MockFlight::loop_seconds();
-    let steps = ((MockFlight::loop_seconds() + 10.0) * hz) as u64;
+    let loop_s = variant.loop_seconds();
+    let start = n as f64 * loop_s;
+    let steps = ((loop_s + 10.0) * hz) as u64;
     for i in 1..=steps {
         let t_s = start + i as f64 / hz;
         let t = flight.sample(t_s, 1_700_000_000_000 + (t_s * 1000.0) as u64);

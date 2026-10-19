@@ -51,6 +51,13 @@ pub mod period {
     pub const SECOND: u32 = 4;
 }
 
+/// `SIMCONNECT_TEXT_TYPE`: scrolling lines 0x00–0x07, printed (static) lines 0x100–0x107, menu 0x200.
+pub mod text_type {
+    pub const SCROLL_WHITE: u32 = 0x0001;
+    pub const PRINT_WHITE: u32 = 0x0101;
+    pub const PRINT_GREEN: u32 = 0x0103;
+}
+
 pub mod request_flag {
     pub const DEFAULT: u32 = 0;
     pub const CHANGED: u32 = 1;
@@ -190,6 +197,14 @@ type FnSubscribeToSystemEvent =
     unsafe extern "system" fn(h: HANDLE, event_id: DWORD, system_event_name: *const c_char) -> HRESULT;
 type FnRequestSystemState = unsafe extern "system" fn(h: HANDLE, request_id: DWORD, state: *const c_char) -> HRESULT;
 type FnGetLastSentPacketId = unsafe extern "system" fn(h: HANDLE, pdw_send_id: *mut DWORD) -> HRESULT;
+type FnText = unsafe extern "system" fn(
+    h: HANDLE,
+    text_type: u32,
+    time_seconds: f32,
+    event_id: DWORD,
+    cb_unit_size: DWORD,
+    p_data_set: *const c_void,
+) -> HRESULT;
 type FnGetNextDispatch =
     unsafe extern "system" fn(h: HANDLE, pp_data: *mut *mut SIMCONNECT_RECV, pcb_data: *mut DWORD) -> HRESULT;
 
@@ -206,6 +221,8 @@ pub struct SimConnectLib {
     pub request_system_state: FnRequestSystemState,
     pub get_last_sent_packet_id: FnGetLastSentPacketId,
     pub get_next_dispatch: FnGetNextDispatch,
+    /// `SimConnect_Text`; optional – a DLL without it still records (no in-sim messages then).
+    pub text: Option<FnText>,
 }
 
 /// One failed candidate of the DLL search.
@@ -471,6 +488,7 @@ impl SimConnectLib {
             let get_last_sent_packet_id: FnGetLastSentPacketId =
                 sym!("SimConnect_GetLastSentPacketID", FnGetLastSentPacketId);
             let get_next_dispatch: FnGetNextDispatch = sym!("SimConnect_GetNextDispatch", FnGetNextDispatch);
+            let text: Option<FnText> = lib.get::<FnText>(b"SimConnect_Text\0").ok().map(|s| *s);
             Ok(Self {
                 _lib: lib,
                 path,
@@ -483,6 +501,7 @@ impl SimConnectLib {
                 request_system_state,
                 get_last_sent_packet_id,
                 get_next_dispatch,
+                text,
             })
         }
     }

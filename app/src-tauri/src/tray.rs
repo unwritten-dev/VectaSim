@@ -1,5 +1,5 @@
-//! Tray icon and minimise-to-tray (Einstellungen → Integrationen, setting `tray_minimize`,
-//! default off).
+//! Tray icon and minimise-/close-to-tray (Einstellungen → Integrationen, settings `tray_minimize`
+//! and `tray_close`, both default on; "0" = off).
 //!
 //! With the setting on there is a tray icon (the window icon) whose tooltip is the short status
 //! ("VectaSim · Aufzeichnung läuft · Cruise") and whose menu offers „Öffnen“, the recording
@@ -7,8 +7,10 @@
 //! Texts follow the backend language (`lang`), flight phases stay English like in the UI
 //! (format.ts → PHASE_LABEL); a language switch relabels the menu at once ([`relabel`]).
 //! Minimising the window then hides it into the tray; a double click on the icon (or „Öffnen“)
-//! brings it back. „Beenden“ shows the window and asks it to close, so the close guard of a
-//! running recording still asks first. Switched off, the icon goes away at once.
+//! brings it back. The close button hides the window as well (`tray_close`, decided by the
+//! frontend: closeToTray.ts). „Beenden“ shows the window, emits `app:quit` (so that close is not
+//! turned into a hide) and asks it to close, so the close guard of a running recording still asks
+//! first. Switched off, the icon goes away at once.
 
 use crate::lang::{self, Lang};
 use crate::manager::{ProviderManager, StatusSnapshot};
@@ -42,7 +44,7 @@ fn lock(s: &TrayState) -> std::sync::MutexGuard<'_, Option<Items>> {
 }
 
 pub fn enabled(store: &Store) -> bool {
-    store.get_setting(SETTING_TRAY).ok().flatten().as_deref() == Some("1")
+    store.get_setting(SETTING_TRAY).ok().flatten().as_deref() != Some("0")
 }
 
 /// English in both languages, like the UI (format.ts → PHASE_LABEL).
@@ -106,10 +108,13 @@ fn toggle_debug(app: &AppHandle) {
     }
 }
 
-/// Window asked to close: the frontend's close guard decides.
+/// „Beenden“: the frontend marks the next close as a real quit and closes; its close guard
+/// still asks during a recording. Without the frontend listening (it never registered) close directly.
 fn quit(app: &AppHandle) {
     focus_main(app);
-    if let Some(w) = app.get_webview_window("main") {
+    if let Some(w) = app.get_webview_window("main")
+        && w.emit("app:quit", ()).is_err()
+    {
         let _ = w.close();
     }
 }
@@ -273,5 +278,26 @@ mod tests {
         s.provider = "mock".into();
         assert!(tooltip(de, &s).ends_with("(Demo)"));
         assert_eq!(phase_label(FlightPhase::TaxiIn), "Taxi in");
+    }
+}
+
+#[cfg(test)]
+mod default_tests {
+    use super::*;
+
+    #[test]
+    fn tray_icon_is_on_unless_switched_off() {
+        let store = Store::open_in_memory().unwrap();
+        assert!(enabled(&store), "default on");
+        store.set_setting(SETTING_TRAY, "0").unwrap();
+        assert!(!enabled(&store));
+        store.set_setting(SETTING_TRAY, "1").unwrap();
+        assert!(enabled(&store));
+    }
+
+    #[test]
+    fn the_tray_hint_is_a_notification_kind_without_its_own_switch() {
+        assert_eq!(crate::notify::Kind::parse("tray"), Some(crate::notify::Kind::Tray));
+        assert_eq!(crate::notify::Kind::Tray.setting(), None);
     }
 }

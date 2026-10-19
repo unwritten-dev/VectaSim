@@ -17,6 +17,7 @@ mod privacy;
 mod server;
 mod simconnect_dl;
 mod simselect;
+mod simtext;
 mod tray;
 
 use manager::{DiagSnapshot, ProviderManager, StatusSnapshot};

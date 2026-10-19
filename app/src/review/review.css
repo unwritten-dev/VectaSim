@@ -52,16 +52,23 @@
   font-weight: 600;
 }
 
+/* Columns and card width come from layout.ts (measured, set inline); the auto-fill rules only
+   stand in for the first frame before the grid was measured. */
 .review-grid {
   display: grid;
-  gap: var(--sp-3);
+  gap: var(--sp-4);
   align-items: start;
+  flex: none;
 }
-.review-portrait {
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+.review-grid:not(.review-grid-fit).review-portrait {
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
 }
-.review-landscape {
-  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+.review-grid:not(.review-grid-fit).review-landscape {
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+}
+/* fixed card widths: the spare width is split left and right */
+.review-grid-fit {
+  justify-content: center;
 }
 
 .review-card {
@@ -71,12 +78,28 @@
   gap: var(--sp-2);
   min-width: 0;
 }
+/* the preview is a button: it opens the card large (ReviewLightbox) */
 .review-card-img {
+  display: block;
+  width: 100%;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: zoom-in;
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
   overflow: hidden;
   background: var(--bg);
   line-height: 0;
+  transition: border-color 0.12s ease;
+}
+.review-card-img:hover {
+  border-color: var(--accent);
+}
+.review-card-img:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 .review-card-img svg {
   display: block;
@@ -99,4 +122,88 @@
 .review-card figcaption .spacer {
   flex-basis: 100%;
   height: 0;
+}
+
+/* ---- single-card view (ReviewLightbox.tsx) ------------------------------------------ */
+
+.review-lightbox {
+  position: fixed;
+  inset: var(--titlebar-h, 0) 0 0; /* the title bar (window controls) stays usable */
+  z-index: 50;
+  background: color-mix(in srgb, var(--bg-sidebar) 94%, transparent);
+  overscroll-behavior: contain;
+  display: flex;
+}
+.review-lightbox-inner {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: var(--sp-3) var(--sp-4) var(--sp-4);
+  gap: var(--sp-3);
+}
+.review-lightbox-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-3);
+  max-width: 1400px;
+  width: 100%;
+  margin: 0 auto;
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+}
+.review-lightbox-bar .spacer {
+  flex: 1;
+}
+.review-lightbox-title {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--text);
+}
+.review-lightbox-stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-3);
+}
+/* the card as large as the window allows, in its exact aspect ratio (--review-ar = w / h):
+   bar (~50 px) + paddings and gaps and the two side buttons are kept free */
+.review-lightbox-card {
+  --review-room-h: calc(100vh - var(--titlebar-h, 0px) - 112px);
+  --review-room-w: calc(100vw - 160px);
+  width: min(var(--review-room-w), calc(var(--review-room-h) * var(--review-ar)));
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  background: var(--bg);
+  line-height: 0;
+  box-shadow: var(--shadow-menu);
+}
+.review-lightbox-card svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.review-lightbox-nav {
+  flex: none;
+  width: 44px;
+  height: 64px;
+  padding: 0;
+  font-size: 28px;
+  line-height: 1;
+}
+.review-lightbox-nav:disabled {
+  visibility: hidden;
+}
+@media (max-width: 900px) {
+  .review-lightbox-hint {
+    display: none;
+  }
 }

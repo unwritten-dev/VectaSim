@@ -2,7 +2,7 @@
 //! telemetry and against the deterministic mock flight.
 
 use vectasim_core::FlightPhase::*;
-use vectasim_core::{FlightEvent, FlightPhase, FlightSession, FlightState, LandingRateSource, MockFlight, PhaseEngine, Telemetry, TouchdownDetector};
+use vectasim_core::{FlightEvent, FlightPhase, FlightSession, FlightState, LandingRateSource, MockFlight, PhaseEngine, ProviderEvent, Telemetry, TouchdownDetector};
 
 /// Builder for synthetic samples; time advances by `step_ms` per `at()` call.
 struct Sim {
@@ -202,19 +202,33 @@ fn touchdown_detector_ignores_hop_without_real_flight() {
 
 #[test]
 fn mock_flight_drives_one_complete_flight() {
+    // the demo flight starts in the air on the downwind and ends parked; the next loop is a
+    // new flight, loaded in the air again (`FlightLoaded`), never a teleport in the old one
     let mut flight = MockFlight::new();
     let mut session = FlightSession::new();
     let mut phases: Vec<FlightPhase> = vec![session.phase()];
     let mut touchdowns = 0;
-    let mut started = 0;
-    let mut ended = 0;
+    let mut started = Vec::new();
+    let mut ended = Vec::new();
     let hz = 20.0;
-    // a little past the loop end: the script wraps to "parked", which lets the 5 s shutdown dwell elapse
-    let steps = ((MockFlight::loop_seconds() + 10.0) * hz) as u64;
-    for i in 1..=steps {
+    let loop_s = MockFlight::loop_seconds();
+    let mut first: Option<vectasim_core::FlightSummary> = None;
+    let mut outcomes = Vec::new();
+    for i in 1..=((loop_s + 10.0) * hz) as u64 {
         let t_s = i as f64 / hz;
-        let t = flight.sample(t_s, 1_000_000 + (t_s * 1000.0) as u64);
-        for ev in session.update(&t) {
+        if t_s >= loop_s && first.is_none() {
+            first = Some(session.summary().clone());
+            outcomes = session.take_touchdown_outcomes().into_iter().map(|o| (o.index, o.outcome)).collect();
+        }
+        let mut evs = Vec::new();
+        for pe in flight.step(t_s, 1_000_000 + (t_s * 1000.0) as u64) {
+            match pe {
+                ProviderEvent::Telemetry(t) => evs.extend(session.update(&t)),
+                ProviderEvent::Sim(e) => evs.extend(session.on_sim_event(&e)),
+                _ => {}
+            }
+        }
+        for ev in evs {
             match ev {
                 FlightEvent::PhaseChanged(tr) => phases.push(tr.to),
                 FlightEvent::Touchdown(r) => {
@@ -225,24 +239,35 @@ fn mock_flight_drives_one_complete_flight() {
                     assert_eq!(r.landing_rate_source, LandingRateSource::Sim, "{r:?}");
                     assert_eq!(r.landing_rate_fpm, -r.vs_fpm_sim.abs().round(), "{r:?}");
                 }
-                FlightEvent::FlightStarted { .. } => started += 1,
-                FlightEvent::FlightEnded { .. } => ended += 1,
+                FlightEvent::FlightStarted { timestamp_ms } => started.push(timestamp_ms),
+                FlightEvent::FlightEnded { interrupted, .. } => ended.push(interrupted),
             }
         }
     }
-    assert_eq!(phases, vec![Preflight, TaxiOut, Takeoff, Climb, Cruise, Descent, Approach, Final, Landing, TaxiIn, Shutdown]);
-    assert_eq!((started, ended, touchdowns), (1, 1, 1));
-    let outcomes: Vec<_> = session.take_touchdown_outcomes().into_iter().map(|o| (o.index, o.outcome)).collect();
+    // straight into the air phase the first sample shows, no take-off; then the next loop
+    assert_eq!(phases, vec![Preflight, Cruise, Descent, Approach, Final, Landing, TaxiIn, Shutdown, Cruise]);
+    assert_eq!((started.len(), ended.as_slice(), touchdowns), (2, [false].as_slice(), 1));
     assert_eq!(outcomes, vec![(0, vectasim_core::touchdown::TouchdownOutcome::FullStop)]);
-    let s = session.summary();
+    let s = first.unwrap();
     assert_eq!(s.state, FlightState::Completed);
     assert_eq!(s.landing_rate_fpm, Some(s.touchdowns[0].landing_rate_fpm));
     assert_eq!(s.landing_ms, Some(s.touchdowns[0].timestamp_ms), "the full stop's first contact");
-    assert!(s.block_time_ms().unwrap() > s.flight_time_ms().unwrap());
+    // recorded from the first sample: block time from there, no lift-off seen (no flight time)
+    assert_eq!(s.off_block_ms, Some(started[0]));
+    assert_eq!(s.off_block_ms, Some(1_000_050));
+    assert_eq!(s.takeoff_ms, None);
+    assert_eq!(s.flight_time_ms(), None);
+    let block = s.block_time_ms().unwrap();
+    assert!((250_000..=300_000).contains(&block), "block {block} ms");
+    assert!(s.departure.is_some() && s.arrival.is_some());
     assert!(s.distance_nm > 5.0, "distance {}", s.distance_nm);
     assert!(s.max_altitude_msl_ft > 2_700.0, "max alt {}", s.max_altitude_msl_ft);
     assert!(s.fuel_used_kg().unwrap() > 0.0);
-    assert!(!s.integrity.slew_detected && !s.integrity.time_acceleration_detected);
+    assert!(!s.integrity.slew_detected && !s.integrity.time_acceleration_detected && !s.integrity.teleport_detected);
+    // the next loop: a new flight, started in the air again, nothing carried over
+    let n = session.summary();
+    assert_eq!((n.state, n.phase, n.takeoff_ms), (FlightState::Active, Cruise, None));
+    assert!(n.touchdowns.is_empty() && !n.integrity.teleport_detected);
 }
 
 #[test]

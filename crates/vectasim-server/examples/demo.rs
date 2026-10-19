@@ -99,6 +99,8 @@ impl Source for Demo {
                 fuel: Fuel { start_kg: Some(9100.0), current_kg: Some(4200.0), used_kg: Some(4900.0), planned_ramp_kg: Some(9100.0), planned_landing_kg: Some(4000.0) },
                 landing_rate_fpm: landed.then_some(-142.0),
                 touchdowns: u32::from(landed),
+                max_g: Some(1.21),
+                min_g: Some(0.86),
             }),
             telemetry: Some(Telemetry {
                 timestamp_ms: now,

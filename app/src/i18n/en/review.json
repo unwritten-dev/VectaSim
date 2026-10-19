@@ -169,6 +169,15 @@
       "clean": { "one": "{count} flight without any asterisk", "other": "{count} flights without any asterisk" },
       "note": "An asterisk is no blemish – it only shows where pause, time acceleration, slew or a jump played a part."
     },
+    "lightbox": {
+      "open": "Open “{card}” large",
+      "openHint": "Click to view the card large",
+      "close": "Close",
+      "prev": "Previous card",
+      "next": "Next card",
+      "position": "{n} of {total}",
+      "hint": "← → to browse · Esc closes"
+    },
     "footer": "Year in review",
     "export": {
       "pngFilter": "PNG image",

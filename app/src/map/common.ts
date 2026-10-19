@@ -5,6 +5,8 @@ import type { Airport, NavFix, TrackSample } from "../types";
 import { DIAGRAM_FROM_ZOOM } from "./airportDiagram";
 import { AIRPORT_DOT, COLOR, TRACK_RAMP } from "../theme";
 import { loadAircraftIcons } from "./aircraftIcons";
+import { curtainGeoJson, withGroundHeights } from "./trackChunks";
+import { CurtainLayer } from "./curtainLayer";
 import { lerpHeading, lowerBoundT, sampleAt, trackBearingAt } from "../landing/replayStore";
 
 /** OpenFreeMap: free vector tiles, no API key. OSM attribution is mandatory and left enabled. */
@@ -15,11 +17,20 @@ export { applyProjection, loadGlobe, projectionFor, saveGlobe, useGlobe, withPro
 export interface TrackPoint {
   lon: number;
   lat: number;
+  /** Altitude MSL: colours the track. */
   altFt: number;
+  /**
+   * Height above the map's ground for the 3D view (the map has no terrain, its ground is 0 m):
+   * 0 on the ground, see trackChunks.withGroundHeights. Absent = altFt.
+   */
+  hFt?: number;
+  /** Height above ground from the sim and its on-ground flag (input of withGroundHeights). */
+  aglFt?: number;
+  onGround?: boolean;
 }
 
 export function samplesToPoints(samples: TrackSample[]): TrackPoint[] {
-  return samples.map((s) => ({ lon: s.longitude, lat: s.latitude, altFt: s.altitudeMslFt }));
+  return samples.map((s) => ({ lon: s.longitude, lat: s.latitude, altFt: s.altitudeMslFt, aglFt: s.altitudeAglFt, onGround: s.onGround }));
 }
 
 /**
@@ -87,13 +98,66 @@ export function addTrackLayers(map: maplibregl.Map, sourceIds: string | string[]
 /** Default camera pitch of the 3D view (degrees). */
 export const PITCH_3D = 58;
 
+interface CurtainEntry {
+  id: string;
+  layer: CurtainLayer;
+  /** The shaders failed: the extrusion pair `${id}-fallback-*` draws instead. */
+  fallback: boolean;
+  visible: boolean;
+  timer?: number;
+  latest?: { points: readonly TrackPoint[]; head: TrackPoint | null };
+}
+/** Curtain layers per map and id. */
+const curtains = new WeakMap<maplibregl.Map, Map<string, CurtainEntry>>();
+
 /**
- * 3D track: a translucent wall from the ground to the flown altitude and a solid ribbon at
- * the top (two fill-extrusion layers over one polygon source, geometry from
- * trackChunks.curtainGeoJson). Hidden until the 3D view is switched on. Inserted below the
- * first symbol layer when `before` is given, so airport and place labels stay readable.
+ * 3D track: a translucent wall from the ground to the flown height with a band in altitude
+ * colour along its top edge – one WebGL custom layer (map/curtainLayer.ts), smooth and
+ * stepless. Hidden until the 3D view is switched on; fed with drawCurtainTrack. Inserted
+ * below the first symbol layer when `before` is given, so airport and place labels stay
+ * readable. Should the shaders not compile, the old fill-extrusion pair takes over.
  */
-export function addCurtainLayers(map: maplibregl.Map, sourceId: string, before?: string) {
+export function addCurtainLayers(map: maplibregl.Map, id: string, before?: string) {
+  const layer = new CurtainLayer(id, TRACK_RAMP);
+  let byId = curtains.get(map);
+  if (!byId) curtains.set(map, (byId = new Map()));
+  const entry: CurtainEntry = { id, layer, fallback: false, visible: false };
+  byId.set(id, entry);
+  layer.onFail = () =>
+    // not inside the render call: add the extrusion pair on the next frame
+    requestAnimationFrame(() => {
+      if (curtains.get(map)?.get(id) !== entry || map.getSource(`${id}-fallback`)) return;
+      const below = before && map.getLayer(before) ? before : undefined;
+      addExtrudedCurtain(map, `${id}-fallback`, below);
+      entry.fallback = true;
+      setCurtainVisible(map, id, entry.visible);
+      feedFallback(map, entry);
+    });
+  map.addLayer(layer, before);
+}
+
+/** The track (and the aircraft's position now as its head: null clears, undefined keeps it) for the curtain `id`. */
+export function drawCurtainTrack(map: maplibregl.Map, id: string, points: readonly TrackPoint[], head?: TrackPoint | null) {
+  const entry = curtains.get(map)?.get(id);
+  if (!entry) return;
+  entry.layer.sync(points, head);
+  entry.latest = { points, head: head === undefined ? (entry.latest?.head ?? null) : head };
+  // the extrusion has no incremental path: at most one rebuild per second
+  if (entry.fallback)
+    entry.timer ??= window.setTimeout(() => {
+      entry.timer = undefined;
+      feedFallback(map, entry);
+    }, 1000);
+}
+
+function feedFallback(map: maplibregl.Map, entry: CurtainEntry) {
+  const l = entry.latest;
+  const pts = l ? (l.head ? [...l.points, l.head] : [...l.points]) : [];
+  (map.getSource(`${entry.id}-fallback`) as maplibregl.GeoJSONSource | undefined)?.setData(curtainGeoJson(pts));
+}
+
+/** Fallback curtain (no WebGL custom layer): two fill-extrusion layers over trackChunks.curtainGeoJson. */
+function addExtrudedCurtain(map: maplibregl.Map, sourceId: string, before?: string) {
   map.addSource(sourceId, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   map.addLayer(
     {
@@ -134,13 +198,20 @@ export function firstSymbolLayer(map: maplibregl.Map): string | undefined {
   return map.getStyle().layers?.find((l) => l.type === "symbol")?.id;
 }
 
-export function setCurtainVisible(map: maplibregl.Map, sourceId: string, on: boolean) {
-  for (const l of [`${sourceId}-wall`, `${sourceId}-ribbon`]) if (map.getLayer(l)) map.setLayoutProperty(l, "visibility", on ? "visible" : "none");
+export function setCurtainVisible(map: maplibregl.Map, id: string, on: boolean) {
+  const entry = curtains.get(map)?.get(id);
+  if (!entry) return;
+  entry.visible = on;
+  entry.layer.setEnabled(on);
+  for (const l of [`${id}-fallback-wall`, `${id}-fallback-ribbon`]) if (map.getLayer(l)) map.setLayoutProperty(l, "visibility", on ? "visible" : "none");
 }
 
-/** Tilt the camera for the 3D view or lay it flat again (bearing kept). */
+/**
+ * Tilt the camera for the 3D view or lay it flat again (bearing kept); flat, the camera looks
+ * at the ground again (the live map's 3D follow raises its centre to the aircraft's height).
+ */
 export function setPitched(map: maplibregl.Map, on: boolean, duration = 500) {
-  map.easeTo({ pitch: on ? PITCH_3D : 0, duration });
+  map.easeTo({ pitch: on ? PITCH_3D : 0, duration, ...(on ? {} : { elevation: 0 }) });
 }
 
 /** Kept for callers that only need "some plane": loads the whole categorised set. */
@@ -256,7 +327,20 @@ export function routeGeoJson(fixes: NavFix[]): GeoJSON.FeatureCollection {
  * between the samples; heading circularly, from the positions when the samples carry none
  * (headingTrueDeg 0 on both sides, e.g. the debrief's rebuilt samples). Null outside the track.
  */
-export function trackPoseAt(samples: TrackSample[], tMs: number | null): { lon: number; lat: number; headingDeg: number | null } | null {
+export interface TrackPose {
+  lon: number;
+  lat: number;
+  headingDeg: number | null;
+  /** Altitude (ft MSL), pitch and bank of the interpolated sample (3D cursor). */
+  altFt: number;
+  /** Height above ground (sim AGL) and on-ground flag of the nearer sample. */
+  aglFt: number;
+  onGround: boolean;
+  pitchDeg: number;
+  bankDeg: number;
+}
+
+export function trackPoseAt(samples: TrackSample[], tMs: number | null): TrackPose | null {
   const s = sampleAt(samples, tMs);
   if (!s || tMs == null) return null;
   const i = Math.min(samples.length - 1, Math.max(1, lowerBoundT(samples, tMs)));
@@ -268,5 +352,30 @@ export function trackPoseAt(samples: TrackSample[], tMs: number | null): { lon: 
     const span = b.tMs - a.tMs;
     headingDeg = lerpHeading(a.headingTrueDeg, b.headingTrueDeg, span > 0 ? Math.min(1, Math.max(0, (tMs - a.tMs) / span)) : 0);
   }
-  return { lon: s.longitude, lat: s.latitude, headingDeg };
+  return { lon: s.longitude, lat: s.latitude, headingDeg, altFt: s.altitudeMslFt, aglFt: s.altitudeAglFt, onGround: !!s.onGround, pitchDeg: s.pitchDeg ?? 0, bankDeg: s.bankDeg ?? 0 };
+}
+
+const heightCache = new WeakMap<readonly TrackSample[], number[]>();
+
+/** 3D heights above the map's ground of a recorded track (trackChunks.withGroundHeights), cached per array. */
+export function trackHeightsFt(samples: readonly TrackSample[]): number[] {
+  let h = heightCache.get(samples);
+  if (!h) {
+    h = withGroundHeights(samplesToPoints(samples as TrackSample[])).map((p) => p.hFt ?? p.altFt);
+    heightCache.set(samples, h);
+  }
+  return h;
+}
+
+/** 3D height at `tMs` (replay cursor), interpolated between the samples; null outside the track. */
+export function trackHeightAt(samples: readonly TrackSample[], tMs: number | null): number | null {
+  if (tMs == null || !samples.length || tMs < samples[0].tMs || tMs > samples[samples.length - 1].tMs) return null;
+  const h = trackHeightsFt(samples);
+  const i = lowerBoundT(samples as TrackSample[], tMs);
+  if (i <= 0) return h[0];
+  const a = samples[i - 1];
+  const b = samples[i];
+  const span = b.tMs - a.tMs;
+  const f = span > 0 ? Math.min(1, Math.max(0, (tMs - a.tMs) / span)) : 1;
+  return h[i - 1] + (h[i] - h[i - 1]) * f;
 }

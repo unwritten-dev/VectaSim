@@ -5,7 +5,7 @@
       "followTitle": "Karte folgt dem Flugzeug",
       "center": "Auf Flugzeug zentrieren",
       "flatten": "Karte wieder flach legen",
-      "tilt": "Karte neigen und das Höhenprofil des Tracks zeigen – drehen und neigen auch mit rechter Maustaste oder Strg + Ziehen",
+      "tilt": "Karte neigen und das Höhenprofil des Tracks zeigen – Online-Verkehr erscheint ab Zoom 8 als 3D-Modell; drehen und neigen auch mit rechter Maustaste oder Strg + Ziehen",
       "globe": "Globus",
       "globeOff": "Weltansicht flach (Mercator) statt als Globus – gilt für alle Karten",
       "globeOn": "Weltansicht als Globus – beim Hineinzoomen geht er von selbst in die flache Karte über; gilt für alle Karten",
@@ -13,8 +13,37 @@
       "layers": "Kartenebenen",
       "atcTitle": "Lotsen an Flughäfen",
       "atcNeedsTraffic": "Erst „Verkehr“ einschalten",
-      "weather": "Wetter",
-      "weatherTitle": "METAR-Kategorie ab Zoom {zoom}"
+      "weather": "Wetter"
+    },
+    "mapStyle": {
+      "satellite": "Satellit",
+      "onTitle": "Satellitenbild als Kartengrund (Sentinel-2, wolkenfrei) – Orte, Grenzen und unsere Ebenen bleiben darüber; gilt für Karte und Track-Karte",
+      "offTitle": "Zurück zur gezeichneten Karte – gilt für Karte und Track-Karte"
+    },
+    "weather": {
+      "groupLabel": "Wetter auf der Karte",
+      "onTitle": "Wetter einblenden: METAR-Kategorie ab Zoom {zoom}, auf Wunsch Regenradar und Wolken – echtes Wetter, kann vom Sim-Wetter abweichen",
+      "offTitle": "Wetter ausblenden (METAR, Radar, Wolken) – Radar und Wolken werden dann nicht mehr abgerufen",
+      "menu": "Wetter-Ebenen",
+      "menuTitle": "Wetter-Ebenen wählen: METAR-Ringe, Regenradar, Wolken",
+      "metar": "METAR-Ringe",
+      "metarTitle": "Flugkategorie (VFR/MVFR/IFR/LIFR) als Ring an den Flughäfen, ab Zoom {zoom}",
+      "radar": "Radar",
+      "radarTitle": "Niederschlagsradar von RainViewer, alle 10 Minuten neu – echtes Wetter, kann vom Sim-Wetter abweichen",
+      "clouds": "Wolken",
+      "cloudsTitle": "Wolken aus dem Infrarot-Satellitenbild (EUMETSAT, stündlich) – je heller, desto höher und kälter; echtes Wetter, kann vom Sim-Wetter abweichen",
+      "note": "Echtes Wetter – kann vom Wetter im Simulator abweichen.",
+      "loading": "lädt …",
+      "failed": "nicht aktualisiert",
+      "legend": {
+        "aria": "METAR-Farben: Flugkategorie am Flughafen",
+        "fromZoom": "ab Zoom {zoom}",
+        "vfr": "VFR: Wolkenuntergrenze über 3000 ft und Sicht über 5 SM (rund 8 km)",
+        "mvfr": "MVFR: Untergrenze 1000–3000 ft oder Sicht 3–5 SM (rund 5–8 km)",
+        "ifr": "IFR: Untergrenze 500–999 ft oder Sicht 1 bis unter 3 SM (rund 1,6–5 km)",
+        "lifr": "LIFR: Untergrenze unter 500 ft oder Sicht unter 1 SM (rund 1,6 km)",
+        "unknown": "?: Das METAR nennt weder Wolkenuntergrenze noch Sicht"
+      }
     },
     "traffic": {
       "toggle": "Verkehr",

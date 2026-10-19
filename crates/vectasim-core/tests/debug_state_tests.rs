@@ -13,7 +13,8 @@ fn debug_state_follows_the_mock_flight() {
     let mut saw_candidate = false;
     let mut saw_airborne_qualified = false;
     let mut saw_settling = false;
-    for i in 1..=(MockFlight::loop_seconds() as u64 * 10) {
+    // one loop, up to just before the next one starts in the air
+    for i in 1..(MockFlight::loop_seconds() as u64 * 10) {
         let t_s = i as f64 / 10.0;
         session.update(&flight.sample(t_s, 1_700_000_000_000 + i * 100));
         let d = session.debug_state();

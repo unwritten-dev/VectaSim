@@ -32,6 +32,7 @@ UI labels are given as they appear in the English UI (*Settings → Display → 
 - [ ] Static data: note title, ATC model (token?), ATC type, registration, airline, flight number.
 - [ ] Note the **data rate** (expected 30–60 Hz) and the sim FPS at the same time.
 - [ ] Parking brake on/off, lights, engine on/off: do the values change?
+- [ ] **Pitch and bank sign (MSFS):** in the climb after take-off and in a right turn, read *Live raw data* and watch the 3D map (3D on): the yellow model must pitch **nose up** in the climb and bank **right wing down** in a right turn. VectaSim assumes pitch nose-up positive and bank right-down positive; SimConnect documents `PLANE PITCH DEGREES` as nose-down positive – if the model pitches down in the climb, note it (one sign in the decoder fixes app-wide pitch values).
 
 ## Step 3 – GA circuit with touch-and-go (30 min) → dump “ga-pattern”
 
@@ -39,6 +40,7 @@ UI labels are given as they appear in the English UI (*Settings → Display → 
 - [ ] Circuit at ~1000 ft AGL, **touch-and-go**: landing report with touch-and-go, phase *Landing* → *Climb*.
 - [ ] Second circuit: **pause (P) in the middle of the base leg** for 60 s → resume. Is the phase stable? Pause count/duration in the flight? Do frames keep arriving during the pause (watch the counter)? Also test **Active Pause** once and the **ESC menu** once, and note which events arrive.
 - [ ] Full-stop landing. Compare the app’s landing rate with a second tool (Landing Inspector, FLARE, Volanta) and with the sim’s raw value; note sign and magnitude.
+- [ ] **In-sim landing line** (*Settings → Simulator → Show the landing rate in the simulator*, on by default): a few seconds after touchdown, once the rollout is slow, does MSFS show “VectaSim · Landed … fpm …” at the top of the screen, in which colour and for how long? Note MSFS 2020 and 2024 separately (also in VR if available). Also check after the touch-and-go above. If nothing appears: search the log for `SimConnect_Text` (rejected or missing export) and note it – the recording must be unaffected.
 - [ ] Vacate, park, engine off → *Taxi in* → *Shutdown* → flight in the logbook, distance plausible. Open the debrief and the approach section.
 
 ## Step 4 – Airliner ILS (45–60 min; first a default airliner, then an add-on) → dump “airliner-ils”

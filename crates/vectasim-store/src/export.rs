@@ -14,6 +14,8 @@
 //!   Earth replays it in 3-D with time), plus placemarks for departure,
 //!   arrival and every touchdown; TAS and wind as `gx:SimpleArrayData` when recorded.
 //! - JSON: the full `FlightDetail` plus the decoded track.
+//! - Logbook CSV: one row per flight; the g-load over the flight (schema v16) are the last
+//!   nine columns (`g_max` … `g_source`), empty when not measured.
 
 use crate::store::{FlightDetail, FlightRow, Store};
 use crate::track::TrackSample;
@@ -116,7 +118,8 @@ const LOGBOOK_CSV_HEADER: &str = "id,state,date_utc,off_block_utc,on_block_utc,d
 registration,block_time,air_time,distance_nm,max_alt_ft,landing_vs_fpm,landings,fuel_start_kg,fuel_end_kg,\
 fuel_used_kg,planned_dep,planned_arr,planned_block_time,planned_fuel_ramp_kg,planned_fuel_landing_kg,paused_s,\
 pause_count,slew,time_acceleration,max_sim_rate,crashed,fuel_increased_airborne,teleport,provider,sim,\
-sched_out,sched_in,delay_out_min,delay_in_min,planned_block_s,planned_trip_kg,notes,tags,rating";
+sched_out,sched_in,delay_out_min,delay_in_min,planned_block_s,planned_trip_kg,notes,tags,rating,\
+g_max,g_max_phase,g_max_alt_ft,g_min,g_min_phase,g_min_alt_ft,g_high_count,g_low_count,g_source";
 
 /// Plan values the logbook CSV reads from a flight's stored OFP (`ofp_json`, our camelCase
 /// serialisation of `vectasim_simbrief::Ofp`): schedule and trip fuel for the Δ columns.
@@ -185,7 +188,10 @@ pub fn export_logbook_csv_with_plans(flights: &[FlightRow], plan_of: impl Fn(&Fl
         });
         let i = &f.integrity;
         let plan = plan_of(f).unwrap_or_default();
-        let cells: [String; 44] = [
+        let g = f.g_load.as_ref();
+        let (g_max, g_min) = (g.and_then(|g| g.max), g.and_then(|g| g.min));
+        let phase = |p: Option<vectasim_core::GLoadPoint>| p.map(|p| crate::store::phase_str(p.phase)).unwrap_or_default();
+        let cells: [String; 53] = [
             text(&f.id),
             text(&f.state),
             iso_utc(start)[..10].to_owned(),
@@ -230,6 +236,15 @@ pub fn export_logbook_csv_with_plans(flights: &[FlightRow], plan_of: impl Fn(&Fl
             text(f.notes.as_deref().unwrap_or_default()),
             text(&f.tags.join("; ")),
             f.rating.map(|r| r.to_string()).unwrap_or_default(),
+            num(g_max.map(|p| p.g), 2),
+            phase(g_max),
+            num(g_max.map(|p| p.altitude_msl_ft), 0),
+            num(g_min.map(|p| p.g), 2),
+            phase(g_min),
+            num(g_min.map(|p| p.altitude_msl_ft), 0),
+            g.map(|g| g.high_count.to_string()).unwrap_or_default(),
+            g.map(|g| g.low_count.to_string()).unwrap_or_default(),
+            g.map(|g| g.source.as_str().to_owned()).unwrap_or_default(),
         ];
         for (n, c) in cells.iter().enumerate() {
             if n > 0 {
@@ -640,7 +655,7 @@ mod tests {
         let lines: Vec<&str> = csv.lines().collect();
         assert_eq!(lines.len(), 3);
         let header_cols = lines[0].split(',').count();
-        assert_eq!(header_cols, 44);
+        assert_eq!(header_cols, 53);
         assert!(lines[1].contains("\"A320 <Neo> & \"\"Friends\"\", Livery\""));
         assert!(lines[1].starts_with("f1,completed,2026-10-16,2026-10-16T08:00:00Z,"));
         // block 59 s → rounds to 0:01, fuel used 800
@@ -686,7 +701,8 @@ mod tests {
         let csv = export_logbook_csv(&[f]);
         let row = csv.split("\r\n").nth(1).unwrap();
         assert!(row.starts_with("f1,completed,2026-10-16,2026-10-16T08:00:00Z,2026-10-16T08:00:59Z,EDDM,EGLL,DLH9X,A321neo,,D-AIEA,"), "{row}");
-        assert!(row.ends_with(",\"Gute Landung,\n=SUM(1)\",vatsim; Event,4"), "{row}");
+        // the nine g-load columns (v16) follow, empty while not measured
+        assert!(row.ends_with(",\"Gute Landung,\n=SUM(1)\",vatsim; Event,4,,,,,,,,,"), "{row}");
     }
 
     #[test]

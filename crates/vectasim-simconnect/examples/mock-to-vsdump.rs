@@ -14,7 +14,7 @@ use vectasim_simconnect::mockdump::{MockDumpSpec, mock_lines, write_dump};
 fn main() {
     let mut args = std::env::args().skip(1);
     let Some(out) = args.next().map(PathBuf::from) else {
-        eprintln!("usage: mock-to-vsdump <out.vsdump> [--variant standard|bounce|goaround|teleport|reconnect] [--from s] [--to s] [--hz n]");
+        eprintln!("usage: mock-to-vsdump <out.vsdump> [--variant standard|circuit|bounce|goaround|teleport|reconnect] [--from s] [--to s] [--hz n]");
         std::process::exit(2);
     };
     let mut spec = MockDumpSpec::final_and_landing();

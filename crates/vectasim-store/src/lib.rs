@@ -40,6 +40,7 @@ pub use export::ExportFormat;
 pub use merge::{MergeCandidate, MergeReport, ResumeCandidate};
 pub use recorder::{FlightRecorder, LiveTrack, PlannedSlot, RecorderContext};
 pub use store::{
+    g_load_from_track,
     APPROACH_FACTS_VERSION, ApproachFactDetail, ApproachFactRow, DeletedFlight, FlightCounts, FlightDetail, FlightRow, FlightUserEdit, MetarSlot, PhaseEventRow, PlannedFlight,
     NOTES_MAX_CHARS, RecentApproaches, RunwayRefinement, SCHEMA_VERSION, Store, TAG_MAX_CHARS, TAGS_MAX, TRASH_RETENTION_DAYS, TagCount, Totals, UserRunway, UserRunwayEdit, UserRunwaySource, normalize_tags,
 };

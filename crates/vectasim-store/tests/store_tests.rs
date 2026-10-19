@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use vectasim_core::flight::{GeoPoint, haversine_nm};
-use vectasim_core::{FlightSession, LandingRateSource, MockFlight};
+use vectasim_core::{FlightSession, LandingRateSource, MockFlight, MockVariant};
 use vectasim_store::{
     AirportResolver, FlightRecorder, MetarSlot, RecorderContext, SCHEMA_VERSION, Store, StoreError, TrackSample, decode_track, encode_track,
 };
@@ -40,7 +40,7 @@ fn sample(i: u64) -> TrackSample {
 #[test]
 fn v2_track_of_the_mock_flight_stays_small() {
     // a whole mock circuit at the recorder's 1 Hz, with every approach value of track v2
-    let mut f = vectasim_core::MockFlight::new();
+    let mut f = vectasim_core::MockFlight::with_variant(vectasim_core::MockVariant::Circuit);
     let samples: Vec<TrackSample> =
         (0..600).map(|i| TrackSample::from(&f.sample(i as f64, 1_700_000_000_000 + i * 1000))).collect();
     assert!(samples.iter().all(|s| s.tas_kt.is_some() && s.wind_kt.is_some() && s.nav_flags.is_some()));
@@ -100,14 +100,14 @@ fn track_roundtrip_is_exact_within_quantisation() {
 
 /// Drive one mock loop (plus a bit, so the shutdown dwell elapses) through session + recorder.
 fn record_mock_flight(store: &Store, hz: f64) -> FlightSession {
-    let mut flight = MockFlight::new();
+    let mut flight = MockFlight::with_variant(MockVariant::Circuit);
     let mut session = FlightSession::new();
     let mut rec = FlightRecorder::new(
         store.clone(),
         RecorderContext { provider: "mock".into(), sim_name: Some("VectaSim Mock".into()), aircraft: Some(MockFlight::aircraft()) },
     )
     .with_resolver(Arc::new(FakeResolver));
-    let steps = ((MockFlight::loop_seconds() + 10.0) * hz) as u64;
+    let steps = ((MockVariant::Circuit.loop_seconds() + 10.0) * hz) as u64;
     for i in 1..=steps {
         let t_s = i as f64 / hz;
         let t = flight.sample(t_s, 1_700_000_000_000 + (t_s * 1000.0) as u64);
@@ -166,13 +166,66 @@ fn mock_flight_is_recorded_completely() {
     assert!(store.get_track(&f.id).unwrap().is_none(), "cascade delete");
 }
 
+/// The demo flight (standard variant) starts in the air on the downwind of EDDF 25C; each
+/// loop after the first begins with `FlightLoaded`, like a sim loading a new flight.
+#[test]
+fn demo_flight_is_recorded_from_its_start_in_the_air() {
+    use vectasim_core::ProviderEvent;
+    let store = Store::open_in_memory().unwrap();
+    let mut flight = MockFlight::new();
+    let mut session = FlightSession::new();
+    let mut rec = FlightRecorder::new(
+        store.clone(),
+        RecorderContext { provider: "mock".into(), sim_name: Some("VectaSim Mock".into()), aircraft: Some(MockFlight::aircraft()) },
+    )
+    .with_resolver(Arc::new(FakeResolver));
+    let hz = 10.0;
+    for i in 1..=((2.0 * MockFlight::loop_seconds() - 1.0) * hz) as u64 {
+        let t_s = i as f64 / hz;
+        let now = 1_700_000_000_000 + (t_s * 1000.0) as u64;
+        for pe in flight.step(t_s, now) {
+            match pe {
+                ProviderEvent::Telemetry(t) => {
+                    let events = session.update(&t);
+                    rec.on_telemetry(&t, session.summary(), &events).unwrap();
+                }
+                ProviderEvent::Sim(e) => {
+                    let events = session.on_sim_event(&e);
+                    rec.on_events(session.summary(), &events, now).unwrap();
+                }
+                _ => {}
+            }
+        }
+    }
+    let flights = store.list_flights(10, 0).unwrap();
+    assert_eq!(flights.len(), 2, "one flight per loop");
+    for f in &flights {
+        assert_eq!((f.state.as_str(), f.landing_count), ("completed", 1));
+        assert!(!f.integrity.teleport_detected, "a new flight, not a jump in the old one");
+        // recorded from the first sample: block time from there, no take-off seen
+        assert!(f.off_block_ms.is_some() && f.landing_ms.is_some() && f.on_block_ms.is_some());
+        assert_eq!(f.takeoff_ms, None);
+        let block = f.on_block_ms.unwrap() - f.off_block_ms.unwrap();
+        assert!((250_000..=300_000).contains(&block), "block {block} ms");
+        // the downwind is > 3 nm from the airport: no departure airport, the arrival is EDDF
+        assert_eq!(f.dep_icao, None);
+        assert_eq!(f.arr_icao.as_deref(), Some("EDDF"));
+        let rate = f.landing_vs_fpm.unwrap();
+        assert!((-245.0..=-215.0).contains(&rate), "the demo landing: {rate}");
+        let detail = store.get_flight(&f.id).unwrap().unwrap();
+        assert_eq!(detail.phases.first().unwrap().to, vectasim_core::FlightPhase::Cruise, "{:?}", detail.phases);
+        assert_eq!(detail.phases.last().unwrap().to, vectasim_core::FlightPhase::Shutdown);
+        assert_eq!(detail.touchdowns.len(), 1);
+    }
+}
+
 #[test]
 fn interrupted_flight_is_marked_on_reopen() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("vectasim.db");
     {
         let store = Store::open(&path).unwrap();
-        let mut flight = MockFlight::new();
+        let mut flight = MockFlight::with_variant(MockVariant::Circuit);
         let mut session = FlightSession::new();
         let mut rec = FlightRecorder::new(store.clone(), RecorderContext { provider: "mock".into(), ..Default::default() });
         // 150 s: airborne, well before landing; several 15 s flushes have happened
@@ -278,7 +331,7 @@ fn settings_and_plan_attachment() {
     };
     let planned = vectasim_store::PlannedSlot::default();
     *planned.lock().unwrap() = Some(plan.clone());
-    let mut flight = MockFlight::new();
+    let mut flight = MockFlight::with_variant(MockVariant::Circuit);
     let mut session = FlightSession::new();
     let mut rec = FlightRecorder::new(store.clone(), RecorderContext { provider: "mock".into(), ..Default::default() })
         .with_planned(planned);

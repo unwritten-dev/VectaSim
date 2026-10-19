@@ -44,7 +44,7 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use vectasim_core::diag::{RawDiag, SharedRawDiag};
 use vectasim_core::flight::TouchdownOutcomeEvent;
 use vectasim_core::touchdown::TouchdownOutcome;
@@ -154,6 +154,8 @@ pub(crate) trait Outbox: Send + 'static {
     fn capture_metar(&self, store: &Store, flight_id: &str, slot: MetarSlot, lat: f64, lon: f64, at_ms: u64);
     /// Windows notification (landing, flight saved, connection); the app decides whether it shows.
     fn notify(&self, _kind: crate::notify::Kind, _title: &str, _body: &str) {}
+    /// Landing line inside the simulator (SimConnect only, see `simtext.rs`).
+    fn landing_in_sim(&self, _store: &Store, _flight_id: Option<String>, _index: usize, _touch_and_go: bool) {}
 }
 
 impl Outbox for AppHandle {
@@ -174,6 +176,23 @@ impl Outbox for AppHandle {
         let (app, title, body) = (self.clone(), title.to_owned(), body.to_owned());
         let _ = std::thread::Builder::new().name("notify".into()).spawn(move || {
             crate::notify::send(&app, kind, &title, &body);
+        });
+    }
+
+    fn landing_in_sim(&self, store: &Store, flight_id: Option<String>, index: usize, touch_and_go: bool) {
+        if !crate::simtext::enabled(store) {
+            return;
+        }
+        // runway match needs the airport index and the stored touchdowns: off the forwarder thread
+        let (app, store) = (self.clone(), store.clone());
+        let _ = std::thread::Builder::new().name("sim-text".into()).spawn(move || {
+            let Some(detail) = flight_id.and_then(|id| store.get_flight(&id).ok().flatten()) else { return };
+            let Some(td) = detail.touchdowns.get(index) else { return };
+            let fact = app
+                .try_state::<Arc<vectasim_data::AirportIndex>>()
+                .map(|a| crate::landing::compute_fact(&store, &a, &detail.flight, &detail.touchdowns, index));
+            let line = crate::simtext::landing_line(crate::lang::current(), td.landing_rate_fpm, td.peak_g, td.bounces, touch_and_go, fact.as_ref());
+            vectasim_simconnect::text::show_text(&line, crate::simtext::SECONDS);
         });
     }
 }
@@ -435,6 +454,7 @@ impl ProviderManager {
             emit(&out, "sim:status", &*s);
         }
         let resume_allowed = !NO_RESUME_PROVIDERS.contains(&provider_name.as_str());
+        let provider_name_is_simconnect = provider_name == "simconnect";
         let recorder = FlightRecorder::new(store.clone(), RecorderContext { provider: provider_name, ..Default::default() })
             .with_live_track(live)
             .with_resolver(resolver)
@@ -450,7 +470,8 @@ impl ProviderManager {
         )
         .with_diag(self.diag.clone())
         .with_ui_visible(self.ui_visible.clone())
-        .with_resume(resume_allowed);
+        .with_resume(resume_allowed)
+        .with_sim_text(provider_name_is_simconnect);
         let (control, control_rx) = mpsc::channel();
         let forwarder = std::thread::Builder::new()
             .name("provider-forwarder".into())
@@ -490,6 +511,8 @@ struct Forwarder<O: Outbox> {
     resume_offer: Option<(String, Instant)>,
     /// Flights offered in this session (each once).
     resume_offered: HashSet<String>,
+    /// Landing lines go into the sim (SimConnect provider only).
+    sim_text: bool,
 }
 
 impl<O: Outbox> Forwarder<O> {
@@ -525,11 +548,17 @@ impl<O: Outbox> Forwarder<O> {
             resume_check: false,
             resume_offer: None,
             resume_offered: HashSet::new(),
+            sim_text: false,
         }
     }
 
     fn with_resume(mut self, allowed: bool) -> Self {
         self.resume_allowed = allowed;
+        self
+    }
+
+    fn with_sim_text(mut self, on: bool) -> Self {
+        self.sim_text = on;
         self
     }
 
@@ -870,6 +899,9 @@ impl<O: Outbox> Forwarder<O> {
         let Some(td) = self.session.summary().touchdowns.get(o.index) else { return };
         let (title, body) = crate::notify::landing_text(crate::lang::current(), td.landing_rate_fpm, td.peak_g, td.bounces, touch_and_go);
         self.out.notify(crate::notify::Kind::Landing, &title, &body);
+        if self.sim_text {
+            self.out.landing_in_sim(&self.store, self.recorder.current_flight_id().map(str::to_owned), o.index, touch_and_go);
+        }
     }
 
     /// Notification for a saved (completed) flight (the landing one: [`Self::notify_outcome`]).
@@ -967,11 +999,15 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
     use vectasim_core::{MockFlight, MockVariant, sleep_interruptible};
 
+    /// `landing_in_sim` arguments: flight id, touchdown index, touch-and-go.
+    type InSimCall = (Option<String>, usize, bool);
+
     #[derive(Clone, Default)]
     struct FakeOutbox {
         emitted: Arc<Mutex<Vec<(String, serde_json::Value)>>>,
         closed: Arc<Mutex<Vec<String>>>,
         notified: Arc<Mutex<Vec<(crate::notify::Kind, String)>>>,
+        in_sim: Arc<Mutex<Vec<InSimCall>>>,
     }
 
     impl Outbox for FakeOutbox {
@@ -984,6 +1020,9 @@ mod tests {
         fn capture_metar(&self, _: &Store, _: &str, _: MetarSlot, _: f64, _: f64, _: u64) {}
         fn notify(&self, kind: crate::notify::Kind, title: &str, _body: &str) {
             lock(&self.notified).push((kind, title.to_owned()));
+        }
+        fn landing_in_sim(&self, _store: &Store, flight_id: Option<String>, index: usize, touch_and_go: bool) {
+            lock(&self.in_sim).push((flight_id, index, touch_and_go));
         }
     }
 
@@ -1111,6 +1150,27 @@ mod tests {
             lock(&out.notified).iter().filter(|(k, _)| *k == crate::notify::Kind::Landing).map(|(_, t)| t.clone()).collect();
         assert_eq!(landings.len(), 1, "{landings:?}");
         assert!(landings[0].starts_with("Gelandet · −"), "{landings:?}");
+        // not the SimConnect provider: no line for the sim
+        assert!(lock(&out.in_sim).is_empty());
+    }
+
+    #[test]
+    fn simconnect_gets_the_landing_line_with_the_outcome() {
+        let store = Store::open_in_memory().unwrap();
+        let out = FakeOutbox::default();
+        let m = ProviderManager::new();
+        let secs = MockFlight::loop_seconds() + 10.0;
+        let (p, sent) = fake_from("simconnect", MockVariant::Standard, 0.0, secs, 0, 0.0);
+        m.start_with(out.clone(), store.clone(), Arc::new(NoAirports), p).unwrap();
+        settle(&m, &sent, (secs * 10.0) as u64);
+        wait_for("flight end", || lock(&out.emitted).iter().any(|(e, v)| e == "sim:flight-event" && v["kind"] == "flightEnded"));
+        let calls = lock(&out.in_sim).clone();
+        assert_eq!(calls.len(), 1, "{calls:?}");
+        let (id, index, tng) = &calls[0];
+        assert_eq!((*index, *tng), (0, false));
+        let id = id.as_deref().expect("the open flight's id");
+        // the touchdown the line is built from is in the store by then
+        assert_eq!(store.get_flight(id).unwrap().expect("flight").touchdowns.len(), 1);
     }
 
     #[test]

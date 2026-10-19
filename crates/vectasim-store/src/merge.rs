@@ -217,6 +217,7 @@ impl Store {
             touchdowns: d.touchdowns,
             landing_rate_fpm,
             integrity: f.integrity,
+            g_load: f.g_load.unwrap_or_default(),
         }))
     }
 
@@ -376,6 +377,11 @@ impl Store {
                 arr_metar_ms.map(|v| v as i64),
             ],
         )?;
+        // g-load: both measured → merged; otherwise derived again from the merged track on the next read
+        match (&a.g_load, &b.g_load) {
+            (Some(ga), Some(gb)) => crate::store::write_g_load(&tx, first_id, Some(&ga.merged(gb)))?,
+            _ => crate::store::clear_g_load(&tx, first_id)?,
+        }
         // plan, METAR at off-block, airframe, aircraft: the first flight's, missing ones from the second
         let sets = COALESCED_COLS
             .iter()

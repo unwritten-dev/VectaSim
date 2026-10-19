@@ -1,7 +1,7 @@
 //! CSV import: sniffer, date formats, the Volanta import CSV (synthetic fixture),
 //! own logbook CSV round trip, duplicates, landing rate handling.
 
-use vectasim_core::{FlightSession, Lang, MockFlight};
+use vectasim_core::{FlightSession, Lang, MockFlight, MockVariant};
 use vectasim_store::csvimport::{
     self, ColumnMapping, CsvEncoding, CsvField, CsvImportOptions, CsvPreset, DateFormat, OffsetSpan, Stamp, WeightUnit, parse_stamp,
 };
@@ -291,14 +291,14 @@ fn mapping_without_airports_is_refused() {
 
 /// One mock loop starting at `base_ms`, corrected to the given route (the mock has no airports).
 fn record_mock_flight(store: &Store, base_ms: u64, dep: &str, arr: &str) {
-    let mut flight = MockFlight::new();
+    let mut flight = MockFlight::with_variant(MockVariant::Circuit);
     let mut session = FlightSession::new();
     let mut rec = FlightRecorder::new(
         store.clone(),
         RecorderContext { provider: "mock".into(), sim_name: Some("VectaSim Mock".into()), aircraft: Some(MockFlight::aircraft()) },
     );
     let hz = 5.0;
-    for i in 1..=((MockFlight::loop_seconds() + 10.0) * hz) as u64 {
+    for i in 1..=((MockVariant::Circuit.loop_seconds() + 10.0) * hz) as u64 {
         let t_s = i as f64 / hz;
         let t = flight.sample(t_s, base_ms + (t_s * 1000.0) as u64);
         let events = session.update(&t);

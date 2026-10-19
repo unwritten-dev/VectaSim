@@ -392,7 +392,7 @@
     },
     "demo": {
       "start": "Demo-Flug starten",
-      "startTitle": "Ohne Simulator ausprobieren – ein simulierter Flug",
+      "startTitle": "Ohne Simulator ausprobieren – ein simulierter Anflug auf Frankfurt, Landung nach etwa 4 Minuten",
       "stop": "Demo-Flug beenden",
       "stopReplay": "Replay beenden",
       "badge": "Demo",
@@ -459,6 +459,10 @@
       "loaded": "Flugplan geladen",
       "failed": "SimBrief-Flugplan nicht geladen"
     },
+    "tray": {
+      "hiddenTitle": "VectaSim läuft weiter",
+      "hiddenBody": "Das Fenster ist im Infobereich. Doppelklick auf das Symbol öffnet es, „Beenden“ im Menü schließt VectaSim."
+    },
     "quit": {
       "title": "Aufzeichnung läuft – trotzdem beenden?",
       "message": "Der Flug wird abgebrochen und im Logbuch als unterbrochen gespeichert.",
@@ -468,7 +472,18 @@
     "update": {
       "available": "Update verfügbar",
       "availableVersion": "Update {version} verfügbar",
-      "hint": "Installieren unter Einstellungen → Updates."
+      "hint": "Installieren unter Einstellungen → Updates.",
+      "current": "VectaSim ist aktuell",
+      "toastBody": "„Jetzt installieren“ lädt das Update herunter, sichert das Logbuch und startet VectaSim neu.",
+      "install": "Jetzt installieren",
+      "checkFailed": "Update-Prüfung fehlgeschlagen",
+      "recordingTitle": "Aufzeichnung läuft – Update nach dem Flug",
+      "recordingBody": "Die Installation startet VectaSim neu. Installiere Version {version} nach dem Flug unter Einstellungen → Updates.",
+      "backupFailed": "Sicherung vor dem Update fehlgeschlagen",
+      "backupFailedBody": "{error} – das Update läuft trotzdem.",
+      "installed": "Update installiert",
+      "installedBody": "VectaSim startet jetzt neu.",
+      "failed": "Update fehlgeschlagen"
     },
     "conn": {
       "lost": "Sim weg – Flug gesichert",
@@ -498,7 +513,7 @@
     "demo": {
       "text": "Demo-Flug · simulierte Daten, ohne Simulator",
       "textActive": "Demo-Flug läuft · seit {since}",
-      "hint": "Ein simulierter Flug zum Ausprobieren. Für echte Flüge den Demo-Flug beenden – der Simulator wird dann automatisch erkannt."
+      "hint": "Ein simulierter Flug zum Ausprobieren: Er beginnt in der Luft im Gegenanflug auf Frankfurt (Piste 25C) und landet nach etwa 4 Minuten, danach startet die nächste Runde. Für echte Flüge den Demo-Flug beenden – der Simulator wird dann automatisch erkannt."
     },
     "recording": {
       "label": "Aufzeichnung läuft",

@@ -2,7 +2,7 @@ import { useEffect, useMemo, type KeyboardEvent } from "react";
 import { NNBSP, fmt, fmtClock, fmtNum, fmtSigned } from "../i18n/number";
 import { useT, type TFunction } from "../i18n";
 import { sideLabel } from "./geometry";
-import { REPLAY_SPEEDS, sampleAt, useReplay, useReplayCursor, useReplayStore, type ReplayStore } from "./replayStore";
+import { sampleAt, useReplay, useReplayCursor, useReplayStore, type ReplayStore } from "./replayStore";
 import type { ApproachAnalysis } from "./approachTypes";
 import type { LandingAnalysis } from "./types";
 
@@ -92,7 +92,7 @@ export default function ReplayBar() {
           +1{NNBSP}s
         </button>
         <span className="segmented replay-speed" role="radiogroup" aria-label={tr("replay.speed")}>
-          {REPLAY_SPEEDS.map((s) => (
+          {store.speeds.map((s) => (
             <button key={s} role="radio" aria-checked={speed === s} className={speed === s ? "active" : ""} onClick={() => store.setSpeed(s)} aria-label={tr("replay.speedOption", { speed: s })}>
               {s}×
             </button>

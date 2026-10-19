@@ -16,6 +16,11 @@ pub trait SimApi {
     fn request_data_on_sim_object(&mut self, req: u32, def: u32, period: u32) -> HRESULT;
     fn subscribe_to_system_event(&mut self, event_id: u32, name: &str) -> HRESULT;
     fn request_system_state(&mut self, req: u32, state: &str) -> HRESULT;
+    /// `SimConnect_Text` (in-sim message); `text_type` from `ffi::text_type`. Backends without
+    /// it answer `E_FAIL`.
+    fn text(&mut self, _text_type: u32, _seconds: f32, _event_id: u32, _text: &str) -> HRESULT {
+        ffi::E_FAIL
+    }
     /// SendID of the packet sent by the last call (`SimConnect_GetLastSentPacketID`).
     fn last_sent_packet_id(&mut self) -> Option<u32>;
     /// Fetch the next message and copy it into `buf` (only touched for `Message`).
@@ -110,6 +115,15 @@ impl SimApi for LiveApi {
         let c = cstring(state);
         // SAFETY: string outlives the call; handle is open.
         unsafe { (self.lib.request_system_state)(self.handle, req, c.as_ptr()) }
+    }
+
+    fn text(&mut self, text_type: u32, seconds: f32, event_id: u32, text: &str) -> HRESULT {
+        let Some(f) = self.lib.text else { return ffi::E_FAIL };
+        // NUL-terminated; interior NULs cannot occur in our own texts, cut there if they do
+        let c = CString::new(text.split('\0').next().unwrap_or_default()).unwrap_or_default();
+        let bytes = c.as_bytes_with_nul();
+        // SAFETY: handle is open; the buffer outlives the call and its size includes the NUL.
+        unsafe { f(self.handle, text_type, seconds, event_id, bytes.len() as u32, bytes.as_ptr() as *const std::ffi::c_void) }
     }
 
     fn last_sent_packet_id(&mut self) -> Option<u32> {

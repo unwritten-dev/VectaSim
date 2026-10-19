@@ -43,6 +43,7 @@ import {
   type TouchdownPoint,
   type WindComponents,
 } from "./types";
+import { gLoadHints } from "../gload";
 
 /** A label table that answers in the active language on every access (same shape as a plain Record). */
 function labels<K extends string>(keys: readonly K[], text: (k: K) => string): Record<K, string> {
@@ -423,6 +424,8 @@ export function buildHints(d: LandingDebriefData, approach?: ApproachAnalysis | 
   if (td.bounces > 0) {
     out.push({ tone: "warn", text: t("facts.hint.bounces", { count: td.bounces, hardest: fmt(td.vsFpmHardest, 0, "fpm"), gap: fmt(0.3, 1, "s") }) });
   }
+  // g-load over the flight (outside the touchdowns): only when it stands out (gload.ts thresholds)
+  out.push(...gLoadHints(d.flight.gLoad));
 
   if (a.flare) {
     out.push({

@@ -5,6 +5,7 @@ import type { Airport, NearestAirport, Runway } from "../types";
 import { DIAGRAM_FROM_ZOOM } from "./airportDiagram";
 import { fmt } from "../i18n/number";
 import { useT } from "../i18n";
+import "./airportReadout.css";
 
 interface Info {
   airport: Airport;

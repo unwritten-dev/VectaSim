@@ -5,6 +5,7 @@
 //!
 //! | transition              | condition                                              | dwell |
 //! |-------------------------|--------------------------------------------------------|-------|
+//! | Preflight → airborne    | start in the air (see below)                           | 0     |
 //! | Preflight → Pushback    | 0.5–8 kt, engines off, parking brake released          | 2 s   |
 //! | Preflight → TaxiOut     | > 1 kt, engines running                                | 2 s   |
 //! | ground → Takeoff        | > 40 kt on ground with engines running, or airborne    | 1 s/0 |
@@ -46,6 +47,15 @@
 //! Lift-off time: [`PhaseEngine::airborne_since`] is the first corroborated airborne
 //! sample of the current airborne stretch; the flight's take-off time is read from it
 //! when Takeoff → Climb fires (Climb itself comes up to 45 s later).
+//!
+//! Start in the air (connected mid-flight, or a flight loaded in the air): when the very
+//! first corroborated sample after [`PhaseEngine::new`] / [`PhaseEngine::restart`] is
+//! airborne (no ground contact seen yet), Preflight goes straight to the phase the sample
+//! shows – Climb (V/S > +300 fpm), level → Cruise, descending → Descent, below 4 000 ft AGL
+//! Approach, below 1 500 ft AGL Final – instead of Takeoff → Climb. No take-off is seen, so
+//! [`PhaseEngine::started_airborne`] is set and the flight gets no take-off time; the air
+//! time requalifies like after a reset in the air ([`MS_REQUALIFY_AFTER_RESET`]). Once the
+//! engine has seen the ground, an airborne sample in Preflight is a take-off as before.
 //!
 //! Context resets ([`PhaseEngine::reset_context`]): after a reconnect, teleport or reload
 //! the hysteresis, the airborne tracking and its `airborne_qualified` latch start from
@@ -143,6 +153,10 @@ pub struct PhaseEngine {
     candidate_dwell_ms: u64,
     /// Wall clock → monotonic time; all timestamps above are on its scale.
     clock: MonoClock,
+    /// A corroborated ground sample was seen since `new` / `restart`.
+    seen_ground: bool,
+    /// The current flight began in the air (see the module doc).
+    started_airborne: bool,
 }
 
 impl Default for PhaseEngine {
@@ -164,6 +178,8 @@ impl PhaseEngine {
             qualify_ms: MS_AIRBORNE_QUALIFIED,
             candidate_dwell_ms: 0,
             clock: MonoClock::new(),
+            seen_ground: false,
+            started_airborne: false,
         }
     }
 
@@ -217,6 +233,12 @@ impl PhaseEngine {
         self.airborne_qualified
     }
 
+    /// The flight in progress began in the air: Preflight went straight to an airborne
+    /// phase (see the module doc). Cleared when the engine is back on the blocks.
+    pub fn started_airborne(&self) -> bool {
+        self.started_airborne
+    }
+
     /// Proposed next phase: (phase, since, dwell it needs, time still missing), as of the
     /// last evaluated sample.
     pub fn candidate(&self) -> Option<(FlightPhase, u64, u64, u64)> {
@@ -266,13 +288,14 @@ impl PhaseEngine {
         let from = self.phase;
         self.phase = desired;
         self.candidate = None;
-        self.on_enter(desired, t);
+        self.on_enter(from, desired, t);
         Some(PhaseTransition { from, to: desired, timestamp_ms: t.timestamp_ms, telemetry: t.clone() })
     }
 
     fn track_airborne(&mut self, t: &Telemetry, now: u64) {
         if ground_contact_corroborated(t) {
             self.airborne_since = None;
+            self.seen_ground = true;
         } else {
             let since = *self.airborne_since.get_or_insert(now);
             if t.altitude_agl_ft > FT_AIRBORNE_QUALIFIED || now.saturating_sub(since) > self.qualify_ms {
@@ -283,14 +306,44 @@ impl PhaseEngine {
         }
     }
 
-    fn on_enter(&mut self, phase: FlightPhase, t: &Telemetry) {
+    fn on_enter(&mut self, from: FlightPhase, phase: FlightPhase, t: &Telemetry) {
+        if from == FlightPhase::Preflight && phase.is_airborne_phase() {
+            // start in the air: no take-off seen, a short stretch of air time qualifies
+            self.started_airborne = true;
+            if !self.airborne_qualified {
+                self.qualify_ms = MS_REQUALIFY_AFTER_RESET;
+            }
+        }
         match phase {
-            FlightPhase::Takeoff => self.max_altitude_msl_ft = t.altitude_msl_ft,
+            FlightPhase::Takeoff => {
+                self.max_altitude_msl_ft = t.altitude_msl_ft;
+                self.started_airborne = false;
+            }
             FlightPhase::TaxiIn | FlightPhase::Shutdown => {
                 self.airborne_qualified = false;
                 self.qualify_ms = MS_AIRBORNE_QUALIFIED;
             }
             _ => {}
+        }
+        if matches!(phase, FlightPhase::Shutdown | FlightPhase::Preflight) {
+            self.started_airborne = false;
+        }
+    }
+
+    /// Start in the air (see the module doc): the airborne phase the first sample shows.
+    fn airborne_start_phase(t: &Telemetry) -> FlightPhase {
+        use FlightPhase::*;
+        let (vs, agl) = (t.vertical_speed_fpm, t.altitude_agl_ft);
+        if vs > FPM_LEVEL {
+            Climb
+        } else if vs >= -FPM_LEVEL {
+            Cruise
+        } else if agl < FT_FINAL {
+            Final
+        } else if agl < FT_APPROACH {
+            Approach
+        } else {
+            Descent
         }
     }
 
@@ -308,6 +361,7 @@ impl PhaseEngine {
         }
 
         match self.phase {
+            Preflight if airborne && !self.seen_ground => Self::airborne_start_phase(t),
             Preflight | Shutdown => {
                 if airborne || gs > KT_TAKEOFF && engines_on {
                     Takeoff
@@ -418,6 +472,7 @@ impl PhaseEngine {
         use FlightPhase::*;
         match (from, to) {
             (_, Landing) => 0,
+            (Preflight, to) if to.is_airborne_phase() => 0,
             (_, Takeoff) if !ground_contact_corroborated(t) => 0,
             (_, Takeoff) => 1_000,
             (Takeoff, Climb) => 0,

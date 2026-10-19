@@ -9,6 +9,7 @@ pub mod approach;
 pub mod clock;
 pub mod diag;
 pub mod flight;
+pub mod gload;
 pub mod lang;
 pub mod landing;
 pub mod mock;
@@ -17,6 +18,7 @@ pub mod telemetry;
 pub mod touchdown;
 
 pub use clock::MonoClock;
+pub use gload::{GLoadPoint, GLoadSource, GLoadStats};
 pub use lang::Lang;
 pub use flight::{CandidateDebug, FlightDebug, FlightEvent, FlightSession, FlightState, FlightSummary, IntegrityFlags};
 pub use mock::{MockFlight, MockProvider, MockVariant};

@@ -101,6 +101,11 @@ pub struct Flight {
     pub landing_rate_fpm: Option<f64>,
     /// Touchdowns so far (touch-and-goes included).
     pub touchdowns: u32,
+    /// Highest / lowest g-load in the air so far, outside the touchdowns (moving average
+    /// over 0.3 s; the last 3 s are held back until no touchdown follows). `null` before
+    /// the first airborne sample.
+    pub max_g: Option<f64>,
+    pub min_g: Option<f64>,
 }
 
 /// `GET /api/v1/telemetry`: the latest sample (the WebSocket sends it at 2 Hz).
@@ -569,7 +574,8 @@ mod tests {
             keys(&v),
             sorted([
                 "id", "state", "phase", "offBlockMs", "takeoffMs", "landingMs", "onBlockMs", "blockTimeMs", "flightTimeMs", "departure", "arrival",
-                "destination", "callsign", "aircraft", "distanceNm", "maxAltitudeFt", "remainingNm", "etaMs", "fuel", "landingRateFpm", "touchdowns"
+                "destination", "callsign", "aircraft", "distanceNm", "maxAltitudeFt", "remainingNm", "etaMs", "fuel", "landingRateFpm", "touchdowns",
+                "maxG", "minG"
             ])
         );
         assert_eq!(v["state"], json!("active"));

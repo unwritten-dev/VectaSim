@@ -392,7 +392,7 @@
     },
     "demo": {
       "start": "Start demo flight",
-      "startTitle": "Try it without a simulator – a simulated flight",
+      "startTitle": "Try it without a simulator – a simulated approach into Frankfurt, landing after about 4 minutes",
       "stop": "Stop demo flight",
       "stopReplay": "Stop replay",
       "badge": "Demo",
@@ -459,6 +459,10 @@
       "loaded": "Flight plan loaded",
       "failed": "SimBrief flight plan not loaded"
     },
+    "tray": {
+      "hiddenTitle": "VectaSim is still running",
+      "hiddenBody": "The window is in the notification area. Double-click the icon to open it; “Quit” in its menu closes VectaSim."
+    },
     "quit": {
       "title": "Recording in progress – quit anyway?",
       "message": "The flight is aborted and saved in the logbook as interrupted.",
@@ -468,7 +472,18 @@
     "update": {
       "available": "Update available",
       "availableVersion": "Update {version} available",
-      "hint": "Install it under Settings → Updates."
+      "hint": "Install it under Settings → Updates.",
+      "current": "VectaSim is up to date",
+      "toastBody": "“Install now” downloads the update, backs up the logbook and restarts VectaSim.",
+      "install": "Install now",
+      "checkFailed": "Update check failed",
+      "recordingTitle": "Recording – update after the flight",
+      "recordingBody": "Installing restarts VectaSim. Install version {version} after the flight under Settings → Updates.",
+      "backupFailed": "Backup before the update failed",
+      "backupFailedBody": "{error} – the update goes ahead anyway.",
+      "installed": "Update installed",
+      "installedBody": "VectaSim is restarting now.",
+      "failed": "Update failed"
     },
     "conn": {
       "lost": "Sim gone – flight saved",
@@ -498,7 +513,7 @@
     "demo": {
       "text": "Demo flight · simulated data, no simulator",
       "textActive": "Demo flight running · since {since}",
-      "hint": "A simulated flight to try things out. For real flights, stop the demo flight – the simulator is then detected automatically."
+      "hint": "A simulated flight to try things out: it starts in the air on the downwind for Frankfurt (runway 25C) and lands after about 4 minutes, then the next round begins. For real flights, stop the demo flight – the simulator is then detected automatically."
     },
     "recording": {
       "label": "Recording",

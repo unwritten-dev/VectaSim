@@ -28,6 +28,8 @@ pub enum Kind {
     Saved,
     Connection,
     Update,
+    /// Once, when closing first hides the window into the tray (only the master switch applies).
+    Tray,
     /// "Test senden": ignores focus and the per-kind switches.
     Test,
 }
@@ -39,6 +41,7 @@ impl Kind {
             "saved" => Self::Saved,
             "connection" => Self::Connection,
             "update" => Self::Update,
+            "tray" => Self::Tray,
             "test" => Self::Test,
             _ => return None,
         })
@@ -50,6 +53,7 @@ impl Kind {
             Self::Saved => Some("notify_saved"),
             Self::Connection => Some("notify_connection"),
             Self::Update => Some("notify_update"),
+            Self::Tray => None,
             Self::Test => None,
         }
     }

@@ -445,6 +445,8 @@ export interface PirepJson {
   greatCircleNm: number | null;
   maxAltitudeFt: number | null;
   plannedCruiseFt: number | null;
+  /** G-load in the air outside the touchdowns (0.3 s average); null = not measured. */
+  gLoad: { maxG: number | null; minG: number | null; source: "live" | "track" } | null;
   fuel: {
     unit: "kg";
     start: number | null;
@@ -555,6 +557,7 @@ export function buildPirep(detail: FlightDetail, plan: Ofp | null, landing?: Pir
     greatCircleNm: round(gc, 1),
     maxAltitudeFt: round(row.maxAltMslFt, 0),
     plannedCruiseFt: round(L.cruise?.plan, 0),
+    gLoad: row.gLoad?.max && row.gLoad.min ? { maxG: round(row.gLoad.max.g, 2), minG: round(row.gLoad.min.g, 2), source: row.gLoad.source } : null,
     fuel: {
       unit: "kg",
       start: round(row.fuelStartKg),
@@ -649,6 +652,7 @@ function pirepText(p: PirepJson, pva: PlanVsActual, unit: WeightUnit, lang: Lang
     ],
     [tr("logbook.pirep.landingRate"), `${l.rateFpm != null ? `${l.rateFpm} fpm` : "-"} | max. ${l.maxG != null ? l.maxG.toFixed(2) : "-"} g | Bounces ${l.bounces ?? "-"}`],
   );
+  if (p.gLoad) lines.push([tr("gload.label"), `max. ${p.gLoad.maxG?.toFixed(2) ?? "-"} g | min. ${p.gLoad.minG?.toFixed(2) ?? "-"} g`]);
   if (l.stableFromFt !== null || l.approachBand)
     lines.push([tr("logbook.pirep.approach"), l.stableFromFt != null ? tr("logbook.pirep.stableFrom", { alt: String(l.stableFromFt) }) : tr("logbook.pirep.neverStable")]);
   const pu = pva.headline;

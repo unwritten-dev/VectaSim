@@ -1,0 +1,29 @@
+{
+  "gload": {
+    "label": "G-load in flight",
+    "summary": "max {max} ({maxPhase}, {maxAlt}) · min {min} ({minPhase})",
+    "notMeasured": "not measured",
+    "notMeasuredTitle": "No g-load for this flight: recorded before this version and without a stored track.",
+    "title": "Highest and lowest g-load in the air – without pauses, slew and time acceleration and without the {window} around each touchdown (they count as the landing's g). Moving average over {smoothing}, so single spikes do not count.",
+    "counts": "Above {high}: {highCount} ×, below {low}: {lowCount} × (each at least {min} in a row)",
+    "sourceLive": "Source: live from the telemetry stream.",
+    "sourceTrack": "Source: from the track, 1 Hz – derived afterwards; shorter peaks are missing, pauses only recognised by the frozen position.",
+    "hint": {
+      "high": "G-load in flight up to {g} ({phase}, {alt}) – well above the 1 g of straight and level flight (hard pull, turn, turbulence){source}",
+      "highWarn": "G-load in flight up to {g} ({phase}, {alt}) – close to the limit load factor of an airliner (+2.5 g){source}",
+      "low": "G-load in flight down to {g} ({phase}, {alt}) – strongly unloaded (level-off, push-over, turbulence){source}",
+      "lowWarn": "Negative g-load in flight: {g} ({phase}, {alt}) – airliners are only designed for −1 g{source}",
+      "track": " (from the track, 1 Hz)"
+    },
+    "protocol": {
+      "label": "G-load in flight",
+      "value": "{summary} · {counts} · {source}",
+      "sourceLive": "live, moving average {smoothing}",
+      "sourceTrack": "from the track, 1 Hz"
+    },
+    "live": {
+      "label": "Max g so far",
+      "title": "Highest g-load in the air so far (touchdowns excluded, averaged over {smoothing}; the last {window} follow once it is clear no touchdown follows)"
+    }
+  }
+}

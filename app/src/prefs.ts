@@ -34,14 +34,18 @@ export interface Prefs {
   notifications: boolean;
   /** `notify_landing` ≠ "0": … after a touchdown. */
   notifyLanding: boolean;
+  /** `sim_text_landing` ≠ "0": the landing line inside MSFS after a touchdown (SimConnect_Text, default on). */
+  simTextLanding: boolean;
   /** `notify_saved` ≠ "0": … when a flight was saved. */
   notifySaved: boolean;
   /** `notify_connection` ≠ "0": … when the sim link is lost / back during a flight. */
   notifyConnection: boolean;
   /** `notify_update` ≠ "0": … when an update is available. */
   notifyUpdate: boolean;
-  /** `tray_minimize` = "1": tray icon, minimising hides the window into the tray (default off; switch with `set_tray_enabled`). */
+  /** `tray_minimize` ≠ "0": tray icon, minimising hides the window into the tray (default on; switch with `set_tray_enabled`). */
   trayMinimize: boolean;
+  /** `tray_close` ≠ "0": with the tray icon, the close button hides the window there instead of quitting (default on). */
+  trayClose: boolean;
   /** `language`: UI language "de" | "en" | "system" (default: follow Windows, else de; i18n/lang.ts). */
   language: LanguageSetting;
 }
@@ -59,10 +63,12 @@ const KEYS: Record<keyof Prefs, string> = {
   discordPresence: "discord_presence",
   notifications: "notifications",
   notifyLanding: "notify_landing",
+  simTextLanding: "sim_text_landing",
   notifySaved: "notify_saved",
   notifyConnection: "notify_connection",
   notifyUpdate: "notify_update",
   trayMinimize: "tray_minimize",
+  trayClose: "tray_close",
   language: "language",
 };
 /** Last theme also in localStorage, so the first paint after a restart is already right. */
@@ -78,7 +84,7 @@ function cachedTheme(): ThemeId {
 }
 
 let prefs: Prefs = { timeLocal: false, showDemo: false, airframePhotos: true, theme: DEFAULT_THEME, simbriefAuto: true, weightUnit: "kg", privacyMode: false, cardAutosave: false, cardHideReg: false,
-  discordPresence: false, notifications: true, notifyLanding: true, notifySaved: true, notifyConnection: true, notifyUpdate: true, trayMinimize: false,
+  discordPresence: false, notifications: true, notifyLanding: true, simTextLanding: true, notifySaved: true, notifyConnection: true, notifyUpdate: true, trayMinimize: true, trayClose: true,
   language: getLanguageSetting() };
 let loaded = false;
 const listeners = new Set<() => void>();
@@ -131,10 +137,12 @@ export function parsePrefs(rows: [string, string][]): Prefs {
     discordPresence: get(KEYS.discordPresence),
     notifications: value(KEYS.notifications) !== "0",
     notifyLanding: value(KEYS.notifyLanding) !== "0",
+    simTextLanding: value(KEYS.simTextLanding) !== "0",
     notifySaved: value(KEYS.notifySaved) !== "0",
     notifyConnection: value(KEYS.notifyConnection) !== "0",
     notifyUpdate: value(KEYS.notifyUpdate) !== "0",
-    trayMinimize: get(KEYS.trayMinimize),
+    trayMinimize: value(KEYS.trayMinimize) !== "0",
+    trayClose: value(KEYS.trayClose) !== "0",
     language: isLanguageSetting(language) ? language : DEFAULT_LANGUAGE_SETTING,
   };
 }
