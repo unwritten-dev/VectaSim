@@ -359,7 +359,7 @@ impl FlightRecorder {
     /// nothing changed and the recorder records as before.
     pub fn resume(&mut self, flight_id: &str, summary: &FlightSummary, now: u64) -> Result<()> {
         if self.current.as_ref().is_some_and(|c| c.ending.is_some()) {
-            return Err(StoreError::Invalid("Das Ende des letzten Flugs ist noch nicht gespeichert.".into()));
+            return Err(StoreError::Invalid(crate::Invalid::LastFlightNotSaved));
         }
         if let Some(c) = self.current.as_ref() {
             if c.id == flight_id {

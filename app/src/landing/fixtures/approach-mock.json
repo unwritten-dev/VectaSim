@@ -24,15 +24,16 @@
  "trackDistRef": "threshold",
  "reference": {
   "glidepathDeg": 3,
-  "glidepathSource": "assumed",
+  "glidepathSource": "ils",
+  "localizerSource": "ils",
   "tchFt": 50,
   "vappKt": 128,
   "vappSource": "flown",
   "flownVappKt": 128,
-  "vs0Kt": null,
-  "vappPlausible": null,
+  "vs0Kt": 104,
+  "vappPlausible": true,
   "landingFlapsIndex": 4,
-  "landingFlapsSource": "touchdown"
+  "landingFlapsSource": "aircraftPositions"
  },
  "established": {
   "tMs": 1792246922500,
@@ -138,7 +139,9 @@
     "locDots": null,
     "altDevFt": -734,
     "iasDevKt": 52,
-    "energyDevFt": 134
+    "energyDevFt": 134,
+    "n1Pct": 52.0,
+    "spoilersPct": 0.0
    },
    "criteria": [
     {
@@ -190,7 +193,9 @@
     "locDots": 0,
     "altDevFt": 10,
     "iasDevKt": 16,
-    "energyDevFt": 267
+    "energyDevFt": 267,
+    "n1Pct": 42.5,
+    "spoilersPct": 0.0
    },
    "criteria": [
     {
@@ -250,7 +255,9 @@
     "locDots": 0,
     "altDevFt": 11,
     "iasDevKt": 1.1,
-    "energyDevFt": 53
+    "energyDevFt": 53,
+    "n1Pct": 43.6,
+    "spoilersPct": 0.0
    },
    "criteria": [
     {
@@ -262,7 +269,7 @@
      "reference": null
     },
     {
-     "kind": "flaps",
+     "kind": "landingFlaps",
      "status": "pass",
      "measured": 4,
      "limitMin": 4,
@@ -308,6 +315,22 @@
      "limitMin": null,
      "limitMax": 15,
      "reference": null
+    },
+    {
+     "kind": "thrust",
+     "status": "pass",
+     "measured": 43.6,
+     "limitMin": 40,
+     "limitMax": null,
+     "reference": null
+    },
+    {
+     "kind": "spoilers",
+     "status": "pass",
+     "measured": 0,
+     "limitMin": null,
+     "limitMax": 2,
+     "reference": null
     }
    ]
   },
@@ -334,7 +357,9 @@
     "locDots": 0.02,
     "altDevFt": 5,
     "iasDevKt": 0.2,
-    "energyDevFt": 22
+    "energyDevFt": 22,
+    "n1Pct": 43.7,
+    "spoilersPct": 0.0
    },
    "criteria": [
     {
@@ -346,7 +371,7 @@
      "reference": null
     },
     {
-     "kind": "flaps",
+     "kind": "landingFlaps",
      "status": "pass",
      "measured": 4,
      "limitMin": 4,
@@ -392,6 +417,22 @@
      "limitMin": null,
      "limitMax": 15,
      "reference": null
+    },
+    {
+     "kind": "thrust",
+     "status": "pass",
+     "measured": 43.7,
+     "limitMin": 40,
+     "limitMax": null,
+     "reference": null
+    },
+    {
+     "kind": "spoilers",
+     "status": "pass",
+     "measured": 0,
+     "limitMin": null,
+     "limitMax": 2,
+     "reference": null
     }
    ]
   },
@@ -418,7 +459,9 @@
     "locDots": 0.02,
     "altDevFt": -2,
     "iasDevKt": 0,
-    "energyDevFt": -1
+    "energyDevFt": -1,
+    "n1Pct": 41.0,
+    "spoilersPct": 0.0
    },
    "criteria": []
   }
@@ -460,7 +503,7 @@
   "lateralBand": "onCentreline"
  },
  "energy": {
-  "tasSource": "derived",
+  "tasSource": "recorded",
   "atTenNm": null,
   "atFaf": {
    "totalFt": 267,
@@ -473,10 +516,52 @@
    "speedFt": 42
   },
   "maxExcessFt": 267,
-  "maxExcessHatFt": 1652
+  "maxExcessHatFt": 1652,
+  "bandMaxFt": 260,
+  "bandMinFt": 51,
+  "band": "good"
+ },
+ "ils": {
+  "gsShare": 1.0,
+  "locShare": 1.0,
+  "gsAngleDeg": 3.0,
+  "gsUsed": true,
+  "locUsed": true,
+  "gsRejected": false,
+  "locRejected": false,
+  "gsDiffDots": 0.01,
+  "locDiffDots": 0.02,
+  "gsRmsSimDots": 0.12,
+  "gsRmsGeoDots": 0.12,
+  "locRmsSimDots": 0.03,
+  "locRmsGeoDots": 0.03,
+  "mismatch": false
+ },
+ "wind": {
+  "samples": 81,
+  "dirTrueDeg": 250.0,
+  "speedKt": 8.0,
+  "headwindKt": 8.0,
+  "crosswindKt": 0.2,
+  "gustSpreadKt": 0.0,
+  "topDirTrueDeg": 250.0,
+  "topKt": 8.0,
+  "bottomDirTrueDeg": 250.0,
+  "bottomKt": 8.0,
+  "shearKt": 0.0,
+  "headwindChangeKt": 0.0
  },
  "goAround": null,
- "automation": null,
+ "automation": {
+  "autopilotOffHatFt": 797,
+  "autothrustOffHatFt": 27,
+  "autopilotUsed": true,
+  "autothrustUsed": true,
+  "autopilotAtEnd": false,
+  "autothrustAtEnd": false,
+  "approachMode": true,
+  "glideslopeMode": true
+ },
  "configEvents": [
   {
    "kind": "flaps",
@@ -556,8 +641,14 @@
    "altDevFt": -1053,
    "iasDevKt": 52,
    "energyDevFt": -185,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": null,
+   "n1Pct": 52.0,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246804000,
@@ -587,8 +678,14 @@
    "altDevFt": -988,
    "iasDevKt": 52,
    "energyDevFt": -121,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": null,
+   "n1Pct": 52.0,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246808000,
@@ -618,8 +715,14 @@
    "altDevFt": -923,
    "iasDevKt": 52,
    "energyDevFt": -56,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": null,
+   "n1Pct": 52.0,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246812000,
@@ -649,8 +752,14 @@
    "altDevFt": -859,
    "iasDevKt": 52,
    "energyDevFt": 9,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": null,
+   "n1Pct": 52.0,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246816000,
@@ -680,8 +789,14 @@
    "altDevFt": -794,
    "iasDevKt": 52,
    "energyDevFt": 74,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": null,
+   "n1Pct": 52.0,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246820000,
@@ -711,8 +826,14 @@
    "altDevFt": -729,
    "iasDevKt": 52,
    "energyDevFt": 138,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": null,
+   "n1Pct": 52.0,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246824000,
@@ -742,8 +863,14 @@
    "altDevFt": -664,
    "iasDevKt": 52,
    "energyDevFt": 203,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": null,
+   "n1Pct": 52.0,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246828000,
@@ -773,8 +900,14 @@
    "altDevFt": -600,
    "iasDevKt": 52,
    "energyDevFt": 268,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": null,
+   "n1Pct": 52.0,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246832000,
@@ -804,8 +937,14 @@
    "altDevFt": -535,
    "iasDevKt": 52,
    "energyDevFt": 333,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": null,
+   "n1Pct": 52.0,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246836000,
@@ -835,8 +974,14 @@
    "altDevFt": -470,
    "iasDevKt": 52,
    "energyDevFt": 397,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": null,
+   "n1Pct": 52.0,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246840000,
@@ -866,8 +1011,14 @@
    "altDevFt": -405,
    "iasDevKt": 52,
    "energyDevFt": 462,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": null,
+   "n1Pct": 52.0,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246844000,
@@ -897,8 +1048,14 @@
    "altDevFt": -341,
    "iasDevKt": 52,
    "energyDevFt": 527,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": null,
+   "n1Pct": 52.0,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246848000,
@@ -928,8 +1085,14 @@
    "altDevFt": -276,
    "iasDevKt": 52,
    "energyDevFt": 592,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": null,
+   "n1Pct": 52.0,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246852000,
@@ -959,8 +1122,14 @@
    "altDevFt": -245,
    "iasDevKt": 52,
    "energyDevFt": 620,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": null,
+   "n1Pct": 43.3,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246856000,
@@ -990,8 +1159,14 @@
    "altDevFt": -229,
    "iasDevKt": 52,
    "energyDevFt": 634,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": null,
+   "n1Pct": 43.3,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246860000,
@@ -1021,8 +1196,14 @@
    "altDevFt": -213,
    "iasDevKt": 52,
    "energyDevFt": 647,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": null,
+   "n1Pct": 43.3,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246864000,
@@ -1052,8 +1233,14 @@
    "altDevFt": -196,
    "iasDevKt": 52,
    "energyDevFt": 660,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": null,
+   "n1Pct": 43.3,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246868000,
@@ -1083,8 +1270,14 @@
    "altDevFt": -180,
    "iasDevKt": 52,
    "energyDevFt": 674,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": null,
+   "n1Pct": 43.3,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246872000,
@@ -1114,8 +1307,14 @@
    "altDevFt": -164,
    "iasDevKt": 52,
    "energyDevFt": 687,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": null,
+   "n1Pct": 43.3,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246876000,
@@ -1145,8 +1344,14 @@
    "altDevFt": -147,
    "iasDevKt": 52,
    "energyDevFt": 700,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": null,
+   "n1Pct": 43.3,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246880000,
@@ -1176,8 +1381,14 @@
    "altDevFt": -131,
    "iasDevKt": 50.8,
    "energyDevFt": 693,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": null,
+   "n1Pct": 43.4,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246884000,
@@ -1207,8 +1418,14 @@
    "altDevFt": -115,
    "iasDevKt": 47.2,
    "energyDevFt": 644,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": null,
+   "n1Pct": 43.5,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246888000,
@@ -1238,8 +1455,14 @@
    "altDevFt": -99,
    "iasDevKt": 43.7,
    "energyDevFt": 598,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": null,
+   "n1Pct": 43.7,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246892000,
@@ -1269,8 +1492,14 @@
    "altDevFt": -84,
    "iasDevKt": 40.2,
    "energyDevFt": 553,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": null,
+   "n1Pct": 43.9,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246896000,
@@ -1300,8 +1529,14 @@
    "altDevFt": -69,
    "iasDevKt": 36.8,
    "energyDevFt": 511,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": null,
+   "n1Pct": 44.0,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246900000,
@@ -1331,8 +1566,14 @@
    "altDevFt": -54,
    "iasDevKt": 33.5,
    "energyDevFt": 472,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": null,
+   "n1Pct": 44.2,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246904000,
@@ -1362,8 +1603,14 @@
    "altDevFt": -39,
    "iasDevKt": 30.2,
    "energyDevFt": 434,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": null,
+   "n1Pct": 44.3,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246908000,
@@ -1393,8 +1640,14 @@
    "altDevFt": -25,
    "iasDevKt": 27,
    "energyDevFt": 398,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": null,
+   "n1Pct": 44.5,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246912000,
@@ -1424,8 +1677,14 @@
    "altDevFt": -11,
    "iasDevKt": 23.9,
    "energyDevFt": 364,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": null,
+   "n1Pct": 44.6,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246916000,
@@ -1455,8 +1714,14 @@
    "altDevFt": 2,
    "iasDevKt": 20.8,
    "energyDevFt": 331,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": null,
+   "n1Pct": 44.8,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246920000,
@@ -1486,8 +1751,14 @@
    "altDevFt": 10,
    "iasDevKt": 17.8,
    "energyDevFt": 295,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": null,
+   "n1Pct": 42.4,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246924000,
@@ -1517,8 +1788,14 @@
    "altDevFt": 9,
    "iasDevKt": 15.5,
    "energyDevFt": 260,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.05,
+   "gsDotsGeo": 0.05,
+   "locDotsSim": 0,
+   "locDotsGeo": 0,
+   "n1Pct": 42.5,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246928000,
@@ -1548,8 +1825,14 @@
    "altDevFt": 8,
    "iasDevKt": 14.2,
    "energyDevFt": 239,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.04,
+   "gsDotsGeo": 0.04,
+   "locDotsSim": 0,
+   "locDotsGeo": 0,
+   "n1Pct": 42.5,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246932000,
@@ -1579,8 +1862,14 @@
    "altDevFt": 7,
    "iasDevKt": 13,
    "energyDevFt": 218,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.04,
+   "gsDotsGeo": 0.04,
+   "locDotsSim": 0.01,
+   "locDotsGeo": 0.01,
+   "n1Pct": 42.6,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246936000,
@@ -1610,8 +1899,14 @@
    "altDevFt": 6,
    "iasDevKt": 11.7,
    "energyDevFt": 199,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.03,
+   "gsDotsGeo": 0.03,
+   "locDotsSim": 0.01,
+   "locDotsGeo": 0.01,
+   "n1Pct": 42.8,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246940000,
@@ -1641,8 +1936,14 @@
    "altDevFt": 5,
    "iasDevKt": 10.4,
    "energyDevFt": 179,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.03,
+   "gsDotsGeo": 0.03,
+   "locDotsSim": 0.01,
+   "locDotsGeo": 0.01,
+   "n1Pct": 42.9,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246944000,
@@ -1672,8 +1973,14 @@
    "altDevFt": 5,
    "iasDevKt": 9.2,
    "energyDevFt": 161,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.03,
+   "gsDotsGeo": 0.03,
+   "locDotsSim": 0.02,
+   "locDotsGeo": 0.02,
+   "n1Pct": 43.1,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246948000,
@@ -1703,8 +2010,14 @@
    "altDevFt": 5,
    "iasDevKt": 8,
    "energyDevFt": 144,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.03,
+   "gsDotsGeo": 0.03,
+   "locDotsSim": 0.02,
+   "locDotsGeo": 0.02,
+   "n1Pct": 43.3,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246952000,
@@ -1734,8 +2047,14 @@
    "altDevFt": 6,
    "iasDevKt": 6.7,
    "energyDevFt": 127,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.04,
+   "gsDotsGeo": 0.04,
+   "locDotsSim": 0.02,
+   "locDotsGeo": 0.02,
+   "n1Pct": 43.4,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246956000,
@@ -1765,8 +2084,14 @@
    "altDevFt": 7,
    "iasDevKt": 5.5,
    "energyDevFt": 112,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.05,
+   "gsDotsGeo": 0.05,
+   "locDotsSim": 0.02,
+   "locDotsGeo": 0.02,
+   "n1Pct": 43.5,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246960000,
@@ -1796,8 +2121,14 @@
    "altDevFt": 8,
    "iasDevKt": 4.3,
    "energyDevFt": 96,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.06,
+   "gsDotsGeo": 0.06,
+   "locDotsSim": 0.02,
+   "locDotsGeo": 0.02,
+   "n1Pct": 43.6,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246964000,
@@ -1827,8 +2158,14 @@
    "altDevFt": 9,
    "iasDevKt": 3.1,
    "energyDevFt": 81,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.07,
+   "gsDotsGeo": 0.07,
+   "locDotsSim": 0.02,
+   "locDotsGeo": 0.02,
+   "n1Pct": 43.6,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246968000,
@@ -1858,8 +2195,14 @@
    "altDevFt": 10,
    "iasDevKt": 2,
    "energyDevFt": 66,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.08,
+   "gsDotsGeo": 0.08,
+   "locDotsSim": 0.01,
+   "locDotsGeo": 0.01,
+   "n1Pct": 43.7,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246972000,
@@ -1889,8 +2232,14 @@
    "altDevFt": 11,
    "iasDevKt": 0.8,
    "energyDevFt": 51,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.09,
+   "gsDotsGeo": 0.09,
+   "locDotsSim": 0.01,
+   "locDotsGeo": 0.01,
+   "n1Pct": 43.7,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246976000,
@@ -1920,8 +2269,14 @@
    "altDevFt": 11,
    "iasDevKt": 1,
    "energyDevFt": 53,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.1,
+   "gsDotsGeo": 0.1,
+   "locDotsSim": 0,
+   "locDotsGeo": 0,
+   "n1Pct": 43.6,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246977000,
@@ -1951,8 +2306,14 @@
    "altDevFt": 11,
    "iasDevKt": 0.9,
    "energyDevFt": 51,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.1,
+   "gsDotsGeo": 0.1,
+   "locDotsSim": 0,
+   "locDotsGeo": 0,
+   "n1Pct": 43.6,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246978000,
@@ -1982,8 +2343,14 @@
    "altDevFt": 11,
    "iasDevKt": 0.8,
    "energyDevFt": 49,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.1,
+   "gsDotsGeo": 0.1,
+   "locDotsSim": 0,
+   "locDotsGeo": 0,
+   "n1Pct": 43.6,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246979000,
@@ -2013,8 +2380,14 @@
    "altDevFt": 11,
    "iasDevKt": 0.6,
    "energyDevFt": 46,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.1,
+   "gsDotsGeo": 0.1,
+   "locDotsSim": 0,
+   "locDotsGeo": 0,
+   "n1Pct": 43.5,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246980000,
@@ -2044,8 +2417,14 @@
    "altDevFt": 11,
    "iasDevKt": 0.4,
    "energyDevFt": 44,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.1,
+   "gsDotsGeo": 0.1,
+   "locDotsSim": 0,
+   "locDotsGeo": 0,
+   "n1Pct": 43.5,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246981000,
@@ -2075,8 +2454,14 @@
    "altDevFt": 11,
    "iasDevKt": 0.2,
    "energyDevFt": 41,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.1,
+   "gsDotsGeo": 0.1,
+   "locDotsSim": 0,
+   "locDotsGeo": 0,
+   "n1Pct": 43.5,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246982000,
@@ -2106,8 +2491,14 @@
    "altDevFt": 10,
    "iasDevKt": 0,
    "energyDevFt": 38,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.1,
+   "gsDotsGeo": 0.1,
+   "locDotsSim": 0,
+   "locDotsGeo": 0,
+   "n1Pct": 43.5,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246983000,
@@ -2137,8 +2528,14 @@
    "altDevFt": 10,
    "iasDevKt": -0.2,
    "energyDevFt": 35,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.1,
+   "gsDotsGeo": 0.1,
+   "locDotsSim": 0,
+   "locDotsGeo": 0,
+   "n1Pct": 43.5,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246984000,
@@ -2168,8 +2565,14 @@
    "altDevFt": 10,
    "iasDevKt": -0.4,
    "energyDevFt": 32,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.1,
+   "gsDotsGeo": 0.1,
+   "locDotsSim": -0.01,
+   "locDotsGeo": -0.01,
+   "n1Pct": 43.5,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246985000,
@@ -2199,8 +2602,14 @@
    "altDevFt": 10,
    "iasDevKt": -0.6,
    "energyDevFt": 29,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.09,
+   "gsDotsGeo": 0.09,
+   "locDotsSim": -0.01,
+   "locDotsGeo": -0.01,
+   "n1Pct": 43.5,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246986000,
@@ -2230,8 +2639,14 @@
    "altDevFt": 10,
    "iasDevKt": -0.7,
    "energyDevFt": 27,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.09,
+   "gsDotsGeo": 0.09,
+   "locDotsSim": -0.01,
+   "locDotsGeo": -0.01,
+   "n1Pct": 43.5,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246987000,
@@ -2261,8 +2676,14 @@
    "altDevFt": 9,
    "iasDevKt": -0.9,
    "energyDevFt": 24,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.09,
+   "gsDotsGeo": 0.09,
+   "locDotsSim": -0.01,
+   "locDotsGeo": -0.01,
+   "n1Pct": 43.5,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246988000,
@@ -2292,8 +2713,14 @@
    "altDevFt": 9,
    "iasDevKt": -1,
    "energyDevFt": 22,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.09,
+   "gsDotsGeo": 0.09,
+   "locDotsSim": -0.01,
+   "locDotsGeo": -0.01,
+   "n1Pct": 43.5,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246989000,
@@ -2323,8 +2750,14 @@
    "altDevFt": 9,
    "iasDevKt": -1.1,
    "energyDevFt": 21,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.09,
+   "gsDotsGeo": 0.09,
+   "locDotsSim": -0.01,
+   "locDotsGeo": -0.01,
+   "n1Pct": 43.5,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246990000,
@@ -2354,8 +2787,14 @@
    "altDevFt": 8,
    "iasDevKt": -1.2,
    "energyDevFt": 19,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.09,
+   "gsDotsGeo": 0.09,
+   "locDotsSim": -0.01,
+   "locDotsGeo": -0.01,
+   "n1Pct": 43.5,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246991000,
@@ -2385,8 +2824,14 @@
    "altDevFt": 8,
    "iasDevKt": -1.2,
    "energyDevFt": 18,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.09,
+   "gsDotsGeo": 0.09,
+   "locDotsSim": -0.01,
+   "locDotsGeo": -0.01,
+   "n1Pct": 43.5,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246992000,
@@ -2416,8 +2861,14 @@
    "altDevFt": 8,
    "iasDevKt": -1.2,
    "energyDevFt": 18,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.08,
+   "gsDotsGeo": 0.08,
+   "locDotsSim": -0.01,
+   "locDotsGeo": -0.01,
+   "n1Pct": 43.5,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246993000,
@@ -2447,8 +2898,14 @@
    "altDevFt": 8,
    "iasDevKt": -1.2,
    "energyDevFt": 17,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.08,
+   "gsDotsGeo": 0.08,
+   "locDotsSim": -0.01,
+   "locDotsGeo": -0.01,
+   "n1Pct": 43.5,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246994000,
@@ -2478,8 +2935,14 @@
    "altDevFt": 7,
    "iasDevKt": -1.1,
    "energyDevFt": 17,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.08,
+   "gsDotsGeo": 0.08,
+   "locDotsSim": -0.01,
+   "locDotsGeo": -0.01,
+   "n1Pct": 43.5,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246995000,
@@ -2509,8 +2972,14 @@
    "altDevFt": 7,
    "iasDevKt": -1,
    "energyDevFt": 18,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.08,
+   "gsDotsGeo": 0.08,
+   "locDotsSim": -0.01,
+   "locDotsGeo": -0.01,
+   "n1Pct": 43.5,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246996000,
@@ -2540,8 +3009,14 @@
    "altDevFt": 7,
    "iasDevKt": -0.9,
    "energyDevFt": 19,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.08,
+   "gsDotsGeo": 0.08,
+   "locDotsSim": -0.01,
+   "locDotsGeo": -0.01,
+   "n1Pct": 43.5,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246997000,
@@ -2571,8 +3046,14 @@
    "altDevFt": 6,
    "iasDevKt": -0.7,
    "energyDevFt": 20,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.07,
+   "gsDotsGeo": 0.07,
+   "locDotsSim": -0.01,
+   "locDotsGeo": -0.01,
+   "n1Pct": 43.5,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246998000,
@@ -2602,8 +3083,14 @@
    "altDevFt": 6,
    "iasDevKt": -0.6,
    "energyDevFt": 21,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.07,
+   "gsDotsGeo": 0.07,
+   "locDotsSim": -0.01,
+   "locDotsGeo": -0.01,
+   "n1Pct": 43.5,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792246999000,
@@ -2633,8 +3120,14 @@
    "altDevFt": 6,
    "iasDevKt": -0.4,
    "energyDevFt": 23,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.07,
+   "gsDotsGeo": 0.07,
+   "locDotsSim": -0.01,
+   "locDotsGeo": -0.01,
+   "n1Pct": 43.5,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247000000,
@@ -2664,8 +3157,14 @@
    "altDevFt": 6,
    "iasDevKt": -0.2,
    "energyDevFt": 25,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.07,
+   "gsDotsGeo": 0.07,
+   "locDotsSim": -0.01,
+   "locDotsGeo": -0.01,
+   "n1Pct": 43.5,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247001000,
@@ -2695,8 +3194,14 @@
    "altDevFt": 6,
    "iasDevKt": 0,
    "energyDevFt": 27,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.07,
+   "gsDotsGeo": 0.07,
+   "locDotsSim": -0.01,
+   "locDotsGeo": -0.01,
+   "n1Pct": 43.5,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247002000,
@@ -2726,8 +3231,14 @@
    "altDevFt": 5,
    "iasDevKt": 0.2,
    "energyDevFt": 28,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.07,
+   "gsDotsGeo": 0.07,
+   "locDotsSim": -0.01,
+   "locDotsGeo": -0.01,
+   "n1Pct": 43.5,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247003000,
@@ -2757,8 +3268,14 @@
    "altDevFt": 5,
    "iasDevKt": 0.4,
    "energyDevFt": 30,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.07,
+   "gsDotsGeo": 0.07,
+   "locDotsSim": -0.01,
+   "locDotsGeo": -0.01,
+   "n1Pct": 43.5,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247004000,
@@ -2788,8 +3305,14 @@
    "altDevFt": 5,
    "iasDevKt": 0.6,
    "energyDevFt": 32,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.07,
+   "gsDotsGeo": 0.07,
+   "locDotsSim": -0.01,
+   "locDotsGeo": -0.01,
+   "n1Pct": 43.6,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247005000,
@@ -2819,8 +3342,14 @@
    "altDevFt": 5,
    "iasDevKt": 0.8,
    "energyDevFt": 33,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.07,
+   "gsDotsGeo": 0.07,
+   "locDotsSim": -0.01,
+   "locDotsGeo": -0.01,
+   "n1Pct": 43.6,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247006000,
@@ -2850,8 +3379,14 @@
    "altDevFt": 5,
    "iasDevKt": 0.9,
    "energyDevFt": 35,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.07,
+   "gsDotsGeo": 0.07,
+   "locDotsSim": 0,
+   "locDotsGeo": 0,
+   "n1Pct": 43.6,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247007000,
@@ -2881,8 +3416,14 @@
    "altDevFt": 5,
    "iasDevKt": 1,
    "energyDevFt": 36,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.07,
+   "gsDotsGeo": 0.07,
+   "locDotsSim": 0,
+   "locDotsGeo": 0,
+   "n1Pct": 43.6,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247008000,
@@ -2912,8 +3453,14 @@
    "altDevFt": 5,
    "iasDevKt": 1.1,
    "energyDevFt": 37,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.07,
+   "gsDotsGeo": 0.07,
+   "locDotsSim": 0,
+   "locDotsGeo": 0,
+   "n1Pct": 43.6,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247009000,
@@ -2943,8 +3490,14 @@
    "altDevFt": 5,
    "iasDevKt": 1.2,
    "energyDevFt": 37,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.07,
+   "gsDotsGeo": 0.07,
+   "locDotsSim": 0,
+   "locDotsGeo": 0,
+   "n1Pct": 43.6,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247010000,
@@ -2974,8 +3527,14 @@
    "altDevFt": 5,
    "iasDevKt": 1.2,
    "energyDevFt": 37,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.07,
+   "gsDotsGeo": 0.07,
+   "locDotsSim": 0,
+   "locDotsGeo": 0,
+   "n1Pct": 43.6,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247011000,
@@ -3005,8 +3564,14 @@
    "altDevFt": 5,
    "iasDevKt": 1.2,
    "energyDevFt": 36,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.08,
+   "gsDotsGeo": 0.08,
+   "locDotsSim": 0,
+   "locDotsGeo": 0,
+   "n1Pct": 43.7,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247012000,
@@ -3036,8 +3601,14 @@
    "altDevFt": 5,
    "iasDevKt": 1.1,
    "energyDevFt": 36,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.08,
+   "gsDotsGeo": 0.08,
+   "locDotsSim": 0.01,
+   "locDotsGeo": 0.01,
+   "n1Pct": 43.6,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247013000,
@@ -3067,8 +3638,14 @@
    "altDevFt": 5,
    "iasDevKt": 1.1,
    "energyDevFt": 34,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.08,
+   "gsDotsGeo": 0.08,
+   "locDotsSim": 0.01,
+   "locDotsGeo": 0.01,
+   "n1Pct": 43.6,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247014000,
@@ -3098,8 +3675,14 @@
    "altDevFt": 5,
    "iasDevKt": 1,
    "energyDevFt": 33,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.08,
+   "gsDotsGeo": 0.08,
+   "locDotsSim": 0.01,
+   "locDotsGeo": 0.01,
+   "n1Pct": 43.6,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247015000,
@@ -3129,8 +3712,14 @@
    "altDevFt": 5,
    "iasDevKt": 0.8,
    "energyDevFt": 31,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.08,
+   "gsDotsGeo": 0.08,
+   "locDotsSim": 0.01,
+   "locDotsGeo": 0.01,
+   "n1Pct": 43.6,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247016000,
@@ -3160,8 +3749,14 @@
    "altDevFt": 5,
    "iasDevKt": 0.7,
    "energyDevFt": 28,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.09,
+   "gsDotsGeo": 0.09,
+   "locDotsSim": 0.01,
+   "locDotsGeo": 0.01,
+   "n1Pct": 43.6,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247017000,
@@ -3191,8 +3786,14 @@
    "altDevFt": 5,
    "iasDevKt": 0.5,
    "energyDevFt": 26,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.09,
+   "gsDotsGeo": 0.09,
+   "locDotsSim": 0.02,
+   "locDotsGeo": 0.02,
+   "n1Pct": 43.7,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247018000,
@@ -3222,8 +3823,14 @@
    "altDevFt": 5,
    "iasDevKt": 0.3,
    "energyDevFt": 23,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.09,
+   "gsDotsGeo": 0.09,
+   "locDotsSim": 0.02,
+   "locDotsGeo": 0.02,
+   "n1Pct": 43.7,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247019000,
@@ -3253,8 +3860,14 @@
    "altDevFt": 5,
    "iasDevKt": 0.1,
    "energyDevFt": 21,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.09,
+   "gsDotsGeo": 0.09,
+   "locDotsSim": 0.02,
+   "locDotsGeo": 0.02,
+   "n1Pct": 43.7,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247020000,
@@ -3284,8 +3897,14 @@
    "altDevFt": 5,
    "iasDevKt": -0.1,
    "energyDevFt": 18,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.1,
+   "gsDotsGeo": 0.1,
+   "locDotsSim": 0.02,
+   "locDotsGeo": 0.02,
+   "n1Pct": 43.7,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247021000,
@@ -3315,8 +3934,14 @@
    "altDevFt": 6,
    "iasDevKt": -0.3,
    "energyDevFt": 16,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.1,
+   "gsDotsGeo": 0.1,
+   "locDotsSim": 0.02,
+   "locDotsGeo": 0.02,
+   "n1Pct": 43.8,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247022000,
@@ -3346,8 +3971,14 @@
    "altDevFt": 6,
    "iasDevKt": -0.5,
    "energyDevFt": 13,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.11,
+   "gsDotsGeo": 0.11,
+   "locDotsSim": 0.03,
+   "locDotsGeo": 0.03,
+   "n1Pct": 43.8,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247023000,
@@ -3377,8 +4008,14 @@
    "altDevFt": 6,
    "iasDevKt": -0.7,
    "energyDevFt": 11,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.11,
+   "gsDotsGeo": 0.11,
+   "locDotsSim": 0.03,
+   "locDotsGeo": 0.03,
+   "n1Pct": 43.8,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247024000,
@@ -3408,8 +4045,14 @@
    "altDevFt": 6,
    "iasDevKt": -0.8,
    "energyDevFt": 9,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.12,
+   "gsDotsGeo": 0.12,
+   "locDotsSim": 0.03,
+   "locDotsGeo": 0.03,
+   "n1Pct": 43.8,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247025000,
@@ -3439,8 +4082,14 @@
    "altDevFt": 6,
    "iasDevKt": -1,
    "energyDevFt": 7,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.12,
+   "gsDotsGeo": 0.12,
+   "locDotsSim": 0.03,
+   "locDotsGeo": 0.03,
+   "n1Pct": 43.8,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247026000,
@@ -3470,8 +4119,14 @@
    "altDevFt": 6,
    "iasDevKt": -1.1,
    "energyDevFt": 6,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.13,
+   "gsDotsGeo": 0.13,
+   "locDotsSim": 0.03,
+   "locDotsGeo": 0.03,
+   "n1Pct": 43.8,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247027000,
@@ -3501,8 +4156,14 @@
    "altDevFt": 6,
    "iasDevKt": -1.1,
    "energyDevFt": 5,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.13,
+   "gsDotsGeo": 0.13,
+   "locDotsSim": 0.04,
+   "locDotsGeo": 0.04,
+   "n1Pct": 43.8,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247028000,
@@ -3532,8 +4193,14 @@
    "altDevFt": 6,
    "iasDevKt": -1.2,
    "energyDevFt": 4,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.14,
+   "gsDotsGeo": 0.14,
+   "locDotsSim": 0.04,
+   "locDotsGeo": 0.04,
+   "n1Pct": 43.8,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247029000,
@@ -3563,8 +4230,14 @@
    "altDevFt": 6,
    "iasDevKt": -1.2,
    "energyDevFt": 4,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.15,
+   "gsDotsGeo": 0.15,
+   "locDotsSim": 0.04,
+   "locDotsGeo": 0.04,
+   "n1Pct": 43.8,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247030000,
@@ -3594,8 +4267,14 @@
    "altDevFt": 6,
    "iasDevKt": -1.2,
    "energyDevFt": 4,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.15,
+   "gsDotsGeo": 0.15,
+   "locDotsSim": 0.04,
+   "locDotsGeo": 0.04,
+   "n1Pct": 43.8,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247031000,
@@ -3625,8 +4304,14 @@
    "altDevFt": 6,
    "iasDevKt": -1.1,
    "energyDevFt": 4,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.16,
+   "gsDotsGeo": 0.16,
+   "locDotsSim": 0.04,
+   "locDotsGeo": 0.04,
+   "n1Pct": 43.8,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247032000,
@@ -3656,8 +4341,14 @@
    "altDevFt": 7,
    "iasDevKt": -1,
    "energyDevFt": 5,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.17,
+   "gsDotsGeo": 0.17,
+   "locDotsSim": 0.04,
+   "locDotsGeo": 0.04,
+   "n1Pct": 43.7,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247033000,
@@ -3687,8 +4378,14 @@
    "altDevFt": 7,
    "iasDevKt": -0.9,
    "energyDevFt": 6,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.17,
+   "gsDotsGeo": 0.17,
+   "locDotsSim": 0.04,
+   "locDotsGeo": 0.04,
+   "n1Pct": 43.7,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247034000,
@@ -3718,8 +4415,14 @@
    "altDevFt": 7,
    "iasDevKt": -0.8,
    "energyDevFt": 7,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.18,
+   "gsDotsGeo": 0.18,
+   "locDotsSim": 0.05,
+   "locDotsGeo": 0.05,
+   "n1Pct": 43.7,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247035000,
@@ -3749,8 +4452,14 @@
    "altDevFt": 7,
    "iasDevKt": -0.6,
    "energyDevFt": 8,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.18,
+   "gsDotsGeo": 0.18,
+   "locDotsSim": 0.05,
+   "locDotsGeo": 0.05,
+   "n1Pct": 43.7,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247036000,
@@ -3780,8 +4489,14 @@
    "altDevFt": 6,
    "iasDevKt": -0.4,
    "energyDevFt": 10,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.19,
+   "gsDotsGeo": 0.19,
+   "locDotsSim": 0.05,
+   "locDotsGeo": 0.05,
+   "n1Pct": 43.6,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247037000,
@@ -3811,8 +4526,14 @@
    "altDevFt": 6,
    "iasDevKt": -0.2,
    "energyDevFt": 12,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.2,
+   "gsDotsGeo": 0.2,
+   "locDotsSim": 0.05,
+   "locDotsGeo": 0.05,
+   "n1Pct": 43.6,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247038000,
@@ -3842,8 +4563,14 @@
    "altDevFt": 6,
    "iasDevKt": 0,
    "energyDevFt": 14,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.2,
+   "gsDotsGeo": 0.2,
+   "locDotsSim": 0.05,
+   "locDotsGeo": 0.05,
+   "n1Pct": 43.6,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247039000,
@@ -3873,8 +4600,14 @@
    "altDevFt": 6,
    "iasDevKt": 0.2,
    "energyDevFt": 16,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.21,
+   "gsDotsGeo": 0.21,
+   "locDotsSim": 0.05,
+   "locDotsGeo": 0.05,
+   "n1Pct": 43.5,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247040000,
@@ -3904,8 +4637,14 @@
    "altDevFt": 6,
    "iasDevKt": 0.4,
    "energyDevFt": 18,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.21,
+   "gsDotsGeo": 0.21,
+   "locDotsSim": 0.05,
+   "locDotsGeo": 0.05,
+   "n1Pct": 43.5,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247041000,
@@ -3935,8 +4674,14 @@
    "altDevFt": 6,
    "iasDevKt": 0.5,
    "energyDevFt": 19,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.21,
+   "gsDotsGeo": 0.21,
+   "locDotsSim": 0.05,
+   "locDotsGeo": 0.05,
+   "n1Pct": 43.5,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247042000,
@@ -3966,8 +4711,14 @@
    "altDevFt": 6,
    "iasDevKt": 0.7,
    "energyDevFt": 21,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.22,
+   "gsDotsGeo": 0.22,
+   "locDotsSim": 0.05,
+   "locDotsGeo": 0.05,
+   "n1Pct": 43.4,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247043000,
@@ -3997,8 +4748,14 @@
    "altDevFt": 5,
    "iasDevKt": 0.9,
    "energyDevFt": 22,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.22,
+   "gsDotsGeo": 0.22,
+   "locDotsSim": 0.05,
+   "locDotsGeo": 0.05,
+   "n1Pct": 43.4,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247044000,
@@ -4028,8 +4785,14 @@
    "altDevFt": 5,
    "iasDevKt": 1,
    "energyDevFt": 23,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.22,
+   "gsDotsGeo": 0.22,
+   "locDotsSim": 0.04,
+   "locDotsGeo": 0.04,
+   "n1Pct": 43.4,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247045000,
@@ -4059,8 +4822,14 @@
    "altDevFt": 5,
    "iasDevKt": 1.1,
    "energyDevFt": 23,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.22,
+   "gsDotsGeo": 0.22,
+   "locDotsSim": 0.04,
+   "locDotsGeo": 0.04,
+   "n1Pct": 43.4,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247046000,
@@ -4090,8 +4859,14 @@
    "altDevFt": 5,
    "iasDevKt": 1.2,
    "energyDevFt": 23,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.22,
+   "gsDotsGeo": 0.22,
+   "locDotsSim": 0.04,
+   "locDotsGeo": 0.04,
+   "n1Pct": 43.3,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247047000,
@@ -4121,8 +4896,14 @@
    "altDevFt": 4,
    "iasDevKt": 1.2,
    "energyDevFt": 23,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.22,
+   "gsDotsGeo": 0.22,
+   "locDotsSim": 0.04,
+   "locDotsGeo": 0.04,
+   "n1Pct": 43.3,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247048000,
@@ -4152,8 +4933,14 @@
    "altDevFt": 4,
    "iasDevKt": 1.2,
    "energyDevFt": 22,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.22,
+   "gsDotsGeo": 0.22,
+   "locDotsSim": 0.04,
+   "locDotsGeo": 0.04,
+   "n1Pct": 43.3,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247049000,
@@ -4183,8 +4970,14 @@
    "altDevFt": 3,
    "iasDevKt": 1.2,
    "energyDevFt": 21,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.21,
+   "gsDotsGeo": 0.21,
+   "locDotsSim": 0.04,
+   "locDotsGeo": 0.04,
+   "n1Pct": 43.3,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247050000,
@@ -4214,8 +5007,14 @@
    "altDevFt": 3,
    "iasDevKt": 1.1,
    "energyDevFt": 20,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.2,
+   "gsDotsGeo": 0.2,
+   "locDotsSim": 0.04,
+   "locDotsGeo": 0.04,
+   "n1Pct": 43.3,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247051000,
@@ -4245,8 +5044,14 @@
    "altDevFt": 3,
    "iasDevKt": 1,
    "energyDevFt": 18,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.19,
+   "gsDotsGeo": 0.19,
+   "locDotsSim": 0.03,
+   "locDotsGeo": 0.03,
+   "n1Pct": 43.3,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247052000,
@@ -4276,8 +5081,14 @@
    "altDevFt": 2,
    "iasDevKt": 0.9,
    "energyDevFt": 15,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.18,
+   "gsDotsGeo": 0.18,
+   "locDotsSim": 0.03,
+   "locDotsGeo": 0.03,
+   "n1Pct": 43.3,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247053000,
@@ -4307,8 +5118,14 @@
    "altDevFt": 2,
    "iasDevKt": 0.7,
    "energyDevFt": 13,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.16,
+   "gsDotsGeo": 0.16,
+   "locDotsSim": 0.03,
+   "locDotsGeo": 0.03,
+   "n1Pct": 43.3,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247054000,
@@ -4338,8 +5155,14 @@
    "altDevFt": 1,
    "iasDevKt": 0.5,
    "energyDevFt": 10,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": 0.13,
+   "gsDotsGeo": 0.13,
+   "locDotsSim": 0.03,
+   "locDotsGeo": 0.03,
+   "n1Pct": 43.3,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247055000,
@@ -4369,8 +5192,14 @@
    "altDevFt": 1,
    "iasDevKt": 0.3,
    "energyDevFt": 7,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": 0.02,
+   "locDotsGeo": 0.02,
+   "n1Pct": 43.3,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247056000,
@@ -4400,8 +5229,14 @@
    "altDevFt": 0,
    "iasDevKt": 0.1,
    "energyDevFt": 4,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": 0.02,
+   "locDotsGeo": 0.02,
+   "n1Pct": 40.0,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247057000,
@@ -4431,8 +5266,14 @@
    "altDevFt": -5,
    "iasDevKt": -0.3,
    "energyDevFt": -7,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": 0.03,
+   "locDotsGeo": 0.03,
+   "n1Pct": 41.0,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247058000,
@@ -4462,8 +5303,14 @@
    "altDevFt": -9,
    "iasDevKt": -1.5,
    "energyDevFt": -25,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": 0.03,
+   "locDotsGeo": 0.03,
+   "n1Pct": 22.0,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247059000,
@@ -4493,8 +5340,14 @@
    "altDevFt": -9,
    "iasDevKt": -2.6,
    "energyDevFt": -38,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": 0.03,
+   "locDotsGeo": 0.03,
+   "n1Pct": 22.0,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247060000,
@@ -4524,8 +5377,14 @@
    "altDevFt": -6,
    "iasDevKt": -3.7,
    "energyDevFt": -48,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": 0.03,
+   "locDotsGeo": 0.03,
+   "n1Pct": 22.0,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247061000,
@@ -4555,8 +5414,14 @@
    "altDevFt": 0,
    "iasDevKt": -4.9,
    "energyDevFt": -54,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": 0.03,
+   "locDotsGeo": 0.03,
+   "n1Pct": 22.0,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247062000,
@@ -4586,8 +5451,14 @@
    "altDevFt": 0,
    "iasDevKt": -6,
    "energyDevFt": -67,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": 0.03,
+   "locDotsGeo": 0.03,
+   "n1Pct": 52.0,
+   "spoilersPct": 0.0
   },
   {
    "tMs": 1792247063000,
@@ -4617,8 +5488,14 @@
    "altDevFt": null,
    "iasDevKt": null,
    "energyDevFt": null,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": 0.03,
+   "n1Pct": 70.0,
+   "spoilersPct": 100.0
   },
   {
    "tMs": 1792247064000,
@@ -4648,8 +5525,14 @@
    "altDevFt": null,
    "iasDevKt": null,
    "energyDevFt": null,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": 0.03,
+   "n1Pct": 70.0,
+   "spoilersPct": 100.0
   },
   {
    "tMs": 1792247065000,
@@ -4679,8 +5562,14 @@
    "altDevFt": null,
    "iasDevKt": null,
    "energyDevFt": null,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": 0.03,
+   "n1Pct": 70.0,
+   "spoilersPct": 100.0
   },
   {
    "tMs": 1792247066000,
@@ -4710,8 +5599,14 @@
    "altDevFt": null,
    "iasDevKt": null,
    "energyDevFt": null,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": 0.03,
+   "n1Pct": 70.0,
+   "spoilersPct": 100.0
   },
   {
    "tMs": 1792247067000,
@@ -4741,8 +5636,14 @@
    "altDevFt": null,
    "iasDevKt": null,
    "energyDevFt": null,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": 0.03,
+   "n1Pct": 70.0,
+   "spoilersPct": 100.0
   },
   {
    "tMs": 1792247068000,
@@ -4772,8 +5673,14 @@
    "altDevFt": null,
    "iasDevKt": null,
    "energyDevFt": null,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": 0.03,
+   "n1Pct": 70.0,
+   "spoilersPct": 100.0
   },
   {
    "tMs": 1792247069000,
@@ -4803,8 +5710,14 @@
    "altDevFt": null,
    "iasDevKt": null,
    "energyDevFt": null,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": 0.03,
+   "n1Pct": 70.0,
+   "spoilersPct": 100.0
   },
   {
    "tMs": 1792247070000,
@@ -4834,8 +5747,14 @@
    "altDevFt": null,
    "iasDevKt": null,
    "energyDevFt": null,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": 0.04,
+   "n1Pct": 70.0,
+   "spoilersPct": 100.0
   },
   {
    "tMs": 1792247071000,
@@ -4865,8 +5784,14 @@
    "altDevFt": null,
    "iasDevKt": null,
    "energyDevFt": null,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": 0.04,
+   "n1Pct": 70.0,
+   "spoilersPct": 100.0
   },
   {
    "tMs": 1792247072000,
@@ -4896,8 +5821,14 @@
    "altDevFt": null,
    "iasDevKt": null,
    "energyDevFt": null,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": 0.04,
+   "n1Pct": 70.0,
+   "spoilersPct": 100.0
   },
   {
    "tMs": 1792247073000,
@@ -4927,8 +5858,14 @@
    "altDevFt": null,
    "iasDevKt": null,
    "energyDevFt": null,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": 0.04,
+   "n1Pct": 70.0,
+   "spoilersPct": 100.0
   },
   {
    "tMs": 1792247074000,
@@ -4958,8 +5895,14 @@
    "altDevFt": null,
    "iasDevKt": null,
    "energyDevFt": null,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": 0.04,
+   "n1Pct": 70.0,
+   "spoilersPct": 100.0
   },
   {
    "tMs": 1792247075000,
@@ -4989,8 +5932,14 @@
    "altDevFt": null,
    "iasDevKt": null,
    "energyDevFt": null,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": 0.04,
+   "n1Pct": 70.0,
+   "spoilersPct": 100.0
   },
   {
    "tMs": 1792247076000,
@@ -5020,8 +5969,14 @@
    "altDevFt": null,
    "iasDevKt": null,
    "energyDevFt": null,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": 0.04,
+   "n1Pct": 27.0,
+   "spoilersPct": 100.0
   },
   {
    "tMs": 1792247077000,
@@ -5051,8 +6006,14 @@
    "altDevFt": null,
    "iasDevKt": null,
    "energyDevFt": null,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": 0.04,
+   "n1Pct": 26.7,
+   "spoilersPct": 100.0
   },
   {
    "tMs": 1792247078000,
@@ -5082,8 +6043,14 @@
    "altDevFt": null,
    "iasDevKt": null,
    "energyDevFt": null,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": 0.04,
+   "n1Pct": 26.4,
+   "spoilersPct": 100.0
   },
   {
    "tMs": 1792247079000,
@@ -5113,8 +6080,14 @@
    "altDevFt": null,
    "iasDevKt": null,
    "energyDevFt": null,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": 0.04,
+   "n1Pct": 26.1,
+   "spoilersPct": 100.0
   },
   {
    "tMs": 1792247080000,
@@ -5144,8 +6117,14 @@
    "altDevFt": null,
    "iasDevKt": null,
    "energyDevFt": null,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": 0.04,
+   "n1Pct": 25.9,
+   "spoilersPct": 100.0
   },
   {
    "tMs": 1792247081000,
@@ -5175,8 +6154,14 @@
    "altDevFt": null,
    "iasDevKt": null,
    "energyDevFt": null,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": 0.04,
+   "n1Pct": 25.6,
+   "spoilersPct": 100.0
   },
   {
    "tMs": 1792247082000,
@@ -5206,8 +6191,14 @@
    "altDevFt": null,
    "iasDevKt": null,
    "energyDevFt": null,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": 0.04,
+   "n1Pct": 25.4,
+   "spoilersPct": 100.0
   },
   {
    "tMs": 1792247083000,
@@ -5237,8 +6228,14 @@
    "altDevFt": null,
    "iasDevKt": null,
    "energyDevFt": null,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": 0.04,
+   "n1Pct": 25.1,
+   "spoilersPct": 100.0
   },
   {
    "tMs": 1792247084000,
@@ -5268,8 +6265,14 @@
    "altDevFt": null,
    "iasDevKt": null,
    "energyDevFt": null,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": 0.04,
+   "n1Pct": 24.9,
+   "spoilersPct": 100.0
   },
   {
    "tMs": 1792247085000,
@@ -5299,8 +6302,14 @@
    "altDevFt": null,
    "iasDevKt": null,
    "energyDevFt": null,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": 0.04,
+   "n1Pct": 24.7,
+   "spoilersPct": 100.0
   },
   {
    "tMs": 1792247086000,
@@ -5330,8 +6339,14 @@
    "altDevFt": null,
    "iasDevKt": null,
    "energyDevFt": null,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": 0.04,
+   "n1Pct": 24.5,
+   "spoilersPct": 100.0
   },
   {
    "tMs": 1792247087000,
@@ -5361,8 +6376,14 @@
    "altDevFt": null,
    "iasDevKt": null,
    "energyDevFt": null,
-   "headwindKt": null,
-   "crosswindKt": null
+   "headwindKt": 8.0,
+   "crosswindKt": 0.2,
+   "gsDotsSim": null,
+   "gsDotsGeo": null,
+   "locDotsSim": null,
+   "locDotsGeo": 0.04,
+   "n1Pct": 24.4,
+   "spoilersPct": 100.0
   }
  ],
  "config": {
@@ -5436,6 +6457,22 @@
   "profileDenseBelowFt": 3000,
   "profileSparseS": 5,
   "profileAfterTouchdownS": 10,
-  "minStatSamples": 5
+  "minStatSamples": 5,
+  "ilsMinShare": 0.6,
+  "locFullScaleDots": 2,
+  "ilsMismatchDots": 0.5,
+  "ilsRejectGsDeg": 1,
+  "ilsRejectLocDots": 1.5,
+  "windTailwindKt": 5,
+  "windCrosswindKt": 15,
+  "windShearKt": 15,
+  "thrustMinN1Pct": 40,
+  "thrustDurationS": 5,
+  "thrustFloorFt": 50,
+  "n1ValidMinPct": 10,
+  "spoilersMaxPct": 2,
+  "energyBandHighFt": 500,
+  "energyBandLowFt": 300,
+  "vappVs0Factor": 1.3
  }
 }

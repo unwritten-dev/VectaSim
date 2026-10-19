@@ -25,11 +25,11 @@
 use crate::airframe::{AirframeHint, icao_from_atc_model, normalize_registration, upsert_from_hint};
 use crate::bundle::route_near;
 use crate::store::{NOTES_MAX_CHARS, normalize_tags, phase_str};
-use crate::{Result, Store, StoreError};
+use crate::{Invalid, Result, Store, StoreError};
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use vectasim_core::FlightPhase;
+use vectasim_core::{FlightPhase, Lang};
 
 /// Largest file the import reads.
 pub const CSV_MAX_BYTES: u64 = 50 * 1024 * 1024;
@@ -335,11 +335,15 @@ pub struct CsvImportOptions {
     pub dedupe: bool,
     /// Tag besides `import` (e.g. `volanta`, `stkp`, the file name); empty = none.
     pub source_tag: String,
+    /// Language of the warnings, row errors and generated note lines; set by the app (backend
+    /// language), not sent by the frontend.
+    #[serde(skip)]
+    pub lang: Lang,
 }
 
 impl Default for CsvImportOptions {
     fn default() -> Self {
-        Self { dedupe: true, source_tag: String::new() }
+        Self { dedupe: true, source_tag: String::new(), lang: Lang::default() }
     }
 }
 
@@ -369,8 +373,8 @@ pub struct CsvImportReport {
     pub warnings: Vec<String>,
 }
 
-fn invalid(msg: impl Into<String>) -> StoreError {
-    StoreError::Invalid(msg.into())
+fn invalid(i: Invalid) -> StoreError {
+    StoreError::Invalid(i)
 }
 
 // ---- decoding -------------------------------------------------------------------------------
@@ -629,13 +633,19 @@ pub fn suggest_columns(columns: &[String]) -> BTreeMap<CsvField, usize> {
     out
 }
 
-/// Encoding, delimiter, header and preset of a file, with a suggested mapping.
-pub fn sniff(bytes: &[u8]) -> CsvProfile {
-    sniff_named(bytes, None)
+/// Name of the column at index `i` in a file without a header.
+fn column_name(i: usize, lang: Lang) -> String {
+    ltr!(lang, "Spalte {}", "Column {}", i + 1)
 }
 
-/// [`sniff`] with the file name as a hint for the preset (`…stkp….csv`).
-pub fn sniff_named(bytes: &[u8], file_name: Option<&str>) -> CsvProfile {
+/// Encoding, delimiter, header and preset of a file, with a suggested mapping.
+pub fn sniff(bytes: &[u8]) -> CsvProfile {
+    sniff_named(bytes, None, Lang::De)
+}
+
+/// [`sniff`] with the file name as a hint for the preset (`…stkp….csv`); `lang` names
+/// columns without a header (`Spalte 1` / `Column 1`).
+pub fn sniff_named(bytes: &[u8], file_name: Option<&str>, lang: Lang) -> CsvProfile {
     let (text, encoding) = decode(bytes, None);
     let delim = sniff_delimiter(&text);
     let head = records_of(&text, delim, Some(SNIFF_RECORDS));
@@ -644,9 +654,9 @@ pub fn sniff_named(bytes: &[u8], file_name: Option<&str>) -> CsvProfile {
     let width = all.iter().map(|r| r.cells.len()).max().unwrap_or(0);
     let columns: Vec<String> = match (has_header, all.first()) {
         (true, Some(h)) => {
-            (0..width).map(|i| h.cells.get(i).cloned().filter(|c| !c.is_empty()).unwrap_or_else(|| format!("Spalte {}", i + 1))).collect()
+            (0..width).map(|i| h.cells.get(i).cloned().filter(|c| !c.is_empty()).unwrap_or_else(|| column_name(i, lang))).collect()
         }
-        _ => (0..width).map(|i| format!("Spalte {}", i + 1)).collect(),
+        _ => (0..width).map(|i| column_name(i, lang)).collect(),
     };
     let data = if has_header { all.get(1..).unwrap_or(&[]) } else { &all[..] };
     let detected_preset = if has_header { detect_preset(&columns, file_name) } else { CsvPreset::Generic };
@@ -987,31 +997,31 @@ fn no_coords(_: &str) -> Option<(f64, f64)> {
     None
 }
 
-const FIELD_LABEL: &[(CsvField, &str)] = &[
-    (CsvField::Date, "Datum"),
-    (CsvField::OffBlock, "Off-Block"),
-    (CsvField::Takeoff, "Start"),
-    (CsvField::Landing, "Landung"),
-    (CsvField::OnBlock, "On-Block"),
+const FIELD_LABEL: &[(CsvField, &str, &str)] = &[
+    (CsvField::Date, "Datum", "Date"),
+    (CsvField::OffBlock, "Off-Block", "Off-block"),
+    (CsvField::Takeoff, "Start", "Takeoff"),
+    (CsvField::Landing, "Landung", "Landing"),
+    (CsvField::OnBlock, "On-Block", "On-block"),
 ];
 
-fn label(f: CsvField) -> &'static str {
-    FIELD_LABEL.iter().find(|(k, _)| *k == f).map(|(_, l)| *l).unwrap_or("Wert")
+fn label(f: CsvField, lang: Lang) -> &'static str {
+    FIELD_LABEL.iter().find(|(k, _, _)| *k == f).map(|(_, de, en)| lang.tr(de, en)).unwrap_or(lang.tr("Wert", "Value"))
 }
 
-/// One record → flight. Never fails; problems end up in `warnings` / `error`.
-fn parse_row(rec: &Record, m: &ColumnMapping, coords: AirportCoords<'_>) -> ParsedFlight {
+/// One record → flight. Never fails; problems end up in `warnings` / `error` (in `lang`).
+fn parse_row(rec: &Record, m: &ColumnMapping, coords: AirportCoords<'_>, lang: Lang) -> ParsedFlight {
     let mut p = ParsedFlight { line: rec.line, ..Default::default() };
     let cell = |f: CsvField| -> &str { m.columns.get(&f).and_then(|i| rec.cells.get(*i)).map(String::as_str).unwrap_or("").trim() };
 
     // airports
     match airport(cell(CsvField::DepIcao)) {
         Ok(v) => p.dep_icao = v,
-        Err(v) => p.error = Some(format!("Abflughafen „{v}“ ist kein Flughafencode")),
+        Err(v) => p.error = Some(ltr!(lang, "Abflughafen „{v}“ ist kein Flughafencode", "Departure airport “{v}” is not an airport code")),
     }
     match airport(cell(CsvField::ArrIcao)) {
         Ok(v) => p.arr_icao = v,
-        Err(v) => p.error = p.error.take().or(Some(format!("Zielflughafen „{v}“ ist kein Flughafencode"))),
+        Err(v) => p.error = p.error.take().or(Some(ltr!(lang, "Zielflughafen „{v}“ ist kein Flughafencode", "Destination airport “{v}” is not an airport code"))),
     }
 
     // text fields
@@ -1036,17 +1046,17 @@ fn parse_row(rec: &Record, m: &ColumnMapping, coords: AirportCoords<'_>) -> Pars
         }
         let v = parse_number(raw);
         if v.is_none() {
-            p.warnings.push(format!("{what} „{raw}“ nicht lesbar"));
+            p.warnings.push(ltr!(lang, "{what} „{raw}“ nicht lesbar", "{what} “{raw}” unreadable"));
         }
         v
     };
-    p.distance_nm = number(&mut p, CsvField::DistanceNm, "Distanz").filter(|v| *v >= 0.0);
-    p.max_alt_ft = number(&mut p, CsvField::MaxAltFt, "Max. Höhe").filter(|v| *v >= 0.0);
-    p.fuel_start_kg = number(&mut p, CsvField::FuelStart, "Kraftstoff Start").map(weight);
-    p.fuel_end_kg = number(&mut p, CsvField::FuelEnd, "Kraftstoff Ende").map(weight);
-    p.fuel_used_kg = number(&mut p, CsvField::FuelUsed, "Kraftstoffverbrauch").map(weight);
-    p.landing_rate_fpm = number(&mut p, CsvField::LandingRateFpm, "Landerate");
-    if let Some(r) = number(&mut p, CsvField::Rating, "Bewertung") {
+    p.distance_nm = number(&mut p, CsvField::DistanceNm, lang.tr("Distanz", "Distance")).filter(|v| *v >= 0.0);
+    p.max_alt_ft = number(&mut p, CsvField::MaxAltFt, lang.tr("Max. Höhe", "Max. altitude")).filter(|v| *v >= 0.0);
+    p.fuel_start_kg = number(&mut p, CsvField::FuelStart, lang.tr("Kraftstoff Start", "Fuel at start")).map(weight);
+    p.fuel_end_kg = number(&mut p, CsvField::FuelEnd, lang.tr("Kraftstoff Ende", "Fuel at end")).map(weight);
+    p.fuel_used_kg = number(&mut p, CsvField::FuelUsed, lang.tr("Kraftstoffverbrauch", "Fuel used")).map(weight);
+    p.landing_rate_fpm = number(&mut p, CsvField::LandingRateFpm, lang.tr("Landerate", "Landing rate"));
+    if let Some(r) = number(&mut p, CsvField::Rating, lang.tr("Bewertung", "Rating")) {
         let r = r.round();
         if (1.0..=5.0).contains(&r) {
             p.rating = Some(r as u8);
@@ -1059,12 +1069,12 @@ fn parse_row(rec: &Record, m: &ColumnMapping, coords: AirportCoords<'_>) -> Pars
         }
         let v = parse_duration_min(raw, m.duration_unit);
         if v.is_none() {
-            p.warnings.push(format!("{what} „{raw}“ nicht lesbar"));
+            p.warnings.push(ltr!(lang, "{what} „{raw}“ nicht lesbar", "{what} “{raw}” unreadable"));
         }
         v
     };
-    p.block_min = duration(&mut p, CsvField::BlockMin, "Blockzeit");
-    p.air_min = duration(&mut p, CsvField::AirMin, "Flugzeit");
+    p.block_min = duration(&mut p, CsvField::BlockMin, lang.tr("Blockzeit", "Block time"));
+    p.air_min = duration(&mut p, CsvField::AirMin, lang.tr("Flugzeit", "Air time"));
 
     // times: naive values first (date completes time-only cells), then UTC
     let date_raw = cell(CsvField::Date);
@@ -1073,7 +1083,7 @@ fn parse_row(rec: &Record, m: &ColumnMapping, coords: AirportCoords<'_>) -> Pars
         match parse_stamp(date_raw, m.date_format) {
             Some(Stamp::Date { days }) => base_days = Some(days),
             Some(Stamp::DateTime { naive_ms, .. }) => base_days = Some(naive_ms.div_euclid(DAY_MS)),
-            _ => p.error = p.error.take().or(Some(format!("Datum „{date_raw}“ nicht lesbar"))),
+            _ => p.error = p.error.take().or(Some(ltr!(lang, "Datum „{date_raw}“ nicht lesbar", "Date “{date_raw}” unreadable"))),
         }
     }
     let mut times: [Option<i64>; 4] = [None; 4];
@@ -1109,15 +1119,15 @@ fn parse_row(rec: &Record, m: &ColumnMapping, coords: AirportCoords<'_>) -> Pars
                     Some(v)
                 }
                 None => {
-                    p.warnings.push(format!("{} „{raw}“ ohne Datum", label(f)));
+                    p.warnings.push(ltr!(lang, "{} „{raw}“ ohne Datum", "{} “{raw}” without a date", label(f, lang)));
                     None
                 }
             },
             None => {
                 if slot == 0 {
-                    p.error = p.error.take().or(Some(format!("Off-Block-Zeit „{raw}“ nicht lesbar")));
+                    p.error = p.error.take().or(Some(ltr!(lang, "Off-Block-Zeit „{raw}“ nicht lesbar", "Off-block time “{raw}” unreadable")));
                 } else {
-                    p.warnings.push(format!("{} „{raw}“ nicht lesbar", label(f)));
+                    p.warnings.push(ltr!(lang, "{} „{raw}“ nicht lesbar", "{} “{raw}” unreadable", label(f, lang)));
                 }
                 None
             }
@@ -1173,19 +1183,21 @@ fn parse_row(rec: &Record, m: &ColumnMapping, coords: AirportCoords<'_>) -> Pars
     if let (Some(a), Some(b)) = (off, on)
         && b < a
     {
-        p.error = p.error.take().or(Some("On-Block liegt vor dem Off-Block".into()));
+        p.error = p.error.take().or(Some(lang.tr("On-Block liegt vor dem Off-Block", "On-block is before off-block").into()));
     }
     let seq: Vec<i64> = [off, takeoff, landing, on].into_iter().flatten().collect();
     if seq.windows(2).any(|w| w[1] < w[0]) && p.error.is_none() {
-        p.warnings.push("Zeiten nicht in der Reihenfolge Off-Block ≤ Start ≤ Landung ≤ On-Block".into());
+        p.warnings.push(
+            lang.tr("Zeiten nicht in der Reihenfolge Off-Block ≤ Start ≤ Landung ≤ On-Block", "Times not in the order off-block ≤ takeoff ≤ landing ≤ on-block").into(),
+        );
     }
     if let (Some(a), Some(b)) = (off, on)
         && b - a > 2 * DAY_MS
     {
-        p.warnings.push("Blockzeit über 48 h".into());
+        p.warnings.push(lang.tr("Blockzeit über 48 h", "Block time over 48 h").into());
     }
     if only_date && p.error.is_none() {
-        p.warnings.push("nur ein Datum – Uhrzeit 00:00 angenommen".into());
+        p.warnings.push(lang.tr("nur ein Datum – Uhrzeit 00:00 angenommen", "date only – time 00:00 assumed").into());
     }
     p.off_block_ms = off;
     p.takeoff_ms = takeoff;
@@ -1194,9 +1206,9 @@ fn parse_row(rec: &Record, m: &ColumnMapping, coords: AirportCoords<'_>) -> Pars
 
     if p.error.is_none() {
         p.error = match (&p.dep_icao, &p.arr_icao, off) {
-            (None, _, _) => Some("Abflughafen fehlt".into()),
-            (_, None, _) => Some("Zielflughafen fehlt".into()),
-            (_, _, None) => Some("Off-Block-Zeit bzw. Datum fehlt".into()),
+            (None, _, _) => Some(lang.tr("Abflughafen fehlt", "Departure airport missing").into()),
+            (_, None, _) => Some(lang.tr("Zielflughafen fehlt", "Destination airport missing").into()),
+            (_, _, None) => Some(lang.tr("Off-Block-Zeit bzw. Datum fehlt", "Off-block time or date missing").into()),
             _ => None,
         };
     }
@@ -1204,7 +1216,7 @@ fn parse_row(rec: &Record, m: &ColumnMapping, coords: AirportCoords<'_>) -> Pars
         && p.error.is_none()
         && !(days_from_civil(1990, 1, 1) * DAY_MS..=days_from_civil(2100, 1, 1) * DAY_MS).contains(&o)
     {
-        p.error = Some("Datum außerhalb 1990–2100".into());
+        p.error = Some(lang.tr("Datum außerhalb 1990–2100", "Date outside 1990–2100").into());
     }
 
     // distance from the airport index when the file has none
@@ -1230,7 +1242,7 @@ fn data_records(bytes: &[u8], m: &ColumnMapping) -> Result<Vec<Record>> {
             let mut c = d.chars();
             match (c.next(), c.next()) {
                 (Some(ch), None) => ch,
-                _ => return Err(invalid(format!("Trennzeichen „{d}“: genau ein Zeichen"))),
+                _ => return Err(invalid(Invalid::CsvDelimiter { delimiter: d.to_string() })),
             }
         }
         None => sniff_delimiter(&text),
@@ -1246,23 +1258,20 @@ fn data_records(bytes: &[u8], m: &ColumnMapping) -> Result<Vec<Record>> {
 fn check_mapping(m: &ColumnMapping) -> Result<()> {
     for f in [CsvField::DepIcao, CsvField::ArrIcao] {
         if !m.columns.contains_key(&f) {
-            return Err(invalid(if f == CsvField::DepIcao {
-                "Keine Spalte für den Abflughafen zugeordnet"
-            } else {
-                "Keine Spalte für den Zielflughafen zugeordnet"
-            }));
+            return Err(invalid(if f == CsvField::DepIcao { Invalid::CsvNoDepartureColumn } else { Invalid::CsvNoArrivalColumn }));
         }
     }
     if ![CsvField::OffBlock, CsvField::Date, CsvField::OnBlock, CsvField::Takeoff].iter().any(|f| m.columns.contains_key(f)) {
-        return Err(invalid("Keine Spalte für Datum oder Off-Block zugeordnet"));
+        return Err(invalid(Invalid::CsvNoDateColumn));
     }
     Ok(())
 }
 
-/// The first `limit` rows with the mapping, without the logbook (no duplicate check).
-pub fn preview(bytes: &[u8], mapping: &ColumnMapping, limit: usize) -> Result<Vec<ParsedFlight>> {
+/// The first `limit` rows with the mapping, without the logbook (no duplicate check);
+/// warnings and errors in `lang`.
+pub fn preview(bytes: &[u8], mapping: &ColumnMapping, limit: usize, lang: Lang) -> Result<Vec<ParsedFlight>> {
     check_mapping(mapping)?;
-    Ok(data_records(bytes, mapping)?.iter().take(limit).map(|r| parse_row(r, mapping, &no_coords)).collect())
+    Ok(data_records(bytes, mapping)?.iter().take(limit).map(|r| parse_row(r, mapping, &no_coords, lang)).collect())
 }
 
 /// Same route, off-block within ±15 min of one of `seen` (rows earlier in the file).
@@ -1275,16 +1284,21 @@ fn route_of(p: &ParsedFlight) -> Option<(&str, &str, i64)> {
 }
 
 /// Notes as stored: the file's notes plus the figures that have no column of their own.
-fn notes_of(p: &ParsedFlight) -> Option<String> {
+fn notes_of(p: &ParsedFlight, lang: Lang) -> Option<String> {
     let mut lines: Vec<String> = p.notes.iter().cloned().collect();
     if let Some(r) = p.landing_rate_fpm {
-        lines.push(format!("Landerate laut Importdatei: {} fpm (nicht von VectaSim gemessen)", r.round() as i64));
+        lines.push(ltr!(
+            lang,
+            "Landerate laut Importdatei: {} fpm (nicht von VectaSim gemessen)",
+            "Landing rate per import file: {} fpm (not measured by VectaSim)",
+            r.round() as i64
+        ));
     }
     if p.fuel_start_kg.is_none()
         && p.fuel_end_kg.is_none()
         && let Some(u) = p.fuel_used_kg
     {
-        lines.push(format!("Kraftstoffverbrauch laut Importdatei: {} kg", u.round() as i64));
+        lines.push(ltr!(lang, "Kraftstoffverbrauch laut Importdatei: {} kg", "Fuel used per import file: {} kg", u.round() as i64));
     }
     let all = lines.join("\n");
     (!all.trim().is_empty()).then(|| all.chars().take(NOTES_MAX_CHARS).collect())
@@ -1304,6 +1318,7 @@ fn insert_parsed(
     tags: &[String],
     now: i64,
     coords: AirportCoords<'_>,
+    lang: Lang,
 ) -> Result<bool> {
     let id = uuid::Uuid::new_v4().to_string();
     let (icao, title) = aircraft_of(p);
@@ -1347,7 +1362,7 @@ fn insert_parsed(
             dep,
             arr,
             p.callsign,
-            notes_of(p),
+            notes_of(p, lang),
             (!all_tags.is_empty()).then(|| serde_json::to_string(&all_tags).unwrap_or_default()),
             p.rating,
             reg,
@@ -1388,7 +1403,7 @@ impl Store {
         let mut out = CsvPreview { total_rows: recs.len(), ..Default::default() };
         let mut seen: Vec<(String, String, i64)> = Vec::new();
         for (i, rec) in recs.iter().enumerate() {
-            let mut p = parse_row(rec, mapping, if i < limit { coords } else { &no_coords });
+            let mut p = parse_row(rec, mapping, if i < limit { coords } else { &no_coords }, opts.lang);
             if p.error.is_some() {
                 out.invalid += 1;
             } else {
@@ -1438,10 +1453,10 @@ impl Store {
             let mut conn = self.conn();
             let tx = conn.transaction()?;
             for rec in chunk {
-                let p = parse_row(rec, mapping, coords);
+                let p = parse_row(rec, mapping, coords, opts.lang);
                 if let Some(e) = &p.error {
                     report.skipped_invalid += 1;
-                    push_warning(&mut report.warnings, &mut dropped, format!("Zeile {}: übersprungen – {e}", p.line));
+                    push_warning(&mut report.warnings, &mut dropped, ltr!(opts.lang, "Zeile {}: übersprungen – {e}", "Line {}: skipped – {e}", p.line));
                     continue;
                 }
                 if opts.dedupe
@@ -1452,10 +1467,10 @@ impl Store {
                     continue;
                 }
                 for w in &p.warnings {
-                    push_warning(&mut report.warnings, &mut dropped, format!("Zeile {}: {w}", p.line));
+                    push_warning(&mut report.warnings, &mut dropped, ltr!(opts.lang, "Zeile {}: {w}", "Line {}: {w}", p.line));
                 }
                 estimated += usize::from(p.distance_estimated);
-                if insert_parsed(&tx, &p, &provider, &tags, now_ms, coords).map_err(|e| invalid(format!("Zeile {}: {e}", p.line)))? {
+                if insert_parsed(&tx, &p, &provider, &tags, now_ms, coords, opts.lang).map_err(|e| invalid(Invalid::CsvLine { line: p.line, source: Box::new(e) }))? {
                     report.airframes_added += 1;
                 }
                 report.added += 1;
@@ -1463,10 +1478,15 @@ impl Store {
             tx.commit()?;
         }
         if estimated > 0 {
-            report.warnings.insert(0, format!("{estimated} Flüge ohne Distanz in der Datei: Großkreis zwischen den Flughäfen eingetragen"));
+            let note = match (opts.lang, estimated) {
+                (Lang::De, _) => format!("{estimated} Flüge ohne Distanz in der Datei: Großkreis zwischen den Flughäfen eingetragen"),
+                (Lang::En, 1) => "1 flight without a distance in the file: great-circle distance between the airports entered".to_string(),
+                (Lang::En, _) => format!("{estimated} flights without a distance in the file: great-circle distance between the airports entered"),
+            };
+            report.warnings.insert(0, note);
         }
         if dropped > 0 {
-            report.warnings.push(format!("… und {dropped} weitere Hinweise"));
+            report.warnings.push(ltr!(opts.lang, "… und {dropped} weitere Hinweise", "… and {dropped} more notes"));
         }
         Ok(report)
     }

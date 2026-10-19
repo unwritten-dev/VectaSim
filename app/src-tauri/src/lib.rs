@@ -1,3 +1,5 @@
+#[macro_use]
+mod lang;
 mod airframes;
 mod approach;
 mod countries;
@@ -12,7 +14,9 @@ mod notify;
 mod online;
 mod pirep;
 mod privacy;
+mod server;
 mod simconnect_dl;
+mod simselect;
 mod tray;
 
 use manager::{DiagSnapshot, ProviderManager, StatusSnapshot};
@@ -105,9 +109,15 @@ struct AppInfo {
 /// Same order as the SimConnect provider's loader; the bare name is resolved like the
 /// Windows DLL search (System32, then PATH). Only checks that the file exists.
 fn find_simconnect_dll() -> Option<std::path::PathBuf> {
+    find_simconnect_dll_where(&|p| p.is_file())
+}
+
+/// [`find_simconnect_dll`] with a custom test for each absolute candidate (the headless
+/// `--install-simconnect --check` also verifies the hash of the downloaded copy).
+pub(crate) fn find_simconnect_dll_where(accept: &dyn Fn(&std::path::Path) -> bool) -> Option<std::path::PathBuf> {
     for p in vectasim_simconnect::ffi::candidate_paths() {
         if p.is_absolute() {
-            if p.is_file() {
+            if accept(&p) {
                 return Some(p);
             }
             continue;
@@ -119,7 +129,7 @@ fn find_simconnect_dll() -> Option<std::path::PathBuf> {
         if let Some(path) = std::env::var_os("PATH") {
             dirs.extend(std::env::split_paths(&path));
         }
-        if let Some(found) = dirs.into_iter().map(|d| d.join(&p)).find(|f| f.is_file()) {
+        if let Some(found) = dirs.into_iter().map(|d| d.join(&p)).find(|f| accept(f)) {
             return Some(found);
         }
     }
@@ -164,6 +174,9 @@ fn select_provider(
     let is_demo = |p: &str| p == "mock" || p == "replay";
     let leaving_demo = is_demo(&manager.snapshot().provider) && !is_demo(&kind);
     apply_dll_setting(&store);
+    // "simconnect" from the UI ("Demo beenden", "Mit Simulator verbinden") means the simulator
+    // chosen in Einstellungen → Simulator (automatic, MSFS or X-Plane)
+    let kind = if kind == "simconnect" { "sim".to_string() } else { kind };
     manager.start(app.clone(), store.inner().clone(), Arc::new(IndexResolver(airports.inner().clone())), &kind)?;
     if leaving_demo {
         purge_demo(&app, &store);
@@ -185,13 +198,13 @@ fn set_simconnect_dll(
     if let Some(p) = &path {
         let file = std::path::Path::new(p);
         if !file.is_file() {
-            return Err(format!("Datei nicht gefunden: {p}"));
+            return Err(trf!("Datei nicht gefunden: {p}", "File not found: {p}"));
         }
         if !file.extension().is_some_and(|e| e.eq_ignore_ascii_case("dll")) {
-            return Err(format!("Keine DLL-Datei: {p}"));
+            return Err(trf!("Keine DLL-Datei: {p}", "Not a DLL file: {p}"));
         }
     }
-    store.set_setting(SETTING_SIMCONNECT_DLL, path.as_deref().unwrap_or("")).map_err(|e| e.to_string())?;
+    store.set_setting(SETTING_SIMCONNECT_DLL, path.as_deref().unwrap_or("")).map_err(lang::ui_error)?;
     apply_dll_setting(&store);
     log::info!("SimConnect.dll setting: {}", path.as_deref().unwrap_or("<automatic search>"));
 
@@ -200,14 +213,14 @@ fn set_simconnect_dll(
     if snap.provider != "simconnect" || snap.state == "connected" || flight_open {
         return Ok(false);
     }
-    manager.start(app, store.inner().clone(), Arc::new(IndexResolver(airports.inner().clone())), "simconnect")?;
+    manager.start(app, store.inner().clone(), Arc::new(IndexResolver(airports.inner().clone())), "sim")?;
     Ok(true)
 }
 
 /// Folder with `vectasim.log` (and its rotated predecessors).
 #[tauri::command]
 fn log_dir(app: AppHandle) -> Result<String, String> {
-    app.path().app_log_dir().map(|d| d.display().to_string()).map_err(|e| e.to_string())
+    app.path().app_log_dir().map(|d| d.display().to_string()).map_err(lang::ui_error)
 }
 
 #[derive(serde::Serialize)]
@@ -243,7 +256,7 @@ fn debug_mode_on(store: &Store) -> bool {
 #[tauri::command]
 fn set_log_level(level: String, store: State<Store>) -> Result<(), String> {
     let parsed = logging::parse_level(&level).ok_or_else(|| format!("unbekannte Protokollstufe: {level}"))?;
-    store.set_setting(logging::SETTING_LOG_LEVEL, &parsed.as_str().to_ascii_lowercase()).map_err(|e| e.to_string())?;
+    store.set_setting(logging::SETTING_LOG_LEVEL, &parsed.as_str().to_ascii_lowercase()).map_err(lang::ui_error)?;
     logging::set_level(parsed);
     log::info!("log level set to {parsed}");
     Ok(())
@@ -251,7 +264,7 @@ fn set_log_level(level: String, store: State<Store>) -> Result<(), String> {
 
 /// `%LOCALAPPDATA%\io.vectasim.app\dumps` (next to `logs`).
 fn dumps_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
-    app.path().app_local_data_dir().map(|d| d.join("dumps")).map_err(|e| e.to_string())
+    app.path().app_local_data_dir().map(|d| d.join("dumps")).map_err(lang::ui_error)
 }
 
 fn apply_dump_setting(app: &AppHandle, store: &Store, manager: &ProviderManager) {
@@ -296,7 +309,7 @@ fn dump_info(app: AppHandle, store: State<Store>, manager: State<ProviderManager
 /// the next SimConnect message).
 #[tauri::command]
 fn set_raw_dump(on: bool, app: AppHandle, store: State<Store>, manager: State<ProviderManager>) -> Result<DumpInfo, String> {
-    store.set_setting(SETTING_RAW_DUMP, if on { "1" } else { "0" }).map_err(|e| e.to_string())?;
+    store.set_setting(SETTING_RAW_DUMP, if on { "1" } else { "0" }).map_err(lang::ui_error)?;
     apply_dump_setting(&app, &store, &manager);
     log::info!("raw dump {}", if on { "on" } else { "off" });
     Ok(dump_info_of(&app, &store, &manager))
@@ -327,7 +340,7 @@ fn get_debug_mode(app: AppHandle, store: State<Store>, manager: State<ProviderMa
 /// off brings back exactly what was set before.
 #[tauri::command]
 fn set_debug_mode(on: bool, app: AppHandle, store: State<Store>, manager: State<ProviderManager>) -> Result<DebugModeInfo, String> {
-    store.set_setting(SETTING_DEBUG_MODE, if on { "1" } else { "0" }).map_err(|e| e.to_string())?;
+    store.set_setting(SETTING_DEBUG_MODE, if on { "1" } else { "0" }).map_err(lang::ui_error)?;
     apply_debug_mode(&app, &store, &manager);
     log::info!("debug mode {}", if on { "on (vectasim_* at debug, raw dump, diag stream)" } else { "off" });
     Ok(get_debug_mode(app, store, manager))
@@ -343,7 +356,11 @@ fn dump_now(app: AppHandle, manager: State<ProviderManager>) -> Result<String, S
             Ok(path.display().to_string())
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            Err("Noch keine Rohdaten aufgezeichnet – der Puffer füllt sich, sobald VectaSim mit dem Simulator verbunden ist.".into())
+            Err(lang::tr(
+                "Noch keine Rohdaten aufgezeichnet – der Puffer füllt sich, sobald VectaSim mit dem Simulator verbunden ist.",
+                "No raw data recorded yet – the buffer fills as soon as VectaSim is connected to the simulator.",
+            )
+            .into())
         }
         Err(e) => Err(format!("{}: {e}", path.display())),
     }
@@ -382,10 +399,11 @@ fn set_replay(path: Option<String>, speed: f64, repeat: bool, manager: State<Pro
     if let Some(p) = &path
         && !p.is_file()
     {
-        return Err(format!("Datei nicht gefunden: {}", p.display()));
+        let p = p.display();
+        return Err(trf!("Datei nicht gefunden: {p}", "File not found: {p}"));
     }
     if !speed.is_finite() || speed < 0.0 {
-        return Err(format!("ungültige Geschwindigkeit: {speed}"));
+        return Err(trf!("ungültige Geschwindigkeit: {speed}", "invalid speed: {speed}"));
     }
     manager.set_replay_config(vectasim_simconnect::ReplayConfig { path, speed, loop_: repeat });
     Ok(())
@@ -411,12 +429,20 @@ fn get_live_track(manager: State<ProviderManager>) -> Vec<TrackSample> {
 
 #[tauri::command]
 fn get_settings(store: State<Store>) -> Result<Vec<(String, String)>, String> {
-    store.all_settings().map_err(|e| e.to_string())
+    store.all_settings().map_err(lang::ui_error)
 }
 
 #[tauri::command]
-fn set_setting(key: String, value: String, store: State<Store>) -> Result<(), String> {
-    store.set_setting(&key, &value).map_err(|e| e.to_string())
+fn set_setting(key: String, value: String, app: AppHandle, store: State<Store>) -> Result<(), String> {
+    store.set_setting(&key, &value).map_err(lang::ui_error)?;
+    if key == lang::SETTING_LANGUAGE {
+        // tray menu, notifications, Discord and the overlay default follow at once
+        let before = lang::current();
+        if lang::apply_setting(Some(&value)) != before {
+            tray::relabel(&app);
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -436,13 +462,13 @@ async fn simbrief_fetch(
 ) -> Result<Ofp, String> {
     let user_input = match user {
         Some(u) if !u.trim().is_empty() => {
-            store.set_setting(SETTING_SIMBRIEF_USER, u.trim()).map_err(|e| e.to_string())?;
+            store.set_setting(SETTING_SIMBRIEF_USER, u.trim()).map_err(lang::ui_error)?;
             u
         }
-        _ => store.get_setting(SETTING_SIMBRIEF_USER).map_err(|e| e.to_string())?.unwrap_or_default(),
+        _ => store.get_setting(SETTING_SIMBRIEF_USER).map_err(lang::ui_error)?.unwrap_or_default(),
     };
     let user = User::parse(&user_input).ok_or_else(|| SimbriefError::NoUser.to_string())?;
-    let ofp = vectasim_simbrief::fetch_latest(&user).await.map_err(|e| e.to_string())?;
+    let ofp = vectasim_simbrief::fetch_latest(&user).await.map_err(lang::ui_error)?;
     log::info!("SimBrief OFP loaded: {} {} ({} fixes)", ofp.callsign, ofp.route_label(), ofp.navlog.len());
 
     let plan = plan_from_ofp(&ofp);
@@ -450,7 +476,7 @@ async fn simbrief_fetch(
     *dispatch.ofp.lock().unwrap() = Some(ofp.clone());
     // only the flight of this session – a stale `active` row from a crash must not get the plan
     if let Some(id) = manager.current_flight_id() {
-        store.attach_plan(&id, &plan).map_err(|e| e.to_string())?;
+        store.attach_plan(&id, &plan).map_err(lang::ui_error)?;
         let _ = app.emit("logbook:changed", ());
     }
     let _ = app.emit("dispatch:ofp", &ofp);
@@ -467,7 +493,7 @@ fn clear_ofp(app: AppHandle, dispatch: State<DispatchState>, manager: State<Prov
 #[tauri::command]
 fn attach_ofp_to_flight(flight_id: String, app: AppHandle, store: State<Store>, dispatch: State<DispatchState>) -> Result<bool, String> {
     let Some(ofp) = dispatch.ofp.lock().unwrap().clone() else { return Err("kein OFP geladen".into()) };
-    let ok = store.attach_plan(&flight_id, &plan_from_ofp(&ofp)).map_err(|e| e.to_string())?;
+    let ok = store.attach_plan(&flight_id, &plan_from_ofp(&ofp)).map_err(lang::ui_error)?;
     if ok {
         let _ = app.emit("logbook:changed", ());
     }
@@ -476,13 +502,13 @@ fn attach_ofp_to_flight(flight_id: String, app: AppHandle, store: State<Store>, 
 
 /// Store work off the async runtime's worker threads: SQLite and the track codec block.
 async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
-    tauri::async_runtime::spawn_blocking(f).await.map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(f).await.map_err(lang::ui_error)?
 }
 
 #[tauri::command]
 async fn list_flights(limit: Option<u32>, offset: Option<u32>, store: State<'_, Store>) -> Result<Vec<FlightRow>, String> {
     let store = store.inner().clone();
-    blocking(move || store.list_flights(limit.unwrap_or(50), offset.unwrap_or(0)).map_err(|e| e.to_string())).await
+    blocking(move || store.list_flights(limit.unwrap_or(50), offset.unwrap_or(0)).map_err(lang::ui_error)).await
 }
 
 /// Logbook size and when it last changed (one aggregate query): the UI polls this and loads
@@ -490,12 +516,12 @@ async fn list_flights(limit: Option<u32>, offset: Option<u32>, store: State<'_, 
 #[tauri::command]
 async fn flight_summary_counts(store: State<'_, Store>) -> Result<FlightCounts, String> {
     let store = store.inner().clone();
-    blocking(move || store.flight_counts().map_err(|e| e.to_string())).await
+    blocking(move || store.flight_counts().map_err(lang::ui_error)).await
 }
 
 #[tauri::command]
 fn get_flight(id: String, store: State<Store>) -> Result<Option<FlightDetail>, String> {
-    store.get_flight(&id).map_err(|e| e.to_string())
+    store.get_flight(&id).map_err(lang::ui_error)
 }
 
 #[tauri::command]
@@ -503,7 +529,7 @@ async fn get_track(id: String, preview: Option<bool>, store: State<'_, Store>) -
     let store = store.inner().clone();
     blocking(move || {
         let r = if preview.unwrap_or(false) { store.get_track_preview(&id) } else { store.get_track(&id) };
-        r.map_err(|e| e.to_string())
+        r.map_err(lang::ui_error)
     })
     .await
 }
@@ -511,7 +537,7 @@ async fn get_track(id: String, preview: Option<bool>, store: State<'_, Store>) -
 /// Moves the flight to the Papierkorb (restorable for 30 days, see `data`).
 #[tauri::command]
 fn delete_flight(id: String, app: AppHandle, store: State<Store>) -> Result<bool, String> {
-    let deleted = store.delete_flight(&id).map_err(|e| e.to_string())?;
+    let deleted = store.delete_flight(&id).map_err(lang::ui_error)?;
     if deleted {
         let _ = app.emit("logbook:changed", ());
     }
@@ -531,7 +557,7 @@ async fn list_merge_candidates(store: State<'_, Store>, manager: State<'_, Provi
     let store = store.inner().clone();
     let running = manager.current_flight_id();
     blocking(move || {
-        let all = store.list_merge_candidates().map_err(|e| e.to_string())?;
+        let all = store.list_merge_candidates().map_err(lang::ui_error)?;
         Ok(all.into_iter().filter(|c| running.as_deref() != Some(c.second.id.as_str()) && running.as_deref() != Some(c.first.id.as_str())).collect())
     })
     .await
@@ -542,10 +568,14 @@ async fn list_merge_candidates(store: State<'_, Store>, manager: State<'_, Provi
 async fn merge_flights(first_id: String, second_id: String, app: AppHandle, store: State<'_, Store>) -> Result<MergeReport, String> {
     let running = app.state::<ProviderManager>().current_flight_id();
     if running.as_deref() == Some(first_id.as_str()) || running.as_deref() == Some(second_id.as_str()) {
-        return Err("Der laufende Flug lässt sich erst nach dem Ende der Aufzeichnung zusammenführen.".into());
+        return Err(lang::tr(
+            "Der laufende Flug lässt sich erst nach dem Ende der Aufzeichnung zusammenführen.",
+            "The running flight can only be merged once the recording has ended.",
+        )
+        .into());
     }
     let store = store.inner().clone();
-    let report = blocking(move || store.merge_flights(&first_id, &second_id).map_err(|e| e.to_string())).await?;
+    let report = blocking(move || store.merge_flights(&first_id, &second_id).map_err(lang::ui_error)).await?;
     let _ = app.emit("logbook:changed", ());
     let _ = app.emit("airframes:changed", "");
     Ok(report)
@@ -553,7 +583,7 @@ async fn merge_flights(first_id: String, second_id: String, app: AppHandle, stor
 
 #[tauri::command]
 fn get_totals(store: State<Store>) -> Result<Totals, String> {
-    store.totals().map_err(|e| e.to_string())
+    store.totals().map_err(lang::ui_error)
 }
 
 fn parse_format(format: &str) -> Result<ExportFormat, String> {
@@ -561,9 +591,9 @@ fn parse_format(format: &str) -> Result<ExportFormat, String> {
 }
 
 fn render_export(id: &str, format: ExportFormat, store: &Store) -> Result<String, String> {
-    let detail = store.get_flight(id).map_err(|e| e.to_string())?.ok_or("Flug nicht gefunden")?;
-    let samples = store.get_track(id).map_err(|e| e.to_string())?.unwrap_or_default();
-    export::export_flight(format, &detail, &samples).map_err(|e| e.to_string())
+    let detail = store.get_flight(id).map_err(lang::ui_error)?.ok_or(lang::tr("Flug nicht gefunden", "Flight not found"))?;
+    let samples = store.get_track(id).map_err(lang::ui_error)?.unwrap_or_default();
+    export::export_flight(format, &detail, &samples).map_err(lang::ui_error)
 }
 
 /// Excel only detects UTF-8 in a CSV that starts with a BOM.
@@ -584,7 +614,7 @@ async fn export_flight(id: String, format: String, store: State<'_, Store>) -> R
 #[tauri::command]
 fn export_file_name(id: String, format: String, store: State<Store>) -> Result<String, String> {
     let format = parse_format(&format)?;
-    let detail = store.get_flight(&id).map_err(|e| e.to_string())?.ok_or("Flug nicht gefunden")?;
+    let detail = store.get_flight(&id).map_err(lang::ui_error)?.ok_or(lang::tr("Flug nicht gefunden", "Flight not found"))?;
     Ok(export::file_name(&detail.flight, format))
 }
 
@@ -610,7 +640,7 @@ async fn export_logbook_csv(path: String, store: State<'_, Store>) -> Result<usi
     let target = data::allowed_target(&path, &[ExportFormat::Csv.extension()])?;
     let store = store.inner().clone();
     blocking(move || {
-        let flights = store.list_flights(u32::MAX, 0).map_err(|e| e.to_string())?;
+        let flights = store.list_flights(u32::MAX, 0).map_err(lang::ui_error)?;
         write_export(&target, ExportFormat::Csv, &export::export_logbook_csv_from_store(&store, &flights))?;
         Ok(flights.len())
     })
@@ -641,6 +671,11 @@ fn get_airport(ident: String, airports: State<Arc<AirportIndex>>) -> Option<Airp
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // `vectasim.exe --install-simconnect [--check]` (NSIS installer): headless, before the
+    // Tauri builder so the single-instance plugin never hands over to a running VectaSim
+    if let Some(code) = simconnect_dl::run_cli(&std::env::args_os().collect::<Vec<_>>()) {
+        std::process::exit(code);
+    }
     logging::install_panic_hook();
 
     tauri::Builder::default()
@@ -671,6 +706,7 @@ pub fn run() {
         .manage(OnlineState::default())
         .manage(airframes::PhotoState::default())
         .manage(discord::DiscordState::default())
+        .manage(server::ServerState::default())
         .manage(tray::TrayState::default())
         .on_window_event(tray::on_window_event)
         .setup(|app| {
@@ -698,6 +734,7 @@ pub fn run() {
             if let Some(env) = logging::env_override() {
                 log::info!("RUST_LOG={env} overrides the log level setting");
             }
+            lang::init(&store);
             apply_dll_setting(&store);
             apply_debug_mode(app.handle(), &store, &app.state::<ProviderManager>());
             if debug_mode_on(&store) {
@@ -714,17 +751,19 @@ pub fn run() {
             tray::start(app.handle().clone());
             discord::start(app.handle().clone());
 
-            if store.get_setting(online::SETTING_VATSIM).ok().flatten().as_deref() == Some("1") {
-                online::start_vatsim(app.handle(), &app.state::<OnlineState>().vatsim);
-            }
+            online::restore(app.handle(), &store);
 
             let started = std::time::Instant::now();
             let airports = Arc::new(AirportIndex::load());
             log::info!("airport index loaded in {:?}", started.elapsed());
             app.manage(airports.clone());
+            // Overlay & Schnittstelle: the local server, if it was left on
+            server::restore(app.handle(), &store);
 
-            let kind = std::env::var("VECTASIM_PROVIDER").unwrap_or_else(|_| "simconnect".into());
+            // `sim` = the simulator chosen in Einstellungen → Simulator (default: automatic)
+            let kind = std::env::var("VECTASIM_PROVIDER").unwrap_or_else(|_| "sim".into());
             let manager = app.state::<ProviderManager>();
+            simselect::apply_settings(&store, &manager);
             if let Err(e) = manager.start(app.handle().clone(), store, Arc::new(IndexResolver(airports)), &kind) {
                 log::error!("could not start provider {kind}: {e}");
             }
@@ -732,6 +771,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             discord::discord_status,
+            server::server_status,
+            server::server_set_enabled,
+            server::server_set_options,
             notify::notify,
             notify::notify_test,
             tray::set_tray_enabled,
@@ -745,6 +787,8 @@ pub fn run() {
             get_log_level,
             set_log_level,
             set_simconnect_dll,
+            simselect::get_sim_settings,
+            simselect::set_sim_settings,
             dump_info,
             set_raw_dump,
             dump_now,
@@ -800,6 +844,7 @@ pub fn run() {
             nearest_airport,
             get_airport,
             online::online_set_enabled,
+            online::online_set_networks,
             online::online_summary,
             online::online_snapshot_in_bbox,
             online::online_pilot,
@@ -822,6 +867,7 @@ pub fn run() {
             airframes::merge_airframes,
             airframes::delete_airframe,
             airframes::airframe_photo,
+            airframes::traffic_photo,
             airframes::set_airframe_image,
             privacy::get_card_dir,
             privacy::set_card_dir,

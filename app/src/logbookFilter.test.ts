@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { setLanguageSetting, tIn } from "./i18n";
 import {
   QUICK_FILTERS,
   callsignOf,
@@ -18,6 +19,10 @@ import {
 } from "./logbookFilter";
 import { importSourceLabel, isDemoRow, isImportedRow } from "./totals";
 import type { FlightRow } from "./types";
+
+// texts are checked in German (the reference); one English check per central text
+beforeAll(() => setLanguageSetting("de"));
+afterAll(() => setLanguageSetting("system"));
 
 const integrity = { pausedMs: 0, pauseCount: 0, slewDetected: false, timeAccelerationDetected: false, maxSimRate: 1, crashed: false, fuelIncreasedAirborne: false };
 
@@ -78,8 +83,12 @@ describe("matchesQuery", () => {
 
 describe("QUICK_FILTERS", () => {
   it("names finished flights „Abgeschlossen“ (every flight is saved)", () => {
-    expect(QUICK_FILTERS.map((q) => q.label)).toEqual(["Alle", "Abgeschlossen", "Unvollständig", "Mit Landung"]);
-    expect(QUICK_FILTERS.map((q) => q.label)).not.toContain("Gespeichert");
+    expect(QUICK_FILTERS.map((q) => tIn("de", q.label))).toEqual(["Alle", "Abgeschlossen", "Unvollständig", "Mit Landung"]);
+    expect(QUICK_FILTERS.map((q) => tIn("de", q.label))).not.toContain("Gespeichert");
+  });
+
+  it("has English labels", () => {
+    expect(QUICK_FILTERS.map((q) => tIn("en", q.label))).toEqual(["All", "Completed", "Incomplete", "With landing"]);
   });
 });
 
@@ -175,6 +184,9 @@ describe("Notizen & Tags", () => {
     expect(originalTitle(null, "EDDF")).toBeNull();
     expect(originalTitle("EDDF", "EDDF")).toBeNull();
     expect(originalTitle("EDDK", null)).toBe("Sim: –");
+    setLanguageSetting("en");
+    expect(originalTitle(noted.userDepIcao, noted.depIcao)).toBe("Sim: EDDF");
+    setLanguageSetting("de");
   });
 
   it("normalises tags like the backend", () => {

@@ -1,7 +1,9 @@
 //! The mock flight's landing as the landing debrief sees it: straight-in on EDDF 25C,
-//! touchdown in the touchdown zone beside the centreline, stabilised approach.
+//! stabilised approach. The standard variant (the demo flight) lands normally but with
+//! deliberate small errors (mock.rs `DEMO_*`): ~520 m past the threshold – in the touchdown
+//! zone, behind the aiming point –, ~9 m right of the centreline, ~−230 fpm, a short float.
 
-use vectasim_core::landing::{self, CheckStatus, LandingConfig, LandingSample, RunwayFrame, SpeedReferenceSource};
+use vectasim_core::landing::{self, Band, CheckStatus, LandingConfig, LandingSample, RunwayFrame, SpeedReferenceSource};
 use vectasim_core::{FlightEvent, FlightSession, MockFlight, MockVariant, Telemetry, TouchdownReport};
 
 fn to_sample(t: &Telemetry) -> LandingSample {
@@ -49,7 +51,7 @@ fn fly_loop(variant: MockVariant, n: u64) -> (Vec<LandingSample>, Vec<TouchdownR
 }
 
 #[test]
-fn mock_landing_is_a_stabilised_straight_in_to_25c() {
+fn demo_landing_is_normal_with_small_errors() {
     let cfg = LandingConfig::default();
     let rwy = MockFlight::runway();
     let frame = RunwayFrame::new(&rwy);
@@ -58,18 +60,21 @@ fn mock_landing_is_a_stabilised_straight_in_to_25c() {
         assert_eq!(tds.len(), 1, "loop {n}: {tds:?}");
         let td = &tds[0];
         assert_eq!(td.bounces, 0);
-        assert!((-200.0..=-100.0).contains(&td.landing_rate_fpm), "loop {n}: rate {}", td.landing_rate_fpm);
+        // ≈ −230 fpm, ≈ 1.3 g: band "normal" for both
+        assert!((-245.0..=-215.0).contains(&td.landing_rate_fpm), "loop {n}: rate {}", td.landing_rate_fpm);
+        assert!((1.22..=1.36).contains(&td.peak_g), "loop {n}: {} g", td.peak_g);
         assert!(td.vs_fpm_sim < 0.0, "loop {n}: the sim value of this landing is used");
         assert!((td.heading_true_deg - frame.heading_deg).abs() < 0.5);
 
         let a = landing::analyze(&track, &tds, 0, std::slice::from_ref(&rwy), None, &cfg).expect("analysis");
+        assert_eq!((a.vs_band, a.g_band), (Band::Normal, Band::Normal), "loop {n}");
         let m = a.runway.as_ref().expect("runway matched");
         assert_eq!((m.ident.as_str(), m.on_runway), ("25C", true));
         let p = a.touchdown_point.as_ref().expect("touchdown point");
-        assert!((330.0..=380.0).contains(&p.distance_m), "loop {n}: touchdown {} m past the threshold", p.distance_m);
-        assert!(p.lateral_m.abs() <= 5.0, "loop {n}: {} m beside the centreline", p.lateral_m);
-        // zone from the threshold (0 … 900 m on 4 000 m); 400 m is the aiming point
-        assert!(p.in_tdz);
+        assert!((505.0..=535.0).contains(&p.distance_m), "loop {n}: touchdown {} m past the threshold", p.distance_m);
+        assert!((7.5..=10.5).contains(&p.lateral_m), "loop {n}: {} m right of the centreline", p.lateral_m);
+        // zone from the threshold (0 … 900 m on 4 000 m): inside it, but behind the 400 m aiming point
+        assert!(p.in_tdz && p.distance_m > p.aiming_point_m + 100.0);
         assert_eq!((p.tdz_start_m, p.tdz_end_m, p.aiming_point_m), (0.0, 900.0, 400.0));
         assert_eq!(m.width_m, Some(60.0));
 
@@ -82,14 +87,18 @@ fn mock_landing_is_a_stabilised_straight_in_to_25c() {
         assert!((40.0..=60.0).contains(&thr.height_ft), "loop {n}: TCH {}", thr.height_ft);
         assert!((122.0..=130.0).contains(&thr.ias_kt), "loop {n}: IAS at threshold {}", thr.ias_kt);
 
+        // the flare from ~25 ft, ~5–6 s with a short float (the 1 Hz track sees it ~1 s before contact)
         let flare = a.flare.as_ref().expect("flare");
         assert!(flare.approach_vs_fpm < -600.0 && flare.approach_vs_fpm > -800.0, "{flare:?}");
-        // the 1 Hz track sees the flare up to ~1 s before contact
-        assert!(flare.final_vs_fpm > -350.0 && flare.final_vs_fpm > flare.approach_vs_fpm + 300.0, "{flare:?}");
+        assert!((18.0..=32.0).contains(&flare.start_hat_ft) && (4.5..=7.0).contains(&flare.duration_s), "{flare:?}");
+        assert!(flare.final_vs_fpm > -250.0 && flare.final_vs_fpm > flare.approach_vs_fpm + 300.0, "{flare:?}");
+        assert!(thr.airborne_s > 7.0, "floated: {} s from the threshold to the contact", thr.airborne_s);
 
         let ap = &a.approach;
         assert!(ap.ias_max_kt.unwrap() < 145.0 && ap.ias_min_kt.unwrap() > 115.0, "{ap:?}");
-        assert!(ap.glidepath_dev_at_1000_deg.unwrap().abs() < 0.3, "{ap:?}");
+        // +0.5 dot (0.35°/dot) high at 1000 ft, on the path again at 500 ft
+        assert!((0.12..=0.2).contains(&ap.glidepath_dev_at_1000_deg.unwrap()), "{ap:?}");
+        assert!(ap.glidepath_dev_at_500_deg.unwrap().abs() < 0.03, "{ap:?}");
         // every gate the approach passed is fully stable
         for g in a.gates.iter().filter(|g| g.reached) {
             for c in &g.criteria {

@@ -1,0 +1,75 @@
+{
+  "updatedAt": "2026-10-18T14:45:28.259225639Z",
+  "servers": [{ "id": "WS1-TEST", "hostname": "ws-1.example.invalid", "description": "Test server", "countryId": "XX", "currentConnections": 3, "maximumConnections": 10 }],
+  "voiceServers": [],
+  "connections": { "total": 9, "atc": 6, "observer": 1, "pilot": 5, "followMe": 0 },
+  "clients": {
+    "pilots": [
+      {
+        "id": 90000001, "userId": 900101, "callsign": "TST101", "serverId": "WS1-TEST", "softwareTypeId": "altitude/win", "rating": 4,
+        "createdAt": "2026-10-18T10:00:00.000Z", "time": 1200,
+        "pilotSession": { "simulatorId": "MSFS", "textureId": 1 },
+        "lastTrack": {
+          "altitude": 34012, "altitudeDifference": 12, "arrivalDistance": 412.5, "departureDistance": 88.2, "groundSpeed": 451.6,
+          "heading": 211, "latitude": 50.0333, "longitude": 8.5706, "onGround": false, "state": "En Route",
+          "timestamp": "2026-10-18T14:45:20.000Z", "transponder": 2301, "transponderMode": "C", "time": 1190
+        },
+        "flightPlan": {
+          "id": 1, "revision": 1, "aircraftId": "A20N", "aircraftNumber": 1, "departureId": "EDDF", "arrivalId": "LEPA",
+          "alternativeId": "LEIB", "alternative2Id": null, "route": "ANEKI DCT CINDY Z74 HAREM", "remarks": "TEST", "speed": "N0450",
+          "level": "F340", "flightRules": "I", "flightType": "S", "eet": 7200, "peopleOnBoard": 150,
+          "aircraft": { "icaoCode": "A20N", "model": "A320neo", "wakeTurbulence": "M", "military": "civil", "description": "LandPlane" }
+        }
+      },
+      {
+        "id": 90000002, "userId": 900102, "callsign": "DTEST", "serverId": "WS1-TEST",
+        "lastTrack": { "altitude": 364, "groundSpeed": 0, "heading": 70, "latitude": 50.0455, "longitude": 8.5421, "onGround": true, "transponder": 7000 },
+        "flightPlan": null
+      },
+      {
+        "id": 90000003, "userId": 900103, "callsign": "TST3", "serverId": "WS1-TEST",
+        "lastTrack": { "altitude": 38000, "groundSpeed": 480, "heading": 95, "latitude": -10.5, "longitude": 179.6, "onGround": false, "transponder": null },
+        "flightPlan": { "aircraftId": null, "departureId": "YSSY", "arrivalId": "PHNL", "route": null, "flightRules": "I", "aircraft": { "icaoCode": "B789" } },
+        "someFutureField": { "nested": [1, 2, 3] }
+      },
+      {
+        "id": 90000004, "userId": 900104, "callsign": "TST4NOPOS", "serverId": "WS1-TEST", "lastTrack": null, "flightPlan": null
+      }
+    ],
+    "atcs": [
+      {
+        "id": 90000101, "userId": 900201, "callsign": "EDDF_TWR", "serverId": "WS1-TEST", "rating": 5,
+        "atcSession": { "frequency": 119.9, "position": "TWR" },
+        "lastTrack": { "altitude": 0, "groundSpeed": 0, "heading": 0, "latitude": 50.03, "longitude": 8.57, "onGround": false, "transponder": 0 },
+        "atis": { "lines": ["ts-1.example.invalid/EDDF_TWR", "Frankfurt Information KILO recorded at 1420z", "RWY 25C IN USE"], "revision": "K", "timestamp": "2026-10-18T14:20:00.000Z" }
+      },
+      {
+        "id": 90000102, "userId": 900202, "callsign": "EDDF_N_APP", "serverId": "WS1-TEST",
+        "atcSession": { "frequency": 120.805, "position": "APP" },
+        "atis": { "lines": ["NO VOICE/EDDF_N_APP"], "revision": "K" }
+      },
+      {
+        "id": 90000103, "userId": 900203, "callsign": "EDGG_CTR", "serverId": "WS1-TEST",
+        "atcSession": { "frequency": 127.5, "position": "CTR" },
+        "atis": { "lines": ["ts-1.example.invalid/EDGG_CTR", "Langen Radar"], "revision": "A" }
+      },
+      {
+        "id": 90000104, "userId": 900204, "callsign": "EDDM_GND", "serverId": "WS1-TEST",
+        "atcSession": { "frequency": 121.775, "position": null },
+        "atis": null
+      },
+      {
+        "id": 90000105, "userId": 900205, "callsign": "EDDM_DEP", "serverId": "WS1-TEST",
+        "atcSession": { "frequency": 129.0, "position": "DEP" }
+      },
+      {
+        "id": 90000106, "userId": 900206, "callsign": "XX_OBS", "serverId": "WS1-TEST",
+        "atcSession": { "frequency": 0, "position": "TWR" }
+      }
+    ],
+    "followMe": [],
+    "observers": [
+      { "id": 90000201, "userId": 900301, "callsign": "TST_OBS", "atcSession": { "frequency": 134.475, "position": null } }
+    ]
+  }
+}

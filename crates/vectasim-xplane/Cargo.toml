@@ -1,0 +1,19 @@
+[package]
+name = "vectasim-xplane"
+description = "X-Plane 12 provider via the built-in Web API (REST + WebSocket, localhost:8086)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+vectasim-core = { path = "../vectasim-core" }
+vectasim-dump = { path = "../vectasim-dump" }
+log = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+base64 = "0.22"
+tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
+
+[dev-dependencies]
+tempfile = "3"

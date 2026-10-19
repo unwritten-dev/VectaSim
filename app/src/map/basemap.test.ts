@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { StyleSpecification } from "maplibre-gl";
-import { patchBasemapStyle } from "./basemap";
+import { labelTextField, localizeLabels, patchBasemapStyle } from "./basemap";
 import { themeById } from "../themes";
 
 const style = {
@@ -57,5 +57,41 @@ describe("patchBasemapStyle (light themes)", () => {
     expect(ids.indexOf("vectasim-graticule")).toBeGreaterThan(-1);
     expect(ids.indexOf("vectasim-graticule")).toBeLessThan(ids.indexOf("building"));
     expect(out.sources["vectasim-graticule"]).toBeTruthy();
+  });
+});
+
+describe("basemap labels in the UI language (UX 1.11 / 5.2)", () => {
+  const named = {
+    version: 8,
+    sources: {},
+    layers: [
+      { id: "place_country_major", type: "symbol", source: "o", "source-layer": "place", layout: { "text-field": "{name:latin}\n{name:nonlatin}" } },
+      { id: "poi_label", type: "symbol", source: "o", "source-layer": "poi", layout: { "text-field": ["get", "name"] } },
+      { id: "housenumber", type: "symbol", source: "o", "source-layer": "housenumber", layout: { "text-field": "{housenumber}" } },
+      { id: "vatsim-pilots-label", type: "symbol", source: "g", layout: { "text-field": ["get", "callsign"] } },
+    ],
+  } as unknown as StyleSpecification;
+
+  it("German: name:de, then Latin, then the local name; only basemap name labels", () => {
+    const out = patchBasemapStyle(named, themeById("signal"), "de");
+    expect(layerOf(out, "place_country_major")!.layout?.["text-field"]).toEqual(["coalesce", ["get", "name:de"], ["get", "name_de"], ["get", "name:latin"], ["get", "name"]]);
+    expect(layerOf(out, "poi_label")!.layout?.["text-field"]).toEqual(labelTextField("de"));
+    expect(layerOf(out, "housenumber")!.layout?.["text-field"]).toBe("{housenumber}");
+    expect(layerOf(out, "vatsim-pilots-label")!.layout?.["text-field"]).toEqual(["get", "callsign"]);
+    // the patched place layer keeps its theme patch too
+    expect(layerOf(out, "place_country_major")!.layout?.["text-letter-spacing"]).toBe(0.08);
+  });
+
+  it("English: name:en", () => {
+    const out = patchBasemapStyle(named, themeById("signal"), "en");
+    expect(layerOf(out, "place_country_major")!.layout?.["text-field"]).toEqual(labelTextField("en"));
+    expect(JSON.stringify(labelTextField("en"))).toContain("name:en");
+  });
+
+  it("localizeLabels re-labels a running map", () => {
+    const calls: Array<[string, unknown]> = [];
+    localizeLabels({ getStyle: () => ({ layers: named.layers as never }), setLayoutProperty: (id: string, _n: string, v: unknown) => calls.push([id, v]) }, "en");
+    expect(calls.map((c) => c[0])).toEqual(["place_country_major", "poi_label"]);
+    expect(calls[0][1]).toEqual(labelTextField("en"));
   });
 });

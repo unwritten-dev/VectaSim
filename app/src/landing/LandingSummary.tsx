@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { fmt } from "../format";
+import { fmt } from "../i18n/number";
+import { useT } from "../i18n";
 import { openDebrief } from "./debriefStore";
 import { APPROACH_BAND_LABEL, APPROACH_BAND_VAR, BAND_LABEL, BAND_VAR, lateralMeasurable, runwaySourceOf, touchdownDistanceText } from "./facts";
 import { sideLabel } from "./geometry";
@@ -12,6 +13,7 @@ import type { ApproachAnalysis } from "./approachTypes";
  * the button opens the full debrief.
  */
 export default function LandingSummary({ flightId, touchdowns, updatedMs }: { flightId: string; touchdowns: number; updatedMs: number }) {
+  const t = useT();
   const [data, setData] = useState<LandingDebriefData | null>(null);
   const [approaches, setApproaches] = useState<ApproachAnalysis[] | null>(null);
   const [failed, setFailed] = useState(false);
@@ -45,32 +47,40 @@ export default function LandingSummary({ flightId, touchdowns, updatedMs }: { fl
     <div className="landing-summary" style={a ? { borderLeftColor: BAND_VAR[a.vsBand] } : undefined}>
       <div>
         <div className="landing-summary-title num">
-          {a ? (rwy ? `${rwy.airport} RWY ${rwy.ident}` : `${data?.airport?.ident ?? "Letzte Landung"} · keine Piste zugeordnet`) : "Letzte Landung wird ausgewertet …"}
+          {a
+            ? rwy
+              ? `${rwy.airport} RWY ${rwy.ident}`
+              : t("debrief.header.titleNoRunway", { place: data?.airport?.ident ?? t("debrief.summary.lastLanding") })
+            : t("debrief.summary.loading")}
         </div>
         {a && (
           <div className="facts num detail">
             <span>
-              Landerate{" "}
-              <button className="rate-link" onClick={() => openDebrief(flightId, null)} title="Landeauswertung öffnen">
+              {t("debrief.summary.rate")}{" "}
+              <button className="rate-link" onClick={() => openDebrief(flightId, null)} title={t("debrief.summary.openTitle")}>
                 {fmt(a.touchdown.landingRateFpm, 0, "fpm")}
               </button>{" "}
               <span className="band-dot inline" style={{ background: BAND_VAR[a.vsBand] }} aria-hidden="true" /> {BAND_LABEL[a.vsBand]}
             </span>
             {tp && (
               <span>
-                {touchdownDistanceText(tp)} hinter der Schwelle · {lateralMeasurable(tp) ? sideLabel(tp.lateralM) : "Querablage nicht messbar"}
-                {rwy && runwaySourceOf(rwy) !== "database" && ` · ${runwaySourceOf(rwy) === "user" ? "Piste von dir festgelegt" : "Piste abgeleitet"}`}
+                {t("debrief.summary.pastThreshold", { distance: touchdownDistanceText(tp) })} · {lateralMeasurable(tp) ? sideLabel(tp.lateralM) : t("debrief.hero.lateralNotMeasurable")}
+                {rwy && runwaySourceOf(rwy) !== "database" && ` · ${runwaySourceOf(rwy) === "user" ? t("debrief.summary.runwayUser") : t("debrief.summary.runwayDerived")}`}
               </span>
             )}
             {landedApproach?.band ? (
               <span>
-                Anflug <span className="band-dot inline" style={{ background: APPROACH_BAND_VAR[landedApproach.band] }} aria-hidden="true" /> {APPROACH_BAND_LABEL[landedApproach.band]}
-                {landedApproach.stability.stableFromFt != null ? ` · stabil ab ${fmt(landedApproach.stability.stableFromFt, 0, "ft")}` : " · nie stabil"}
-                {goArounds > 0 && ` · ${goArounds}× durchgestartet`}
+                {t("debrief.summary.approach")} <span className="band-dot inline" style={{ background: APPROACH_BAND_VAR[landedApproach.band] }} aria-hidden="true" /> {APPROACH_BAND_LABEL[landedApproach.band]}
+                {landedApproach.stability.stableFromFt != null
+                  ? ` · ${t("debrief.summary.stableFrom", { alt: fmt(landedApproach.stability.stableFromFt, 0, "ft") })}`
+                  : ` · ${t("debrief.summary.neverStable")}`}
+                {goArounds > 0 && ` · ${t("debrief.summary.goArounds", { count: goArounds })}`}
               </span>
             ) : (
               <span>
-                Stabilisierter Anflug: {reached === 0 ? "nicht anwendbar" : fails === 0 ? "alle Kriterien erfüllt" : `${fails} ${fails === 1 ? "Kriterium" : "Kriterien"} nicht erfüllt`}
+                {t("debrief.summary.stabilised", {
+                  result: reached === 0 ? t("debrief.summary.notApplicable") : fails === 0 ? t("debrief.summary.allMet") : t("debrief.summary.failed", { count: fails }),
+                })}
               </span>
             )}
           </div>
@@ -78,7 +88,7 @@ export default function LandingSummary({ flightId, touchdowns, updatedMs }: { fl
       </div>
       <span className="spacer" />
       <button className="btn-sm" onClick={() => openDebrief(flightId, null)} disabled={!a}>
-        Landeauswertung
+        {t("debrief.summary.open")}
       </button>
     </div>
   );

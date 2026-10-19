@@ -1,117 +1,161 @@
+🇩🇪 [Deutsche Version](README.de.md)
+
 <p align="center">
   <img src="docs/brand/logo-wordmark.svg" alt="VectaSim" width="360">
 </p>
 
 <p align="center">
-  Flight-Tracker und Logbuch für Flugsimulatoren – leicht, lokal, mit ehrlicher Anflug- und Landeauswertung.
+  Flight tracker and logbook for flight simulators – lightweight, local, with an honest approach and landing analysis.
 </p>
 
 <p align="center">
   <a href="https://github.com/unwritten-dev/VectaSim/releases"><img alt="Download" src="https://img.shields.io/github/v/release/unwritten-dev/VectaSim?include_prereleases&label=Download&color=2ea043"></a>
-  <img alt="Alpha" src="https://img.shields.io/badge/Status-Alpha-f0b429">
+  <img alt="Beta" src="https://img.shields.io/badge/Status-Beta-2ea043">
   <img alt="Windows" src="https://img.shields.io/badge/Windows-10%20%2F%2011-5b6b7a">
   <img alt="MSFS" src="https://img.shields.io/badge/MSFS-2020%20%2F%202024-5b6b7a">
+  <img alt="X-Plane" src="https://img.shields.io/badge/X--Plane-12.1.1%2B%20(Web%20API)-5b6b7a">
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/live-map.png" alt="Live-Karte mit Endanflug auf Frankfurt, HUD und Seitenpanel" width="900">
+  <img src="docs/screenshots/en/live-map.png" alt="Live map with final approach into Frankfurt, HUD and side panel" width="900">
 </p>
 
-VectaSim läuft neben Microsoft Flight Simulator 2020/2024, erkennt deinen Flug von selbst vom Losrollen bis zum Abstellen, zeichnet ihn auf und bewertet Anflug und Landung so, dass du den Zahlen trauen kannst. Alles bleibt auf deinem PC – kein Konto, keine Cloud, kein Abo.
+VectaSim runs alongside Microsoft Flight Simulator 2020/2024 and X-Plane 12.1.1 or later. It detects your flight on its own from the moment you start taxiing until you shut down, records it, and assesses your approach and landing in a way you can trust. No account, no cloud, no subscription: your data stays on your PC; VectaSim only fetches map, weather, traffic, flight plans and photos.
 
-> **Alpha.** Dies ist die erste öffentliche Vorabversion. Sie ist stabil genug zum Mitfliegen, aber noch nicht an allen Flugzeugen und Add-ons erprobt. Wenn etwas nicht stimmt, hilft ein [Issue](https://github.com/unwritten-dev/VectaSim/issues) mit dem Diagnosepaket aus *Einstellungen → Diagnose* – siehe [Wenn etwas nicht klappt](#wenn-etwas-nicht-klappt).
+> **Beta.** VectaSim is feature-complete for everyday flying and is now being tested on real setups. It has not yet been tried with every aircraft and add-on. If something looks wrong, an [issue](https://github.com/unwritten-dev/VectaSim/issues) with the diagnostics package from *Settings → Diagnostics* helps a lot – see [If something goes wrong](#if-something-goes-wrong).
 
-## Auf einen Blick
+## At a glance
 
 | | |
 |---|---|
-| **Automatisch** | Verbindet sich mit MSFS, erkennt Off-Block, Start, Landung und On-Block und legt den Flug ins Logbuch – ohne Knopfdruck. Pause, Slew und Zeitraffer werden markiert, nicht mitgezählt. |
-| **Anflug & Landung** | „Stabil ab … ft“, Gates bei 10 nm, FAF, 1000 und 500 ft, Landerate mit Herkunft, Aufsetzpunkt auf der Piste, Bounces, Go-arounds als Entscheidung statt als Fehler. |
-| **Live-Karte** | Eigenes Flugzeug, höhencodierter Track, auf Wunsch als 3D-Höhenprofil im Raum, Flughäfen mit Taxiways und Gates, VATSIM-Verkehr, METAR, SimBrief-Route, HUD mit Phase, Höhe, Speed, Sinkrate, Restdistanz und ETA. |
-| **Logbuch** | Flight-Strips mit Route, Blockzeiten, Landerate und Mini-Runway; Flotte nach Kennzeichen mit Fotos; Flughäfen; Streubilder deiner Aufsetzpunkte und Anflüge; Notizen, Tags, Sterne. |
-| **Länder** | Weltkarte, auf der jedes Land eingefärbt ist, in dem du gelandet bist – mit Fortschritt je Kontinent. |
-| **Deine Daten** | Eine SQLite-Datei auf deinem PC, tägliche Sicherung in einen Ordner deiner Wahl (OneDrive, NAS …), Papierkorb, Export als CSV, GPX, KML und JSON, Import alter Logbücher (Volanta, SimToolkitPro, VA-CSV). |
+| **Automatic** | Connects to MSFS or X-Plane 12.1.1+, detects off-block, takeoff, landing and on-block and files the flight in the logbook – no button to press. Pause, slew and time acceleration are flagged, not counted. |
+| **Approach & landing** | “Stable from … ft”, gates at 10 nm, FAF, 1000 and 500 ft, landing rate with its source, touchdown point on the runway, bounces, go-arounds treated as a decision rather than a mistake. |
+| **Live map** | World view as a globe (or flat), your own aircraft, altitude-coloured track, optionally as a 3D altitude profile, airports with taxiways and gates, online traffic and controllers from VATSIM and/or IVAO (click an aircraft for a flight card with route, altitude/trend, distance and a Planespotters photo when the registration is known, with follow and great-circle route), METAR, SimBrief route, HUD with phase, altitude, speed, vertical speed, remaining distance and ETA. |
+| **Logbook** | Flight strips with route, block times, landing rate and a mini runway; fleet by registration with photos; airports; dispersion plots of your touchdowns and approaches; notes, tags, star ratings; year in review. |
+| **Countries** | A world globe that colours every country you have landed in – with progress per continent. |
+| **Your data** | One SQLite file on your PC, a daily backup to a folder of your choice (OneDrive, NAS …), a trash, export as CSV, GPX, KML and JSON, import of old logbooks (Volanta, SimToolkitPro, VA CSV). |
+| **Languages** | English and German UI, following your Windows display language or set by hand. |
 
-## Anflug und Landung
+## Approach and landing
 
 <p align="center">
-  <img src="docs/screenshots/debrief.png" alt="Landeauswertung: Kernsatz, Landerate, Aufsetzpunkt, g-Last und Anflugbewertung mit „stabil ab“" width="900">
+  <img src="docs/screenshots/en/debrief.png" alt="Landing debrief: summary sentence, landing rate, touchdown point, g-load and approach rating with “stable from”" width="900">
 </p>
 
-- **Der ganze Anflug zählt**, nicht nur das Aufsetzen: Gleitpfad und Grundlinie in Dots, Speed gegen die geflogene Referenz, Sinkrate, Bank und Konfiguration an jedem Gate – nach den EASA-Kriterien für stabilisierte Anflüge, in vier Bändern von „stabil“ bis „instabil unter 500 ft“; die Grundlinie bekommt dazu eine eigene Kennzahl mit eigenem Band (RMS und max. in Dots, Ablage bei 500 ft und über der Schwelle, Überschießen beim Eindrehen, S-Kurven).
-- **Landerate nach festen, dokumentierten Regeln:** Sim-Wert mit Rückfall auf die letzte Sinkrate in der Luft, härtester Kontakt bei Bounces, kein Flug-Peak. Jede Zahl zeigt ihre Herkunft (Sim · gemessen · abgeleitet).
-- **Pisten-Draufsicht** mit Aufsetzpunkt, Mittellinien-Versatz, Aufsetzzone und Zielpunkt, **Anflugprofil** gegen den 3°-Gleitpfad mit Replay-Cursor, Abfangen, Rollout und der Wind aus dem METAR zum Landezeitpunkt.
-- **Durchstarten ist eine Entscheidung:** Ein Go-around bekommt seinen eigenen Debrief mit tiefstem Punkt, der abgebrochene Anflug wird vollständig bewertet.
-- **Du gegen dich:** Jede Landung wird gegen deine eigenen eingeordnet („besser als 70 % deiner letzten 20 auf EDDF 25C“), *Landungen → Verlauf* zeigt den gleitenden Median über Wochen und Monate, das Streubild die letzten 20 Aufsetzpunkte und Anflüge.
-- **Landekarte zum Teilen** (1200 × 675 PNG) mit Runway, Mini-Anflugprofil, den vier Kennzahlen und Wind – in die Zwischenablage oder als Datei, auf Wunsch nach jeder Landung automatisch.
+- **The whole approach counts**, not just the touchdown: glide path and lateral deviation in dots, speed against the flown reference, sink rate, bank and configuration at every gate – based on the EASA criteria for stabilised approaches, in four bands from “stable” to “unstable below 500 ft”. With data from the sim, VectaSim also checks against the simulator’s ILS instead of assuming 3°, and takes the sim wind on final, thrust, spoilers and landing flaps into account. ILS reference and sim wind apply to flights recorded with this version; older flights and X-Plane flights are assessed from the runway geometry and the 3° assumption. Lateral tracking gets its own metric and band (RMS and maximum in dots, offset at 500 ft and over the threshold, overshoot when intercepting, S-turns).
+- **Energy and wind:** an energy band from 10 nm down to 1000 ft, plus notes on tailwind, crosswind and wind shear on final.
+- **Landing rate by fixed, documented rules:** the sim’s touchdown value with a fallback to the last airborne vertical speed, the hardest contact across bounces, never an in-flight peak. Every number shows its source (sim · measured · derived).
+- **Runway top view** with touchdown point, centreline offset, touchdown zone and aiming point; **approach profile** against the 3° glide path with a replay cursor, flare, rollout and the METAR wind at the time of landing. Runways missing from the airport database are derived from your ground track (marked “derived”, threshold ±50 m); *Correct runway …* sets threshold and end exactly.
+- **A go-around is a decision:** it gets its own debrief with the lowest point, and the abandoned approach is assessed in full. *Circuits* in the flight detail lists every touch-and-go.
+- **You against yourself:** every landing is ranked against your own (“better than 70 % of your last 20 on EDDF 25C”), *Landings → Trends* shows the rolling median over weeks and months, and the dispersion plot shows your last 20 touchdowns and approaches.
+- **Landing card to share** (1200 × 675 PNG) with runway, mini approach profile, the four key figures and wind – to the clipboard or as a file, optionally saved automatically after every landing; plus an **approach card** with band, gates, profile and lateral tracking, saved automatically next to the landing card when auto-save is on.
 
 <table align="center">
   <tr>
-    <td><img src="docs/screenshots/approach-profile.png" alt="Piste von oben mit Aufsetzpunkt und Anflugprofil gegen den 3°-Pfad" width="440"></td>
-    <td><img src="docs/screenshots/goaround.png" alt="Debrief eines Durchstartens: stabiler Anflug, tiefster Punkt, Steigflug danach" width="440"></td>
+    <td><img src="docs/screenshots/en/approach-profile.png" alt="Runway from above with touchdown point and approach profile against the 3° path" width="440"></td>
+    <td><img src="docs/screenshots/en/approach-card.png" alt="Approach card with band, gates, profile and lateral tracking" width="440"></td>
   </tr>
 </table>
 
-## Logbuch, Flotte und Länder
-
 <p align="center">
-  <img src="docs/screenshots/logbook.png" alt="Logbuch mit Flight-Strips, Suche und Filtern sowie Flugdetail mit Track-Karte" width="900">
+  <img src="docs/screenshots/en/lateral.png" alt="Lateral tracking: offset from the extended centreline over the final approach, replay cursor and the notes on intercept overshoot and S-turns" width="900">
 </p>
 
-- **Flight-Strips:** Rufzeichen und Muster, Route mit Blockzeiten, Landerate, „stabil ab … ft“, Go-arounds und eine kleine Runway mit dem Aufsetzpunkt – eine Liste, die Muster zeigt. Suche und Filter über alles, auch Notizen und Tags.
-- **Flugdetail:** Höhen- und Speed-Profil mit Phasen, Track-Karte, Zeiten, Treibstoff, Plan gegen Ist (Blockzeit, Trip-Fuel, Landetreibstoff, Pünktlichkeit) und ein PIREP für VA-Formulare als Text oder JSON.
-- **Flotte:** Flüge landen immer auf demselben Flugzeug (Kennzeichen), mit Foto von Planespotters.net oder eigenem Bild und eigener Vapp für die Anflugbewertung.
-- **Notizen, Tags, Sterne** je Flug; falsch aufgezeichnete Werte (Rufzeichen, Flughäfen, Flugzeug, Kennzeichen) lassen sich korrigieren – das Original bleibt erhalten.
-- **SimBrief:** Mit hinterlegter Pilot-ID lädt VectaSim den aktuellen Flugplan von selbst, zeigt die Route auf der Karte und vergleicht Plan und Ist.
-- **Import:** Alte Flüge aus Volanta (Import-CSV), SimToolkitPro, VA-Exporten oder dem eigenen Logbuch-CSV – mit Spaltenzuordnung, Vorschau und Duplikaterkennung. Importierte Flüge zählen für Stunden, Strecken, Flotte und Länder.
+**Lateral tracking** gets its own key figure next to the glide path: the offset from the extended centreline in dots (simulator localiser when available, otherwise geometry), its own band (on track · slight · marked), the offset at 500 ft and over the threshold, overshoot on intercept and S-turns – and the strip under the approach profile shows the whole lateral picture at a glance.
+
+## Logbook, fleet and countries
 
 <p align="center">
-  <img src="docs/screenshots/fleet.png" alt="Flotte nach Kennzeichen mit Fotos, Flügen, Blockzeit und Landerate" width="900">
+  <img src="docs/screenshots/en/logbook.png" alt="Logbook with flight strips, search and filters, and flight detail with track map" width="900">
+</p>
+
+- **Flight strips:** callsign and type, route with block times, landing rate, “stable from … ft”, go-arounds and a small runway with the touchdown point – a list that reveals patterns. Search and filter across everything, including notes and tags.
+- **Flight detail:** altitude and speed profile with phases, track map, times, fuel, plan vs. actual (block time, trip fuel, landing fuel, punctuality) and a PIREP for VA forms as text or JSON.
+- **Fleet** (Logbook → Aircraft): flights always land on the same aircraft (registration), with a photo from Planespotters.net or your own picture, and your own Vapp and landing flap setting (e.g. 3 for CONF 3) for the approach rating.
+- **Notes, tags, stars** per flight; wrongly recorded values (callsign, airports, aircraft, registration) can be corrected – the original is kept.
+- **After a crash:** if you are back within 30 minutes and 5 nm of the last position, VectaSim offers to resume the flight; otherwise *Merge* above the logbook joins the two parts into one flight.
+- **SimBrief:** with your pilot ID set, VectaSim loads your current flight plan on its own, shows the route on the map and compares plan and actual.
+- **Import:** old flights from Volanta (import CSV), SimToolkitPro, VA exports or VectaSim’s own logbook CSV – with column mapping, preview and duplicate detection. Delimiter, encoding and format are detected automatically; common date formats, times in UTC or local time, weights in kg or lb, files up to 50 MB. A landing rate from the file goes into the notes; imported flights get the tag `import` and count towards hours, routes, fleet and countries.
+- **Year in review: story cards as PNG** (“Your year 2026”, Logbook → Year): seven cards – overview, routes with world map, fleet, landings with a yearly dispersion plot, approaches, months, countries – plus an optional eighth, “With an asterisk” (flights with pause, time acceleration, slew or a position jump). Story portrait format 1080 × 1920 or landscape 1200 × 675, for a calendar year or the last 12 months. Save or copy them one by one, with *Save each one* into a folder, or with *All as one long image* as a portrait stack; streamer mode masks the registrations.
+
+<p align="center">
+  <img src="docs/screenshots/en/fleet.png" alt="Fleet by registration with photos, flights, block time and landing rate" width="900">
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/countries.png" alt="Länder-Weltkarte: besuchte Länder eingefärbt, Fortschritt je Kontinent" width="900">
+  <img src="docs/screenshots/en/countries.png" alt="Countries world map: visited countries coloured, progress per continent" width="900">
 </p>
 
-**Länder** (Strg+3): Jedes Land, in dem du gelandet bist, wird eingefärbt – nur die Ankunft zählt. Fortschritt gesamt und je Kontinent, erste und letzte Landung je Land, ein Klick zeigt die Flüge dorthin; die Karte lässt sich als Bild speichern.
+**Countries** (Ctrl+3): every country you have landed in is coloured in – only the arrival counts. Progress overall and per continent, first and last landing per country, one click shows the flights there; the map can be saved as an image.
 
-## Oberfläche
+## Interface
 
-- Vier Ansichten – Karte, Logbuch, Länder, Einstellungen (Strg+1 bis 4) – und sechs Themes (Signal, Nachtcockpit, Graphit & Amber, Phosphor sowie die Tagesthemen Papierkarte und Arktis Studio). Zeiten in UTC oder Ortszeit, Gewichte in kg oder lb, Oberfläche mit Strg+Plus/Minus skalierbar.
-- **Streamer-Modus** (Strg+Umschalt+P) blendet Kennzeichen, Rufzeichen, Airline, SimBrief-ID und Benutzerpfade überall aus – auch auf der Landekarte und im Diagnosepaket.
-- **Integrationen** (alle abschaltbar): Discord-Status mit Route und Phase, Windows-Benachrichtigungen (Landung, Flug gespeichert, Verbindung, Update), Minimieren in den Infobereich.
-- **Datensicherheit:** tägliche Sicherung, zusätzlich vor jedem Update und jeder Umstellung des Datenformats, in einen frei wählbaren Ordner; Wiederherstellen mit einem Klick; gelöschte Flüge liegen 30 Tage im Papierkorb; Gesamtexport als `.vectasim`-Datei für den Umzug auf einen anderen PC.
-- **Demo-Flug** ohne Simulator zum Ausprobieren; signierte Auto-Updates.
+- Four views – Map, Logbook, Countries, Settings (Ctrl+1 to 4) – and six themes (Signal, Night Cockpit, Graphite & Amber, Phosphor plus the day themes Paper Chart and Arctic Studio). Times in UTC or local time, weights in kg or lb, the whole interface scalable with Ctrl+Plus/Minus.
+- **Keyboard:** Ctrl+F searches the logbook, Ctrl+. collapses the map’s side panel, Enter opens the debrief of the selected flight, Del moves it to the trash, Alt+T jumps to the newest notice – the full list is under *Settings → Keyboard*.
+- **Map:** switch between globe and flat map in the map bar or under *Settings → Display*; rotate and tilt the 3D view with the right mouse button or Ctrl + drag.
+- **English and German:** *Settings → Display → Language* – System (follows your Windows display language), Deutsch or English, applies immediately. Notifications, tray menu, Discord status, overlays and the installer follow the same setting; flight phases are always shown in English.
+- **Streamer mode** (Ctrl+Shift+P) hides registrations, callsigns, airline, SimBrief ID and user paths everywhere – including the landing card and the diagnostics package.
+- **Integrations** (all optional, off by default except notifications): Discord status with route and phase (off by default, turn it on under *Settings → Integrations*; no Discord app of your own needed – activity sharing must be allowed in Discord), Windows notifications (landing, flight saved, connection, update), minimise to the notification area.
+- **Overlay & API** (off by default): a local server with transparent OBS overlays (HUD, landing, route); open the overlays and start page on a tablet or phone on your Wi-Fi (with token); plus a read-only JSON/WebSocket API for virtual airlines. Overlays accept `?lang=de|en` – endpoints and security in [docs/overlay-api.md](docs/overlay-api.md).
+- **Data safety:** a daily backup (the last 7 daily backups are kept), plus one before every update and every data format migration, to a folder of your choice; restore with one click; deleted flights stay in the trash for 30 days; a full export as a `.vectasim` file to move to another PC. *Empty trash* and *Delete all data* are under *Settings → Data*.
+- **Demo flight** to try things out without a simulator – it lands normally, with a few small, deliberate mistakes so the debrief has something to show. Demo flights are removed when the demo ends; until then they only appear in the logbook and statistics with the “Demo flights” filter.
+- **Updates:** automatic updates are verified with VectaSim’s own signature; the installer itself is not yet code-signed for Windows. During a recorded flight, updates wait until the flight is over, and quitting asks first (the flight is then saved as interrupted).
+
+## System requirements
+
+- Windows 10 or 11, 64-bit, with WebView2 (preinstalled on current Windows).
+- Microsoft Flight Simulator 2020 or 2024 (Microsoft Store or Steam) or X-Plane 12.1.1 or later, on the same PC.
+- An internet connection for the map and online data (weather, traffic, flight plans, photos).
+- A window of at least 1024 × 640.
 
 ## Installation
 
-1. Unter [Releases](https://github.com/unwritten-dev/VectaSim/releases) die neueste Version öffnen und `VectaSim_<version>_x64-setup.exe` herunterladen (Windows 10/11, 64-bit).
-2. Installer starten. Windows SmartScreen meldet „unbekannter Herausgeber“ (die Alpha ist noch nicht code-signiert) → *Weitere Informationen → Trotzdem ausführen*. Keine Adminrechte nötig.
-3. Beim ersten Start braucht VectaSim die `SimConnect.dll` von Microsoft. Ist das MSFS-SDK nicht installiert: *Einstellungen → Simulator → SimConnect herunterladen* – ein Klick, rund 108 MB, VectaSim prüft die Datei und behält nur die DLL.
-4. MSFS starten. Sobald der Sim im Hauptmenü ist, zeigt die Karte „Bereit“; die Aufzeichnung beginnt beim Losrollen.
+1. Open the latest version under [Releases](https://github.com/unwritten-dev/VectaSim/releases) and download `VectaSim_<version>_x64-setup.exe` (Windows 10/11, 64-bit).
+2. Run the installer. Windows SmartScreen reports an “unknown publisher” (the beta is not code-signed yet) → *More info → Run anyway*. No admin rights needed.
+3. VectaSim needs Microsoft’s `SimConnect.dll` for MSFS. At the end, the installer offers to fetch it from Microsoft – one click, about 108 MB; it verifies the file and keeps only the DLL (if the MSFS SDK is already installed, it doesn’t ask). You can also do this later under *Settings → Simulator → Download SimConnect*. X-Plane needs no extra file – if you only fly X-Plane, answer “No”.
+4. Start MSFS or X-Plane. As soon as the sim is in the main menu (MSFS) or a flight is loaded (X-Plane), the map shows “Ready”; recording starts when you taxi.
 
-Updates meldet VectaSim beim Start und installiert sie nach Bestätigung. Mehr Details, der Weg über das SDK und die Fehlersuche stehen in [docs/installation.md](docs/installation.md).
+*Settings → Simulator* defaults to *Automatic*: if no MSFS is found within 10 seconds, VectaSim tries X-Plane. If you only fly X-Plane, choose “X-Plane 12”. For X-Plane, *Settings → Network → Disable Incoming Traffic* in X-Plane must stay off, otherwise the Web API is blocked.
 
-## Wenn etwas nicht klappt
+VectaSim announces updates at startup and installs them after you confirm. More details, the SDK route, X-Plane setup and troubleshooting are in [docs/installation.md](docs/installation.md).
 
-*Einstellungen → Diagnose* zeigt Verbindung, gefundene DLL und Datenrate. Für einen Fehlerbericht: **Debug-Modus** einschalten, den Fehler nachstellen, **Diagnosepaket erstellen** – die ZIP-Datei (Protokolle, Einstellungen, Simulator-Aufzeichnung; ohne Passwörter oder Schlüssel) an ein [Issue](https://github.com/unwritten-dev/VectaSim/issues) hängen. Danach den Debug-Modus wieder ausschalten.
+## Your data & privacy
+
+- Your logbook lives in `%APPDATA%\io.vectasim.app\`; logs and the default backup folder are in `%LOCALAPPDATA%\io.vectasim.app\`.
+- VectaSim only contacts: OpenFreeMap (map tiles), aviationweather.gov (METAR), VATSIM and IVAO (only when turned on), SimBrief (only with your pilot ID), Planespotters.net (aircraft photos, can be turned off), GitHub (updates) and Microsoft’s SDK server (only for the SimConnect download).
+
+## Uninstall
+
+Windows *Settings → Apps → VectaSim → Uninstall*. Your logbook stays unless you tick “Delete app data” – that also removes the backups in the default folder, so keep a backup elsewhere first.
+
+## If something goes wrong
+
+*Settings → Diagnostics* shows the connection, the DLL that was found and the data rate; *Copy diagnostics* puts a short summary on the clipboard. For a bug report: turn on **Debug mode**, reproduce the problem, click **Create diagnostics package** – attach the ZIP file (logs, settings, simulator recording; no passwords or keys) to an [issue](https://github.com/unwritten-dev/VectaSim/issues). Then turn debug mode off again.
+
+## Known limitations
+
+- **X-Plane:** 10 values per second, no touchdown value from the sim – the landing rate is “measured” (about ±50–100 fpm), no ILS reference, same PC only.
+- Imported flights have no track and no landing analysis.
+- Derived runways are accurate to about ±50 m.
+- Flight phases are always shown in English.
+- The installer is not code-signed yet.
 
 ## Status
 
-Alpha 0.3 – MSFS 2020/2024 über SimConnect. In Arbeit: X-Plane, englische Oberfläche, Volanta-Import aus dem JSON-Export, Code-Signing. Was sich geändert hat, steht im [CHANGELOG](CHANGELOG.md).
+Beta 0.4 – MSFS 2020/2024 and X-Plane 12.1.1+ (Web API), English and German UI. Planned: Volanta JSON import, code signing – ideas welcome as an [issue](https://github.com/unwritten-dev/VectaSim/issues). What has changed is in the [CHANGELOG](CHANGELOG.md).
 
-## Mitmachen
+## Contributing
 
-Alles für Entwicklerinnen und Entwickler – Stack, Bauen aus dem Quellcode, Architektur, Konventionen – steht in [DEVELOPMENT.md](DEVELOPMENT.md).
+Everything for developers – stack, building from source, architecture, conventions – is in [DEVELOPMENT.md](DEVELOPMENT.md).
 
-## Daten und Danke
+## Data and credits
 
-Karte: © [OpenStreetMap](https://www.openstreetmap.org/copyright)-Mitwirkende, Tiles von [OpenFreeMap](https://openfreemap.org) · Flughäfen: [OurAirports](https://ourairports.com) (Public Domain) · Ländergrenzen: [Natural Earth](https://www.naturalearthdata.com) (Public Domain) · Wetter: NOAA aviationweather.gov · Online-Verkehr: [VATSIM](https://vatsim.net) · Flugpläne: [SimBrief](https://www.simbrief.com) · Flugzeugfotos: [Planespotters.net](https://www.planespotters.net) mit Fotografen-Credit.
+Map: © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors, tiles by [OpenFreeMap](https://openfreemap.org) · Airports: [OurAirports](https://ourairports.com) (public domain) · Country borders: [Natural Earth](https://www.naturalearthdata.com) (public domain) · Weather: NOAA aviationweather.gov · Online traffic: [VATSIM](https://vatsim.net) · [IVAO](https://ivao.aero) · Flight plans: [SimBrief](https://www.simbrief.com) · Aircraft photos: [Planespotters.net](https://www.planespotters.net) with photographer credit.
 
-SimConnect ist Bestandteil des Microsoft Flight Simulator SDK und wird nicht mitgeliefert; auf Wunsch lädt VectaSim die `SimConnect.dll` aus dem offiziellen SDK-Download von Microsoft.
+SimConnect is part of the Microsoft Flight Simulator SDK and is not bundled; on request VectaSim downloads `SimConnect.dll` from Microsoft’s official SDK download.
 
-Lizenzen der verwendeten Bibliotheken, Schriften und Daten: [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+Licenses of the libraries, fonts and data used: [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
-## Lizenz
+## License
 
-MIT – siehe [LICENSE](LICENSE).
+MIT – see [LICENSE](LICENSE).

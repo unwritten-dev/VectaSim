@@ -1,8 +1,9 @@
 import { useRef, useState } from "react";
 import type { FlightSummary, Stats, StatusSnapshot } from "../types";
-import { DEMO_LABEL, isRealSimError, isSimMissing, recordingStatus } from "../status";
+import { isRealSimError, isSimMissing, recordingStatus } from "../status";
 import { isDllMissing, userMessage } from "../errors";
-import { fmt, fmtClock } from "../format";
+import { fmt, fmtClock } from "../i18n/number";
+import { useT } from "../i18n";
 import { togglePrivacyMode, usePrefs, usePrivacyShortcut } from "../prefs";
 import Popover from "./Popover";
 import { KV } from "./Stat";
@@ -38,6 +39,7 @@ const ALERT = ["M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2
  * error). Opens a popover with the same texts as the map pill and the next step.
  */
 export default function StatusButton({ status, flight, stats, providers, lastError, onSelectProvider, onOpenSettings }: Props) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLButtonElement>(null);
   const { privacyMode } = usePrefs();
@@ -63,7 +65,7 @@ export default function StatusButton({ status, flight, stats, providers, lastErr
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls={open ? "status-popover" : undefined}
-        aria-label={`Aufzeichnung: ${rec.label}. Details anzeigen`}
+        aria-label={t("shell.statusButton.aria", { label: rec.label })}
         title={`${rec.label} – ${rec.hint}`}
       >
         <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -80,7 +82,7 @@ export default function StatusButton({ status, flight, stats, providers, lastErr
         </svg>
         <span className={`dot status-mark dot-${mark}`} aria-hidden="true" />
       </button>
-      <Popover open={open} onClose={close} anchorRef={ref} label="Aufzeichnungsstatus" id="status-popover" className="status-popover">
+      <Popover open={open} onClose={close} anchorRef={ref} label={t("shell.statusButton.popover")} id="status-popover" className="status-popover">
         <div className="status-pop-head">
           <span className={`dot dot-${mark}`} aria-hidden="true" />
           <strong>{rec.label}</strong>
@@ -88,8 +90,8 @@ export default function StatusButton({ status, flight, stats, providers, lastErr
             <button
               className="btn-ghost privacy-mark"
               onClick={() => void togglePrivacyMode(false)}
-              title="Streamer-Modus an – Kennzeichen, Rufzeichen, IDs und Pfade ausgeblendet. Klicken zum Ausschalten (Strg+Umschalt+P)"
-              aria-label="Streamer-Modus an. Ausschalten"
+              title={t("shell.statusButton.privacyTitle")}
+              aria-label={t("shell.statusButton.privacyAria")}
             >
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 {EYE_OFF.map((d) => (
@@ -102,19 +104,19 @@ export default function StatusButton({ status, flight, stats, providers, lastErr
         <p className="status-pop-hint">{rec.hint}</p>
         <KV
           rows={[
-            ["Simulator", sim],
-            ["Datenrate", live && stats ? `${fmt(stats.rateHz, 1, "Hz")} · ${fmt(stats.frames)} Datensätze` : "–"],
+            [t("settings.simulator.label"), sim],
+            [t("shell.statusButton.dataRate"), live && stats ? t("shell.statusButton.rate", { rate: fmt(stats.rateHz, 1, "Hz"), frames: fmt(stats.frames) }) : "–"],
           ]}
         />
         {err && errMsg && (
           <div className="alert compact status-pop-error">
             <div>
-              <strong>{err.ms ? `Letzter Fehler (${fmtClock(err.ms, { seconds: true })})` : "Fehler"}:</strong> {errMsg.title}
+              <strong>{err.ms ? t("shell.statusButton.lastError", { time: fmtClock(err.ms, { seconds: true }) }) : t("shell.statusButton.error")}</strong> {errMsg.title}
             </div>
             <div className="detail">{errMsg.hint}</div>
             {errMsg.detail && (
               <details className="alert-details">
-                <summary>Details</summary>
+                <summary>{t("shell.action.details")}</summary>
                 <code>{errMsg.detail}</code>
               </details>
             )}
@@ -128,9 +130,9 @@ export default function StatusButton({ status, flight, stats, providers, lastErr
                 onOpenSettings();
                 close();
               }}
-              title="Einstellungen → Simulator: SimConnect mit einem Klick herunterladen"
+              title={t("shell.statusButton.setupTitle")}
             >
-              SimConnect einrichten
+              {t("settings.simconnect.title")}
             </button>
           )}
           {/* always offered; without SimConnect the app falls back to the waiting state */}
@@ -142,7 +144,7 @@ export default function StatusButton({ status, flight, stats, providers, lastErr
                 close();
               }}
             >
-              {status?.provider === "replay" ? "Replay beenden" : `${DEMO_LABEL} beenden`}
+              {status?.provider === "replay" ? t("shell.demo.stopReplay") : t("shell.demo.stop")}
             </button>
           )}
           {(rec.kind === "waiting" || rec.kind === "suspended") && (
@@ -152,9 +154,9 @@ export default function StatusButton({ status, flight, stats, providers, lastErr
                 onSelectProvider(status?.provider || "simconnect");
                 close();
               }}
-              title="Sofort einen Verbindungsversuch starten, statt auf den nächsten automatischen zu warten"
+              title={t("shell.statusButton.connectTitle")}
             >
-              Jetzt verbinden
+              {t("shell.statusButton.connect")}
             </button>
           )}
           {rec.kind === "waiting" && providers.includes("mock") && (
@@ -164,9 +166,9 @@ export default function StatusButton({ status, flight, stats, providers, lastErr
                 onSelectProvider("mock");
                 close();
               }}
-              title="Ohne Simulator ausprobieren – ein simulierter Flug"
+              title={t("shell.demo.startTitle")}
             >
-              {DEMO_LABEL} starten
+              {t("shell.demo.start")}
             </button>
           )}
           <button
@@ -176,7 +178,7 @@ export default function StatusButton({ status, flight, stats, providers, lastErr
               close();
             }}
           >
-            Einstellungen
+            {t("nav.settings")}
           </button>
         </div>
       </Popover>

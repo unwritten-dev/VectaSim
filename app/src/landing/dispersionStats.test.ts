@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { LandingFact } from "../types";
+import { setLanguageSetting } from "../i18n";
 import {
   aircraftKey,
   applyFilter,
@@ -16,6 +17,10 @@ import {
   stdDev,
   tdzRate,
 } from "./dispersionStats";
+
+// jsdom reports en-US: pin the reference language (the en case switches explicitly)
+beforeEach(() => setLanguageSetting("de"));
+afterEach(() => setLanguageSetting("de"));
 
 function fact(p: Partial<LandingFact>): LandingFact {
   return {
@@ -177,5 +182,12 @@ describe("landings without measurable lateral offset (derived runway)", () => {
     expect(lateralText(derived)).toBe("Querablage nicht messbar");
     expect(distanceText(derived).replace(/\u202f/g, " ")).toBe("380 ± 50 m");
     expect(distanceText(fact({})).replace(/\u202f/g, " ")).toBe("400 m");
+  });
+
+  it("say so in English", () => {
+    setLanguageSetting("en");
+    expect(lateralText(derived)).toBe("Lateral offset not measurable");
+    expect(distanceText(fact({ touchdownDistanceM: 1250 })).replace(/\u202f/g, " ")).toBe("1,250 m");
+    expect(aircraftKey(fact({ aircraftIcaoType: null, aircraftTitle: null }))).toBe("Unknown");
   });
 });

@@ -18,7 +18,8 @@
 //!   puts it in place on the next open (the app restarts right after staging).
 
 use crate::store::{SCHEMA_VERSION, file_schema_version};
-use crate::{Result, Store, StoreError};
+use crate::error::path_text;
+use crate::{BackupStep, Invalid, Result, Store, StoreError};
 use rusqlite::{Connection, OpenFlags, params};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -246,8 +247,8 @@ pub fn rotate(dir: &Path, keep_daily: usize, keep_event: usize) -> Result<Vec<Pa
 
 /// Consistent copy of the database behind `conn` into `dir` (see the module docs).
 pub(crate) fn create_backup_from(conn: &Connection, dir: &Path, kind: BackupKind, now_ms: u64) -> Result<PathBuf> {
-    let fail = |what: &str, e: &dyn std::fmt::Display| StoreError::Backup(format!("{what} ({}): {e}", dir.display()));
-    std::fs::create_dir_all(dir).map_err(|e| fail("Ordner nicht anlegbar", &e))?;
+    let fail = |step: BackupStep, e: &dyn std::fmt::Display| StoreError::Backup { step, dir: dir.to_path_buf(), detail: e.to_string() };
+    std::fs::create_dir_all(dir).map_err(|e| fail(BackupStep::CreateDir, &e))?;
     // two copies within one second get the next free second
     let mut ms = now_ms;
     let mut target = dir.join(file_name(kind, ms));
@@ -257,12 +258,12 @@ pub(crate) fn create_backup_from(conn: &Connection, dir: &Path, kind: BackupKind
     }
     let partial = dir.join(format!("{}.partial", target.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()));
     let _ = std::fs::remove_file(&partial);
-    let path = partial.to_str().ok_or_else(|| fail("Pfad nicht darstellbar", &"non-UTF-8"))?;
+    let path = partial.to_str().ok_or_else(|| fail(BackupStep::PathNotUtf8, &"non-UTF-8"))?;
     if let Err(e) = conn.execute("VACUUM INTO ?1", params![path]) {
         let _ = std::fs::remove_file(&partial);
-        return Err(fail("Kopie fehlgeschlagen", &e));
+        return Err(fail(BackupStep::Copy, &e));
     }
-    std::fs::rename(&partial, &target).map_err(|e| fail("Kopie nicht umbenennbar", &e))?;
+    std::fs::rename(&partial, &target).map_err(|e| fail(BackupStep::Rename, &e))?;
     Ok(target)
 }
 
@@ -272,29 +273,29 @@ pub(crate) fn create_backup_from(conn: &Connection, dir: &Path, kind: BackupKind
 /// newer than this build ([`StoreError::NewerSchema`] otherwise), number of flights.
 pub fn inspect(path: &Path) -> Result<RestoreCheck> {
     if !path.is_file() {
-        return Err(StoreError::Invalid(format!("Datei nicht gefunden: {}", path.display())));
+        return Err(Invalid::FileNotFound { path: path_text(path) }.into());
     }
     let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)
-        .map_err(|e| StoreError::Invalid(format!("keine lesbare Datenbank: {e}")))?;
+        .map_err(|e| StoreError::from(Invalid::NotADatabase { detail: e.to_string() }))?;
     let problems: Vec<String> = (|| -> rusqlite::Result<Vec<String>> {
         let mut stmt = conn.prepare("PRAGMA integrity_check")?;
         let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
         rows.collect()
     })()
-    .map_err(|e| StoreError::Invalid(format!("keine lesbare Datenbank: {e}")))?;
+    .map_err(|e| StoreError::from(Invalid::NotADatabase { detail: e.to_string() }))?;
     if problems.len() != 1 || problems[0] != "ok" {
-        return Err(StoreError::Invalid(format!("Sicherung beschädigt: {}", problems.join("; "))));
+        return Err(Invalid::BackupCorrupt { detail: problems.join("; ") }.into());
     }
-    let schema_version = file_schema_version(&conn).map_err(|e| StoreError::Invalid(format!("keine VectaSim-Datenbank: {e}")))?;
+    let schema_version = file_schema_version(&conn).map_err(|e| StoreError::from(Invalid::NotVectasimDatabase { detail: e.to_string() }))?;
     if schema_version == 0 {
-        return Err(StoreError::Invalid("keine VectaSim-Datenbank (Schema fehlt)".into()));
+        return Err(Invalid::SchemaMissing.into());
     }
     if schema_version > SCHEMA_VERSION {
         return Err(StoreError::NewerSchema { found: schema_version, supported: SCHEMA_VERSION });
     }
     let flights: i64 = conn
         .query_row("SELECT COUNT(*) FROM flights", [], |r| r.get(0))
-        .map_err(|e| StoreError::Invalid(format!("keine VectaSim-Datenbank: {e}")))?;
+        .map_err(|e| StoreError::from(Invalid::NotVectasimDatabase { detail: e.to_string() }))?;
     Ok(RestoreCheck { schema_version, flights: flights.max(0) as u64 })
 }
 
@@ -438,10 +439,10 @@ impl Store {
     /// the next time it is opened – restart the app right after this. Returns the copy of the
     /// current logbook.
     pub fn restore_from(&self, src: &Path, backup_dir: &Path) -> Result<PathBuf> {
-        let db = self.path().ok_or_else(|| StoreError::Invalid("Logbuch ohne Datei (im Speicher)".into()))?.to_path_buf();
+        let db = self.path().ok_or_else(|| StoreError::from(Invalid::InMemory))?.to_path_buf();
         let same = |a: &Path, b: &Path| matches!((a.canonicalize(), b.canonicalize()), (Ok(x), Ok(y)) if x == y);
         if same(src, &db) {
-            return Err(StoreError::Invalid("Das ist die aktive Datenbank, keine Sicherung.".into()));
+            return Err(Invalid::ActiveDatabase.into());
         }
         inspect(src)?;
         let saved = self.create_backup(backup_dir, BackupKind::PreRestore)?;

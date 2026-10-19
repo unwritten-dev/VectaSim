@@ -1,7 +1,7 @@
-//! CSV import: sniffer, date formats, the Volanta import CSV (synthetic fixture after doc 08),
+//! CSV import: sniffer, date formats, the Volanta import CSV (synthetic fixture),
 //! own logbook CSV round trip, duplicates, landing rate handling.
 
-use vectasim_core::{FlightSession, MockFlight};
+use vectasim_core::{FlightSession, Lang, MockFlight};
 use vectasim_store::csvimport::{
     self, ColumnMapping, CsvEncoding, CsvField, CsvImportOptions, CsvPreset, DateFormat, OffsetSpan, Stamp, WeightUnit, parse_stamp,
 };
@@ -27,7 +27,7 @@ fn mapping_of(bytes: &[u8]) -> ColumnMapping {
 }
 
 fn opts(tag: &str) -> CsvImportOptions {
-    CsvImportOptions { dedupe: true, source_tag: tag.into() }
+    CsvImportOptions { dedupe: true, source_tag: tag.into(), lang: Lang::De }
 }
 
 #[test]
@@ -123,7 +123,7 @@ fn separate_date_and_time_columns_local_time_and_pounds() {
     assert_eq!(m.columns.get(&CsvField::OnBlock), Some(&4));
     m.weight_unit = WeightUnit::Lb;
     m.local_offsets = vec![OffsetSpan { from_ms: 0, offset_min: 60 }, OffsetSpan { from_ms: MAY1 - 40 * 24 * HOUR, offset_min: 120 }];
-    let rows = csvimport::preview(csv.as_bytes(), &m, 20).unwrap();
+    let rows = csvimport::preview(csv.as_bytes(), &m, 20, Lang::De).unwrap();
     let r = &rows[0];
     assert_eq!(r.error, None, "{r:?}");
     assert_eq!(r.off_block_ms, Some(MAY1 + 20 * HOUR + 30 * MIN));
@@ -132,7 +132,7 @@ fn separate_date_and_time_columns_local_time_and_pounds() {
     // fixed offset instead
     m.local_offsets.clear();
     m.utc_offset_min = -300;
-    let r = &csvimport::preview(csv.as_bytes(), &m, 20).unwrap()[0];
+    let r = &csvimport::preview(csv.as_bytes(), &m, 20, Lang::De).unwrap()[0];
     assert_eq!(r.off_block_ms, Some(MAY1 + 27 * HOUR + 30 * MIN));
 }
 
@@ -161,7 +161,7 @@ fn volanta_import_csv_is_recognised_and_imported() {
     }
     assert_eq!(c.len(), 12, "Route stays unmapped: {c:?}");
 
-    let preview = csvimport::preview(bytes, &p.suggested, 20).unwrap();
+    let preview = csvimport::preview(bytes, &p.suggested, 20, Lang::De).unwrap();
     assert_eq!(preview.len(), 4);
     assert_eq!(preview[0].on_block_ms, Some(MAY1 + 9 * HOUR + 35 * MIN));
     assert_eq!(preview[1].on_block_ms, Some(MAY1 + 13 * HOUR + 35 * MIN), "from Duration 95 min");
@@ -211,7 +211,7 @@ fn duplicates_against_logbook_and_trash() {
     assert!(store.delete_flight_at(&id, 1).unwrap());
     assert_eq!(store.import_csv(bytes, &m, &opts("volanta")).unwrap().added, 0);
     // without the check everything valid comes in
-    let all = store.import_csv(bytes, &m, &CsvImportOptions { dedupe: false, source_tag: String::new() }).unwrap();
+    let all = store.import_csv(bytes, &m, &CsvImportOptions { dedupe: false, ..CsvImportOptions::default() }).unwrap();
     assert_eq!((all.added, all.skipped_duplicate), (3, 0));
 }
 
@@ -259,10 +259,33 @@ EDDF,EDDM,2023-05-01T08:00:00Z,2023-05-01T09:00:00Z,0:40,-142,Seitenwind,\"Train
 }
 
 #[test]
+fn import_texts_follow_the_language() {
+    let bytes = VOLANTA.as_bytes();
+    let p = csvimport::sniff(bytes);
+    let preview = csvimport::preview(bytes, &p.suggested, 20, Lang::En).unwrap();
+    assert_eq!(preview[2].error.as_deref(), Some("Departure airport missing"));
+    let store = Store::open_in_memory().unwrap();
+    let r = store.import_csv(bytes, &p.suggested, &CsvImportOptions { lang: Lang::En, ..opts("volanta") }).unwrap();
+    assert!(r.warnings.iter().any(|w| w == "Line 4: skipped – Departure airport missing"), "{:?}", r.warnings);
+    let flights = store.list_flights(100, 0).unwrap();
+    let f = flights.iter().find(|f| f.dep_icao.as_deref() == Some("EDDF")).unwrap();
+    assert_eq!(f.notes.as_deref(), Some("Fuel used per import file: 2400 kg"));
+    // a value that cannot be read, with English quotes
+    let csv = "EDDF;EGLL;2023-05-01 08:00;abc\n";
+    let mut m = csvimport::sniff_named(csv.as_bytes(), None, Lang::En).suggested;
+    m.columns = [(CsvField::DepIcao, 0), (CsvField::ArrIcao, 1), (CsvField::OffBlock, 2), (CsvField::DistanceNm, 3)].into_iter().collect();
+    let r = &csvimport::preview(csv.as_bytes(), &m, 20, Lang::En).unwrap()[0];
+    assert_eq!(r.warnings, ["Distance “abc” unreadable"]);
+    let r = &csvimport::preview(csv.as_bytes(), &m, 20, Lang::De).unwrap()[0];
+    assert_eq!(r.warnings, ["Distanz „abc“ nicht lesbar"]);
+    assert_eq!(csvimport::sniff_named(csv.as_bytes(), None, Lang::En).columns[0], "Column 1");
+}
+
+#[test]
 fn mapping_without_airports_is_refused() {
     let mut m = mapping_of(VOLANTA.as_bytes());
     m.columns.remove(&CsvField::DepIcao);
-    let e = csvimport::preview(VOLANTA.as_bytes(), &m, 20).unwrap_err().to_string();
+    let e = csvimport::preview(VOLANTA.as_bytes(), &m, 20, Lang::De).unwrap_err().to_string();
     assert!(e.contains("Abflughafen"), "{e}");
 }
 

@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { RESUME_MAX_AGE_MS, gapTitle, mergeHint, mergeKey, resumeCandidate } from "./resume";
 import type { FlightRow, MergeCandidate, ResumeCandidate } from "./types";
+import { setLanguageSetting } from "./i18n";
+
+beforeEach(() => setLanguageSetting("de"));
 
 const NOW = Date.UTC(2026, 9, 18, 12, 30);
 const MIN = 60_000;
@@ -91,5 +94,17 @@ describe("gapTitle", () => {
   it("names the recording gap of a resumed flight, nothing for a normal one", () => {
     expect(gapTitle(row({}))).toBeNull();
     expect(gapTitle(row({ integrity: { ...integrity, gapMs: 2 * MIN } }))).toMatch(/^Aufzeichnungslücke 2.*fortgesetzt/);
+  });
+});
+
+describe("in English", () => {
+  it("resume prompt and gap tooltip", () => {
+    setLanguageSetting("en");
+    const p = resumeCandidate(offer(), { demo: false, nowMs: NOW });
+    expect(p?.title).toBe("Resume flight?");
+    expect(p?.body).toContain("EDDF → … since 12:04z");
+    expect(p?.body).toContain("1.2");
+    expect(p?.body).toContain("new flight");
+    expect(gapTitle(row({ state: "interrupted" }))).toMatch(/^Recording interrupted\. Ended without shutdown/);
   });
 });

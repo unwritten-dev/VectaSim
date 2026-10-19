@@ -6,6 +6,7 @@ import { silhouettePath, wakeCategory } from "../map/aircraftIcons";
 import { usePrefs } from "../prefs";
 import { privacy } from "../format";
 import { needsPhotoLookup, photoCredit } from "./airframe";
+import { useT } from "../i18n";
 
 // One lazy lookup per registration and app session; the backend caches and rate-limits,
 // this only keeps a list of thumbnails from asking again on every re-render.
@@ -56,6 +57,7 @@ export default function AirframeImage({ airframe: a, size = "thumb", credit = fa
   useLazyPhoto(a);
   // re-render with the Streamer-Modus (alt text)
   const { privacyMode } = usePrefs();
+  const t = useT();
   const url = a ? src(a, size) : null;
   const [broken, setBroken] = useState(false);
   useEffect(() => setBroken(false), [url]);
@@ -73,7 +75,7 @@ export default function AirframeImage({ airframe: a, size = "thumb", credit = fa
     <figure className={`af-image af-${size} ${className}`}>
       <div className="af-frame">
         {show ? (
-          <img src={url} alt={a ? `Foto ${privacy(a.registration, "registration", privacyMode)}` : ""} loading="lazy" onError={() => setBroken(true)} draggable={false} />
+          <img src={url} alt={a ? t("logbook.airframe.photoAlt", { reg: privacy(a.registration, "registration", privacyMode) }) : ""} loading="lazy" onError={() => setBroken(true)} draggable={false} />
         ) : (
           <AirframeSilhouette icaoType={a?.icaoType ?? fallbackType} title={a?.title ?? fallbackTitle} />
         )}
@@ -82,7 +84,7 @@ export default function AirframeImage({ airframe: a, size = "thumb", credit = fa
             className="af-credit-badge"
             role={a?.imageLink ? "link" : undefined}
             tabIndex={a?.imageLink ? 0 : undefined}
-            title={a?.imageLink ? `${line} – Foto auf Planespotters.net öffnen` : line!}
+            title={a?.imageLink ? t("logbook.airframe.openPhoto", { credit: line! }) : line!}
             aria-label={line!}
             onClick={openLink}
             onMouseDown={(e) => e.stopPropagation()}
@@ -105,9 +107,9 @@ export default function AirframeImage({ airframe: a, size = "thumb", credit = fa
               line
             )
           ) : a?.imageSource === "none" ? (
-            "Kein Foto zu dieser Registrierung gefunden"
+            t("logbook.airframe.noPhotoFound")
           ) : (
-            "Noch kein Foto"
+            t("logbook.airframe.noPhotoYet")
           )}
         </figcaption>
       )}

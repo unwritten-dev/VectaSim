@@ -2,7 +2,8 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
-import { fmt, fmtDate, fmtNum } from "../format";
+import { fmt, fmtDate, fmtNum } from "../i18n/number";
+import { useT } from "../i18n";
 import { showToast } from "../ui/Toast";
 import { RUNWAY_SOURCE_SHORT, runwaySourceOf } from "./facts";
 import { isDerivedSource, type LandingAnalysis, type UserRunway, type UserRunwayEdit } from "./types";
@@ -12,6 +13,11 @@ const EARTH_R_M = 6_371_008.8;
 const DERIVE_AIM_M = 300;
 /** Shortest ground run a runway is taken from (DERIVE_MIN_GROUND_RUN_M). */
 const MIN_GROUND_RUN_M = 150;
+/** Allowed threshold–end distance and width (save_user_runway checks the same). */
+const MIN_LENGTH_M = 100;
+const MAX_LENGTH_M = 8000;
+const MIN_WIDTH_M = 1;
+const MAX_WIDTH_M = 200;
 
 interface Form {
   ident: string;
@@ -97,6 +103,7 @@ const FOCUSABLE = 'button:not([disabled]), input:not([disabled]), [tabindex]:not
  * focus trap keeps Tab inside it; Esc closes the editor only.
  */
 export default function RunwayEditor({ analysis: a, airportIcao, onClose, onChanged }: { analysis: LandingAnalysis; airportIcao: string; onClose: () => void; onChanged: () => void }) {
+  const t = useT();
   const rwy = a.runway;
   const titleId = useId();
   const ref = useRef<HTMLDivElement>(null);
@@ -174,23 +181,21 @@ export default function RunwayEditor({ analysis: a, airportIcao, onClose, onChan
     if (!fromLanding) return;
     setForm((f) => ({ ...f, latThr: coord(fromLanding.latThr), lonThr: coord(fromLanding.lonThr), latEnd: coord(fromLanding.latEnd), lonEnd: coord(fromLanding.lonEnd) }));
     setLengthEstimated(fromLanding.lengthEstimated);
-    setNote(
-      `Aus dieser Landung übernommen: Achse aus deiner Rollspur, Schwelle ${fmt(DERIVE_AIM_M, 0, "m")} vor dem Aufsetzpunkt angenommen` +
-        (fromLanding.lengthEstimated ? ", Pistenende am Ende des Rollouts (Länge unbekannt)." : "."),
-    );
+    setNote(t(fromLanding.lengthEstimated ? "runwayEditor.noteTakenEstimated" : "runwayEditor.noteTaken", { aim: fmt(DERIVE_AIM_M, 0, "m") }));
   };
 
   const parsed = (() => {
     const v = { latThr: num(form.latThr), lonThr: num(form.lonThr), latEnd: num(form.latEnd), lonEnd: num(form.lonEnd), widthM: num(form.widthM), elevationFt: num(form.elevationFt) };
     const ident = form.ident.trim().toUpperCase();
-    if (!/^[0-9A-Z-]{1,4}$/.test(ident)) return { error: "Pistenbezeichnung: 1–4 Zeichen, z. B. 09 oder 27L" };
+    if (!/^[0-9A-Z-]{1,4}$/.test(ident)) return { error: t("runwayEditor.error.ident") };
     const coords = [v.latThr, v.lonThr, v.latEnd, v.lonEnd];
-    if (coords.some((c) => c == null || Number.isNaN(c))) return { error: "Schwelle und Ende brauchen Breite und Länge in Dezimalgrad" };
-    if ([v.latThr!, v.latEnd!].some((x) => Math.abs(x) > 90) || [v.lonThr!, v.lonEnd!].some((x) => Math.abs(x) > 180)) return { error: "Koordinaten außerhalb des Erdballs" };
+    if (coords.some((c) => c == null || Number.isNaN(c))) return { error: t("runwayEditor.error.coords") };
+    if ([v.latThr!, v.latEnd!].some((x) => Math.abs(x) > 90) || [v.lonThr!, v.lonEnd!].some((x) => Math.abs(x) > 180)) return { error: t("runwayEditor.error.globe") };
     const len = distanceM(v.latThr!, v.lonThr!, v.latEnd!, v.lonEnd!);
-    if (len < 100 || len > 8000) return { error: `Schwelle und Ende liegen ${fmt(len, 0, "m")} auseinander – erlaubt sind 100 m bis 8 km` };
-    if (Number.isNaN(v.widthM) || (v.widthM != null && (v.widthM < 1 || v.widthM > 200))) return { error: "Breite: 1–200 m oder leer" };
-    if (Number.isNaN(v.elevationFt)) return { error: "Höhe: Zahl in ft oder leer" };
+    if (len < MIN_LENGTH_M || len > MAX_LENGTH_M)
+      return { error: t("runwayEditor.error.length", { length: fmt(len, 0, "m"), min: fmt(MIN_LENGTH_M, 0, "m"), max: fmt(MAX_LENGTH_M / 1000, 0, "km") }) };
+    if (Number.isNaN(v.widthM) || (v.widthM != null && (v.widthM < MIN_WIDTH_M || v.widthM > MAX_WIDTH_M))) return { error: t("runwayEditor.error.width", { min: MIN_WIDTH_M, max: MAX_WIDTH_M }) };
+    if (Number.isNaN(v.elevationFt)) return { error: t("runwayEditor.error.elevation") };
     return { ident, len, course: bearingDeg(v.latThr!, v.lonThr!, v.latEnd!, v.lonEnd!), v };
   })();
 
@@ -227,7 +232,7 @@ export default function RunwayEditor({ analysis: a, airportIcao, onClose, onChan
     setError(null);
     try {
       const saved = await invoke<UserRunway>("save_user_runway", { edit });
-      showToast({ tone: "ok", title: `${saved.airportIcao} RWY ${saved.ident} gespeichert`, body: "Landungen an diesem Platz werden mit deiner Piste neu ausgewertet." });
+      showToast({ tone: "ok", title: t("runwayEditor.savedTitle", { airport: saved.airportIcao, ident: saved.ident }), body: t("runwayEditor.savedBody") });
       void emit("logbook:changed");
       onChanged();
       onClose();
@@ -245,8 +250,8 @@ export default function RunwayEditor({ analysis: a, airportIcao, onClose, onChan
       await invoke<boolean>("delete_user_runway", { icao: row.airportIcao, ident: row.ident });
       showToast({
         tone: "ok",
-        title: `${row.airportIcao} RWY ${row.ident} vergessen`,
-        body: "Es gelten wieder die Datenbank-Piste bzw. eine neu aus der Rollspur abgeleitete.",
+        title: t("runwayEditor.forgotTitle", { airport: row.airportIcao, ident: row.ident }),
+        body: t("runwayEditor.forgotBody"),
       });
       void emit("logbook:changed");
       onChanged();
@@ -265,16 +270,10 @@ export default function RunwayEditor({ analysis: a, airportIcao, onClose, onChan
     <div className="rwe-backdrop">
       <div ref={ref} className="rwe" role="dialog" aria-modal="true" aria-labelledby={titleId}>
         <header className="rwe-head">
-          <h3 id={titleId}>
-            Piste korrigieren · {airportIcao}
-            {rwy ? ` RWY ${rwy.ident}` : ""}
-          </h3>
-          <span className="detail">jetzt: {RUNWAY_SOURCE_SHORT[src]}</span>
+          <h3 id={titleId}>{rwy ? t("runwayEditor.titleRunway", { airport: airportIcao, ident: rwy.ident }) : t("runwayEditor.title", { airport: airportIcao })}</h3>
+          <span className="detail">{t("runwayEditor.now", { source: RUNWAY_SOURCE_SHORT[src] })}</span>
         </header>
-        <p className="detail rwe-intro">
-          Trag die Schwelle (Beginn der Landestrecke) und das Ende der Piste in Landerichtung ein, z. B. aus der Bodenkarte des Simulators. Deine Piste hat Vorrang vor
-          OurAirports und wird für alle Landungen an diesem Platz verwendet.
-        </p>
+        <p className="detail rwe-intro">{t("runwayEditor.intro")}</p>
         <form
           className="rwe-form"
           onSubmit={(e) => {
@@ -283,41 +282,43 @@ export default function RunwayEditor({ analysis: a, airportIcao, onClose, onChan
           }}
         >
           <label className="af-field rwe-ident">
-            <span className="stat-label">Bezeichnung</span>
+            <span className="stat-label">{t("runwayEditor.ident")}</span>
             <input value={form.ident} onChange={set("ident")} maxLength={4} autoComplete="off" spellCheck={false} />
           </label>
           <fieldset className="rwe-pair">
-            <legend className="stat-label">Schwelle (Dezimalgrad)</legend>
+            <legend className="stat-label">{t("runwayEditor.threshold")}</legend>
             <label className="af-field">
-              <span className="sr-only">Schwelle Breite</span>
-              <input value={form.latThr} onChange={set("latThr")} inputMode="decimal" placeholder="Breite" aria-label="Schwelle Breite" />
+              <span className="sr-only">{t("runwayEditor.thresholdLat")}</span>
+              <input value={form.latThr} onChange={set("latThr")} inputMode="decimal" placeholder={t("runwayEditor.lat")} aria-label={t("runwayEditor.thresholdLat")} />
             </label>
             <label className="af-field">
-              <span className="sr-only">Schwelle Länge</span>
-              <input value={form.lonThr} onChange={set("lonThr")} inputMode="decimal" placeholder="Länge" aria-label="Schwelle Länge" />
+              <span className="sr-only">{t("runwayEditor.thresholdLon")}</span>
+              <input value={form.lonThr} onChange={set("lonThr")} inputMode="decimal" placeholder={t("runwayEditor.lon")} aria-label={t("runwayEditor.thresholdLon")} />
             </label>
           </fieldset>
           <fieldset className="rwe-pair">
-            <legend className="stat-label">Ende in Landerichtung (Dezimalgrad)</legend>
+            <legend className="stat-label">{t("runwayEditor.end")}</legend>
             <label className="af-field">
-              <span className="sr-only">Ende Breite</span>
-              <input value={form.latEnd} onChange={set("latEnd")} inputMode="decimal" placeholder="Breite" aria-label="Ende Breite" />
+              <span className="sr-only">{t("runwayEditor.endLat")}</span>
+              <input value={form.latEnd} onChange={set("latEnd")} inputMode="decimal" placeholder={t("runwayEditor.lat")} aria-label={t("runwayEditor.endLat")} />
             </label>
             <label className="af-field">
-              <span className="sr-only">Ende Länge</span>
-              <input value={form.lonEnd} onChange={set("lonEnd")} inputMode="decimal" placeholder="Länge" aria-label="Ende Länge" />
+              <span className="sr-only">{t("runwayEditor.endLon")}</span>
+              <input value={form.lonEnd} onChange={set("lonEnd")} inputMode="decimal" placeholder={t("runwayEditor.lon")} aria-label={t("runwayEditor.endLon")} />
             </label>
           </fieldset>
           <label className="af-field">
-            <span className="stat-label">Breite (m)</span>
-            <input value={form.widthM} onChange={set("widthM")} inputMode="decimal" placeholder="unbekannt" />
+            <span className="stat-label">{t("runwayEditor.width")}</span>
+            <input value={form.widthM} onChange={set("widthM")} inputMode="decimal" placeholder={t("runwayEditor.widthPlaceholder")} />
           </label>
           <label className="af-field">
-            <span className="stat-label">Höhe der Schwelle (ft)</span>
-            <input value={form.elevationFt} onChange={set("elevationFt")} inputMode="decimal" placeholder="Platzhöhe" />
+            <span className="stat-label">{t("runwayEditor.elevation")}</span>
+            <input value={form.elevationFt} onChange={set("elevationFt")} inputMode="decimal" placeholder={t("runwayEditor.elevationPlaceholder")} />
           </label>
           <div className="rwe-check detail num" aria-live="polite">
-            {"error" in parsed ? parsed.error : `Länge ${fmt(parsed.len, 0, "m")}${lengthEstimated ? " (Mindestlänge, Ende geschätzt)" : ""} · Richtung ${fmt(parsed.course, 0, "°")} rechtweisend`}
+            {"error" in parsed
+              ? parsed.error
+              : t(lengthEstimated ? "runwayEditor.checkEstimated" : "runwayEditor.check", { length: fmt(parsed.len, 0, "m"), course: fmt(parsed.course, 0, "°") })}
           </div>
           {note && <div className="detail rwe-note">{note}</div>}
           {error && (
@@ -326,45 +327,45 @@ export default function RunwayEditor({ analysis: a, airportIcao, onClose, onChan
             </div>
           )}
           <div className="rwe-actions">
-            <button type="button" className="btn-sm" onClick={take} disabled={!fromLanding || busy} title={fromLanding ? "Achse und Schwelle aus der Rollspur dieser Landung" : "Diese Landung hat keinen auswertbaren Rollout"}>
-              Aus aktueller Landung übernehmen
+            <button type="button" className="btn-sm" onClick={take} disabled={!fromLanding || busy} title={fromLanding ? t("runwayEditor.takeTitle") : t("runwayEditor.takeNone")}>
+              {t("runwayEditor.take")}
             </button>
             {rowOfMatch && (
-              <button type="button" className="btn-sm danger" onClick={() => void forget(rowOfMatch)} disabled={busy} title="Gemerkte Piste löschen – danach gilt wieder OurAirports bzw. eine neu abgeleitete Piste">
-                Zurücksetzen auf Datenbank
+              <button type="button" className="btn-sm danger" onClick={() => void forget(rowOfMatch)} disabled={busy} title={t("runwayEditor.resetTitle")}>
+                {t("runwayEditor.reset")}
               </button>
             )}
             <span className="spacer" />
             <button type="button" className="btn-sm" onClick={onClose} disabled={busy}>
-              Abbrechen
+              {t("runwayEditor.cancel")}
             </button>
             <button type="submit" className="btn-sm btn-primary" disabled={busy || "error" in parsed}>
-              {busy ? "Speichert …" : "Speichern"}
+              {busy ? t("runwayEditor.saving") : t("runwayEditor.save")}
             </button>
           </div>
         </form>
 
-        <section className="rwe-list" aria-label={`Gemerkte Pisten von ${airportIcao}`}>
-          <h4 className="stat-label">Gemerkte Pisten von {airportIcao}</h4>
+        <section className="rwe-list" aria-label={t("runwayEditor.listTitle", { airport: airportIcao })}>
+          <h4 className="stat-label">{t("runwayEditor.listTitle", { airport: airportIcao })}</h4>
           {rows == null ? (
-            <div className="detail">Wird geladen …</div>
+            <div className="detail">{t("runwayEditor.listLoading")}</div>
           ) : rows.length === 0 ? (
-            <div className="detail">Keine – es gelten die Pisten aus OurAirports.</div>
+            <div className="detail">{t("runwayEditor.listNone")}</div>
           ) : (
             <table className="data-table">
               <thead>
                 <tr>
-                  <th scope="col">Piste</th>
-                  <th scope="col">Quelle</th>
+                  <th scope="col">{t("runwayEditor.col.runway")}</th>
+                  <th scope="col">{t("runwayEditor.col.source")}</th>
                   <th scope="col" className="num-col">
-                    Landungen
+                    {t("runwayEditor.col.landings")}
                   </th>
                   <th scope="col" className="num-col">
-                    Länge
+                    {t("runwayEditor.col.length")}
                   </th>
-                  <th scope="col">Geändert</th>
+                  <th scope="col">{t("runwayEditor.col.changed")}</th>
                   <th scope="col">
-                    <span className="sr-only">Aktion</span>
+                    <span className="sr-only">{t("runwayEditor.col.action")}</span>
                   </th>
                 </tr>
               </thead>
@@ -372,7 +373,7 @@ export default function RunwayEditor({ analysis: a, airportIcao, onClose, onChan
                 {rows.map((r) => (
                   <tr key={r.ident}>
                     <td className="num">{r.ident}</td>
-                    <td>{r.source === "user" ? "von dir festgelegt" : "aus deiner Rollspur abgeleitet"}</td>
+                    <td>{r.source === "user" ? t("runwayEditor.sourceUser") : t("runwayEditor.sourceDerived")}</td>
                     <td className="num num-col">{r.source === "user" ? "–" : fmtNum(r.uses)}</td>
                     <td className="num num-col">
                       {r.lengthEstimated ? "≥ " : ""}
@@ -380,8 +381,8 @@ export default function RunwayEditor({ analysis: a, airportIcao, onClose, onChan
                     </td>
                     <td className="num">{fmtDate(r.updatedMs)}</td>
                     <td>
-                      <button type="button" className="btn-sm" onClick={() => void forget(r)} disabled={busy} aria-label={`RWY ${r.ident} vergessen`}>
-                        Vergessen
+                      <button type="button" className="btn-sm" onClick={() => void forget(r)} disabled={busy} aria-label={t("runwayEditor.forgetAria", { ident: r.ident })}>
+                        {t("runwayEditor.forget")}
                       </button>
                     </td>
                   </tr>

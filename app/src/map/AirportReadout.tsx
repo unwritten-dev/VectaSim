@@ -3,7 +3,8 @@ import type * as maplibregl from "maplibre-gl";
 import { invoke } from "@tauri-apps/api/core";
 import type { Airport, NearestAirport, Runway } from "../types";
 import { DIAGRAM_FROM_ZOOM } from "./airportDiagram";
-import { fmt } from "../format";
+import { fmt } from "../i18n/number";
+import { useT } from "../i18n";
 
 interface Info {
   airport: Airport;
@@ -14,6 +15,7 @@ const hdg = (v: number | null | undefined) => (typeof v === "number" && Number.i
 
 /** "Flugplatz" box over the map at zoom ≥ 13: nearest airport to the map centre and its runways. */
 export default function AirportReadout({ mapRef, ready }: { mapRef: RefObject<maplibregl.Map | null>; ready: boolean }) {
+  const t = useT();
   const [info, setInfo] = useState<Info | null>(null);
 
   useEffect(() => {
@@ -58,7 +60,7 @@ export default function AirportReadout({ mapRef, ready }: { mapRef: RefObject<ma
   return (
     <div className="airport-readout">
       <div className="airport-readout-head">
-        <span className="airport-readout-label">Flugplatz</span>
+        <span className="airport-readout-label">{t("map.airport.label")}</span>
         <b>{airport.ident}</b>
         {airport.iata && <span className="muted"> / {airport.iata}</span>}
       </div>

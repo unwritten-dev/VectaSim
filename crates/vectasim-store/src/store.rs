@@ -3,18 +3,18 @@
 //! commands can share one `Store` clone.
 
 use crate::track::{TrackSample, decode_track};
-use crate::{Result, StoreError};
+use crate::{Field, Invalid, Result, StoreError};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
-use vectasim_core::approach::{self, ApproachAnalysis, ApproachBand, ElevationSource, FafReason, GateKind, GoAroundSource, LateralBand, MarkerKind, Severity};
+use vectasim_core::approach::{self, ApproachAnalysis, ApproachBand, ElevationSource, EnergyBand, FafReason, GateKind, GoAroundSource, LateralBand, LocalizerSource, MarkerKind, Severity};
 use vectasim_core::landing::{CriterionKind, RunwayEnd, RunwayFrame, RunwayGeometrySource, angle_diff_deg, blend_runway, opposite_ident};
 use vectasim_core::{AircraftInfo, FlightPhase, FlightSummary, IntegrityFlags, LandingRateSource, TouchdownReport};
 
 /// Newest schema this build writes. A file with a higher version is refused
 /// ([`StoreError::NewerSchema`]) instead of being opened by an older app.
-pub const SCHEMA_VERSION: i64 = 14;
+pub const SCHEMA_VERSION: i64 = 15;
 
 /// Days a deleted flight stays in the Papierkorb before `purge_deleted` removes it.
 pub const TRASH_RETENTION_DAYS: u32 = 30;
@@ -246,7 +246,9 @@ const MIGRATION_V14_COLUMNS: &[(&str, &str)] = &[
 /// 2: displaced thresholds move the runway geometry (glidepath origin, distances).
 /// 3: runways derived from the track / remembered in `user_runways` (fields without coordinates).
 /// 4: lateral guidance (localizer RMS and lateral band in the detail).
-pub const APPROACH_FACTS_VERSION: u32 = 4;
+/// 5: track v2 – sim ILS as glidepath/localizer reference, thrust/spoiler/landing-flap
+///    criteria, Vapp from VS0 × 1.3, energy band and sim wind in the detail.
+pub const APPROACH_FACTS_VERSION: u32 = 5;
 
 /// Which end of a flight a stored METAR describes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -409,6 +411,16 @@ const MIGRATIONS: &[MigrationStep] = &[
             Ok(())
         },
     },
+    MigrationStep {
+        to: 15,
+        // idempotent like v9-v14
+        apply: |c| {
+            if !has_column(c, "airframes", "landing_flaps")? {
+                c.execute_batch(crate::airframe::MIGRATION_V15)?;
+            }
+            Ok(())
+        },
+    },
 ];
 
 /// Schema version of an open file; 0 = empty (no `schema_version` table yet).
@@ -565,19 +577,19 @@ fn tags_from_json(json: Option<String>) -> Vec<String> {
 }
 
 /// A corrected airport: 4 letters/digits, upper-case.
-fn user_icao(raw: &str, what: &str) -> Result<String> {
+fn user_icao(raw: &str, what: Field) -> Result<String> {
     let v = raw.trim().to_ascii_uppercase();
     if v.len() != 4 || !v.chars().all(|c| c.is_ascii_alphanumeric()) {
-        return Err(StoreError::Invalid(format!("{what}: ICAO-Code muss aus 4 Buchstaben/Ziffern bestehen")));
+        return Err(Invalid::IcaoInvalid { field: what }.into());
     }
     Ok(v)
 }
 
 /// A corrected free-text value: trimmed, at most `max` characters.
-fn user_text(raw: &str, max: usize, what: &str) -> Result<String> {
+fn user_text(raw: &str, max: usize, what: Field) -> Result<String> {
     let v = raw.trim().to_string();
     if v.chars().count() > max {
-        return Err(StoreError::Invalid(format!("{what}: höchstens {max} Zeichen")));
+        return Err(Invalid::TextTooLong { field: what, max }.into());
     }
     Ok(v)
 }
@@ -805,28 +817,28 @@ fn valid_key(s: &str, max: usize) -> bool {
 /// Plausible values: coordinates finite and on the globe, ends 100 m - 8 km apart, width
 /// 1-200 m, elevation -1500 - 30000 ft.
 fn validate_user_runway(e: &UserRunwayEdit) -> Result<()> {
-    let bad = |m: &str| Err(StoreError::Invalid(m.to_string()));
+    let bad = |i: Invalid| Err(StoreError::Invalid(i));
     if !valid_key(&runway_key(&e.airport_icao), 8) {
-        return bad("Flugplatz-Kennung ungültig");
+        return bad(Invalid::RunwayAirportInvalid);
     }
     if !valid_key(&runway_key(&e.ident), 4) {
-        return bad("Pistenbezeichnung ungültig");
+        return bad(Invalid::RunwayIdentInvalid);
     }
     let lat_ok = |v: f64| v.is_finite() && (-90.0..=90.0).contains(&v);
     let lon_ok = |v: f64| v.is_finite() && (-180.0..=180.0).contains(&v);
     if !(lat_ok(e.lat_thr) && lat_ok(e.lat_end) && lon_ok(e.lon_thr) && lon_ok(e.lon_end)) {
-        return bad("Koordinaten ungültig");
+        return bad(Invalid::RunwayCoordinatesInvalid);
     }
     let len = RunwayFrame::new(&RunwayEnd { threshold_lat: e.lat_thr, threshold_lon: e.lon_thr, end_lat: e.lat_end, end_lon: e.lon_end, ..Default::default() })
         .length_m;
     if !(100.0..=8000.0).contains(&len) {
-        return bad("Schwelle und Bahnende müssen 100 m bis 8 km auseinanderliegen");
+        return bad(Invalid::RunwayLengthInvalid);
     }
     if e.width_m.is_some_and(|w| !w.is_finite() || !(1.0..=200.0).contains(&w)) {
-        return bad("Pistenbreite ungültig (1–200 m)");
+        return bad(Invalid::RunwayWidthInvalid);
     }
     if e.elevation_ft.is_some_and(|v| !v.is_finite() || !(-1500.0..=30000.0).contains(&v)) {
-        return bad("Höhe ungültig");
+        return bad(Invalid::RunwayElevationInvalid);
     }
     Ok(())
 }
@@ -920,6 +932,16 @@ pub struct ApproachFactDetail {
     pub loc_rms_dots: Option<f64>,
     #[serde(default)]
     pub lateral_band: Option<LateralBand>,
+    /// v5 (track v2): where the localizer dots came from, the energy band 10 nm → 1000 ft and
+    /// the sim's median head-/crosswind 1000 → 50 ft (None: not recorded / before v5).
+    #[serde(default)]
+    pub localizer_source: Option<LocalizerSource>,
+    #[serde(default)]
+    pub energy_band: Option<EnergyBand>,
+    #[serde(default)]
+    pub sim_headwind_kt: Option<f64>,
+    #[serde(default)]
+    pub sim_crosswind_kt: Option<f64>,
 }
 
 impl ApproachFactRow {
@@ -947,6 +969,10 @@ impl ApproachFactRow {
             runway_source: a.runway.as_ref().map(|r| r.geometry.source),
             loc_rms_dots: a.stability.loc_rms_dots.filter(|_| a.lateral.measurable),
             lateral_band: a.lateral.lateral_band,
+            localizer_source: Some(a.reference.localizer_source),
+            energy_band: a.energy.as_ref().and_then(|e| e.band),
+            sim_headwind_kt: a.wind.as_ref().and_then(|w| w.headwind_kt),
+            sim_crosswind_kt: a.wind.as_ref().and_then(|w| w.crosswind_kt),
         };
         Self {
             approach_index: a.index as u32,
@@ -1510,7 +1536,7 @@ impl Store {
             let n = n.replace("\r\n", "\n").replace('\r', "\n");
             let n = n.trim_end().trim_start_matches('\n').to_string();
             if n.chars().count() > NOTES_MAX_CHARS {
-                return Err(StoreError::Invalid(format!("Notiz zu lang (höchstens {NOTES_MAX_CHARS} Zeichen)")));
+                return Err(StoreError::Invalid(Invalid::NotesTooLong { max: NOTES_MAX_CHARS }));
             }
             sets.push(("notes", text_or_null(n)));
         }
@@ -1519,30 +1545,30 @@ impl Store {
             sets.push(("tags", if t.is_empty() { Sql::Null } else { Sql::Text(serde_json::to_string(&t)?) }));
         }
         if let Some(c) = &edit.callsign {
-            sets.push(("user_callsign", text_or_null(user_text(c, 16, "Rufzeichen")?)));
+            sets.push(("user_callsign", text_or_null(user_text(c, 16, Field::Callsign)?)));
         }
-        for (col, raw, what) in [("user_dep_icao", &edit.dep_icao, "Abflug"), ("user_arr_icao", &edit.arr_icao, "Ankunft")] {
+        for (col, raw, what) in [("user_dep_icao", &edit.dep_icao, Field::Departure), ("user_arr_icao", &edit.arr_icao, Field::Arrival)] {
             if let Some(v) = raw {
                 let v = if v.trim().is_empty() { String::new() } else { user_icao(v, what)? };
                 sets.push((col, text_or_null(v)));
             }
         }
         if let Some(t) = &edit.aircraft_title {
-            sets.push(("user_aircraft_title", text_or_null(user_text(t, 120, "Flugzeugname")?)));
+            sets.push(("user_aircraft_title", text_or_null(user_text(t, 120, Field::AircraftTitle)?)));
         }
         let mut new_reg: Option<String> = None;
         if let Some(r) = &edit.registration {
             let reg = if r.trim().is_empty() {
                 String::new()
             } else {
-                crate::airframe::normalize_registration(r).ok_or_else(|| StoreError::Invalid(format!("ungültige Registrierung: {r}")))?
+                crate::airframe::normalize_registration(r).ok_or_else(|| StoreError::Invalid(Invalid::InvalidRegistration { registration: r.to_string() }))?
             };
             sets.push(("user_registration", text_or_null(reg.clone())));
             new_reg = Some(reg);
         }
         if let Some(r) = edit.rating {
             if r > 5 {
-                return Err(StoreError::Invalid("Bewertung muss 1 bis 5 Sterne sein".into()));
+                return Err(StoreError::Invalid(Invalid::RatingInvalid));
             }
             sets.push(("rating", if r == 0 { Sql::Null } else { Sql::Integer(i64::from(r)) }));
         }
@@ -1697,7 +1723,7 @@ impl Store {
         let n = conn.execute("DELETE FROM flights WHERE provider IN ('mock', 'replay')", [])?;
         for reg in regs {
             conn.execute(
-                "DELETE FROM airframes WHERE registration = ?1 AND custom_name IS NULL AND notes IS NULL AND vapp_kt IS NULL
+                "DELETE FROM airframes WHERE registration = ?1 AND custom_name IS NULL AND notes IS NULL AND vapp_kt IS NULL AND landing_flaps IS NULL
                    AND NOT EXISTS (SELECT 1 FROM flights WHERE airframe_reg = ?1)",
                 params![reg],
             )?;
@@ -1844,7 +1870,7 @@ impl Store {
                 uses
             ],
         )?;
-        let row = get_user_runway(&tx, &icao, &ident)?.ok_or_else(|| StoreError::Invalid("Piste nicht gespeichert".into()))?;
+        let row = get_user_runway(&tx, &icao, &ident)?.ok_or_else(|| StoreError::Invalid(Invalid::RunwayNotSaved))?;
         tx.commit()?;
         Ok(row)
     }
@@ -1981,7 +2007,7 @@ impl Store {
                 })?;
                 write(&tx, observed, length_estimated, 1)?;
                 record(&tx)?;
-                let row = get_user_runway(&tx, &icao, &ident)?.ok_or_else(|| StoreError::Invalid("Piste nicht gespeichert".into()))?;
+                let row = get_user_runway(&tx, &icao, &ident)?.ok_or_else(|| StoreError::Invalid(Invalid::RunwayNotSaved))?;
                 RunwayRefinement::Inserted(row)
             }
         };

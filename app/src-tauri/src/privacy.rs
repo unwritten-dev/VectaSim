@@ -179,7 +179,7 @@ pub async fn set_card_dir(path: Option<String>, app: AppHandle, store: State<'_,
                 let dir = check_dir(p, &data::forbidden_roots())?;
                 std::fs::create_dir_all(&dir).map_err(|e| format!("{p}: {e}"))?;
                 let probe = dir.join(".vectasim-write-test");
-                std::fs::write(&probe, b"ok").map_err(|e| format!("Ordner nicht beschreibbar: {p} ({e})"))?;
+                std::fs::write(&probe, b"ok").map_err(|e| trf!("Ordner nicht beschreibbar: {p} ({e})", "Folder not writable: {p} ({e})"))?;
                 let _ = std::fs::remove_file(probe);
                 dir.display().to_string()
             }

@@ -4,6 +4,9 @@ import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { SimConnectDownloadInfo, SimConnectDownloadProgress } from "./types";
 import { showToast } from "./ui/Toast";
+import { t, useT } from "./i18n";
+import { fmtNum } from "./i18n/number";
+import { rich } from "./ui/richText";
 
 /** Backend event name (`simconnect_dl::PROGRESS_EVENT`). */
 export const SIMCONNECT_PROGRESS_EVENT = "simconnect-download";
@@ -14,9 +17,14 @@ const DEFAULT_EULA = "https://docs.flightsimulator.com/html/Introduction/SDK_EUL
 
 const MB = 1024 * 1024;
 
-/** Bytes as "12,3 MB" (one decimal, German comma). */
+/** Megabytes with one decimal in the UI language ("12,3" / "12.3"). */
+function mbNum(bytes: number): string {
+  return fmtNum(Math.max(0, bytes) / MB, 1);
+}
+
+/** Bytes as "12,3 MB" (one decimal, comma in German, point in English). */
 export function fmtMB(bytes: number): string {
-  return `${(Math.max(0, bytes) / MB).toFixed(1).replace(".", ",")} MB`;
+  return `${mbNum(bytes)} MB`;
 }
 
 /** Rounded size for the intro text: "~108 MB". */
@@ -34,30 +42,32 @@ export function progressFraction(p: SimConnectDownloadProgress | null): number |
 
 /** Status line under the bar: "Lade … 12,3 von 108,1 MB" / "Prüfe …" / "Entpacke …". */
 export function progressText(p: SimConnectDownloadProgress | null): string {
-  if (!p) return "Starte Download …";
+  if (!p) return t("settings.simconnect.progress.start");
   switch (p.phase) {
     case "download":
-      return p.total ? `Lade … ${fmtMB(p.received).replace(" MB", "")} von ${fmtMB(p.total)}` : `Lade … ${fmtMB(p.received)}`;
+      return p.total
+        ? t("settings.simconnect.progress.downloadOf", { received: mbNum(p.received), total: fmtMB(p.total) })
+        : t("settings.simconnect.progress.downloadBytes", { received: fmtMB(p.received) });
     case "verify":
-      return "Prüfe …";
+      return t("settings.simconnect.progress.verify");
     case "extract":
-      return "Entpacke …";
+      return t("settings.simconnect.progress.extract");
     case "done":
-      return "Fertig";
+      return t("settings.simconnect.progress.done");
     default:
-      return "Lade …";
+      return t("settings.simconnect.progress.download");
   }
 }
 
 /**
- * User text for a failed download. Backend errors are German already; curl's network failures
+ * User text for a failed download. Backend errors arrive in the UI language already; curl's network failures
  * ("Could not resolve host", timeouts, exit 6/7/28/35/56) get a plain next step instead.
  */
 export function downloadErrorText(raw: string): string {
-  if (/läuft bereits/i.test(raw)) return "Der Download läuft bereits – bitte kurz warten.";
+  if (/läuft bereits|already running/i.test(raw)) return t("settings.simconnect.error.running");
   if (/could not resolve|couldn't resolve|failed to connect|timed out|connection (reset|refused)|ssl|exit (code|status): (6|7|28|35|56)\b|\((6|7|28|35|56)\)/i.test(raw))
-    return "Microsoft ist nicht erreichbar. Prüfe deine Internetverbindung und versuche es erneut.";
-  if (/SHA-256|Größe \d+ statt/i.test(raw)) return "Die Datei kam unvollständig oder verändert an. Versuche es erneut.";
+    return t("settings.simconnect.error.network");
+  if (/SHA-256|Größe \d+ statt|size \d+ instead/i.test(raw)) return t("settings.simconnect.error.corrupt");
   return raw;
 }
 
@@ -76,6 +86,7 @@ interface Props {
  * closing the window; the backend cleans up its scratch folder on its own.
  */
 export default function SimConnectDownload({ dllMissing, statusMissing, onInstalled }: Props) {
+  const t = useT();
   const [info, setInfo] = useState<SimConnectDownloadInfo | null>(null);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<SimConnectDownloadProgress | null>(null);
@@ -123,8 +134,8 @@ export default function SimConnectDownload({ dllMissing, statusMissing, onInstal
         setDone(true);
         showToast({
           tone: "ok",
-          title: "SimConnect eingerichtet – VectaSim verbindet sich automatisch",
-          body: res.restarted ? undefined : "Die neue Datei gilt ab dem nächsten Verbindungsaufbau.",
+          title: t("settings.simconnect.installed"),
+          body: res.restarted ? undefined : t("settings.simconnect.installedLater"),
           durationMs: 6000,
         });
         onInstalled();
@@ -136,31 +147,31 @@ export default function SimConnectDownload({ dllMissing, statusMissing, onInstal
   return (
     <div className="sc-download" role="group" aria-labelledby="sc-download-title">
       <strong id="sc-download-title" className="sc-download-title">
-        SimConnect einrichten
+        {t("settings.simconnect.title")}
       </strong>
-      <p className="sc-download-text">
-        VectaSim braucht die SimConnect-Bibliothek von Microsoft. Ein Klick lädt das offizielle MSFS-SDK ({version}, {approxMB(bytes)}) direkt von
-        Microsoft und behält nur die SimConnect.dll – passt zu MSFS 2020 und 2024.
-      </p>
+      <p className="sc-download-text">{t("settings.simconnect.intro", { version, size: approxMB(bytes) })}</p>
+      <p className="detail">{t("settings.simconnect.installerHint")}</p>
       <p className="detail sc-download-eula">
-        Mit dem Download gelten die{" "}
-        <a
-          href={eula}
-          onClick={(e) => {
-            e.preventDefault();
-            void openUrl(eula).catch(() => {});
-          }}
-        >
-          Lizenzbedingungen des MSFS SDK
-        </a>
-        .
+        {rich(t("settings.simconnect.eula"), {
+          link: (
+            <a
+              href={eula}
+              onClick={(e) => {
+                e.preventDefault();
+                void openUrl(eula).catch(() => {});
+              }}
+            >
+              {t("settings.simconnect.eulaLink")}
+            </a>
+          ),
+        })}
       </p>
       {busy && (
         <div className="sc-download-progress" role="status" aria-live="polite">
           {fraction == null ? (
-            <progress className="update-progress" aria-label="Download-Fortschritt" />
+            <progress className="update-progress" aria-label={t("settings.simconnect.progressLabel")} />
           ) : (
-            <progress className="update-progress" max={1} value={fraction} aria-label="Download-Fortschritt" />
+            <progress className="update-progress" max={1} value={fraction} aria-label={t("settings.simconnect.progressLabel")} />
           )}
           <span className="detail">{progressText(progress)}</span>
         </div>
@@ -168,17 +179,17 @@ export default function SimConnectDownload({ dllMissing, statusMissing, onInstal
       {error && !busy && (
         <div className="alert compact sc-download-error" role="alert">
           <div>
-            <strong>Download fehlgeschlagen.</strong> {downloadErrorText(error)}
+            <strong>{t("settings.simconnect.failed")}</strong> {downloadErrorText(error)}
           </div>
           <details className="alert-details">
-            <summary>Details</summary>
+            <summary>{t("shell.action.details")}</summary>
             <code>{error}</code>
           </details>
         </div>
       )}
       <div className="setting-row">
         <button className="btn-primary" onClick={start} disabled={busy} aria-busy={busy}>
-          {busy ? "Wird heruntergeladen …" : error ? "Erneut versuchen" : "SimConnect herunterladen"}
+          {busy ? t("settings.simconnect.downloading") : error ? t("shell.action.retry") : t("settings.simconnect.download")}
         </button>
       </div>
     </div>

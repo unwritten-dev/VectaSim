@@ -3,7 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { LandingFactsResult } from "../types";
 import type { ApproachFact, ApproachFactsResult } from "./approachTypes";
-import { NNBSP, fmt, fmtNum } from "../format";
+import { NNBSP, fmt, fmtNum } from "../i18n/number";
+import { useT, type TFunction } from "../i18n";
 import { usePrefs } from "../prefs";
 import {
   MIN_PEERS,
@@ -97,11 +98,7 @@ export function useHistoryFacts(): HistoryFacts {
 
 // ---- comparison ---------------------------------------------------------------------------
 
-const SCOPE_LABEL: Record<Scope, string> = {
-  runway: "gleiche Piste",
-  type: "gleicher Typ",
-  all: "alle",
-};
+const scopeLabel = (t: TFunction, s: Scope): string => t(`landingHistory.scope.label.${s}`);
 
 export interface Comparison {
   fact: HistLanding | null;
@@ -137,17 +134,18 @@ function useComparison(flightId: string, touchdownIndex: number | null | undefin
 }
 
 /** "25 fpm weicher", "40 m weiter", "150 ft höher"; null when there is nothing to compare. */
-function deltaText(m: MetricCompare, kind: "rate" | "distance" | "stable"): string | null {
+function deltaText(t: TFunction, m: MetricCompare, kind: "rate" | "distance" | "stable"): string | null {
   if (m.value == null || m.median == null) return null;
   if (kind === "rate") {
     const d = Math.abs(m.value) - Math.abs(m.median);
-    if (Math.round(d) === 0) return "wie der Median";
-    return `${fmtNum(Math.abs(d), 0)}${NNBSP}fpm ${d < 0 ? "weicher" : "härter"}`;
+    if (Math.round(d) === 0) return t("landingHistory.delta.same");
+    const value = `${fmtNum(Math.abs(d), 0)}${NNBSP}fpm`;
+    return t(d < 0 ? "landingHistory.delta.softer" : "landingHistory.delta.harder", { value });
   }
   const d = m.value - m.median;
-  if (Math.round(d) === 0) return "wie der Median";
-  if (kind === "distance") return `${fmtNum(Math.abs(d), 0)}${NNBSP}m ${d > 0 ? "weiter" : "kürzer"}`;
-  return `${fmtNum(Math.abs(d), 0)}${NNBSP}ft ${d > 0 ? "höher" : "tiefer"}`;
+  if (Math.round(d) === 0) return t("landingHistory.delta.same");
+  if (kind === "distance") return t(d > 0 ? "landingHistory.delta.longer" : "landingHistory.delta.shorter", { value: `${fmtNum(Math.abs(d), 0)}${NNBSP}m` });
+  return t(d > 0 ? "landingHistory.delta.higher" : "landingHistory.delta.lower", { value: `${fmtNum(Math.abs(d), 0)}${NNBSP}ft` });
 }
 
 function Arrow({ up }: { up: boolean | null }) {
@@ -171,12 +169,13 @@ interface TileProps {
 }
 
 function Tile({ label, value, median, delta, up, better, n }: TileProps) {
+  const t = useT();
   return (
     <div className="hist-tile">
       <div className="tile-label">{label}</div>
       <div className="hist-tile-value num">{value}</div>
       <div className="detail num">
-        Median {median}
+        {t("landingHistory.median", { value: median })}
         {n > 0 && <span className="hist-n"> · n = {n}</span>}
       </div>
       {(delta || better) && (
@@ -207,13 +206,14 @@ export default function HistoryPanel({ flightId, touchdownIndex, approachIndex }
   const [chosen, setChosen] = useState<Scope | null>(null);
   const { error } = useHistoryFacts();
   const c = useComparison(flightId, touchdownIndex, approachIndex, chosen);
+  const t = useT();
 
-  if (!c) return error ? null : <div className="hist hist-empty detail">Einordnung wird berechnet …</div>;
+  if (!c) return error ? null : <div className="hist hist-empty detail">{t("landingHistory.loading")}</div>;
   if (!c.fact) {
     return (
-      <section className="hist hist-empty" aria-label="Einordnung">
-        <span className="kicker">Einordnung</span>
-        <span className="detail">Kein Vergleich: Verglichen werden nur Full-Stop-Landungen mit zugeordneter Piste.</span>
+      <section className="hist hist-empty" aria-label={t("landingHistory.kicker")}>
+        <span className="kicker">{t("landingHistory.kicker")}</span>
+        <span className="detail">{t("landingHistory.noFact")}</span>
       </section>
     );
   }
@@ -222,17 +222,17 @@ export default function HistoryPanel({ flightId, touchdownIndex, approachIndex }
   const where = scopePhrase(scope, fact);
 
   const switcher = (
-    <div className="chips hist-scope" role="group" aria-label="Vergleichen mit">
+    <div className="chips hist-scope" role="group" aria-label={t("landingHistory.scope.aria")}>
       {SCOPES.map((s) => (
         <button
           key={s}
           className={`chip${s === scope ? " active" : ""}`}
           aria-pressed={s === scope}
           disabled={c.counts[s] < MIN_PEERS && s !== scope}
-          title={`${SCOPE_LABEL[s]}: ${c.counts[s]} Landung${c.counts[s] === 1 ? "" : "en"} zum Vergleich`}
+          title={t("landingHistory.scope.count", { scope: scopeLabel(t, s), count: c.counts[s] })}
           onClick={() => setChosen(s)}
         >
-          {SCOPE_LABEL[s]}
+          {scopeLabel(t, s)}
         </button>
       ))}
     </div>
@@ -240,61 +240,64 @@ export default function HistoryPanel({ flightId, touchdownIndex, approachIndex }
 
   if (!l || !enough) {
     return (
-      <section className="hist hist-empty" aria-label="Einordnung">
-        <span className="kicker">Einordnung</span>
-        <span className="detail">Noch zu wenig Landungen zum Vergleich{where ? ` ${where}` : ""}.</span>
+      <section className="hist hist-empty" aria-label={t("landingHistory.kicker")}>
+        <span className="kicker">{t("landingHistory.kicker")}</span>
+        <span className="detail">{where ? t("landingHistory.tooFewWhere", { where }) : t("landingHistory.tooFew")}</span>
         {SCOPES.some((s) => c.counts[s] >= MIN_PEERS) && switcher}
       </section>
     );
   }
 
   const better = betterText(l.rate.better);
-  const sentence = `Deine letzten ${l.n} Landungen${where ? ` ${where}` : ""}: Median ${fmt(l.rate.median, 0, "fpm")} · du: ${fmt(l.rate.value, 0, "fpm")}${better ? ` (${better})` : ""}`;
+  const youRate = fmt(l.rate.value, 0, "fpm");
+  const you = better ? t("landingHistory.youBetter", { value: youRate, better }) : youRate;
+  const median = fmt(l.rate.median, 0, "fpm");
+  const sentence = where ? t("landingHistory.sentenceWhere", { count: l.n, where, median, you }) : t("landingHistory.sentence", { count: l.n, median, you });
   const absUp = (m: MetricCompare) => (m.value == null || m.median == null || Math.abs(m.value) === Math.abs(m.median) ? null : Math.abs(m.value) > Math.abs(m.median));
   const up = (m: MetricCompare) => (m.value == null || m.median == null || m.value === m.median ? null : m.value > m.median);
   const sf = a?.stableFrom;
 
   return (
-    <section className="hist" aria-label="Einordnung gegen deine eigenen Landungen">
+    <section className="hist" aria-label={t("landingHistory.aria")}>
       <div className="hist-head">
-        <span className="kicker">Einordnung</span>
+        <span className="kicker">{t("landingHistory.kicker")}</span>
         {switcher}
       </div>
       <p className="hist-sentence num">{sentence}</p>
       <div className="hist-tiles">
         <Tile
-          label="Landerate"
+          label={t("landingHistory.tile.rate")}
           value={fmt(l.rate.value, 0, "fpm")}
           median={fmt(l.rate.median, 0, "fpm")}
-          delta={deltaText(l.rate, "rate")}
+          delta={deltaText(t, l.rate, "rate")}
           up={absUp(l.rate)}
           better={better}
           n={l.rate.n}
         />
         <Tile
-          label="Aufsetzpunkt"
+          label={t("landingHistory.tile.distance")}
           value={fmt(l.distance.value, 0, "m")}
           median={fmt(l.distance.median, 0, "m")}
-          delta={deltaText(l.distance, "distance")}
+          delta={deltaText(t, l.distance, "distance")}
           up={up(l.distance)}
-          better={l.tdz.rate != null ? `Aufsetzzone ${l.tdz.yes}/${l.tdz.total} · du: ${l.tdz.current ? "drin" : "außerhalb"}` : null}
+          better={l.tdz.rate != null ? t(l.tdz.current ? "landingHistory.tile.tdzIn" : "landingHistory.tile.tdzOut", { yes: l.tdz.yes, total: l.tdz.total }) : null}
           n={l.distance.n}
         />
         {a && sf ? (
           <Tile
-            label="Stabil ab"
-            value={sf.value != null ? fmt(sf.value, 0, "ft") : c.approach?.band ? "nie stabil" : "–"}
+            label={t("landingHistory.tile.stableFrom")}
+            value={sf.value != null ? fmt(sf.value, 0, "ft") : c.approach?.band ? t("landingHistory.tile.neverStable") : "–"}
             median={fmt(sf.median, 0, "ft")}
-            delta={deltaText(sf, "stable")}
+            delta={deltaText(t, sf, "stable")}
             up={up(sf)}
             better={a.n >= MIN_PEERS ? betterText(sf.better) : null}
             n={sf.n}
           />
         ) : (
           <div className="hist-tile">
-            <div className="tile-label">Stabil ab</div>
+            <div className="tile-label">{t("landingHistory.tile.stableFrom")}</div>
             <div className="hist-tile-value num">–</div>
-            <div className="detail">Anflug nicht bewertet</div>
+            <div className="detail">{t("landingHistory.tile.notAssessed")}</div>
           </div>
         )}
       </div>
@@ -308,13 +311,14 @@ export default function HistoryPanel({ flightId, touchdownIndex, approachIndex }
  */
 export function HistoryLine({ flightId }: { flightId: string }) {
   const c = useComparison(flightId, null, null, null);
+  const t = useT();
   const l = c?.landing;
   if (!c?.fact || !l || l.n < MIN_PEERS) return null;
   const better = betterText(l.rate.better);
   if (!better) return null;
   return (
-    <div className="after-history detail num" title={`Landerate gegen den Median ${fmt(l.rate.median, 0, "fpm")} deiner Vergleichslandungen`}>
-      {better} {peersPhrase(l.n, c.scope, c.fact)}
+    <div className="after-history detail num" title={t("landingHistory.afterLineTitle", { median: fmt(l.rate.median, 0, "fpm") })}>
+      {t("landingHistory.afterLine", { better, peers: peersPhrase(l.n, c.scope, c.fact) })}
     </div>
   );
 }

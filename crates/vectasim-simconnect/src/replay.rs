@@ -15,7 +15,7 @@
 //! replay is fully deterministic (simulated clock, used by tests).
 
 use crate::decode::{expand_f64, expand_str};
-use crate::decoder::{self, DefKind, Decoder, def_by_key, event_id};
+use crate::decoder::{self, DefKind, Decoder, N_DEFS, def_by_key, event_id};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -24,7 +24,7 @@ use std::sync::mpsc::Sender;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use vectasim_core::diag::{DiagEvent, RawDiag, SharedRawDiag};
-use vectasim_core::{ProviderEvent, SimProvider, now_ms, sleep_interruptible};
+use vectasim_core::{Lang, ProviderEvent, SimProvider, now_ms, sleep_interruptible};
 use vectasim_dump::{Body, DumpReader, Header, Line, f64_vec, parse_hr};
 
 pub const ENV_REPLAY: &str = "VECTASIM_REPLAY";
@@ -59,9 +59,13 @@ impl ReplayConfig {
         Self { path, speed, loop_ }
     }
 
-    pub fn provider(&self) -> Result<ReplayProvider, String> {
-        let path = self.path.clone().ok_or_else(|| format!("Replay: keine Datei gewählt ({ENV_REPLAY} setzen)"))?;
-        Ok(ReplayProvider::new(path, self.speed, self.loop_))
+    /// The provider for this configuration; `lang` for its status texts and this error.
+    pub fn provider(&self, lang: Lang) -> Result<ReplayProvider, String> {
+        let path = self.path.clone().ok_or_else(|| match lang {
+            Lang::De => format!("Replay: keine Datei gewählt ({ENV_REPLAY} setzen)"),
+            Lang::En => format!("Replay: no file chosen (set {ENV_REPLAY})"),
+        })?;
+        Ok(ReplayProvider::new(path, self.speed, self.loop_).with_lang(lang))
     }
 }
 
@@ -76,15 +80,22 @@ pub struct ReplayProvider {
     pub speed: f64,
     pub loop_: bool,
     pub diag: SharedRawDiag,
+    /// Language of the end-of-file status texts (`Disconnected` reasons).
+    pub lang: Lang,
 }
 
 impl ReplayProvider {
     pub fn new(path: impl Into<PathBuf>, speed: f64, loop_: bool) -> Self {
-        Self { path: path.into(), speed: speed.max(0.0), loop_, diag: RawDiag::shared("replay") }
+        Self { path: path.into(), speed: speed.max(0.0), loop_, diag: RawDiag::shared("replay"), lang: Lang::default() }
+    }
+
+    pub fn with_lang(mut self, lang: Lang) -> Self {
+        self.lang = lang;
+        self
     }
 
     pub fn from_env() -> Result<Self, String> {
-        ReplayConfig::from_env().provider()
+        ReplayConfig::from_env().provider(Lang::default())
     }
 }
 
@@ -147,7 +158,7 @@ fn run(cfg: ReplayProvider, tx: Sender<ProviderEvent>, stop: Arc<AtomicBool>) {
                 return;
             }
         };
-        let mut player = Player::new(&reader.header, sim_name.clone(), cfg.diag.clone());
+        let mut player = AnyPlayer::new(&reader.header, sim_name.clone(), cfg.diag.clone());
         if player.definitions_differ() {
             log::warn!("replay: the dump's definitions differ from this build; values are mapped by SimVar name");
         }
@@ -196,13 +207,18 @@ fn run(cfg: ReplayProvider, tx: Sender<ProviderEvent>, stop: Arc<AtomicBool>) {
         loops += 1;
         log::info!("replay: end of {} after {lines} lines (pass {loops})", cfg.path.display());
         if !cfg.loop_ || lines == 0 {
-            let _ = tx.send(ProviderEvent::Disconnected { reason: format!("Replay beendet ({label}, {lines} Datensätze)") });
+            let reason = match cfg.lang {
+                Lang::De => format!("Replay beendet ({label}, {lines} Datensätze)"),
+                Lang::En => format!("Replay finished ({label}, {lines} records)"),
+            };
+            let _ = tx.send(ProviderEvent::Disconnected { reason });
             idle(&stop);
             return;
         }
         // the next pass continues the clock one second later
         offset_ms += last_rel + 1_000;
-        let _ = tx.send(ProviderEvent::Disconnected { reason: "Replay: Dateiende, beginnt von vorn".into() });
+        let reason = cfg.lang.tr("Replay: Dateiende, beginnt von vorn", "Replay: end of file, starting over");
+        let _ = tx.send(ProviderEvent::Disconnected { reason: reason.into() });
     }
 }
 
@@ -215,25 +231,34 @@ pub struct Player {
     /// Request id in the dump → definition index.
     reqs: BTreeMap<u32, usize>,
     /// The dump's declared variable names per definition.
-    dump_vars: [Vec<String>; 3],
+    dump_vars: [Vec<String>; N_DEFS],
     /// Dump variable index → current variable index, when the layouts differ.
-    remap: [Option<Vec<Option<usize>>>; 3],
+    remap: [Option<Vec<Option<usize>>>; N_DEFS],
     /// Registration state on the dump's side (used with `remap`).
-    dump_active: [Vec<bool>; 3],
+    dump_active: [Vec<bool>; N_DEFS],
     header_inactive: BTreeMap<String, Vec<usize>>,
 }
 
 impl Player {
     pub fn new(header: &Header, sim_name: String, diag: SharedRawDiag) -> Self {
+        let names = |v: &[(String, String)]| v.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>();
         let dump_vars = [
-            header.defs.fast.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>(),
-            header.defs.slow.iter().map(|(n, _)| n.clone()).collect(),
+            names(&header.defs.fast),
+            names(&header.defs.slow),
             header.defs.statics.clone(),
+            names(&header.defs.approach),
+            names(&header.defs.design),
         ];
         let current = decoder::dump_defs();
-        let same = [header.defs.fast == current.fast, header.defs.slow == current.slow, header.defs.statics == current.statics];
+        let same = [
+            header.defs.fast == current.fast,
+            header.defs.slow == current.slow,
+            header.defs.statics == current.statics,
+            header.defs.approach == current.approach,
+            header.defs.design == current.design,
+        ];
         let defs = decoder::definitions();
-        let remap: [Option<Vec<Option<usize>>>; 3] = std::array::from_fn(|i| {
+        let remap: [Option<Vec<Option<usize>>>; N_DEFS] = std::array::from_fn(|i| {
             (!same[i]).then(|| dump_vars[i].iter().map(|n| defs[i].vars.iter().position(|(v, _)| v == n)).collect())
         });
         let mut reqs: BTreeMap<u32, usize> = header.reqs.iter().filter_map(|(k, r)| def_by_key(k).map(|i| (*r, i))).collect();
@@ -254,9 +279,10 @@ impl Player {
         p
     }
 
-    /// Any definition of the dump differs from this build.
+    /// Any definition the dump recorded differs from this build (a definition an older
+    /// build did not have at all – approach, design – does not count).
     pub fn definitions_differ(&self) -> bool {
-        self.remap.iter().any(Option::is_some)
+        self.remap.iter().zip(&self.dump_vars).any(|(r, v)| r.is_some() && !v.is_empty())
     }
 
     pub fn decoder(&self) -> &Decoder {
@@ -374,6 +400,37 @@ impl Player {
     }
 }
 
+/// The player for a dump's `source`: X-Plane dumps (`source: "xplane"`) go through the
+/// X-Plane decoder, everything else (SimConnect, mock) through [`Player`].
+pub enum AnyPlayer {
+    SimConnect(Box<Player>),
+    XPlane(Box<vectasim_xplane::XpPlayer>),
+}
+
+impl AnyPlayer {
+    pub fn new(header: &Header, sim_name: String, diag: SharedRawDiag) -> Self {
+        if header.source == vectasim_xplane::DUMP_SOURCE {
+            AnyPlayer::XPlane(Box::new(vectasim_xplane::XpPlayer::new(header, sim_name, diag)))
+        } else {
+            AnyPlayer::SimConnect(Box::new(Player::new(header, sim_name, diag)))
+        }
+    }
+
+    pub fn definitions_differ(&self) -> bool {
+        match self {
+            AnyPlayer::SimConnect(p) => p.definitions_differ(),
+            AnyPlayer::XPlane(p) => p.definitions_differ(),
+        }
+    }
+
+    pub fn apply(&mut self, line: &Line, ts_ms: u64, wall_ms: u64) -> Vec<ProviderEvent> {
+        match self {
+            AnyPlayer::SimConnect(p) => p.apply(line, ts_ms, wall_ms),
+            AnyPlayer::XPlane(p) => p.apply(line, ts_ms, wall_ms),
+        }
+    }
+}
+
 /// `"Pause"` or `"#7"` → event id.
 fn parse_event(id: &str) -> Option<u32> {
     event_id(id).or_else(|| id.strip_prefix('#').and_then(|n| n.parse().ok()))
@@ -383,7 +440,7 @@ fn parse_event(id: &str) -> Option<u32> {
 /// For tests and tools; the provider streams instead.
 pub fn replay_file(path: &Path) -> std::io::Result<(Vec<ProviderEvent>, Option<std::io::Error>)> {
     let (header, lines, err) = vectasim_dump::read_all(path)?;
-    let mut player = Player::new(&header, format!("Replay {}", file_label(path)), RawDiag::shared("replay"));
+    let mut player = AnyPlayer::new(&header, format!("Replay {}", file_label(path)), RawDiag::shared("replay"));
     let (t0, w0) = lines.first().map_or((0, 0), |l| (l.t, l.w));
     let events = lines.iter().flat_map(|l| player.apply(l, w0 + l.t.saturating_sub(t0), l.w)).collect();
     Ok((events, err))

@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { setLanguageSetting } from "../i18n";
 import { NNBSP } from "../format";
 import mockJson from "./fixtures/approach-mock.json";
 import type { ApproachAnalysis } from "./approachTypes";
@@ -12,13 +13,26 @@ const { rangeDomain } = await import("./ApproachProfile");
 
 const mock = mockJson as unknown as ApproachAnalysis;
 const N = (s: string) => s.split(NNBSP).join(" ");
+/** The fixture as a v1 track would give it: no sim ILS, wind or automation, the 3° assumption. */
+const asV1 = (a: ApproachAnalysis): ApproachAnalysis => ({
+  ...(JSON.parse(JSON.stringify(a)) as ApproachAnalysis),
+  reference: { ...a.reference, glidepathSource: "assumed", localizerSource: "geometric" },
+  ils: null,
+  wind: null,
+  automation: null,
+});
+
+// the expectations are German; jsdom reports en-US
+beforeEach(() => setLanguageSetting("de"));
 
 describe("ApproachProfile", () => {
   it("renders the range switch, reference band, markers and the lateral strip", () => {
     const h = N(renderToStaticMarkup(<ApproachChart approach={mock} />));
     for (const r of ["Final (1000 ft)", "10 nm", "ab TOD"]) expect(h).toContain(r);
     expect(h).toContain('aria-checked="true"');
-    expect(h).toContain("3°-Pfad (Annahme) ±1 Dot");
+    // the mock records its ILS 25C (track v2); a v1 track keeps the assumption
+    expect(h).toContain("3,0°-Pfad (ILS) ±1 Dot");
+    expect(N(renderToStaticMarkup(<ApproachChart approach={asV1(mock)} />))).toContain("3°-Pfad (Annahme) ±1 Dot");
     expect(h).toContain("Referenz 128 kt (geflogen)");
     expect(h).toContain(">1000<");
     expect(h).toContain(">Schwelle<");

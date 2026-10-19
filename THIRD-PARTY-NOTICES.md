@@ -1,8 +1,8 @@
 # Third-Party Notices
 
-VectaSim selbst steht unter der [MIT-Lizenz](LICENSE). Dieses Dokument listet die Bibliotheken, Schriften, Daten und Dienste Dritter, die die App zur Laufzeit verwendet, mit ihren Lizenzen. Die Lizenztexte der Pakete liegen jeweils im Paket selbst (npm: `node_modules/<paket>/LICENSE`, Rust: crates.io-Quelle).
+VectaSim itself is licensed under the [MIT License](LICENSE). This document lists the third-party libraries, fonts, data and services the app uses at runtime, together with their licenses. The license texts of the packages are included in each package (npm: `node_modules/<package>/LICENSE`, Rust: the crates.io source).
 
-Erzeugt aus `npx license-checker-rseidelsohn --production` (in `app/`) und `cargo tree --workspace -e normal --target x86_64-pc-windows-msvc` (Stand: Version 0.3.0). Bei einer Lizenzangabe mit „OR“ wählt VectaSim die MIT-Variante, sofern vorhanden.
+Generated from `npx license-checker-rseidelsohn --production` (in `app/`) and `cargo tree --workspace -e normal --target x86_64-pc-windows-msvc` (as of version 0.4.0). Where a license is given with “OR”, VectaSim chooses the MIT option if available. The descriptions in the tables below are in German.
 
 ## Daten und Dienste
 
@@ -16,13 +16,15 @@ Erzeugt aus `npx license-checker-rseidelsohn --production` (in `app/`) und `carg
 | [Unicode CLDR](https://cldr.unicode.org/) | Deutsche und englische Ländernamen in `crates/vectasim-data/data/countries.csv` | [Unicode License v3](https://www.unicode.org/license.txt) – © 1991–2026 Unicode, Inc. |
 | NOAA / [aviationweather.gov](https://aviationweather.gov) | METAR-Wetter | US-Regierungswerk, Public Domain |
 | [VATSIM](https://vatsim.net) data feed v3 | Online-Verkehr und ATC (nur wenn „Verkehr“ eingeschaltet) | VATSIM-Datennutzungsbedingungen; Abruf höchstens alle 15 s |
+| [IVAO](https://ivao.aero) Whazzup v2 (`api.ivao.aero/v2/tracker/whazzup`) | Online-Verkehr und ATC (nur wenn „Verkehr“ mit IVAO oder „Beide“ eingeschaltet) | Öffentliche Datei ohne Anmeldung/API-Key; laut [IVAO-Dokumentation](https://wiki.ivao.aero/en/home/devops/api/whazuup/how-to-retrieve-v2) höchstens ein Abruf alle 15 s (häufiger führt zur IP-Sperre), VectaSim hält das ein |
 | [SimBrief](https://www.simbrief.com) (Navigraph) | OFP-Abruf auf Knopfdruck | Navigraph/SimBrief-Nutzungsbedingungen |
 | [Planespotters.net](https://www.planespotters.net) | Flugzeugfotos zur Registrierung | Foto © jeweiliger Fotograf; Credit und Link zur Fotoseite werden bei jedem Foto angezeigt |
-| Microsoft Flight Simulator SDK | `SimConnect.dll`, zur Laufzeit geladen, **nicht** mitgeliefert; auf Klick des Nutzers aus dem offiziellen SDK-Download (`sdk.flightsimulator.com`, MSFS 2020 SDK Core 0.24.6.0) nach `%LOCALAPPDATA%\io.vectasim.app\simconnect\` geladen | [MSFS SDK EULA](https://docs.flightsimulator.com/html/Introduction/SDK_EULA.htm), siehe unten |
+| Microsoft Flight Simulator SDK | `SimConnect.dll`, zur Laufzeit geladen, **nicht** mitgeliefert; auf Klick des Nutzers (in der App oder nach Rückfrage im Installer) aus dem offiziellen SDK-Download (`sdk.flightsimulator.com`, MSFS 2020 SDK Core 0.24.6.0) nach `%LOCALAPPDATA%\io.vectasim.app\simconnect\` geladen | [MSFS SDK EULA](https://docs.flightsimulator.com/html/Introduction/SDK_EULA.htm), siehe unten |
+| [X-Plane 12 Web API](https://developer.x-plane.com/article/x-plane-web-api/) (Laminar Research) | Telemetrie aus X-Plane 12.1.1+ über die eingebaute lokale REST/WebSocket-Schnittstelle (`localhost:8086`); kein Plugin, kein SDK-Code in VectaSim | Schnittstelle von X-Plane, keine zusätzlichen Lizenzbedingungen; VectaSim liest nur |
 
 ### Microsoft Flight Simulator SDK – SimConnect.dll
 
-Die `SimConnect.dll` ist Eigentum der Microsoft Corporation und wird **nicht** mit VectaSim verteilt (weder im Repository noch im Installer). Die Schaltfläche *SimConnect herunterladen* lädt das offizielle SDK-Archiv von Microsofts Server, prüft es per SHA-256 und behält davon nur die DLL. Für diese Datei gelten allein die „Microsoft Software License Terms“ des Microsoft Flight Simulator SDK (Microsoft Corporation): https://docs.flightsimulator.com/html/Introduction/SDK_EULA.htm (MSFS 2024: https://docs.flightsimulator.com/msfs2024/html/1_Introduction/SDK_EULA.htm). Die MIT-Lizenz von VectaSim gilt für sie nicht.
+Die `SimConnect.dll` ist Eigentum der Microsoft Corporation und wird **nicht** mit VectaSim verteilt (weder im Repository noch im Installer). Die Schaltfläche *SimConnect herunterladen* – bzw. nach Zustimmung des Nutzers schon der Installer am Ende der Installation – lädt das offizielle SDK-Archiv von Microsofts Server, prüft es per SHA-256 und behält davon nur die DLL. Für diese Datei gelten allein die „Microsoft Software License Terms“ des Microsoft Flight Simulator SDK (Microsoft Corporation): https://docs.flightsimulator.com/html/Introduction/SDK_EULA.htm (MSFS 2024: https://docs.flightsimulator.com/msfs2024/html/1_Introduction/SDK_EULA.htm). Die MIT-Lizenz von VectaSim gilt für sie nicht.
 
 ## Schriften
 
@@ -106,6 +108,8 @@ Die mitgelieferte SQLite-Bibliothek (3.53.2, über `libsqlite3-sys`, Feature `bu
 | `anyhow` | 1.0.104 | MIT OR Apache-2.0 |
 | `async-compression` | 0.4.51 | MIT OR Apache-2.0 |
 | `atomic-waker` | 1.1.2 | Apache-2.0 OR MIT |
+| `axum` | 0.8.9 | MIT |
+| `axum-core` | 0.5.6 | MIT |
 | `base64` | 0.22.1 | MIT OR Apache-2.0 |
 | `base64` | 0.23.1 | MIT OR Apache-2.0 |
 | `bit-set` | 0.8.0 | Apache-2.0 OR MIT |
@@ -113,6 +117,7 @@ Die mitgelieferte SQLite-Bibliothek (3.53.2, über `libsqlite3-sys`, Feature `bu
 | `bitflags` | 1.3.2 | MIT/Apache-2.0 |
 | `bitflags` | 2.13.2 | MIT OR Apache-2.0 |
 | `block-buffer` | 0.10.4 | MIT OR Apache-2.0 |
+| `block-buffer` | 0.12.1 | MIT OR Apache-2.0 |
 | `brotli` | 9.0.0 | BSD-3-Clause AND MIT |
 | `brotli-decompressor` | 6.0.1 | BSD-3-Clause/MIT |
 | `byteorder` | 1.5.0 | Unlicense OR MIT |
@@ -122,15 +127,19 @@ Die mitgelieferte SQLite-Bibliothek (3.53.2, über `libsqlite3-sys`, Feature `bu
 | `cargo_metadata` | 0.19.2 | MIT |
 | `cfb` | 0.14.0 | MIT |
 | `cfg-if` | 1.0.5 | MIT OR Apache-2.0 |
+| `chacha20` | 0.10.2 | MIT OR Apache-2.0 |
 | `colorchoice` | 1.0.5 | MIT OR Apache-2.0 |
 | `compression-codecs` | 0.4.46 | MIT OR Apache-2.0 |
 | `compression-core` | 0.4.34 | MIT OR Apache-2.0 |
+| `const-oid` | 0.10.2 | Apache-2.0 OR MIT |
 | `cookie` | 0.18.2 | MIT OR Apache-2.0 |
 | `cpufeatures` | 0.2.17 | MIT OR Apache-2.0 |
+| `cpufeatures` | 0.3.1 | MIT OR Apache-2.0 |
 | `crc32fast` | 1.5.2 | MIT OR Apache-2.0 |
 | `crossbeam-channel` | 0.5.17 | MIT OR Apache-2.0 |
 | `crossbeam-utils` | 0.8.23 | MIT OR Apache-2.0 |
 | `crypto-common` | 0.1.7 | MIT OR Apache-2.0 |
+| `crypto-common` | 0.2.2 | MIT OR Apache-2.0 |
 | `cssparser` | 0.37.0 | MPL-2.0 |
 | `cssparser-macros` | 0.7.1 | MPL-2.0 |
 | `csv` | 1.4.0 | Unlicense/MIT |
@@ -139,10 +148,12 @@ Die mitgelieferte SQLite-Bibliothek (3.53.2, über `libsqlite3-sys`, Feature `bu
 | `darling` | 0.24.1 | MIT |
 | `darling_core` | 0.24.1 | MIT |
 | `darling_macro` | 0.24.1 | MIT |
+| `data-encoding` | 2.11.1 | MIT |
 | `deranged` | 0.5.9 | MIT OR Apache-2.0 |
 | `derive_more` | 2.1.1 | MIT |
 | `derive_more-impl` | 2.1.1 | MIT |
 | `digest` | 0.10.7 | MIT OR Apache-2.0 |
+| `digest` | 0.11.3 | MIT OR Apache-2.0 |
 | `dirs` | 7.0.0 | MIT OR Apache-2.0 |
 | `dirs-sys` | 0.5.0 | MIT OR Apache-2.0 |
 | `discord-rich-presence` | 1.1.0 | MIT |
@@ -161,6 +172,7 @@ Die mitgelieferte SQLite-Bibliothek (3.53.2, über `libsqlite3-sys`, Feature `bu
 | `fallible-streaming-iterator` | 0.1.9 | MIT/Apache-2.0 |
 | `fastrand` | 2.5.0 | Apache-2.0 OR MIT |
 | `fdeflate` | 0.3.7 | MIT OR Apache-2.0 |
+| `fern` | 0.7.1 | MIT |
 | `flate2` | 1.1.10 | MIT OR Apache-2.0 |
 | `fnv` | 1.0.7 | Apache-2.0 / MIT |
 | `foldhash` | 0.2.0 | Zlib |
@@ -186,6 +198,8 @@ Die mitgelieferte SQLite-Bibliothek (3.53.2, über `libsqlite3-sys`, Feature `bu
 | `http-body-util` | 0.1.5 | MIT |
 | `http-range` | 0.1.5 | MIT |
 | `httparse` | 1.10.1 | MIT OR Apache-2.0 |
+| `httpdate` | 1.0.3 | MIT OR Apache-2.0 |
+| `hybrid-array` | 0.4.15 | MIT OR Apache-2.0 |
 | `hyper` | 1.12.0 | MIT |
 | `hyper-rustls` | 0.27.10 | Apache-2.0 OR ISC OR MIT |
 | `hyper-util` | 0.1.21 | MIT |
@@ -218,6 +232,7 @@ Die mitgelieferte SQLite-Bibliothek (3.53.2, über `libsqlite3-sys`, Feature `bu
 | `lock_api` | 0.4.14 | MIT OR Apache-2.0 |
 | `log` | 0.4.34 | MIT OR Apache-2.0 |
 | `markup5ever` | 0.39.0 | MIT OR Apache-2.0 |
+| `matchit` | 0.8.4 | MIT AND BSD-3-Clause |
 | `memchr` | 2.8.3 | Unlicense OR MIT |
 | `mime` | 0.3.17 | MIT OR Apache-2.0 |
 | `minisign-verify` | 0.3.0 | MIT |
@@ -251,8 +266,10 @@ Die mitgelieferte SQLite-Bibliothek (3.53.2, über `libsqlite3-sys`, Feature `bu
 | `quick-xml` | 0.42.0 | MIT |
 | `quote` | 1.0.47 | MIT OR Apache-2.0 |
 | `rand` | 0.9.5 | MIT OR Apache-2.0 |
+| `rand` | 0.10.3 | MIT OR Apache-2.0 |
 | `rand_chacha` | 0.9.0 | MIT OR Apache-2.0 |
 | `rand_core` | 0.9.5 | MIT OR Apache-2.0 |
+| `rand_core` | 0.10.1 | MIT OR Apache-2.0 |
 | `raw-window-handle` | 0.6.2 | MIT OR Apache-2.0 OR Zlib |
 | `regex` | 1.13.1 | MIT OR Apache-2.0 |
 | `regex-automata` | 0.4.18 | MIT OR Apache-2.0 |
@@ -280,6 +297,7 @@ Die mitgelieferte SQLite-Bibliothek (3.53.2, über `libsqlite3-sys`, Feature `bu
 | `serde_derive` | 1.0.229 | MIT OR Apache-2.0 |
 | `serde_derive_internals` | 0.29.1 | MIT OR Apache-2.0 |
 | `serde_json` | 1.0.154 | MIT OR Apache-2.0 |
+| `serde_path_to_error` | 0.1.20 | MIT OR Apache-2.0 |
 | `serde_repr` | 0.1.21 | MIT OR Apache-2.0 |
 | `serde_spanned` | 1.1.2 | MIT OR Apache-2.0 |
 | `serde_urlencoded` | 0.7.1 | MIT/Apache-2.0 |
@@ -288,6 +306,8 @@ Die mitgelieferte SQLite-Bibliothek (3.53.2, über `libsqlite3-sys`, Feature `bu
 | `serialize-to-javascript` | 0.1.2 | MIT OR Apache-2.0 |
 | `serialize-to-javascript-impl` | 0.1.2 | MIT OR Apache-2.0 |
 | `servo_arc` | 0.4.3 | MIT OR Apache-2.0 |
+| `sha1` | 0.10.7 | MIT OR Apache-2.0 |
+| `sha1` | 0.11.0 | MIT OR Apache-2.0 |
 | `sha2` | 0.10.9 | MIT OR Apache-2.0 |
 | `simd-adler32` | 0.3.10 | MIT |
 | `siphasher` | 1.0.4 | MIT OR Apache-2.0 |
@@ -309,10 +329,13 @@ Die mitgelieferte SQLite-Bibliothek (3.53.2, über `libsqlite3-sys`, Feature `bu
 | `tauri-macros` | 2.7.3 | Apache-2.0 OR MIT |
 | `tauri-plugin-dialog` | 2.8.3 | Apache-2.0 OR MIT |
 | `tauri-plugin-fs` | 2.7.1 | Apache-2.0 OR MIT |
+| `tauri-plugin-log` | 2.10.1 | Apache-2.0 OR MIT |
 | `tauri-plugin-notification` | 2.7.0 | Apache-2.0 OR MIT |
 | `tauri-plugin-opener` | 2.7.2 | Apache-2.0 OR MIT |
 | `tauri-plugin-process` | 2.4.0 | Apache-2.0 OR MIT |
+| `tauri-plugin-single-instance` | 2.5.4 | Apache-2.0 OR MIT |
 | `tauri-plugin-updater` | 2.14.0 | Apache-2.0 OR MIT |
+| `tauri-plugin-window-state` | 2.5.0 | Apache-2.0 OR MIT |
 | `tauri-runtime` | 2.12.2 | Apache-2.0 OR MIT |
 | `tauri-runtime-wry` | 2.12.2 | Apache-2.0 OR MIT |
 | `tauri-utils` | 2.10.2 | Apache-2.0 OR MIT |
@@ -328,6 +351,7 @@ Die mitgelieferte SQLite-Bibliothek (3.53.2, über `libsqlite3-sys`, Feature `bu
 | `tokio` | 1.53.3 | MIT |
 | `tokio-macros` | 2.7.2 | MIT |
 | `tokio-rustls` | 0.26.6 | MIT OR Apache-2.0 |
+| `tokio-tungstenite` | 0.29.0 | MIT |
 | `tokio-util` | 0.7.20 | MIT |
 | `toml` | 1.1.8+spec-1.1.0 | MIT OR Apache-2.0 |
 | `toml_datetime` | 1.1.2+spec-1.1.0 | MIT OR Apache-2.0 |
@@ -338,9 +362,12 @@ Die mitgelieferte SQLite-Bibliothek (3.53.2, über `libsqlite3-sys`, Feature `bu
 | `tower-layer` | 0.3.3 | MIT |
 | `tower-service` | 0.3.3 | MIT |
 | `tracing` | 0.1.44 | MIT |
+| `tracing-attributes` | 0.1.31 | MIT |
 | `tracing-core` | 0.1.36 | MIT |
 | `tray-icon` | 0.25.1 | MIT OR Apache-2.0 |
 | `try-lock` | 0.2.5 | MIT |
+| `tungstenite` | 0.29.0 | MIT OR Apache-2.0 |
+| `tungstenite` | 0.30.0 | MIT OR Apache-2.0 |
 | `typeid` | 1.0.3 | MIT OR Apache-2.0 |
 | `typenum` | 1.20.1 | MIT OR Apache-2.0 |
 | `unicode-ident` | 1.0.27 | (MIT OR Apache-2.0) AND Unicode-3.0 |
@@ -392,6 +419,7 @@ Die mitgelieferte SQLite-Bibliothek (3.53.2, über `libsqlite3-sys`, Feature `bu
 | `zerovec` | 0.11.8 | Unicode-3.0 |
 | `zerovec-derive` | 0.11.6 | Unicode-3.0 |
 | `zip` | 4.6.1 | MIT |
+| `zlib-rs` | 0.6.8 | Zlib |
 | `zmij` | 1.0.23 | MIT |
 | `zstd` | 0.13.3 | MIT |
 | `zstd-safe` | 7.3.0 | BSD-3-Clause |

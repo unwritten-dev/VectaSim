@@ -1,6 +1,9 @@
 import { NNBSP } from "../format";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
+import { setLanguageSetting } from "../i18n";
 import { MIN_RUNWAY_PX, TRACK_BEFORE_M, UNKNOWN_WIDTH_DRAW_M, drawWidthM, nearestByDist, niceDistanceStep, pathOf, referenceHeightFt, runwayLayout, sideLabel, stripeCount } from "./geometry";
+
+beforeEach(() => setLanguageSetting("de"));
 
 describe("runwayLayout", () => {
   const base = { lengthM: 2000, widthM: 45, widthPx: 1000 };

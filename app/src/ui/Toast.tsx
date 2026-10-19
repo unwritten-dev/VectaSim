@@ -9,6 +9,7 @@
 // Esc in a toast closes it and returns to where the focus was.
 
 import { useEffect, useId, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react";
+import { useT } from "../i18n";
 
 export type ToastTone = "info" | "ok" | "warn" | "err";
 export type ToastRegion = "app" | "map";
@@ -171,6 +172,7 @@ export function focusNewestToast(): boolean {
 }
 
 function ToastCard({ item }: { item: ToastItem }) {
+  const t = useT();
   const remaining = useRef<number | null>(item.durationMs ?? null);
   const started = useRef(Date.now());
   const timer = useRef<number | undefined>(undefined);
@@ -274,7 +276,7 @@ function ToastCard({ item }: { item: ToastItem }) {
           </div>
         )}
       </div>
-      <button className="toast-close btn-ghost" onClick={close} aria-label="Hinweis schließen" title="Schließen (Esc)">
+      <button className="toast-close btn-ghost" onClick={close} aria-label={t("shell.errorNotice.dismiss")} title={t("shell.toast.closeTitle")}>
         <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
           <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
         </svg>

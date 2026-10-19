@@ -3,15 +3,21 @@
 //!
 //! One loop: start-up at a stand north of RWY 25C, taxi, rolling take-off on
 //! 25C, left-hand circuit at 2 500 ft AGL (level long enough to count as a
-//! cruise, then a descending downwind and base turn), a stabilised 3° straight-in
-//! to 25C (threshold crossed at ~50 ft, IAS 140 → 125 kt), a flare from about
-//! −700 to −150 fpm, touchdown ~350 m past the threshold a metre or two beside
-//! the centreline, rollout to 30 kt, vacate to the north and park.
+//! cruise, then a descending downwind and base turn), a 3° straight-in to 25C and
+//! a landing, rollout to 30 kt, vacate to the north and park.
+//!
+//! The standard variant (the "Demo-Flug") flies a normal, stable approach with a few
+//! deliberate small errors so the debrief has something to show (see the
+//! `DEMO_*` constants below): fast at the FAF, a little high at 1000 ft, an
+//! overshoot when turning onto the final and a gentle S, late landing flaps, a short
+//! float and a touchdown ~520 m past the threshold, ~9 m right, ~−230 fpm. The other
+//! variants keep the textbook approach (on the path and the centreline, touchdown
+//! ~350 m, −120…−185 fpm).
 //!
 //! The path is built from analytic legs (straight lines and circular arcs in a
 //! runway-aligned frame) and pre-computed at 10 Hz, so a sample depends only on
 //! its time – the caller's rate cannot shift the touchdown point. The flare
-//! height is solved per loop so the first contact lands 350 m past the threshold;
+//! height is solved per loop so the first contact lands at the aimed distance;
 //! the touchdown rate and lateral offset vary slightly from loop to loop (also
 //! so the sim's "last touchdown" value differs between consecutive landings).
 //!
@@ -70,7 +76,7 @@ const KT: f64 = 0.514_444; // m/s per kt
 const FT_PER_M: f64 = 3.280_84;
 const GLIDE_DEG: f64 = 3.0;
 const TCH_FT: f64 = 50.0;
-/// Where the first contact is aimed, metres past the threshold (standard variant).
+/// Where the first contact is aimed, metres past the threshold (textbook variants; demo: `DEMO_TOUCHDOWN_M`).
 const TOUCHDOWN_AIM_M: f64 = 350.0;
 const CIRCUIT_R_M: f64 = 1_800.0;
 /// Downwind abeam/turn points along the runway axis (s = metres past the 25C threshold).
@@ -78,6 +84,72 @@ const CROSSWIND_S: f64 = 3_000.0;
 const FINAL_S: f64 = -9_000.0;
 const CIRCUIT_AGL_FT: f64 = 2_500.0;
 const INTERCEPT_AGL_FT: f64 = 1_500.0;
+/// Ground speed at the end of the base turn (start of the final), kt.
+const BASE_END_GS_KT: f64 = 146.0;
+
+// ---- Demo-Landung: bewusst kleine Fehler (standard variant only) ----
+// A normal landing that stays stable ("stabil", landing "normal") but shows the
+// assessment at work. Dots are the debrief's (approach.rs defaults): glideslope
+// 1 dot = 0.35°, localizer 1 dot = 52 m at the threshold seen from 300 m beyond
+// the far end. All values are deterministic; only the touchdown rate and offset
+// vary a little from loop to loop.
+/// First contact, metres past the threshold: in the touchdown zone (0…900 m on the
+/// 4 000 m 25C), but behind the 400 m aiming point.
+const DEMO_TOUCHDOWN_M: f64 = 520.0;
+/// Rate at first contact per loop, fpm positive-down (band "normal", ≈ −230 fpm).
+const DEMO_TD_FPM: [f64; 4] = [232.0, 240.0, 226.0, 236.0];
+/// Lateral offset at touchdown per loop, m right of the centreline (≈ 9 m).
+const DEMO_LATERAL_M: [f64; 4] = [9.0, 8.4, 9.6, 8.7];
+/// Contact g per fpm: 1 + 230 × 0.0014 ≈ 1.32 g at the contact point (≈ 1.3 g peak in the
+/// 20 Hz samples; the textbook variants: 0.0008).
+const DEMO_TD_G_PER_FPM: f64 = 0.0014;
+const TD_G_PER_FPM: f64 = 0.0008;
+/// The flare: from about 20–25 ft, ~5.5 s with a short float (≈ −160 fpm) before the
+/// aircraft settles at the touchdown rate.
+const DEMO_FLARE_S: f64 = 5.5;
+/// Speed: the base turn ends at 144.5 kt GS (≈ Vref + 12 kt IAS at the FAF), bled off to
+/// ≈ Vref + 4 kt at 500 ft and to ≈ Vref − 3 kt over the threshold (Vref = the flown
+/// median 500 → 100 ft).
+const DEMO_BASE_END_GS_KT: f64 = 144.5;
+const DEMO_GS_500_KT: f64 = 136.0;
+const DEMO_GS_THRESHOLD_KT: f64 = 127.0;
+/// Landing flaps (FULL = 4) only at about this height; flaps 3 before.
+const DEMO_FLAPS_FULL_FT: f64 = 1_100.0;
+/// Glidepath deviation (dots, + = above) over the nominal 3° path height (ft):
+/// +0.5 dot at 1000 ft, captured by 500 ft, briefly −0.3 dot (low) below 300 ft, on
+/// the path again over the threshold. Smoothstep between the knots.
+const DEMO_GS_DOTS: [(f64, f64); 6] = [(1_400.0, 0.0), (1_050.0, 0.5), (550.0, 0.0), (330.0, 0.0), (220.0, -0.3), (110.0, 0.0)];
+const DEMO_GS_DOT_DEG: f64 = 0.35;
+/// Lateral profile (dots, + = right) at s metres past the threshold, smoothstep between
+/// the knots: the base turn ends on the centreline still turning, overshoots 0.62 dot to
+/// the right (above 1 000 ft) and is corrected within ~15 s; then a gentle S between
+/// 1 000 and 300 ft (right 0.4, left 0.42, right 0.38 dot = two side changes beyond the
+/// 0.3-dot dead band), settling to the touchdown offset from `DEMO_LATERAL_END_S` on.
+const DEMO_LOC_DOTS: [(f64, f64); 6] = [(-9_000.0, 0.0), (-7_750.0, 0.62), (-6_650.0, 0.0), (-4_650.0, 0.40), (-3_200.0, -0.42), (-2_050.0, 0.38)];
+const DEMO_LATERAL_END_S: f64 = -800.0;
+const DEMO_LOC_DOT_M_AT_THRESHOLD: f64 = 52.0;
+
+// ---- approach data (track v2) of the mock world ----
+/// Wind at the aircraft, everywhere and at every height: 250° true / 8 kt (a typical
+/// EDDF westerly, ~8 kt headwind on 25C). The path itself is flown over the ground and
+/// TAS stays = GS, so the IAS/TAS the landing analysis sees are unchanged by it.
+pub const MOCK_WIND_DIR_TRUE_DEG: f64 = 250.0;
+pub const MOCK_WIND_KT: f64 = 8.0;
+/// NAV 1 is tuned to the ILS 25C for the whole flight: 3.0° glideslope, antenna at the
+/// point where the 3° path (TCH 50 ft) meets the runway; localizer 300 m beyond the far end.
+pub const MOCK_ILS_GS_DEG: f64 = 3.0;
+const LOC_BEYOND_END_M: f64 = 300.0;
+/// Localizer full-scale needle deflection (±127) = 2 dots = ±104 m at the threshold (ICAO
+/// course sector): 2 × the debrief's geometric dot seen from the localizer antenna.
+const LOC_FULL_SCALE_DOTS: f64 = 2.0;
+/// Glideslope usable within this distance and this angle off the localizer course.
+const GS_RANGE_M: f64 = 10.0 * 1_852.0;
+const GS_SECTOR_DEG: f64 = 8.0;
+/// A320neo: flap handle 0, 1, 2, 3, FULL; design speeds (cfg constants).
+const FLAP_POSITIONS: i32 = 5;
+const DESIGN_VS0_KT: f64 = 104.0;
+const DESIGN_VS1_KT: f64 = 125.0;
+const DESIGN_VC_KT: f64 = 350.0;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum MockVariant {
@@ -216,18 +288,26 @@ struct Params {
     td_fpm: f64,
     /// Lateral offset at touchdown, m (positive = right).
     lateral_m: f64,
+    /// The demo landing with its small errors (standard variant, see `DEMO_*`).
+    demo: bool,
 }
 
 impl Params {
     fn for_loop(variant: MockVariant, n: u64) -> Self {
         let i = (n % 4) as usize;
+        if variant == MockVariant::Standard {
+            return Self { variant, td_fpm: DEMO_TD_FPM[i], lateral_m: DEMO_LATERAL_M[i], demo: true };
+        }
         let td_fpm = match variant {
-            MockVariant::Standard | MockVariant::GoAround | MockVariant::Teleport | MockVariant::Reconnect => {
-                [150.0, 120.0, 185.0, 140.0][i]
-            }
             MockVariant::Bounce => [330.0, 290.0, 360.0, 310.0][i],
+            _ => [150.0, 120.0, 185.0, 140.0][i],
         };
-        Self { variant, td_fpm, lateral_m: [-1.8, 2.4, -0.6, 3.1][i] }
+        Self { variant, td_fpm, lateral_m: [-1.8, 2.4, -0.6, 3.1][i], demo: false }
+    }
+
+    /// Where the first contact is aimed, metres past the threshold.
+    fn touchdown_aim_m(&self) -> f64 {
+        if self.demo { DEMO_TOUCHDOWN_M } else { TOUCHDOWN_AIM_M }
     }
 }
 
@@ -255,7 +335,66 @@ fn ias_of(tas_kt: f64, msl_ft: f64) -> f64 {
 /// Lateral offset of the final approach and rollout: blends in over the last
 /// 3 km before the threshold, holds through touchdown, back on the centreline by 1 300 m.
 fn lateral_offset(s: f64, off: f64) -> f64 {
-    off * smoothstep((s + 3000.0) / 2000.0) * (1.0 - smoothstep((s - 700.0) / 600.0))
+    off * smoothstep((s + 3000.0) / 2000.0) * rollout_fade(s)
+}
+
+/// After the touchdown the offset fades out: back on the centreline by 1 300 m.
+fn rollout_fade(s: f64) -> f64 {
+    1.0 - smoothstep((s - 700.0) / 600.0)
+}
+
+/// Smoothstep interpolation through `(x, y)` knots sorted by x; constant beyond the ends.
+fn knots(k: &[(f64, f64)], x: f64) -> f64 {
+    let (first, last) = (k[0], k[k.len() - 1]);
+    if x <= first.0 {
+        return first.1;
+    }
+    if x >= last.0 {
+        return last.1;
+    }
+    let i = k.partition_point(|p| p.0 <= x);
+    let (a, b) = (k[i - 1], k[i]);
+    a.1 + (b.1 - a.1) * smoothstep((x - a.0) / (b.0 - a.0))
+}
+
+/// Demo glidepath deviation in dots at `s` (from the knots over the nominal path height).
+fn demo_gs_dots(s: f64) -> f64 {
+    // knots run from high to low; flip to increasing x
+    let k: Vec<(f64, f64)> = DEMO_GS_DOTS.iter().rev().copied().collect();
+    knots(&k, glide_ft(s))
+}
+
+/// Height of the path flown at `s`: the 3° glide path, with the demo's deviation.
+fn path_ft(s: f64, demo: bool) -> f64 {
+    if !demo {
+        return glide_ft(s);
+    }
+    let gpip = TCH_FT / FT_PER_M / GLIDE_DEG.to_radians().tan();
+    (gpip - s) * (GLIDE_DEG + DEMO_GS_DOT_DEG * demo_gs_dots(s)).to_radians().tan() * FT_PER_M
+}
+
+/// Where the demo path is `ft` high on the final (s between the final start and the threshold).
+fn demo_s_at_ft(ft: f64) -> f64 {
+    let (mut lo, mut hi) = (FINAL_S, 0.0);
+    for _ in 0..60 {
+        let mid = (lo + hi) / 2.0;
+        if path_ft(mid, true) > ft {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    (lo + hi) / 2.0
+}
+
+/// Demo lateral offset (m right) at `s`: the `DEMO_LOC_DOTS` profile converted with the
+/// localizer geometry (`loc_ant_s` = the virtual antenna, s), then the touchdown offset,
+/// faded out on the rollout.
+fn demo_lateral(s: f64, off: f64, loc_ant_s: f64) -> f64 {
+    let dot = DEMO_LOC_DOT_M_AT_THRESHOLD.atan2(loc_ant_s);
+    let mut k: Vec<(f64, f64)> = DEMO_LOC_DOTS.iter().map(|&(ks, d)| (ks, (loc_ant_s - ks) * (d * dot).tan())).collect();
+    k.push((DEMO_LATERAL_END_S, off));
+    knots(&k, s) * rollout_fade(s)
 }
 
 struct Builder {
@@ -269,8 +408,12 @@ struct Builder {
     ctrl_vs: f64,
     /// Flare height for this build.
     hf: f64,
-    /// Flare state: (start time, start V/S fpm (negative), duration).
-    flare: Option<(f64, f64, f64)>,
+    /// Flare state: (start time, start V/S fpm (negative), duration, demo float amplitude fpm).
+    flare: Option<(f64, f64, f64, f64)>,
+    /// Localizer antenna position (s) of the debrief's geometry, for the demo lateral profile.
+    loc_ant_s: f64,
+    /// Direction of the current path leg (the track without the demo's lateral profile).
+    path_theta: f64,
     /// Bounce: time of the first contact.
     bounce_t0: Option<f64>,
     /// Where the first contact happened (s).
@@ -292,25 +435,29 @@ impl Builder {
             ctrl_vs: 0.0,
             hf,
             flare: None,
+            loc_ant_s: RunwayFrame::new(&MockFlight::runway()).length_m + LOC_BEYOND_END_M,
+            path_theta: cur.theta,
             bounce_t0: None,
             touchdown_s: None,
             leg_starts: Vec::new(),
         }
     }
 
-    fn legs(variant: MockVariant) -> Vec<Leg> {
+    fn legs(p: &Params) -> Vec<Leg> {
         use Path::*;
         use Speed::*;
         use Vert::*;
+        let variant = p.variant;
         let climb = Ctrl { target: CIRCUIT_AGL_FT, fpm: 2_500.0 };
         let downwind_len = CROSSWIND_S - FINAL_S;
+        let base_end_gs = if p.demo { DEMO_BASE_END_GS_KT } else { BASE_END_GS_KT };
         let circuit = [
             // crosswind/downwind turn (left), level-off at 2 500 ft
             Leg::new(Arc { radius: CIRCUIT_R_M, sweep: -PI }, To(215.0), climb).gear_up(),
             Leg::new(Line { len: downwind_len * 0.7 }, To(215.0), climb).gear_up(),
             // descending end of the downwind and base turn (left) onto a 9 km final
             Leg::new(Line { len: downwind_len * 0.3 }, To(200.0), Ctrl { target: INTERCEPT_AGL_FT, fpm: 900.0 }).gear_up(),
-            Leg::new(Arc { radius: CIRCUIT_R_M, sweep: -PI }, To(146.0), Ctrl { target: INTERCEPT_AGL_FT, fpm: 900.0 }).flaps(2),
+            Leg::new(Arc { radius: CIRCUIT_R_M, sweep: -PI }, To(base_end_gs), Ctrl { target: INTERCEPT_AGL_FT, fpm: 900.0 }).flaps(2),
         ];
         let mut legs = Self::departure(climb);
         legs.extend(circuit);
@@ -321,7 +468,7 @@ impl Builder {
             legs.push(Leg::new(Line { len: CROSSWIND_S - ga_s }, To(185.0), Ctrl { target: CIRCUIT_AGL_FT, fpm: 2_000.0 }).flaps(2).gear_up());
             legs.extend(circuit);
         }
-        legs.extend(Self::arrival(variant));
+        legs.extend(Self::arrival(variant, p.demo));
         legs
     }
 
@@ -344,12 +491,25 @@ impl Builder {
     }
 
     /// Final, flare, (bounce,) rollout, vacate and park.
-    fn arrival(variant: MockVariant) -> Vec<Leg> {
+    fn arrival(variant: MockVariant, demo: bool) -> Vec<Leg> {
         use Path::*;
         use Speed::*;
         use Vert::*;
-        vec![
-            Leg::new(Line { len: -FINAL_S }, To(126.0), Glide).flaps(4),
+        let final_legs = if demo {
+            // flaps 3 down to ~1 100 ft, FULL after; the FAF excess bled off by 500 ft
+            let (s_full, s_500) = (demo_s_at_ft(DEMO_FLAPS_FULL_FT), demo_s_at_ft(500.0));
+            let f = (s_full - FINAL_S) / (s_500 - FINAL_S);
+            let gs_full = (DEMO_BASE_END_GS_KT.powi(2) + (DEMO_GS_500_KT.powi(2) - DEMO_BASE_END_GS_KT.powi(2)) * f).sqrt();
+            vec![
+                Leg::new(Line { len: s_full - FINAL_S }, To(gs_full), Glide).flaps(3),
+                Leg::new(Line { len: s_500 - s_full }, To(DEMO_GS_500_KT), Glide).flaps(4),
+                Leg::new(Line { len: -s_500 }, To(DEMO_GS_THRESHOLD_KT), Glide).flaps(4),
+            ]
+        } else {
+            vec![Leg::new(Line { len: -FINAL_S }, To(126.0), Glide).flaps(4)]
+        };
+        let mut legs = final_legs;
+        legs.extend([
             Leg::new(Line { len: f64::INFINITY }, Accel(-1.2), Flare).flaps(4).runway(),
             Leg::new(Line { len: if variant == MockVariant::Bounce { f64::INFINITY } else { 0.0 } }, Accel(-1.5), Bounce)
                 .flaps(4)
@@ -361,11 +521,17 @@ impl Builder {
             Leg::new(Line { len: 230.0 }, To(15.0), Ground),
             Leg::new(Line { len: 25.0 }, To(0.0), Ground),
             Leg::hold(4.0, 2),
-        ]
+        ]);
+        legs
+    }
+
+    /// Lateral offset on the final, flare and rollout.
+    fn lateral(&self, s: f64) -> f64 {
+        if self.p.demo { demo_lateral(s, self.p.lateral_m, self.loc_ant_s) } else { lateral_offset(s, self.p.lateral_m) }
     }
 
     fn run(mut self) -> Self {
-        for leg in Self::legs(self.p.variant) {
+        for leg in Self::legs(&self.p) {
             self.leg_starts.push(self.cur.t);
             self.fly(leg);
         }
@@ -391,7 +557,8 @@ impl Builder {
             }
             return;
         }
-        let (start, theta0) = ((self.cur.s, self.cur.x), self.cur.theta);
+        // the path direction, not the demo's S-turn track on top of it
+        let (start, theta0) = ((self.cur.s, self.cur.x), self.path_theta);
         let len = match leg.path {
             Path::Line { len } => len,
             Path::Arc { radius, sweep } => radius * sweep.abs(),
@@ -422,6 +589,7 @@ impl Builder {
             d += step;
             v = v1;
             let (pos, theta) = position(leg.path, start, theta0, d);
+            self.path_theta = theta;
             let mut c = self.cur;
             c.s = pos.0;
             c.x = pos.1;
@@ -459,8 +627,8 @@ impl Builder {
                 self.ctrl_agl = (self.ctrl_agl + self.ctrl_vs / 60.0 * dt_eff).max(0.0);
                 let mut agl = self.ctrl_agl;
                 if let Vert::Glide = leg.vert {
-                    agl = smin(agl, glide_ft(c.s), 60.0);
-                    c.x = lateral_offset(c.s, self.p.lateral_m);
+                    agl = smin(agl, path_ft(c.s, self.p.demo), 60.0);
+                    c.x = self.lateral(c.s);
                 }
                 c.agl = agl.max(0.0);
                 c.vs_fpm = (c.agl - prev.agl) / dt_eff * 60.0;
@@ -486,12 +654,20 @@ impl Builder {
                     c.agl = agl.max(0.0);
                     c.vs_fpm = if c.agl > 0.0 { vs } else { 0.0 };
                 }
-                c.x = lateral_offset(c.s, self.p.lateral_m);
+                c.x = self.lateral(c.s);
             }
+        }
+        let mut bank_target = bank_target;
+        if self.p.demo && matches!(leg.vert, Vert::Glide | Vert::Flare | Vert::Bounce) {
+            // the S on the final: track along the lateral profile, bank from its curvature
+            let (h, v) = (1.0, c.gs_kt * KT);
+            let (xm, x0, xp) = (self.lateral(c.s - h), self.lateral(c.s), self.lateral(c.s + h));
+            c.theta += ((xp - xm) / (2.0 * h)).atan();
+            bank_target = if c.agl > 0.0 { (v * v * (xp - 2.0 * x0 + xm) / (h * h) / 9.81).atan().to_degrees() } else { 0.0 };
         }
         if matches!(leg.vert, Vert::Ground) && leg.on_runway && self.touchdown_s.is_some() {
             // rollout: drift back from the touchdown offset to the centreline
-            c.x = lateral_offset(c.s, self.p.lateral_m);
+            c.x = self.lateral(c.s);
         }
 
         c.flaps = leg.flaps;
@@ -522,7 +698,7 @@ impl Builder {
         c.bank = lag(prev.bank, bank_target, 1.5);
         let dvs = (c.vs_fpm - prev.vs_fpm) / 60.0 / FT_PER_M / dt_eff;
         c.g = if contact {
-            1.0 + c.td_fpm * 0.0008
+            1.0 + c.td_fpm * if self.p.demo { DEMO_TD_G_PER_FPM } else { TD_G_PER_FPM }
         } else if on_ground {
             lag(prev.g, 1.0, 0.2)
         } else {
@@ -547,18 +723,29 @@ impl Builder {
 
     /// Height and V/S on the glide path and in the flare (may go below 0 at contact).
     fn flare_vs(&mut self, t: f64, s: f64, prev: &Pt, dt: f64) -> (f64, f64) {
-        let glide = glide_ft(s);
+        let glide = path_ft(s, self.p.demo);
+        let v1 = -self.p.td_fpm;
         if self.flare.is_none() && glide <= self.hf {
-            // V/S(τ) = v0 + (v1 − v0)(τ/T)²: the mean (2 v0 + v1)/3 must lose the flare height
             let v0 = prev.vs_fpm;
-            let mean = (2.0 * v0 - self.p.td_fpm) / 3.0;
-            self.flare = Some((prev.t, v0, prev.agl / (-mean / 60.0)));
+            self.flare = Some(if self.p.demo {
+                // V/S(f) = v1 + (v0 − v1)(1 − f)³ + A·sin(πf) over a fixed time: most of the
+                // rate is taken out early, a short float, then the aircraft settles at v1.
+                // Its mean v1 + (v0 − v1)/4 + 2A/π must lose the flare height in DEMO_FLARE_S.
+                // (the flare height was crossed a moment before this step: end on time anyway)
+                let dur = DEMO_FLARE_S - (self.hf - prev.agl) * 60.0 / -v0.min(-1.0);
+                let mean = -prev.agl * 60.0 / dur;
+                (prev.t, v0, dur, (mean - v1 - (v0 - v1) / 4.0) * FRAC_PI_2)
+            } else {
+                // V/S(τ) = v0 + (v1 − v0)(τ/T)²: the mean (2 v0 + v1)/3 must lose the flare height
+                let mean = (2.0 * v0 + v1) / 3.0;
+                (prev.t, v0, prev.agl / (-mean / 60.0), 0.0)
+            });
         }
         match self.flare {
             None => (glide, (glide - prev.agl) / dt * 60.0),
-            Some((t0, v0, dur)) => {
+            Some((t0, v0, dur, float)) => {
                 let f = ((t - t0) / dur).min(1.0);
-                let vs = v0 + (-self.p.td_fpm - v0) * f * f;
+                let vs = if self.p.demo { v1 + (v0 - v1) * (1.0 - f).powi(3) + float * (PI * f).sin() } else { v0 + (v1 - v0) * f * f };
                 (prev.agl + (prev.vs_fpm + vs) / 2.0 / 60.0 * dt, vs)
             }
         }
@@ -628,20 +815,22 @@ fn build(p: Params) -> Track {
         // a late, short flare from 25 ft: firm contact a little before the aim point
         return Track::of(Builder::new(p, 25.0).run());
     }
-    // flare height so the first contact is TOUCHDOWN_AIM_M past the threshold (monotonic: higher flare → longer)
-    let (mut lo, mut hi) = (5.0, 60.0);
+    // flare height so the first contact is at the aimed distance past the threshold (monotonic:
+    // a higher flare lands longer; with the demo's fixed flare time it starts earlier, so shorter)
+    let aim = p.touchdown_aim_m();
+    let (mut lo, mut hi) = if p.demo { (12.0, 32.0) } else { (5.0, 60.0) };
     let mut best: Option<Builder> = None;
     for _ in 0..30 {
         let hf = (lo + hi) / 2.0;
         let b = Builder::new(p, hf).run();
         let s = b.touchdown_s.unwrap_or(f64::INFINITY);
-        if s > TOUCHDOWN_AIM_M {
+        if (s > aim) != p.demo {
             hi = hf;
         } else {
             lo = hf;
         }
-        let err = (s - TOUCHDOWN_AIM_M).abs();
-        if best.as_ref().is_none_or(|b| err < (b.touchdown_s.unwrap_or(f64::INFINITY) - TOUCHDOWN_AIM_M).abs()) {
+        let err = (s - aim).abs();
+        if best.as_ref().is_none_or(|b| err < (b.touchdown_s.unwrap_or(f64::INFINITY) - aim).abs()) {
             best = Some(b);
         }
         if err < 0.5 {
@@ -728,7 +917,7 @@ impl MockFlight {
             }
             _ => {}
         }
-        out.push(ProviderEvent::Telemetry(self.sample(t_s, timestamp_ms)));
+        out.push(ProviderEvent::Telemetry(Box::new(self.sample(t_s, timestamp_ms))));
         out
     }
 
@@ -867,8 +1056,82 @@ impl MockFlight {
             },
             // decimal digits, as the providers decode the sim's BCD squawk
             transponder_code: 2000,
+            ..self.approach_data(&p)
         }
     }
+
+    /// The track-v2 values of a point: wind, ILS 25C on NAV 1, autopilot bits, N1,
+    /// spoilers, alpha, flap positions and design speeds (see the `MOCK_*` constants).
+    fn approach_data(&self, p: &Pt) -> Telemetry {
+        let on_ground = p.agl <= 0.0;
+        let landed = p.td_fpm > 0.0;
+        // ILS geometry in the runway frame (s along the landing direction, x right)
+        let loc_s = self.frame.length_m + LOC_BEYOND_END_M;
+        let loc_err = p.x.atan2(loc_s - p.s).to_degrees();
+        let gs_antenna_s = TCH_FT / FT_PER_M / MOCK_ILS_GS_DEG.to_radians().tan();
+        let to_gs = gs_antenna_s - p.s;
+        let gs_error = (p.agl / FT_PER_M).atan2(to_gs).to_degrees() - MOCK_ILS_GS_DEG;
+        let gs_valid = to_gs > 0.0 && (loc_s - p.s).hypot(p.x) < GS_RANGE_M && loc_err.abs() < GS_SECTOR_DEG;
+        let course = self.frame.heading_deg;
+        let on_course = !on_ground && p.s < 0.0 && angle_diff(course + p.theta.to_degrees(), course) < 20.0 && p.x.abs() < 1_000.0;
+        // automation: AP from 800 ft after take-off to 800 ft on final, A/THR down to the flare
+        let ap = !on_ground && p.agl > 800.0;
+        let appr = ap && on_course;
+        let athr = !on_ground && p.agl > 30.0 && p.engines > 0;
+        // N1: climb/level/descent from the V/S, idle in the flare, reverse on the rollout
+        let n1 = if p.engines == 0 {
+            0.0
+        } else if on_ground {
+            if p.on_runway && !landed && p.gs_kt > 5.0 {
+                86.0
+            } else if p.on_runway && landed && p.gs_kt > 60.0 {
+                70.0
+            } else {
+                21.0 + p.gs_kt * 0.1
+            }
+        } else if landed || p.agl < 30.0 && p.vs_fpm < 0.0 {
+            22.0
+        } else {
+            (52.0 + p.vs_fpm * 0.012).clamp(24.0, 88.0)
+        };
+        let reverse = on_ground && p.on_runway && landed && p.gs_kt > 60.0;
+        let spoilers = if on_ground && p.on_runway && landed && p.gs_kt > 30.0 { 100.0 } else { 0.0 };
+        let fpa = (p.vs_fpm / 60.0 / FT_PER_M).atan2((p.gs_kt * KT).max(1.0)).to_degrees();
+        Telemetry {
+            wind_dir_true_deg: Some(MOCK_WIND_DIR_TRUE_DEG),
+            wind_kt: Some(MOCK_WIND_KT),
+            nav_has_localizer: Some(true),
+            nav_has_glide_slope: Some(true),
+            nav_gs_flag: Some(gs_valid),
+            nav_gs_error_deg: Some(gs_error),
+            nav_gs_angle_deg: Some(MOCK_ILS_GS_DEG),
+            // needle right (+) when the aircraft is left of the course
+            nav_cdi: Some((-loc_err / (LOC_FULL_SCALE_DOTS * DEMO_LOC_DOT_M_AT_THRESHOLD.atan2(loc_s).to_degrees()) * 127.0).clamp(-127.0, 127.0)),
+            nav_radial_error_deg: Some(loc_err),
+            nav_loc_course_deg: Some((course - VARIATION_DEG).rem_euclid(360.0)),
+            autopilot_master: Some(ap),
+            autopilot_approach_hold: Some(appr),
+            autopilot_glideslope_hold: Some(appr && gs_valid && gs_error.abs() < 0.5),
+            autothrottle_active: Some(athr),
+            n1_pct: Some(n1),
+            throttle_lever_pct: Some(if reverse { 0.0 } else { ((n1 - 20.0) / 68.0 * 100.0).clamp(0.0, 100.0) }),
+            spoilers_handle_pct: Some(spoilers),
+            spoilers_armed: Some(p.flaps >= 3 && p.gear >= 99.0 && (!on_ground || landed && p.on_runway)),
+            spoilers_pct: Some(spoilers),
+            alpha_deg: Some(if on_ground { p.pitch } else { p.pitch - fpa }),
+            flap_positions: Some(FLAP_POSITIONS),
+            design_vs0_kt: Some(DESIGN_VS0_KT),
+            design_vs1_kt: Some(DESIGN_VS1_KT),
+            design_vc_kt: Some(DESIGN_VC_KT),
+            ..Default::default()
+        }
+    }
+}
+
+/// Unsigned difference of two headings, degrees (0…180).
+fn angle_diff(a: f64, b: f64) -> f64 {
+    let d = (a - b).rem_euclid(360.0);
+    d.min(360.0 - d)
 }
 
 pub struct MockProvider {
@@ -923,7 +1186,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_loop_fits_and_aims_at_350_m() {
+    fn every_loop_fits_and_hits_its_touchdown_aim() {
         // (teleport / reconnect fly the standard path)
         for variant in [MockVariant::Standard, MockVariant::Bounce, MockVariant::GoAround] {
             for n in 0..4 {
@@ -932,7 +1195,8 @@ mod tests {
                 // the rest of the loop is parked with engines off (shutdown dwell)
                 assert!(end <= variant.loop_seconds() - 15.0, "{variant:?}/{n}: path takes {end:.0} s");
                 let tol = if variant == MockVariant::Bounce { 60.0 } else { 2.0 };
-                assert!((tr.touchdown_s - TOUCHDOWN_AIM_M).abs() < tol, "{variant:?}/{n}: {}", tr.touchdown_s);
+                let aim = Params::for_loop(variant, n).touchdown_aim_m();
+                assert!((tr.touchdown_s - aim).abs() < tol, "{variant:?}/{n}: {}", tr.touchdown_s);
                 assert!(tr.pts.windows(2).all(|w| w[1].t > w[0].t));
             }
         }

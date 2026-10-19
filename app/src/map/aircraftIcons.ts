@@ -10,7 +10,8 @@
 // current weight as a last resort.
 
 import type * as maplibregl from "maplibre-gl";
-import { COLOR, TRAFFIC, getMapTheme } from "../theme";
+import { COLOR, getMapTheme } from "../theme";
+import { activeTheme, contrastRatio, mixHex, type ThemeDef } from "../themes";
 
 export type WakeCategory = "light" | "medium" | "heavy" | "super";
 
@@ -115,7 +116,8 @@ function svg(path: string, fill: string, stroke: string, strokeWidth: number): s
 </svg>`;
 }
 
-export function iconId(kind: "own" | "traffic", cat: WakeCategory): string {
+/** `traffic` = VATSIM (and the generic traffic symbol), `ivao` = IVAO traffic: same fill, accent outline. */
+export function iconId(kind: "own" | "traffic" | "ivao", cat: WakeCategory): string {
   return `ac-${kind}-${cat}`;
 }
 
@@ -132,17 +134,67 @@ function loadOne(map: maplibregl.Map, id: string, markup: string): Promise<void>
   });
 }
 
+/** WCAG targets on the basemap: callsign text 4.5:1, aircraft symbols (non-text graphics) 3:1. */
+export const TRAFFIC_LABEL_CONTRAST = 4.5;
+export const TRAFFIC_SYMBOL_CONTRAST = 3;
+
 /**
- * Registers all eight symbols (own/traffic × four classes) in the active theme. Idempotent
+ * Mixes `color` towards `ink` in 5 % steps until it reaches `min` contrast against `ground`.
+ * Keeps the hue as long as possible (blue-grey stays slate), falls back to the ink itself.
+ */
+export function ensureContrast(color: string, ground: string, ink: string, min: number): string {
+  for (let t = 0; t <= 1.0001; t += 0.05) {
+    const c = mixHex(color, ink, Math.min(1, t));
+    if (contrastRatio(c, ground) >= min) return c;
+  }
+  return ink;
+}
+
+export interface TrafficColors {
+  /** Fill of the VATSIM / IVAO aircraft symbols. */
+  fill: string;
+  /** VATSIM callsign label. */
+  label: string;
+  /** IVAO callsign label (theme accent). */
+  ivaoLabel: string;
+}
+
+/**
+ * Traffic colours of a theme, readable on its basemap: the blue-grey traffic token (themes.ts)
+ * is moved towards the theme's text colour until the fill clears 3:1 and the labels 4.5:1
+ * against the land colour – darker on the light themes (Papierkarte, Arktis Studio), lighter on
+ * the dark ones where needed. Tokens that already pass stay unchanged.
+ */
+export function trafficColorsOf(t: ThemeDef): TrafficColors {
+  const c = t.colors;
+  const ground = t.map.land;
+  return {
+    fill: ensureContrast(c.traffic, ground, c.text, TRAFFIC_SYMBOL_CONTRAST),
+    label: ensureContrast(c.traffic, ground, c.text, TRAFFIC_LABEL_CONTRAST),
+    ivaoLabel: ensureContrast(c.accent, ground, c.text, TRAFFIC_LABEL_CONTRAST),
+  };
+}
+
+/** Traffic colours of the active theme (read at layer-build time, like COLOR). */
+export function trafficColors(): TrafficColors {
+  return trafficColorsOf(activeTheme());
+}
+
+/**
+ * Registers all twelve symbols (own/VATSIM traffic/IVAO traffic × four classes) in the active theme.
+ * IVAO traffic keeps the traffic fill and gets a thicker outline in the theme accent, so both
+ * networks read as "other traffic" yet stay apart without a new colour. Idempotent
  * per style; a theme change re-adds them after setStyle. Light themes get the ink-outline
  * variant (yellow alone has too little contrast on paper / light grey).
  */
 export async function loadAircraftIcons(map: maplibregl.Map): Promise<void> {
   const cats: WakeCategory[] = ["light", "medium", "heavy", "super"];
   const light = getMapTheme().scheme === "light";
+  const fill = trafficColors().fill;
   await Promise.all([
     ...cats.map((c) => loadOne(map, iconId("own", c), svg(SHAPES[c], COLOR.ownAircraft, COLOR.aircraftEdge, light ? 1.5 : 1.6))),
-    ...cats.map((c) => loadOne(map, iconId("traffic", c), svg(SHAPES[c], TRAFFIC, light ? COLOR.aircraftEdge : COLOR.halo, light ? 1.2 : 1.4))),
+    ...cats.map((c) => loadOne(map, iconId("traffic", c), svg(SHAPES[c], fill, light ? COLOR.aircraftEdge : COLOR.halo, light ? 1.2 : 1.4))),
+    ...cats.map((c) => loadOne(map, iconId("ivao", c), svg(SHAPES[c], fill, COLOR.accent, light ? 2.2 : 2.4))),
   ]);
 }
 

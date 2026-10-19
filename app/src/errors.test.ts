@@ -1,7 +1,10 @@
-import { describe, expect, it } from "vitest";
-import { DLL_MISSING_TEXT, isDllMissing, triedDllPaths, userMessage } from "./errors";
+import { beforeEach, describe, expect, it } from "vitest";
+import { dllMissingText, isDllMissing, networkContext, triedDllPaths, userMessage } from "./errors";
 import { computeTotals, countedFlights } from "./totals";
 import type { FlightRow } from "./types";
+import { setLanguageSetting } from "./i18n";
+
+beforeEach(() => setLanguageSetting("de"));
 
 describe("userMessage", () => {
   it("SimConnect.dll missing", () => {
@@ -20,7 +23,7 @@ describe("userMessage", () => {
     expect(isDllMissing("sim not reachable; retry in 8s")).toBe(false);
     expect(triedDllPaths(raw)).toEqual(["D:\\SDK\\SimConnect.dll", "C:\\Program Files\\VectaSim\\SimConnect.dll", "SimConnect.dll"]);
     expect(triedDllPaths("unknown provider 'xplane'")).toEqual([]);
-    expect(DLL_MISSING_TEXT).toBe("SimConnect fehlt noch – unter Einstellungen → Simulator mit einem Klick herunterladen");
+    expect(dllMissingText()).toBe("SimConnect fehlt noch – unter Einstellungen → Simulator mit einem Klick herunterladen");
   });
   it("sim not reachable is a waiting state with retry time", () => {
     const m = userMessage("sim not reachable (SimConnect_Open hr=0x80004005); retry in 8s", "sim");
@@ -45,11 +48,38 @@ describe("userMessage", () => {
     expect(v.title).toBe("VATSIM ist nicht erreichbar.");
     expect(v.hint).toMatch(/Tracking läuft lokal weiter/);
     expect(userMessage("network: operation timed out", "metar").title).toBe("Wetterdienst ist nicht erreichbar.");
+    const i = userMessage("IVAO: network: error sending request for url (https://api.ivao.aero/v2/tracker/whazzup)", "ivao");
+    expect(i.title).toBe("IVAO ist nicht erreichbar.");
+    expect(i.hint).toMatch(/IVAO-Verkehr ist pausiert/);
+    expect(userMessage("IVAO: rate limit reached, try again shortly", "ivao").title).toBe("IVAO: zu viele Anfragen.");
+  });
+  it("IVAO-prefixed errors are IVAO even with the vatsim fallback", () => {
+    expect(networkContext("IVAO: HTTP 503")).toBe("ivao");
+    expect(networkContext("VATSIM: HTTP 503", "ivao")).toBe("vatsim");
+    expect(networkContext("network: timed out", "ivao")).toBe("ivao");
+    expect(networkContext("network: timed out")).toBe("vatsim");
+    expect(userMessage("IVAO: network: error sending request", "vatsim").title).toBe("IVAO ist nicht erreichbar.");
+    expect(userMessage("IVAO: HTTP 503", "vatsim").title).toBe("IVAO antwortet mit einem Fehler (HTTP 503).");
+    expect(userMessage("network: error sending request", "vatsim").title).toBe("VATSIM ist nicht erreichbar.");
+    expect(userMessage("network: error sending request", "ivao").hint).not.toMatch(/VATSIM/);
   });
   it("unknown errors keep the raw text as detail", () => {
     const m = userMessage(new Error("boom"));
     expect(m.title).toBe("Unerwarteter Fehler.");
     expect(m.detail).toBe("boom");
+  });
+});
+
+describe("userMessage in English", () => {
+  it("translates title and hint, keeps the raw detail", () => {
+    setLanguageSetting("en");
+    const m = userMessage("sim not reachable; retry in 8s", "sim");
+    expect(m.title).toBe("Waiting for simulator …");
+    expect(m.hint).toBe("Start the simulator – VectaSim connects automatically (next attempt in 8 s).");
+    expect(userMessage("network: timed out", "metar").title).toBe("Weather service is not reachable.");
+    expect(userMessage("IVAO: HTTP 503", "vatsim").title).toBe("IVAO responded with an error (HTTP 503).");
+    expect(userMessage(new Error("boom")).detail).toBe("boom");
+    expect(dllMissingText()).toMatch(/Settings → Simulator/);
   });
 });
 

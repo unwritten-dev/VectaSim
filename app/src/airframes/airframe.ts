@@ -3,6 +3,7 @@
 
 import type { Airframe } from "../types";
 import { maskRegistration, maskTitle } from "../format";
+import { t } from "../i18n";
 
 const PLACEHOLDER_IDS = new Set(["ASXGS", "ASOBO", "N12345", "NONE", "UNKNOWN", "TEST", "XXXX", "XXXXX", "ABC", "ABCD", "ABCDE"]);
 
@@ -50,7 +51,7 @@ export function shownAirframeName(a: Pick<Airframe, "registration" | "customName
 /** Credit line for the photo; Planespotters requires photographer + source. */
 export function photoCredit(a: Pick<Airframe, "imageSource" | "imageCredit">): string | null {
   if (a.imageSource === "planespotters") return a.imageCredit ? `© ${a.imageCredit} · Planespotters.net` : "© Planespotters.net";
-  if (a.imageSource === "user") return a.imageCredit || "Eigenes Bild";
+  if (a.imageSource === "user") return a.imageCredit || t("logbook.airframe.ownImage");
   return null;
 }
 
@@ -81,6 +82,18 @@ export function pickerOptions<T extends Pick<Airframe, "registration" | "customN
 /** Plausible Vapp range (kt); the backend refuses values outside it. */
 export const VAPP_MIN_KT = 40;
 export const VAPP_MAX_KT = 250;
+
+/** Highest landing flap handle index the backend accepts (`LANDING_FLAPS_MAX`). */
+export const LANDING_FLAPS_MAX = 10;
+
+/** Landing flaps field → handle index; null = empty (the last handle position), undefined = not a whole number 0…10. */
+export function parseLandingFlaps(raw: string): number | null | undefined {
+  const t = raw.trim();
+  if (!t) return null;
+  if (!/^\d+$/.test(t)) return undefined;
+  const v = Number(t);
+  return v <= LANDING_FLAPS_MAX ? v : undefined;
+}
 
 /** Vapp field → knots; null = empty (use the flown value), undefined = not a plausible number. */
 export function parseVapp(raw: string): number | null | undefined {

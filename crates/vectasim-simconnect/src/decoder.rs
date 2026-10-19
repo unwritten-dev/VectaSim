@@ -17,9 +17,13 @@ use vectasim_core::{AircraftInfo, ProviderEvent, SimEvent, Telemetry};
 pub const DEF_FAST: u32 = 1;
 pub const DEF_SLOW: u32 = 2;
 pub const DEF_STATIC: u32 = 3;
+pub const DEF_APPROACH: u32 = 4;
+pub const DEF_DESIGN: u32 = 5;
 pub const REQ_FAST: u32 = 1;
 pub const REQ_SLOW: u32 = 2;
 pub const REQ_STATIC: u32 = 3;
+pub const REQ_APPROACH: u32 = 4;
+pub const REQ_DESIGN: u32 = 5;
 /// Request id for `RequestSystemState("Sim")` (initial state query and watchdog probes).
 pub const REQ_STATE_SIM: u32 = 100;
 
@@ -93,9 +97,59 @@ const SLOW_OUT: [&str; 17] =
 /// Requested as STRING256 each (ATC MODEL/TYPE may come back as `TT:` localisation tokens).
 pub const STATIC_VARS: &[&str] = &["TITLE", "ATC MODEL", "ATC TYPE", "ATC ID", "ATC AIRLINE", "ATC FLIGHT NUMBER"];
 
+/// Approach data at 1 Hz (track v2). Its own definition so a variable the sim or an add-on
+/// does not know (`NAME_UNRECOGNIZED`) can never cost FAST/SLOW anything; a rejected one is
+/// dropped from this definition only and reads as `None`.
+///
+/// `AIRSPEED TRUE` is already in FAST. `NAV …:1` = NAV 1 receiver. Booleans as FLOAT64 "bool".
+/// `AUTOTHROTTLE ACTIVE` does not exist; managed throttle / throttle arm stand in for it.
+pub const APPROACH_VARS: &[(&str, &str)] = &[
+    ("AMBIENT WIND VELOCITY", "knots"),
+    ("AMBIENT WIND DIRECTION", "degrees"),
+    ("NAV HAS LOCALIZER:1", "bool"),
+    ("NAV HAS GLIDE SLOPE:1", "bool"),
+    ("NAV GS FLAG:1", "bool"),
+    ("NAV GLIDE SLOPE ERROR:1", "degrees"),
+    ("NAV CDI:1", "number"),
+    ("NAV RADIAL ERROR:1", "degrees"),
+    // `NAV GLIDE SLOPE` is encoded; the RAW variant is the angle in degrees
+    ("NAV RAW GLIDE SLOPE:1", "degrees"),
+    ("NAV LOCALIZER:1", "degrees"),
+    ("AUTOPILOT MASTER", "bool"),
+    ("AUTOPILOT APPROACH HOLD", "bool"),
+    ("AUTOPILOT GLIDESLOPE HOLD", "bool"),
+    ("AUTOPILOT MANAGED THROTTLE ACTIVE", "bool"),
+    ("AUTOPILOT THROTTLE ARM", "bool"),
+    ("TURB ENG N1:1", "percent"),
+    ("TURB ENG N1:2", "percent"),
+    ("GENERAL ENG THROTTLE LEVER POSITION:1", "percent"),
+    ("SPOILERS HANDLE POSITION", "percent"),
+    ("SPOILERS ARMED", "bool"),
+    ("SPOILERS LEFT POSITION", "percent"),
+    ("INCIDENCE ALPHA", "degrees"),
+    ("FLAPS NUM HANDLE POSITIONS", "number"),
+];
+const APPROACH_OUT: [&str; 23] = [
+    "kt", "°", "bool", "bool", "bool", "°", "Nadel", "°", "°", "°", "bool", "bool", "bool", "bool", "bool", "%", "%", "%", "%", "bool", "%", "°", "Anzahl",
+];
+
+/// aircraft.cfg design speeds, once per aircraft (requested again on `AircraftLoaded`).
+/// `DESIGN SPEED VC` is natively ft/s; it is requested in ft/s and converted here, so the
+/// value is right whether or not the sim applies the unit conversion.
+pub const DESIGN_VARS: &[(&str, &str)] =
+    &[("DESIGN SPEED VS0", "knots"), ("DESIGN SPEED VS1", "knots"), ("DESIGN SPEED VC", "feet per second")];
+const DESIGN_OUT: [&str; 3] = ["kt", "kt", "kt"];
+const KT_PER_FT_S: f64 = 0.592_483_8;
+
 pub const IDX_FAST: usize = 0;
 pub const IDX_SLOW: usize = 1;
 pub const IDX_STATIC: usize = 2;
+pub const IDX_APPROACH: usize = 3;
+pub const IDX_DESIGN: usize = 4;
+/// Number of definitions (FAST, SLOW, STATIC, APPROACH, DESIGN).
+pub const N_DEFS: usize = 5;
+/// Dump header keys of the definitions, by index.
+const DEF_KEYS: [&str; N_DEFS] = ["fast", "slow", "static", "approach", "design"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DefKind {
@@ -134,16 +188,18 @@ pub fn definitions() -> Vec<DefState> {
         DefState::new("FAST", DEF_FAST, REQ_FAST, period::SIM_FRAME, DefKind::F64, FAST_VARS.iter().map(|(v, u)| (*v, Some(*u))).collect()),
         DefState::new("SLOW", DEF_SLOW, REQ_SLOW, period::SECOND, DefKind::F64, SLOW_VARS.iter().map(|(v, u)| (*v, Some(*u))).collect()),
         DefState::new("STATIC", DEF_STATIC, REQ_STATIC, period::ONCE, DefKind::Str256, STATIC_VARS.iter().map(|v| (*v, None)).collect()),
+        DefState::new("APPROACH", DEF_APPROACH, REQ_APPROACH, period::SECOND, DefKind::F64, APPROACH_VARS.iter().map(|(v, u)| (*v, Some(*u))).collect()),
+        DefState::new("DESIGN", DEF_DESIGN, REQ_DESIGN, period::ONCE, DefKind::F64, DESIGN_VARS.iter().map(|(v, u)| (*v, Some(*u))).collect()),
     ]
 }
 
-/// Key of a definition in the dump header (`fast`/`slow`/`static`).
+/// Key of a definition in the dump header (`fast`/`slow`/`static`/`approach`/`design`).
 pub fn def_key(idx: usize) -> &'static str {
-    ["fast", "slow", "static"].get(idx).copied().unwrap_or("?")
+    DEF_KEYS.get(idx).copied().unwrap_or("?")
 }
 
 pub fn def_by_key(key: &str) -> Option<usize> {
-    ["fast", "slow", "static"].iter().position(|k| k.eq_ignore_ascii_case(key))
+    DEF_KEYS.iter().position(|k| k.eq_ignore_ascii_case(key))
 }
 
 pub fn event_name(id: u32) -> Option<&'static str> {
@@ -160,11 +216,13 @@ pub fn dump_defs() -> vectasim_dump::Defs {
         fast: FAST_VARS.iter().map(|(n, u)| (n.to_string(), u.to_string())).collect(),
         slow: SLOW_VARS.iter().map(|(n, u)| (n.to_string(), u.to_string())).collect(),
         statics: STATIC_VARS.iter().map(|s| s.to_string()).collect(),
+        approach: APPROACH_VARS.iter().map(|(n, u)| (n.to_string(), u.to_string())).collect(),
+        design: DESIGN_VARS.iter().map(|(n, u)| (n.to_string(), u.to_string())).collect(),
     }
 }
 
 pub fn dump_reqs() -> BTreeMap<String, u32> {
-    [("fast".to_string(), REQ_FAST), ("slow".to_string(), REQ_SLOW), ("static".to_string(), REQ_STATIC)].into_iter().collect()
+    definitions().iter().enumerate().map(|(i, d)| (def_key(i).to_string(), d.req)).collect()
 }
 
 /// Text of the error a failed call is reported with.
@@ -235,6 +293,53 @@ fn slow_value(t: &Telemetry, i: usize, raw: f64) -> f64 {
     }
 }
 
+fn opt(v: Option<f64>) -> f64 {
+    v.unwrap_or(f64::NAN)
+}
+
+fn opt_flag(v: Option<bool>) -> f64 {
+    v.map_or(f64::NAN, flag)
+}
+
+/// The Telemetry value an APPROACH variable ends up as (NaN = `None`).
+fn approach_value(t: &Telemetry, i: usize, raw: f64) -> f64 {
+    match i {
+        0 => opt(t.wind_kt),
+        1 => opt(t.wind_dir_true_deg),
+        2 => opt_flag(t.nav_has_localizer),
+        3 => opt_flag(t.nav_has_glide_slope),
+        4 => opt_flag(t.nav_gs_flag),
+        5 => opt(t.nav_gs_error_deg),
+        6 => opt(t.nav_cdi),
+        7 => opt(t.nav_radial_error_deg),
+        8 => opt(t.nav_gs_angle_deg),
+        9 => opt(t.nav_loc_course_deg),
+        10 => opt_flag(t.autopilot_master),
+        11 => opt_flag(t.autopilot_approach_hold),
+        12 => opt_flag(t.autopilot_glideslope_hold),
+        // both throttle flags feed one field; the row shows its own flag
+        13 | 14 => as_flag(raw).map_or(f64::NAN, flag),
+        // per-engine N1; Telemetry keeps the mean
+        15 | 16 => raw,
+        17 => opt(t.throttle_lever_pct),
+        18 => opt(t.spoilers_handle_pct),
+        19 => opt_flag(t.spoilers_armed),
+        20 => opt(t.spoilers_pct),
+        21 => opt(t.alpha_deg),
+        22 => t.flap_positions.map_or(f64::NAN, f64::from),
+        _ => f64::NAN,
+    }
+}
+
+fn design_value(t: &Telemetry, i: usize) -> f64 {
+    match i {
+        0 => opt(t.design_vs0_kt),
+        1 => opt(t.design_vs1_kt),
+        2 => opt(t.design_vc_kt),
+        _ => f64::NAN,
+    }
+}
+
 /// See module doc.
 pub struct Decoder {
     pub defs: Vec<DefState>,
@@ -268,6 +373,8 @@ impl Decoder {
                             value_unit: match idx {
                                 IDX_FAST => FAST_OUT.get(i).copied().unwrap_or(""),
                                 IDX_SLOW => SLOW_OUT.get(i).copied().unwrap_or(""),
+                                IDX_APPROACH => APPROACH_OUT.get(i).copied().unwrap_or(""),
+                                IDX_DESIGN => DESIGN_OUT.get(i).copied().unwrap_or(""),
                                 _ => "Text",
                             }
                             .into(),
@@ -396,9 +503,11 @@ impl Decoder {
         match idx {
             IDX_FAST => {
                 self.apply_fast(v, ts_ms);
-                out.push(ProviderEvent::Telemetry(self.current.clone()));
+                out.push(ProviderEvent::Telemetry(Box::new(self.current.clone())));
             }
             IDX_SLOW => self.apply_slow(v),
+            IDX_APPROACH => self.apply_approach(v),
+            IDX_DESIGN => self.apply_design(v),
             _ => return,
         }
         let t = &self.current;
@@ -410,7 +519,12 @@ impl Decoder {
         for (i, var) in def.vars.iter_mut().enumerate() {
             let raw = v.get(i).copied().unwrap_or(f64::NAN);
             var.raw = finite(raw);
-            var.value = finite(if idx == IDX_FAST { fast_value(t, i) } else { slow_value(t, i, raw) });
+            var.value = finite(match idx {
+                IDX_FAST => fast_value(t, i),
+                IDX_SLOW => slow_value(t, i, raw),
+                IDX_APPROACH => approach_value(t, i, raw),
+                _ => design_value(t, i),
+            });
         }
     }
 
@@ -601,6 +715,52 @@ impl Decoder {
         }
         set(&mut t.sim_zulu_time_s, v[16]);
     }
+
+    /// Unlike FAST/SLOW a NaN (rejected/missing variable) clears the field to `None`: these
+    /// values must never look recorded when they were not. ILS deviations count only while
+    /// the station has the matching component (`NAV HAS LOCALIZER/GLIDE SLOPE`), so a
+    /// receiver without a localizer never yields a "centred" needle.
+    fn apply_approach(&mut self, v: &[f64]) {
+        let t = &mut self.current;
+        t.wind_kt = finite(v[0]).map(|w| w.max(0.0));
+        t.wind_dir_true_deg = finite(v[1]).map(|d| d.rem_euclid(360.0));
+        t.nav_has_localizer = as_flag(v[2]);
+        t.nav_has_glide_slope = as_flag(v[3]);
+        t.nav_gs_flag = as_flag(v[4]);
+        let loc = t.nav_has_localizer == Some(true);
+        let gs = t.nav_has_glide_slope == Some(true);
+        t.nav_gs_error_deg = finite(v[5]).filter(|_| gs);
+        t.nav_cdi = finite(v[6]).filter(|_| loc);
+        t.nav_radial_error_deg = finite(v[7]).filter(|_| loc);
+        t.nav_gs_angle_deg = finite(v[8]).filter(|_| gs);
+        t.nav_loc_course_deg = finite(v[9]).filter(|_| loc).map(|d| d.rem_euclid(360.0));
+        t.autopilot_master = as_flag(v[10]);
+        t.autopilot_approach_hold = as_flag(v[11]);
+        t.autopilot_glideslope_hold = as_flag(v[12]);
+        t.autothrottle_active = match (as_flag(v[13]), as_flag(v[14])) {
+            (None, None) => None,
+            (a, b) => Some(a.unwrap_or(false) || b.unwrap_or(false)),
+        };
+        // N1 of the engines the aircraft has (only 1..2 are requested); unknown count → both
+        let engines = if t.num_engines == 1 { 1 } else { 2 };
+        let n1: Vec<f64> = v[15..15 + engines].iter().copied().filter(|x| x.is_finite()).collect();
+        t.n1_pct = (!n1.is_empty()).then(|| n1.iter().sum::<f64>() / n1.len() as f64);
+        t.throttle_lever_pct = finite(v[17]);
+        t.spoilers_handle_pct = finite(v[18]);
+        t.spoilers_armed = as_flag(v[19]);
+        t.spoilers_pct = finite(v[20]);
+        t.alpha_deg = finite(v[21]);
+        t.flap_positions = finite(v[22]).filter(|n| (1.0..=32.0).contains(n)).map(|n| n.round() as i32);
+    }
+
+    /// Design speeds: 0 or negative = not set in the aircraft's cfg.
+    fn apply_design(&mut self, v: &[f64]) {
+        let t = &mut self.current;
+        let speed = |x: f64| finite(x).filter(|s| *s > 0.0);
+        t.design_vs0_kt = speed(v[0]);
+        t.design_vs1_kt = speed(v[1]);
+        t.design_vc_kt = speed(v[2]).map(|s| s * KT_PER_FT_S);
+    }
 }
 
 /// Update a field only with a real value; NaN (rejected/missing SimVar) keeps the previous/default one.
@@ -659,6 +819,46 @@ pub fn encode_slow(t: &Telemetry) -> Vec<f64> {
         t.sim_zulu_time_s,
     ]);
     v
+}
+
+/// Inverse of the APPROACH conversion. A deviation the station does not provide goes out as
+/// 0 (what a receiver without that component shows), an unknown one as NaN.
+pub fn encode_approach(t: &Telemetry) -> Vec<f64> {
+    let gated = |v: Option<f64>, has: Option<bool>| match (v, has) {
+        (Some(x), _) => x,
+        (None, Some(false)) => 0.0,
+        (None, _) => f64::NAN,
+    };
+    vec![
+        opt(t.wind_kt),
+        opt(t.wind_dir_true_deg),
+        opt_flag(t.nav_has_localizer),
+        opt_flag(t.nav_has_glide_slope),
+        opt_flag(t.nav_gs_flag),
+        gated(t.nav_gs_error_deg, t.nav_has_glide_slope),
+        gated(t.nav_cdi, t.nav_has_localizer),
+        gated(t.nav_radial_error_deg, t.nav_has_localizer),
+        gated(t.nav_gs_angle_deg, t.nav_has_glide_slope),
+        gated(t.nav_loc_course_deg, t.nav_has_localizer),
+        opt_flag(t.autopilot_master),
+        opt_flag(t.autopilot_approach_hold),
+        opt_flag(t.autopilot_glideslope_hold),
+        opt_flag(t.autothrottle_active),
+        t.autothrottle_active.map_or(f64::NAN, |_| 0.0),
+        opt(t.n1_pct),
+        opt(t.n1_pct),
+        opt(t.throttle_lever_pct),
+        opt(t.spoilers_handle_pct),
+        opt_flag(t.spoilers_armed),
+        opt(t.spoilers_pct),
+        opt(t.alpha_deg),
+        t.flap_positions.map_or(f64::NAN, f64::from),
+    ]
+}
+
+/// Inverse of the DESIGN conversion (VC back to ft/s).
+pub fn encode_design(t: &Telemetry) -> Vec<f64> {
+    vec![opt(t.design_vs0_kt), opt(t.design_vs1_kt), t.design_vc_kt.map_or(f64::NAN, |v| v / KT_PER_FT_S)]
 }
 
 pub fn encode_static(a: &AircraftInfo) -> Vec<String> {

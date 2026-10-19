@@ -1063,10 +1063,12 @@ input[type="checkbox"] {
   border-radius: var(--r-sm);
   color: var(--text-muted);
 }
-/* the unlabeled "centre on aircraft" glyph: square, a touch larger than the text */
+/* the unlabeled "centre on aircraft" crosshair (inline SVG): square, centred */
 .map-toolbar button.map-toolbar-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 0;
-  font-size: var(--fs-lg);
   line-height: 1;
 }
 
@@ -1550,10 +1552,22 @@ table.mini-table .right {
 
 .settings {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  /* two columns; the left one stacks the short cards (.settings-col) beside the long Integrationen card */
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--sp-3);
   max-width: 1280px;
   align-items: start;
+}
+.settings-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+@media (max-width: 1099px) {
+  .settings {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 .settings > .alert,
 .settings > .about {
@@ -1572,6 +1586,28 @@ table.mini-table .right {
 }
 .setting-row input {
   width: 240px;
+}
+/* a checkbox in a row keeps its own size and sits right at its label (the 240 px above is for
+   text fields; on a checkbox it tore box and label apart) */
+.setting-row input[type="checkbox"],
+.setting-row input[type="radio"] {
+  width: auto;
+  flex: none;
+  margin: 0;
+}
+.setting-row label.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text);
+}
+/* several checkboxes in one row (Online-Verkehr: VATSIM / IVAO) */
+.check-group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
 }
 .check {
   display: flex;
@@ -1653,6 +1689,15 @@ table.mini-table .right {
 }
 .airport-readout .muted {
   color: var(--text-muted);
+}
+
+/* Globus on, but zoomed in so far that the globe looks flat (map/GlobeToggle.tsx): still
+   pressed, only dimmed – its tooltip says that it shows when zooming out */
+button.globe-toggle.globe-dormant {
+  opacity: 0.55;
+}
+button.globe-toggle.globe-dormant:hover {
+  opacity: 0.85;
 }
 
 /* ---- online networks & weather ------------------------------------------------------ */
@@ -2964,6 +3009,20 @@ button.theme-card:focus-visible {
 }
 .settings > .settings-wide {
   grid-column: 1 / -1;
+}
+/* Overlay & Schnittstelle: port and LAN while the server is off (ServerPanel.tsx) */
+.server-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.server-options-off > :not(.server-options-note) {
+  opacity: 0.55;
+  transition: opacity 120ms ease;
+}
+.server-options-off > :not(.server-options-note):hover,
+.server-options-off > :not(.server-options-note):focus-within {
+  opacity: 0.85;
 }
 
 .band-dot.inline {

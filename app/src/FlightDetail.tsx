@@ -3,8 +3,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import type { FlightDetail as Detail, Ofp, TouchdownReport, TrackSample } from "./types";
 import type { ApproachAnalysis } from "./landing/approachTypes";
-import { PHASE_LABEL, fmt, fmtClock, fmtCoord, fmtDate, fmtDuration, fmtWeightNum, getWeightUnit } from "./format";
-import { actualFromRow, buildPirep, fmtPunctuality, fmtPvaDelta, fmtPvaValue, integrityIssues, parseOfp, pirepFileName, planFromRow, planVsActual, type PirepApproach } from "./pirep";
+import { PHASE_LABEL, getWeightUnit } from "./format";
+import { fmt, fmtClock, fmtCoord, fmtDate, fmtDuration, fmtWeightNum } from "./i18n/number";
+import { t as tr, useT, type TFunction, type TKey } from "./i18n";
+import { ON_TIME_THRESHOLD_MIN, actualFromRow, buildPirep, fmtPunctuality, fmtPvaDelta, fmtPvaValue, integrityIssues, parseOfp, pirepFileName, planFromRow, planVsActual, type PirepApproach } from "./pirep";
 import { usePrefs } from "./prefs";
 import TrackMap from "./map/TrackMap";
 import ProfileChart from "./ProfileChart";
@@ -19,31 +21,35 @@ import NotesEditor from "./NotesEditor";
 import { importSourceLabel, isDemoRow } from "./totals";
 import LandingSummary from "./landing/LandingSummary";
 import { openDebrief } from "./landing/debriefStore";
-import { BAND_LABEL, BAND_VAR, G_HARD, vsBandOf } from "./landing/facts";
+import { BAND_VAR, G_HARD, vsBandOf } from "./landing/facts";
 import HistoryPanel, { useHistoryFacts } from "./landing/HistoryPanel";
 import { patternSeries } from "./landing/history";
 import { linear } from "./landing/dispersionStats";
 import AirframeCard from "./airframes/AirframeCard";
 import { navigate } from "./airframes/navigation";
 
-export function stateLabel(state: string): string {
+/** State of a flight in words; `t` defaults to the UI language. */
+export function stateLabel(state: string, t: TFunction = tr): string {
   switch (state) {
     case "completed":
-      return "abgeschlossen";
+      return t("logbook.state.completed");
     case "active":
-      return "Aufzeichnung läuft";
+      return t("logbook.state.active");
     case "interrupted":
-      return "unvollständig";
+      return t("logbook.state.interrupted");
     default:
       return state;
   }
 }
 
 function simulatorLabel(provider: string | null | undefined, simName: string | null | undefined): string {
-  if (provider === "mock") return "Demo-Flug (simuliert)";
+  if (provider === "mock") return tr("logbook.detail.simDemo");
   if (simName) return simName;
-  return provider === "simconnect" ? "MSFS" : provider || "unbekannt";
+  return provider === "simconnect" ? "MSFS" : provider || tr("logbook.detail.simUnknown");
 }
+
+/** Landing rate from which a landing counts as hard (marks and tooltips). */
+const HARD_FPM = 600;
 
 interface Props {
   detail: Detail;
@@ -62,6 +68,7 @@ interface Props {
 
 /** Right-hand side of the logbook: one flight with map, profile, landings and phases. */
 export default function FlightDetail({ detail, track, onDelete, deleteRequest, onCancelDelete, deletedMs, onRestore }: Props) {
+  const t = useT();
   // the profile chart and the track map share the logbook replay cursor; the bar needs a range
   useEffect(() => {
     if (track.length < 2) {
@@ -70,11 +77,11 @@ export default function FlightDetail({ detail, track, onDelete, deleteRequest, o
     }
     const markers: ReplayMarker[] = [
       ...detail.phases.map((p) => ({ key: `${p.to}-${p.timestampMs}`, label: PHASE_LABEL[p.to], tMs: p.timestampMs })),
-      ...detail.touchdowns.map((td, i) => ({ key: `td-${i}`, label: td.touchAndGo ? "Touch-and-go" : "Aufsetzen", tMs: td.timestampMs })),
+      ...detail.touchdowns.map((td, i) => ({ key: `td-${i}`, label: td.touchAndGo ? t("logbook.detail.touchAndGo") : t("logbook.detail.touchdown"), tMs: td.timestampMs })),
     ].sort((a, b) => a.tMs - b.tMs);
     logbookReplay.configure({ startMs: track[0].tMs, endMs: track[track.length - 1].tMs }, markers);
     return () => logbookReplay.reset();
-  }, [track, detail.phases, detail.touchdowns]);
+  }, [track, detail.phases, detail.touchdowns, t]);
   const f = detail.flight;
   const { weightUnit } = usePrefs();
   const [confirming, setConfirming] = useState(false);
@@ -115,7 +122,7 @@ export default function FlightDetail({ detail, track, onDelete, deleteRequest, o
   }, [f, track, ofp]);
 
   return (
-    <article className="flight-detail" aria-label={`Flug ${dep ?? "····"} nach ${arr ?? "····"}`}>
+    <article className="flight-detail" aria-label={t("logbook.detail.ariaLabel", { dep: dep ?? "····", arr: arr ?? "····" })}>
       <header className="detail-head">
         <div className="detail-title">
           <h2 className="num">
@@ -130,11 +137,11 @@ export default function FlightDetail({ detail, track, onDelete, deleteRequest, o
           <div className="detail">
             {(
               [
-                [effectiveAircraftTitle(f) || "Unbekanntes Flugzeug", originalTitle(f.userAircraftTitle, f.aircraft.title)],
+                [effectiveAircraftTitle(f) || t("logbook.detail.unknownAircraft"), originalTitle(f.userAircraftTitle, f.aircraft.title)],
                 [effectiveRegistration(f), originalTitle(f.userRegistration, f.aircraft.atcId)],
                 [callsign, originalTitle(f.userCallsign, recordedCallsignOf(f))],
                 [fmtDate(f.offBlockMs ?? f.createdMs), null],
-                [blockMs != null ? `${fmtDuration(blockMs, { seconds: false })} Blockzeit` : null, null],
+                [blockMs != null ? t("logbook.detail.blockTime", { duration: fmtDuration(blockMs, { seconds: false }) }) : null, null],
               ] as Array<[string | null, string | null]>
             )
               .filter(([text]) => !!text)
@@ -148,42 +155,42 @@ export default function FlightDetail({ detail, track, onDelete, deleteRequest, o
               ))}
           </div>
           <div className="detail-badges">
-            <span className={`badge state-${f.state}`}>{stateLabel(f.state)}</span>
+            <span className={`badge state-${f.state}`}>{stateLabel(f.state, t)}</span>
             {trashed && (
-              <span className="badge badge-trash" title={`Wird ${TRASH_DAYS} Tage nach dem Löschen endgültig entfernt`}>
-                Im Papierkorb · noch {trashDaysLeft(deletedMs, Date.now())} Tage
+              <span className="badge badge-trash" title={t("logbook.detail.trashTitle", { days: TRASH_DAYS })}>
+                {t("logbook.detail.trashBadge", { count: trashDaysLeft(deletedMs, Date.now()) })}
               </span>
             )}
             {isDemoRow(f) && (
-              <span className="badge badge-demo" title="Simulierter Demo-Flug – zählt nicht in den Summen">
-                Demo
+              <span className="badge badge-demo" title={t("logbook.detail.demoTitle")}>
+                {t("logbook.detail.demo")}
               </span>
             )}
             {importedFrom && (
-              <span className="badge badge-imported" title="Aus einer Importdatei übernommen – ohne Aufzeichnung (kein Track, keine Landungen, keine Integritätsprüfung)">
-                importiert aus {importedFrom}
+              <span className="badge badge-imported" title={t("logbook.detail.importedTitle")}>
+                {t("logbook.detail.imported", { source: importedFrom })}
               </span>
             )}
             {f.hasOfp && (
-              <span className="badge badge-connecting" title="SimBrief-OFP">
-                Flugplan
+              <span className="badge badge-connecting" title={t("logbook.detail.ofpTitle")}>
+                {t("logbook.detail.ofp")}
               </span>
             )}
-            <span className="detail">Simulator: {simulatorLabel(f.provider, f.simName)}</span>
+            <span className="detail">{t("logbook.detail.simulator", { name: simulatorLabel(f.provider, f.simName) })}</span>
           </div>
         </div>
         <div className="detail-actions">
           {!trashed && <ExportMenu detail={detail} ofp={ofp} track={track} />}
           {trashed && onRestore && !confirming && (
-            <button className="btn-primary" onClick={onRestore} title="Zurück ins Logbuch">
-              Wiederherstellen
+            <button className="btn-primary" onClick={onRestore} title={t("logbook.detail.restoreTitle")}>
+              {t("logbook.detail.restore")}
             </button>
           )}
           {confirming ? (
             <span
               className="confirm-delete"
               role="group"
-              aria-label="Löschen bestätigen"
+              aria-label={t("logbook.detail.confirmLabel")}
               onKeyDown={(e) => {
                 if (e.key === "Escape") {
                   e.stopPropagation();
@@ -191,18 +198,18 @@ export default function FlightDetail({ detail, track, onDelete, deleteRequest, o
                 }
               }}
             >
-              <span className="detail">{trashed ? "Endgültig löschen? Das lässt sich nicht rückgängig machen." : `In den Papierkorb (${TRASH_DAYS} Tage wiederherstellbar)?`}</span>
+              <span className="detail">{trashed ? t("logbook.detail.confirmPermanent") : t("logbook.detail.confirmTrash", { days: TRASH_DAYS })}</span>
               <button className="btn-sm danger" onClick={onDelete}>
-                {trashed ? "Endgültig löschen" : "In den Papierkorb"}
+                {trashed ? t("logbook.detail.deletePermanent") : t("logbook.detail.moveToTrash")}
               </button>
               {/* focus on the safe choice: Enter right after Entf cancels */}
               <button className="btn-sm" onClick={cancelDelete} autoFocus>
-                Abbrechen
+                {t("logbook.detail.cancel")}
               </button>
             </span>
           ) : (
-            <button className="danger" onClick={() => setConfirming(true)} title={trashed ? "Endgültig löschen (Entf)" : "In den Papierkorb legen (Entf)"}>
-              {trashed ? "Endgültig löschen" : "Löschen"}
+            <button className="danger" onClick={() => setConfirming(true)} title={trashed ? t("logbook.detail.deletePermanentTitle") : t("logbook.detail.deleteTitle")}>
+              {trashed ? t("logbook.detail.deletePermanent") : t("logbook.detail.delete")}
             </button>
           )}
         </div>
@@ -217,61 +224,61 @@ export default function FlightDetail({ detail, track, onDelete, deleteRequest, o
           {track.length > 1 && <ReplayBar />}
         </>
       ) : (
-        <div className="detail">{importedFrom ? "Ohne Aufzeichnung – aus Importdatei." : "Für diesen Flug wurde kein Track aufgezeichnet."}</div>
+        <div className="detail">{importedFrom ? t("logbook.detail.noTrackImported") : t("logbook.detail.noTrack")}</div>
       )}
 
       <div className="detail-section">
-        <h3>{detail.touchdowns.length > 1 ? "Landungen" : "Landung"}</h3>
+        <h3>{detail.touchdowns.length > 1 ? t("logbook.detail.headingLandings") : t("logbook.detail.headingLanding")}</h3>
         {detail.touchdowns.length === 0 ? (
           <div className="detail">
-            {importedFrom ? "– · ohne Aufzeichnung – aus Importdatei. Eine Landerate aus der Datei steht, falls vorhanden, in den Notizen." : "Keine Landung aufgezeichnet."}
+            {importedFrom ? t("logbook.detail.noLandingImported") : t("logbook.detail.noLanding")}
           </div>
         ) : (
           <>
           <LandingSummary flightId={f.id} touchdowns={detail.touchdowns.length} updatedMs={f.updatedMs} />
           <HistoryPanel flightId={f.id} />
           <details className="fold">
-            <summary>Alle Landungen dieses Flugs ({detail.touchdowns.length})</summary>
+            <summary>{t("logbook.detail.allLandings", { count: detail.touchdowns.length })}</summary>
           <table className="mini-table">
             <thead>
               <tr>
-                <th>Zeit</th>
-                <th className="right">Landerate</th>
-                <th className="right">Messwert</th>
-                <th className="right">Sim-Wert</th>
-                <th className="right">g-Last</th>
-                <th className="right">Bounces</th>
-                <th className="right">GS</th>
-                <th>Art</th>
+                <th>{t("logbook.detail.colTime")}</th>
+                <th className="right">{t("logbook.detail.colRate")}</th>
+                <th className="right">{t("logbook.detail.colMeasured")}</th>
+                <th className="right">{t("logbook.detail.colSim")}</th>
+                <th className="right">{t("logbook.detail.colG")}</th>
+                <th className="right">{t("logbook.detail.colBounces")}</th>
+                <th className="right">{t("logbook.detail.colGs")}</th>
+                <th>{t("logbook.detail.colKind")}</th>
                 <th />
               </tr>
             </thead>
             <tbody>
-              {detail.touchdowns.map((t, i) => (
+              {detail.touchdowns.map((td, i) => (
                 <tr key={i}>
-                  <td className="num">{fmtClock(t.timestampMs, { seconds: true })}</td>
+                  <td className="num">{fmtClock(td.timestampMs, { seconds: true })}</td>
                   <td
-                    className={`num right strong${t.landingRateFpm <= -600 ? " warn-text" : ""}`}
-                    title={`${t.landingRateFpm <= -600 ? "Harte Landung (ab 600 fpm). " : ""}Herkunft: ${t.landingRateSource === "sim" ? "Sim-Touchdown-Wert" : "letztes V/S-Sample in der Luft"}${t.bounces ? ", härtester Kontakt" : ""}. Klick: Landeauswertung`}
+                    className={`num right strong${td.landingRateFpm <= -HARD_FPM ? " warn-text" : ""}`}
+                    title={rateTitle(t, td)}
                   >
-                    <button className="rate-link" onClick={() => openDebrief(f.id, i)} aria-label={`Landeauswertung: ${fmt(t.landingRateFpm, 0, "fpm")}`}>
-                      {t.landingRateFpm <= -600 && (
+                    <button className="rate-link" onClick={() => openDebrief(f.id, i)} aria-label={t("logbook.detail.rateAria", { rate: fmt(td.landingRateFpm, 0, "fpm") })}>
+                      {td.landingRateFpm <= -HARD_FPM && (
                         <span className="warn-icon" aria-hidden="true">
                           !
                         </span>
                       )}
-                      {fmt(t.landingRateFpm, 0, "fpm")}
+                      {fmt(td.landingRateFpm, 0, "fpm")}
                     </button>
                   </td>
-                  <td className="num right">{fmt(t.vsFpmMeasured, 0, "fpm")}</td>
-                  <td className="num right">{t.vsFpmSim ? fmt(t.vsFpmSim, 0, "fpm") : "n. v."}</td>
-                  <td className={`num right${t.peakG >= G_HARD ? " warn-text" : ""}`}>{fmt(t.peakG, 2)}</td>
-                  <td className="num right">{t.bounces}</td>
-                  <td className="num right">{fmt(t.groundSpeedKt, 0, "kt")}</td>
-                  <td>{t.touchAndGo ? "Touch-and-go" : "Full Stop"}</td>
+                  <td className="num right">{fmt(td.vsFpmMeasured, 0, "fpm")}</td>
+                  <td className="num right">{td.vsFpmSim ? fmt(td.vsFpmSim, 0, "fpm") : t("logbook.detail.notAvailable")}</td>
+                  <td className={`num right${td.peakG >= G_HARD ? " warn-text" : ""}`}>{fmt(td.peakG, 2)}</td>
+                  <td className="num right">{td.bounces}</td>
+                  <td className="num right">{fmt(td.groundSpeedKt, 0, "kt")}</td>
+                  <td>{td.touchAndGo ? t("logbook.detail.touchAndGo") : t("logbook.detail.fullStop")}</td>
                   <td className="right">
-                    <button className="btn-sm" onClick={() => openDebrief(f.id, i)} title="Landeauswertung dieser Landung öffnen">
-                      Landeauswertung
+                    <button className="btn-sm" onClick={() => openDebrief(f.id, i)} title={t("logbook.detail.openDebriefTitle")}>
+                      {t("logbook.detail.openDebrief")}
                     </button>
                   </td>
                 </tr>
@@ -286,47 +293,47 @@ export default function FlightDetail({ detail, track, onDelete, deleteRequest, o
       {detail.touchdowns.length >= 2 && <Circuits flightId={f.id} touchdowns={detail.touchdowns} />}
 
       <div className="detail-section">
-        <h3>Flugzeug</h3>
+        <h3>{t("logbook.detail.aircraft")}</h3>
         <AirframeCard flight={f} onOpenFleet={(registration) => navigate({ kind: "airframe", registration })} />
       </div>
 
       <div className="detail-section">
-        <h3>Flug</h3>
+        <h3>{t("logbook.detail.flight")}</h3>
         <div className="stat-grid detail-grid">
           <Stat
             size="sm"
-            label="Abflug"
+            label={t("logbook.detail.statDep")}
             title={originalTitle(f.userDepIcao, f.depIcao) ?? undefined}
             value={dep ?? fmtCoord(f.depLat, f.depLon)}
             sub={depAirport?.name ?? (dep ? fmtCoord(f.depLat, f.depLon) : undefined)}
           />
           <Stat
             size="sm"
-            label="Ankunft"
+            label={t("logbook.detail.statArr")}
             title={originalTitle(f.userArrIcao, f.arrIcao) ?? undefined}
             value={arr ?? fmtCoord(f.arrLat, f.arrLon)}
             sub={arrAirport?.name ?? (arr ? fmtCoord(f.arrLat, f.arrLon) : undefined)}
           />
-          <Stat size="sm" label="Off-Block" value={fmtClock(f.offBlockMs)} />
-          <Stat size="sm" label="Start" value={fmtClock(f.takeoffMs)} />
-          <Stat size="sm" label="Landung" value={fmtClock(f.landingMs)} />
-          <Stat size="sm" label="On-Block" value={fmtClock(f.onBlockMs)} />
-          <Stat size="sm" label="Blockzeit" value={fmtDuration(blockMs)} />
-          <Stat size="sm" label="Luftzeit" title="Abheben bis Aufsetzen – für das Flugbuch zählt die Blockzeit" value={fmtDuration(airMs)} />
-          <Stat size="sm" label="Distanz" value={fmt(f.distanceNm, 1)} unit="nm" />
-          <Stat size="sm" label="Max. Höhe" value={fmt(f.maxAltMslFt, 0)} unit="ft" />
-          <Stat size="sm" label="Verbrauch" value={fmtWeightNum(fuelUsed)} unit={weightUnit} />
+          <Stat size="sm" label={t("logbook.detail.statOffBlock")} value={fmtClock(f.offBlockMs)} />
+          <Stat size="sm" label={t("logbook.detail.statTakeoff")} value={fmtClock(f.takeoffMs)} />
+          <Stat size="sm" label={t("logbook.detail.statLanding")} value={fmtClock(f.landingMs)} />
+          <Stat size="sm" label={t("logbook.detail.statOnBlock")} value={fmtClock(f.onBlockMs)} />
+          <Stat size="sm" label={t("logbook.list.statBlockTime")} value={fmtDuration(blockMs)} />
+          <Stat size="sm" label={t("logbook.list.statAirTime")} title={t("logbook.list.statAirTimeTitle")} value={fmtDuration(airMs)} />
+          <Stat size="sm" label={t("logbook.list.statDistance")} value={fmt(f.distanceNm, 1)} unit="nm" />
+          <Stat size="sm" label={t("logbook.detail.statMaxAlt")} value={fmt(f.maxAltMslFt, 0)} unit="ft" />
+          <Stat size="sm" label={t("logbook.detail.statFuel")} value={fmtWeightNum(fuelUsed)} unit={weightUnit} />
         </div>
       </div>
 
       {pva && (
         <div className="detail-section">
           <h3 className="pva-head">
-            Plan gegen Ist
+            {t("logbook.detail.pvaHeading")}
             {pva.headline && (
               <span
                 className={`badge ${pva.headline.status === "late" ? "state-interrupted" : "state-completed"}`}
-                title={`${pva.headline.event === "in" ? "On-Block" : "Off-Block"} gegen Flugplan; bis 15 min nach Plan gilt als pünktlich`}
+                title={t(pva.headline.event === "in" ? "logbook.detail.punctualityTitleIn" : "logbook.detail.punctualityTitleOut", { min: ON_TIME_THRESHOLD_MIN })}
               >
                 {fmtPunctuality(pva.headline)}
               </span>
@@ -334,15 +341,15 @@ export default function FlightDetail({ detail, track, onDelete, deleteRequest, o
             <span className="detail">
               {ofp
                 ? `SimBrief ${ofp.originIcao || f.plannedDep || "–"} → ${ofp.destinationIcao || f.plannedArr || "–"}${ofp.alternateIcao ? ` · ALTN ${ofp.alternateIcao}` : ""}`
-                : `Plan ${f.plannedDep ?? "–"} → ${f.plannedArr ?? "–"}`}
+                : t("logbook.detail.pvaPlanRoute", { dep: f.plannedDep ?? "–", arr: f.plannedArr ?? "–" })}
             </span>
           </h3>
           <table className="mini-table pva-table">
             <thead>
               <tr>
                 <th />
-                <th className="right">Plan</th>
-                <th className="right">Ist</th>
+                <th className="right">{t("logbook.detail.colPlan")}</th>
+                <th className="right">{t("logbook.detail.colActual")}</th>
                 <th className="right">Δ</th>
               </tr>
             </thead>
@@ -368,9 +375,9 @@ export default function FlightDetail({ detail, track, onDelete, deleteRequest, o
       )}
 
       <div className="detail-section">
-        <h3>Phasen</h3>
+        <h3>{t("logbook.detail.phases")}</h3>
         {detail.phases.length === 0 ? (
-          <div className="detail">Keine Phasenwechsel aufgezeichnet.</div>
+          <div className="detail">{t("logbook.detail.noPhases")}</div>
         ) : (
           <ol className="phase-timeline">
             {detail.phases.map((p, i) => (
@@ -387,7 +394,7 @@ export default function FlightDetail({ detail, track, onDelete, deleteRequest, o
 
       {issues.length > 0 && (
         <div className="detail-section">
-          <h3>Integrität</h3>
+          <h3>{t("logbook.detail.integrity")}</h3>
           <div className="detail-badges">
             {issues.map((s) => (
               <span key={String(s)} className="badge state-interrupted">
@@ -401,6 +408,20 @@ export default function FlightDetail({ detail, track, onDelete, deleteRequest, o
   );
 }
 
+/** Tooltip of a landing-rate cell: hard mark, where the value comes from, the click hint. */
+function rateTitle(t: TFunction, td: TouchdownReport): string {
+  const source: TKey =
+    td.landingRateSource === "sim"
+      ? td.bounces
+        ? "logbook.detail.sourceSimBounces"
+        : "logbook.detail.sourceSim"
+      : td.bounces
+        ? "logbook.detail.sourceMeasuredBounces"
+        : "logbook.detail.sourceMeasured";
+  const hard = td.landingRateFpm <= -HARD_FPM ? t("logbook.detail.hardLanding", { limit: fmt(HARD_FPM, 0, "fpm") }) : null;
+  return [hard, t(source), t("logbook.detail.clickDebrief")].filter(Boolean).join(" ");
+}
+
 const SPARK_W = 160;
 const SPARK_H = 36;
 
@@ -410,6 +431,7 @@ const SPARK_H = 36;
  * which exist for the full stop (and approaches ending in a touch-and-go).
  */
 function Circuits({ flightId, touchdowns }: { flightId: string; touchdowns: TouchdownReport[] }) {
+  const t = useT();
   const { landings, approaches } = useHistoryFacts();
   const s = useMemo(() => patternSeries(touchdowns, landings ?? [], flightId, approaches ?? []), [touchdowns, landings, approaches, flightId]);
   const maxFpm = Math.max(300, ...s.rows.map((r) => Math.abs(r.landingRateFpm)));
@@ -420,11 +442,11 @@ function Circuits({ flightId, touchdowns }: { flightId: string; touchdowns: Touc
   const hasStable = s.rows.some((r) => r.stableFromFt != null);
   return (
     <div className="detail-section">
-      <h3>Platzrunden</h3>
+      <h3>{t("logbook.circuits.heading")}</h3>
       <div className="circuits-head">
         <span className="detail num">
-          {s.rows.length} Bodenkontakte · {s.touchAndGos} Touch-and-go · {s.fullStops} Full Stop · Median {fmt(s.medianRateFpm, 0, "fpm")}
-          {s.bestIndex != null && ` · weichster Kontakt #${s.bestIndex + 1}`}
+          {t("logbook.circuits.summary", { contacts: s.rows.length, tgs: s.touchAndGos, stops: s.fullStops, median: fmt(s.medianRateFpm, 0, "fpm") })}
+          {s.bestIndex != null && ` · ${t("logbook.circuits.best", { n: s.bestIndex + 1 })}`}
         </span>
         {/* the same values as the table below: for the mouse only */}
         <svg className="circuits-spark" viewBox={`0 0 ${SPARK_W} ${SPARK_H}`} width={SPARK_W} height={SPARK_H} aria-hidden="true">
@@ -433,7 +455,7 @@ function Circuits({ flightId, touchdowns }: { flightId: string; touchdowns: Touc
             const band = vsBandOf(r.landingRateFpm);
             return (
               <g key={i} className="circuits-pt" onClick={() => openDebrief(flightId, r.touchdownIndex)}>
-                <title>{`#${i + 1} ${r.touchAndGo ? "Touch-and-go" : "Full Stop"}: ${fmt(r.landingRateFpm, 0, "fpm")}`}</title>
+                <title>{`#${i + 1} ${r.touchAndGo ? t("logbook.detail.touchAndGo") : t("logbook.detail.fullStop")}: ${fmt(r.landingRateFpm, 0, "fpm")}`}</title>
                 <circle cx={X(i)} cy={Y(Math.abs(r.landingRateFpm))} r={9} fill="transparent" />
                 <circle
                   cx={X(i)}
@@ -446,32 +468,32 @@ function Circuits({ flightId, touchdowns }: { flightId: string; touchdowns: Touc
             );
           })}
         </svg>
-        <span className="detail">gefüllt = Full Stop, Ring = Touch-and-go</span>
+        <span className="detail">{t("logbook.circuits.legend")}</span>
       </div>
       <table className="mini-table">
-        <caption className="sr-only">Bodenkontakte dieses Flugs in zeitlicher Reihenfolge</caption>
+        <caption className="sr-only">{t("logbook.circuits.caption")}</caption>
         <thead>
           <tr>
             <th scope="col">#</th>
-            <th scope="col">Zeit</th>
-            <th scope="col">Art</th>
+            <th scope="col">{t("logbook.detail.colTime")}</th>
+            <th scope="col">{t("logbook.detail.colKind")}</th>
             <th scope="col" className="right">
-              Landerate
+              {t("logbook.detail.colRate")}
             </th>
             <th scope="col" className="right">
-              g-Last
+              {t("logbook.detail.colG")}
             </th>
             <th scope="col" className="right">
-              Bounces
+              {t("logbook.detail.colBounces")}
             </th>
             {hasPoint && (
               <th scope="col" className="right">
-                Aufsetzpunkt
+                {t("logbook.circuits.colTouchdownPoint")}
               </th>
             )}
             {hasStable && (
               <th scope="col" className="right">
-                Stabil ab
+                {t("logbook.circuits.colStable")}
               </th>
             )}
           </tr>
@@ -483,15 +505,15 @@ function Circuits({ flightId, touchdowns }: { flightId: string; touchdowns: Touc
               <tr key={i} className={`clickable${r.touchdownIndex === s.bestIndex ? " circuits-best" : ""}`} onClick={() => openDebrief(flightId, r.touchdownIndex)}>
                 <td className="num">{i + 1}</td>
                 <td className="num">{fmtClock(r.timestampMs, { seconds: true })}</td>
-                <td>{r.touchAndGo ? "Touch-and-go" : "Full Stop"}</td>
-                <td className={`num right strong${r.landingRateFpm <= -600 ? " warn-text" : ""}`}>
+                <td>{r.touchAndGo ? t("logbook.detail.touchAndGo") : t("logbook.detail.fullStop")}</td>
+                <td className={`num right strong${r.landingRateFpm <= -HARD_FPM ? " warn-text" : ""}`}>
                   <button
                     className="rate-link"
                     onClick={(e) => {
                       e.stopPropagation();
                       openDebrief(flightId, r.touchdownIndex);
                     }}
-                    aria-label={`Landeauswertung Kontakt ${i + 1}: ${fmt(r.landingRateFpm, 0, "fpm")}, ${BAND_LABEL[band]}`}
+                    aria-label={t("logbook.circuits.rateAria", { n: i + 1, rate: fmt(r.landingRateFpm, 0, "fpm"), band: t(`band.${band}`) })}
                   >
                     <span className="band-dot inline" style={{ background: BAND_VAR[band] }} aria-hidden="true" /> {fmt(r.landingRateFpm, 0, "fpm")}
                   </button>
@@ -499,7 +521,7 @@ function Circuits({ flightId, touchdowns }: { flightId: string; touchdowns: Touc
                 <td className={`num right${r.peakG >= G_HARD ? " warn-text" : ""}`}>{fmt(r.peakG, 2)}</td>
                 <td className="num right">{r.bounces}</td>
                 {hasPoint && (
-                  <td className="num right" title={r.inTdz == null ? undefined : r.inTdz ? "in der Aufsetzzone" : "außerhalb der Aufsetzzone"}>
+                  <td className="num right" title={r.inTdz == null ? undefined : r.inTdz ? t("logbook.circuits.inTdz") : t("logbook.circuits.outTdz")}>
                     {r.distanceM != null ? fmt(r.distanceM, 0, "m") : "–"}
                   </td>
                 )}
@@ -513,12 +535,13 @@ function Circuits({ flightId, touchdowns }: { flightId: string; touchdowns: Touc
   );
 }
 
+/** `title` and `hint` are i18n keys. */
 const EXPORT_FORMATS = [
-  { id: "kml", label: "KML", title: "Für Google Earth (KML)", hint: "3D-Track" },
-  { id: "gpx", label: "GPX", title: "Für Garmin/Strava (GPX)", hint: "Track mit Zeitstempeln" },
-  { id: "csv", label: "CSV", title: "Rohdaten (CSV)", hint: "alle Trackpunkte" },
-  { id: "json", label: "JSON", title: "Rohdaten (JSON)", hint: "Flug, Landungen, Phasen, Track" },
-] as const;
+  { id: "kml", label: "KML", title: "logbook.export.kmlTitle", hint: "logbook.export.kmlHint" },
+  { id: "gpx", label: "GPX", title: "logbook.export.gpxTitle", hint: "logbook.export.gpxHint" },
+  { id: "csv", label: "CSV", title: "logbook.export.csvTitle", hint: "logbook.export.csvHint" },
+  { id: "json", label: "JSON", title: "logbook.export.jsonTitle", hint: "logbook.export.jsonHint" },
+] as const satisfies ReadonlyArray<{ id: string; label: string; title: TKey; hint: TKey }>;
 
 /** Landed approach for the PIREP ("stabil ab"); null when the analysis is unavailable. */
 async function landedApproach(flightId: string): Promise<PirepApproach | null> {
@@ -542,6 +565,7 @@ async function pirepOf(detail: Detail, ofp: Ofp | null, track: TrackSample[]) {
 }
 
 function ExportMenu({ detail, ofp, track }: { detail: Detail; ofp: Ofp | null; track: TrackSample[] }) {
+  const t = useT();
   const flightId = detail.flight.id;
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -569,9 +593,9 @@ function ExportMenu({ detail, ofp, track }: { detail: Detail; ofp: Ofp | null; t
     setOpen(false);
     try {
       const { text } = await pirepOf(detail, ofp, track);
-      if (!navigator.clipboard?.writeText) throw new Error("Die Zwischenablage ist hier nicht verfügbar");
+      if (!navigator.clipboard?.writeText) throw new Error(t("logbook.export.noClipboard"));
       await navigator.clipboard.writeText(text);
-      showToast({ tone: "ok", title: "PIREP kopiert", body: "Als Text in der Zwischenablage – zum Einfügen ins VA-Formular." });
+      showToast({ tone: "ok", title: t("logbook.export.pirepCopied"), body: t("logbook.export.pirepCopiedBody") });
     } catch (e) {
       fail(e);
     }
@@ -584,7 +608,7 @@ function ExportMenu({ detail, ofp, track }: { detail: Detail; ofp: Ofp | null; t
       const path = await save({ defaultPath: pirepFileName(json), filters: [{ name: "PIREP (JSON)", extensions: ["json"] }] });
       if (!path) return;
       await invoke("save_pirep_json", { path, json: JSON.stringify(json, null, 2) });
-      showToast({ tone: "ok", title: "PIREP gespeichert", body: path });
+      showToast({ tone: "ok", title: t("logbook.export.pirepSaved"), body: path });
     } catch (e) {
       fail(e);
     }
@@ -597,7 +621,7 @@ function ExportMenu({ detail, ofp, track }: { detail: Detail; ofp: Ofp | null; t
       const path = await save({ defaultPath, filters: [{ name: format.label, extensions: [format.id] }] });
       if (!path) return;
       await invoke("save_export", { id: flightId, format: format.id, path });
-      showToast({ tone: "ok", title: `Flug exportiert (${format.label})`, body: path });
+      showToast({ tone: "ok", title: t("logbook.export.exported", { format: format.label }), body: path });
     } catch (e) {
       const m = userMessage(e, "export");
       showToast({ tone: "err", title: m.title, body: m.hint });
@@ -607,23 +631,23 @@ function ExportMenu({ detail, ofp, track }: { detail: Detail; ofp: Ofp | null; t
   return (
     <div className="export-menu" ref={ref}>
       <button onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open}>
-        Flug exportieren ▾
+        {t("logbook.export.button")} ▾
       </button>
       {open && (
         <div className="export-menu-list" role="menu">
           {EXPORT_FORMATS.map((f) => (
             <button key={f.id} role="menuitem" onClick={() => run(f)}>
-              {f.title}
-              <span className="detail">{f.hint}</span>
+              {t(f.title)}
+              <span className="detail">{t(f.hint)}</span>
             </button>
           ))}
           <div className="export-menu-sep" role="separator" />
           <button role="menuitem" onClick={copyPirep}>
-            PIREP als Text kopieren
-            <span className="detail">für VA-Formulare</span>
+            {t("logbook.export.copyPirep")}
+            <span className="detail">{t("logbook.export.copyPirepHint")}</span>
           </button>
           <button role="menuitem" onClick={savePirep}>
-            PIREP als JSON speichern …
+            {t("logbook.export.savePirep")}
             <span className="detail">pirep/v1</span>
           </button>
         </div>

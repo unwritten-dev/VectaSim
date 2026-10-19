@@ -1,5 +1,6 @@
 import type { MouseEvent } from "react";
-import { fmt, fmtClock, fmtDate, fmtDuration } from "./format";
+import { fmt, fmtClock, fmtDate, fmtDuration } from "./i18n/number";
+import { t as globalT, useT, type TFunction, type TKey } from "./i18n";
 import { stateLabel } from "./FlightDetail";
 import { callsignOf, effectiveAircraftTitle, effectiveArr, effectiveDep, notesFirstLine } from "./logbookFilter";
 import { BAND_VAR, vsBandOf } from "./landing/facts";
@@ -30,12 +31,14 @@ const STRIP_BAND_CLASS: Record<ApproachBand, string> = {
   unstable: "band-unstable",
   unstableBelow500: "band-unstable",
 };
-const STRIP_BAND_TITLE: Record<ApproachBand, string> = {
-  stable: "Stabiler Anflug",
-  deviations: "Anflug mit Abweichungen über 500 ft",
-  unstable: "Instabiler Anflug (≥ 3 Kriterien über 500 ft)",
-  unstableBelow500: "Instabil unter 500 ft",
+const STRIP_BAND_TITLE: Record<ApproachBand, TKey> = {
+  stable: "logbook.strip.bandStable",
+  deviations: "logbook.strip.bandDeviations",
+  unstable: "logbook.strip.bandUnstable",
+  unstableBelow500: "logbook.strip.bandUnstableBelow500",
 };
+/** Landing rate from which a landing counts as hard (strip marks, tooltips). */
+const HARD_FPM = 600;
 
 interface Props {
   flight: FlightRow;
@@ -54,33 +57,33 @@ interface Props {
 const GLYPH_LEN_M = 3000;
 const TDZ_M: [number, number] = [300, 900];
 
-/** What a screen reader says for a strip (the visible text has "····", glyphs and symbols). */
-export function stripLabel(f: FlightRow, fact: StripFact | null | undefined, flags: string[]): string {
+/** What a screen reader says for a strip (the visible text has "····", glyphs and symbols). `t` defaults to the UI language. */
+export function stripLabel(f: FlightRow, fact: StripFact | null | undefined, flags: string[], t: TFunction = globalT): string {
   const type = f.aircraft.atcModel?.replace(/^TT:ATCCOM\.(AC_MODEL|ATC_NAME)[ _]?/i, "").split(".")[0] || effectiveAircraftTitle(f) || "";
   const callsign = callsignOf(f) || f.aircraft.atcId || "";
-  const dep = effectiveDep(f) ?? "Abflug unbekannt";
-  const arr = effectiveArr(f) ?? (f.state === "active" ? "Ziel offen" : "Ziel unbekannt");
-  const block = f.onBlockMs && f.offBlockMs ? `Block ${fmtDuration(f.onBlockMs - f.offBlockMs, { seconds: false })}` : null;
+  const dep = effectiveDep(f) ?? t("logbook.strip.depUnknown");
+  const arr = effectiveArr(f) ?? (f.state === "active" ? t("logbook.strip.destOpen") : t("logbook.strip.destUnknown"));
+  const block = f.onBlockMs && f.offBlockMs ? t("logbook.strip.block", { duration: fmtDuration(f.onBlockMs - f.offBlockMs, { seconds: false }) }) : null;
   const rate = f.landingVsFpm;
   const landing =
     rate != null
-      ? `Landung ${fmt(rate, 0, "fpm")}${rate <= -600 ? ", harte Landung" : ""}${stableText(fact) ? `, ${stableText(fact)}` : ""}`
-      : "keine Landung";
+      ? [t("logbook.strip.landing", { rate: fmt(rate, 0, "fpm") }), rate <= -HARD_FPM ? t("logbook.strip.hardLanding") : null, stableText(fact, t)].filter(Boolean).join(", ")
+      : t("logbook.strip.noLanding");
   return [
     callsign,
     type,
-    `${dep} nach ${arr}${fact?.runwayIdent ? ` ${fact.runwayIdent}` : ""}`,
+    `${t("logbook.strip.route", { dep, arr })}${fact?.runwayIdent ? ` ${fact.runwayIdent}` : ""}`,
     fmtDate(f.offBlockMs ?? f.createdMs),
     block,
     landing,
-    fact?.goArounds ? `${fact.goArounds}× durchgestartet` : null,
-    f.state !== "completed" ? stateLabel(f.state) : null,
-    isDemoRow(f) ? "Demo" : null,
-    isImportedRow(f) ? "importiert" : null,
+    fact?.goArounds ? t("logbook.strip.goArounds", { count: fact.goArounds }) : null,
+    f.state !== "completed" ? stateLabel(f.state, t) : null,
+    isDemoRow(f) ? t("logbook.strip.demo") : null,
+    isImportedRow(f) ? t("logbook.strip.imported") : null,
     ...flags,
-    f.rating ? `Bewertung ${f.rating} von 5 Sternen` : null,
-    f.tags?.length ? `Tags: ${f.tags.join(", ")}` : null,
-    f.notes?.trim() ? "mit Notiz" : null,
+    f.rating ? t("logbook.strip.rating", { rating: f.rating }) : null,
+    f.tags?.length ? t("logbook.strip.tags", { tags: f.tags.join(", ") }) : null,
+    f.notes?.trim() ? t("logbook.strip.withNote") : null,
   ]
     .filter(Boolean)
     .join(", ");
@@ -96,21 +99,22 @@ export function stripLabel(f: FlightRow, fact: StripFact | null | undefined, fla
  * (hidden from screen readers); with the keyboard, Enter on the option opens the debrief.
  */
 export default function FlightStrip({ flight: f, fact, selected, tabIndex, onSelect, onDebrief, describedBy, gapToNextMs }: Props) {
+  const tr = useT();
   const rate = f.landingVsFpm;
-  const hard = (rate ?? 0) <= -600;
+  const hard = (rate ?? 0) <= -HARD_FPM;
   const block = f.onBlockMs && f.offBlockMs ? f.onBlockMs - f.offBlockMs : null;
   const type = f.aircraft.atcModel?.replace(/^TT:ATCCOM\.(AC_MODEL|ATC_NAME)[ _]?/i, "").split(".")[0] || "";
   const callsign = callsignOf(f) || f.aircraft.atcId || "";
   const imported = isImportedRow(f);
   // an imported flight has no recording, so no integrity marks – the "importiert" badge instead
   const flags = (imported ? [] : [
-    f.integrity.pauseCount > 0 && { mark: "⏸", title: `${f.integrity.pauseCount}× Pause (${fmtDuration(f.integrity.pausedMs)})` },
-    f.integrity.slewDetected && { mark: "⇢", title: "Slew erkannt" },
-    f.integrity.timeAccelerationDetected && { mark: `×${fmt(f.integrity.maxSimRate, 0)}`, title: `Zeitraffer (max. ${fmt(f.integrity.maxSimRate, 0)}×)` },
-    f.integrity.crashed && { mark: "✕", title: "Absturz" },
-    f.integrity.teleportDetected && { mark: "⇝", title: "Positionssprung (Teleport/Neuladen)" },
+    f.integrity.pauseCount > 0 && { mark: "⏸", title: tr("logbook.integrity.pause", { n: f.integrity.pauseCount, duration: fmtDuration(f.integrity.pausedMs) }) },
+    f.integrity.slewDetected && { mark: "⇢", title: tr("logbook.integrity.slewDetected") },
+    f.integrity.timeAccelerationDetected && { mark: `×${fmt(f.integrity.maxSimRate, 0)}`, title: tr("logbook.integrity.timeAccel", { rate: fmt(f.integrity.maxSimRate, 0) }) },
+    f.integrity.crashed && { mark: "✕", title: tr("logbook.integrity.crash") },
+    f.integrity.teleportDetected && { mark: "⇝", title: tr("logbook.integrity.teleport") },
     // a flight resumed or merged after a crash: the recording has a hole
-    f.state !== "interrupted" && (f.integrity.gapMs ?? 0) > 0 && { mark: "⋯", title: gapTitle(f) ?? "Aufzeichnungslücke" },
+    f.state !== "interrupted" && (f.integrity.gapMs ?? 0) > 0 && { mark: "⋯", title: gapTitle(f) ?? tr("logbook.integrity.gap") },
   ]).filter(Boolean) as Array<{ mark: string; title: string }>;
   const stateTitle = gapTitle(f, gapToNextMs) ?? undefined;
   const dep = effectiveDep(f);
@@ -132,7 +136,7 @@ export default function FlightStrip({ flight: f, fact, selected, tabIndex, onSel
         data-id={f.id}
         role="option"
         aria-selected={selected}
-        aria-label={stripLabel(f, fact, flags.map((x) => x.title))}
+        aria-label={stripLabel(f, fact, flags.map((x) => x.title), tr)}
         aria-describedby={describedBy}
         tabIndex={tabIndex}
         className="strip-option"
@@ -162,15 +166,15 @@ export default function FlightStrip({ flight: f, fact, selected, tabIndex, onSel
           <div className="strip-meta detail">
             <span className="num">{fmtDate(f.offBlockMs ?? f.createdMs)}</span>
             {block != null && <span className="num">{fmtDuration(block, { seconds: false })}</span>}
-            {isDemoRow(f) && <span className="badge badge-demo badge-inline">Demo</span>}
+            {isDemoRow(f) && <span className="badge badge-demo badge-inline">{tr("logbook.strip.demo")}</span>}
             {imported && (
-              <span className="badge badge-imported badge-inline" title="Aus einer Importdatei – ohne Aufzeichnung">
-                importiert
+              <span className="badge badge-imported badge-inline" title={tr("logbook.strip.importedTitle")}>
+                {tr("logbook.strip.imported")}
               </span>
             )}
             {f.state !== "completed" && (
               <span className={`badge badge-inline state-${f.state}`} title={stateTitle}>
-                {f.state === "interrupted" ? "unterbrochen" : stateLabel(f.state)}
+                {f.state === "interrupted" ? tr("logbook.state.interruptedShort") : stateLabel(f.state, tr)}
               </span>
             )}
             {flags.map((x) => (
@@ -180,22 +184,22 @@ export default function FlightStrip({ flight: f, fact, selected, tabIndex, onSel
             ))}
             {/* Notizen & Tags: up to two tags, the rating, a note symbol with the first line */}
             {tags.slice(0, 2).map((t, i) => (
-              <span key={t} className={`strip-tag${i ? " strip-tag-2" : ""}`} title={tags.length > 2 ? `Tags: ${tags.join(", ")}` : `Tag: ${t}`}>
+              <span key={t} className={`strip-tag${i ? " strip-tag-2" : ""}`} title={tags.length > 2 ? tr("logbook.strip.tags", { tags: tags.join(", ") }) : tr("logbook.strip.tag", { tag: t })}>
                 {t}
               </span>
             ))}
             {tags.length > 2 && (
-              <span className="strip-tag strip-tag-more" title={`Tags: ${tags.join(", ")}`}>
+              <span className="strip-tag strip-tag-more" title={tr("logbook.strip.tags", { tags: tags.join(", ") })}>
                 +{tags.length - 2}
               </span>
             )}
             {f.rating ? (
-              <span className="strip-rating num" title={`Bewertung: ${f.rating} von 5 Sternen`}>
+              <span className="strip-rating num" title={tr("logbook.strip.ratingTitle", { rating: f.rating })}>
                 ★{f.rating}
               </span>
             ) : null}
             {note && (
-              <span className="strip-note" title={`Notiz: ${note}`}>
+              <span className="strip-note" title={tr("logbook.strip.note", { note })}>
                 <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" aria-hidden="true">
                   <path d="M3 2h7l3 3v9H3zM5.5 7h5M5.5 10h3.5" />
                 </svg>
@@ -210,7 +214,7 @@ export default function FlightStrip({ flight: f, fact, selected, tabIndex, onSel
             className={`strip-rate num${hard ? " warn-text" : ""}`}
             tabIndex={-1}
             aria-hidden="true"
-            title={`${hard ? "Harte Landung (ab 600 fpm). " : ""}${stableText(fact) ? `${stableText(fact)}. ` : ""}Landeauswertung öffnen (Eingabetaste)`}
+            title={`${hard ? `${tr("logbook.detail.hardLanding", { limit: fmt(HARD_FPM, 0, "fpm") })} ` : ""}${stableText(fact, tr) ? `${stableText(fact, tr)}. ` : ""}${tr("logbook.strip.openDebrief")}`}
             onClick={debrief}
           >
             <RunwayGlyph fact={fact} rate={rate} />
@@ -240,18 +244,19 @@ export default function FlightStrip({ flight: f, fact, selected, tabIndex, onSel
 }
 
 /** Second small line under the fpm value: "stabil ab 1 500 ft" / "nie stabil", coloured by band (read only). */
-function stableText(fact?: StripFact | null): string | null {
+function stableText(fact: StripFact | null | undefined, t: TFunction): string | null {
   if (!fact?.band) return null;
-  return fact.stableFromFt != null ? `stabil ab ${fmt(fact.stableFromFt, 0, "ft")}` : "nie stabil";
+  return fact.stableFromFt != null ? t("logbook.strip.stableFrom", { alt: fmt(fact.stableFromFt, 0, "ft") }) : t("logbook.strip.neverStable");
 }
 
 /** Shown only where the strip has room (container query in flows.css); the button title always has it. */
 function StableLine({ fact }: { fact?: StripFact | null }) {
+  const tr = useT();
   const band = fact?.band ?? null;
-  const text = stableText(fact);
+  const text = stableText(fact, tr);
   if (!band || !text) return null;
   return (
-    <span className={`strip-stable ${STRIP_BAND_CLASS[band]}`} title={STRIP_BAND_TITLE[band]}>
+    <span className={`strip-stable ${STRIP_BAND_CLASS[band]}`} title={tr(STRIP_BAND_TITLE[band])}>
       {text}
     </span>
   );
@@ -259,7 +264,8 @@ function StableLine({ fact }: { fact?: StripFact | null }) {
 
 /** "GA ×n" in front of the landing rate. */
 function GoAroundBadge({ n }: { n: number }) {
-  const label = `${n}× durchgestartet`;
+  const tr = useT();
+  const label = tr("logbook.strip.goArounds", { count: n });
   return (
     <span className="strip-ga" title={label}>
       GA×{n}

@@ -9,7 +9,8 @@
 import type { LandingFact, TouchdownReport } from "../types";
 import type { ApproachFact } from "./approachTypes";
 import { isDerivedSource } from "./types";
-import { NNBSP } from "../format";
+import { t } from "../i18n";
+import { NNBSP, fmtNum } from "../i18n/number";
 
 /** A landing fact whose centreline offset may be missing. */
 export type HistLanding = Omit<LandingFact, "centerlineOffsetM"> & { centerlineOffsetM: number | null };
@@ -80,9 +81,9 @@ export function quota(xs: Array<boolean | null | undefined>): { yes: number; tot
 
 // ---- keys and filters -------------------------------------------------------------------
 
-/** Aircraft key: ICAO type, else the title, else "Unbekannt" (as dispersionStats.aircraftKey). */
+/** Aircraft key: ICAO type, else the title, else "Unbekannt" / "Unknown" (as dispersionStats.aircraftKey). */
 export function typeKey(f: { aircraftIcaoType?: string | null; aircraftTitle?: string | null }): string {
-  return f.aircraftIcaoType?.trim() || f.aircraftTitle?.trim() || "Unbekannt";
+  return f.aircraftIcaoType?.trim() || f.aircraftTitle?.trim() || t("landingHistory.unknownType");
 }
 
 export const runwayKey = (f: { airportIcao?: string | null; runwayIdent?: string | null }): string | null =>
@@ -289,7 +290,7 @@ export interface TrendSeries {
   centerline: TrendPoint[];
   /** "stabil ab" ft (approach facts; empty without). */
   stableFrom: TrendPoint[];
-  /** Lateral guidance: localizer RMS 1000 → 50 ft, dots (approach facts with a known centreline; empty without). */
+  /** Lateral guidance: localiser RMS 1000 → 50 ft, dots (approach facts with a known centreline; empty without). */
   lateral: TrendPoint[];
   /** TDZ quota 0..1. */
   tdz: TrendPoint[];
@@ -476,21 +477,24 @@ export function patternSeries(touchdowns: TouchdownReport[], facts: HistLanding[
 
 // ---- wording ----------------------------------------------------------------------------
 
-/** "auf EDDF 25C", "mit A20N", "" (all). */
+/** "auf EDDF 25C", "mit A20N", "" (all) – in the active language. */
 export function scopePhrase(scope: Scope, f: { airportIcao?: string | null; runwayIdent?: string | null; aircraftIcaoType?: string | null; aircraftTitle?: string | null }): string {
-  if (scope === "runway") return runwayKey(f) ? `auf ${runwayKey(f)}` : "auf dieser Piste";
-  if (scope === "type") return `mit ${typeKey(f)}`;
+  if (scope === "runway") {
+    const rk = runwayKey(f);
+    return rk ? t("landingHistory.scope.runway", { runway: rk }) : t("landingHistory.scope.thisRunway");
+  }
+  if (scope === "type") return t("landingHistory.scope.type", { type: typeKey(f) });
   return "";
 }
 
 /** "besser als 70 %" / "besser als jede" (reads with a following genitive); null without percentile. */
 export function betterText(p: number | null | undefined): string | null {
   if (p == null || !Number.isFinite(p)) return null;
-  if (p >= 1) return "besser als jede";
-  return `besser als ${Math.round(p * 100)}${NNBSP}%`;
+  if (p >= 1) return t("landingHistory.betterAll");
+  return t("landingHistory.betterPct", { pct: `${fmtNum(Math.round(p * 100), 0)}${NNBSP}%` });
 }
 
 /** "deiner letzten 20 Landungen auf EDDF 25C" (genitive, for the after-flight line). */
 export function peersPhrase(n: number, scope: Scope, f: Parameters<typeof scopePhrase>[1]): string {
-  return [`deiner letzten ${n} Landung${n === 1 ? "" : "en"}`, scopePhrase(scope, f)].filter(Boolean).join(" ");
+  return [t("landingHistory.peers", { count: n }), scopePhrase(scope, f)].filter(Boolean).join(" ");
 }

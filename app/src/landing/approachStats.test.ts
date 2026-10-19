@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
+import { setLanguageSetting } from "../i18n";
 import type { ApproachFact } from "./approachTypes";
 import {
   GATE_TOLERANCE,
@@ -68,6 +69,9 @@ function fact(p: Partial<ApproachFact>): ApproachFact {
     ...p,
   };
 }
+
+// German expectations ("Unbekannt"); jsdom reports en-US
+beforeEach(() => setLanguageSetting("de"));
 
 describe("withinTolerance", () => {
   it("checks the box inclusively on both axes", () => {
@@ -149,6 +153,9 @@ describe("filter", () => {
   it("keys aircraft by type, then title, and skips missing airports", () => {
     expect(approachAircraftKey(fact({ aircraftIcaoType: " ", aircraftTitle: "Cessna" }))).toBe("Cessna");
     expect(approachAircraftKey(fact({ aircraftIcaoType: null }))).toBe("Unbekannt");
+    setLanguageSetting("en");
+    expect(approachAircraftKey(fact({ aircraftIcaoType: null }))).toBe("Unknown");
+    setLanguageSetting("de");
     const facts = [fact({ airportIcao: "EDDF" }), fact({ airportIcao: null }), fact({ airportIcao: "EDDF" }), fact({ airportIcao: "EDDM" })];
     expect(approachFilterOptions(facts, (f) => f.airportIcao)).toEqual([
       { key: "EDDF", count: 2 },

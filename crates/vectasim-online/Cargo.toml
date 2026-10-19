@@ -1,6 +1,6 @@
 [package]
 name = "vectasim-online"
-description = "Online-network traffic (VATSIM data feed) and METAR weather"
+description = "Online-network traffic (VATSIM data feed, IVAO Whazzup) and METAR weather"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

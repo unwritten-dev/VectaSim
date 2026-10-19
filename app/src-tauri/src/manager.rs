@@ -54,9 +54,10 @@ use vectasim_core::{
 };
 use vectasim_dump::{DumpRecorder, DumpStatus, RingConfig};
 use vectasim_simconnect::{ReplayConfig, ReplayProvider, SimConnectProvider};
+use vectasim_xplane::{XPlaneConfig, XPlaneProvider};
 use vectasim_store::{AirportResolver, FlightRecorder, LiveTrack, MetarSlot, PlannedSlot, RecorderContext, Store, TrackSample};
 
-pub const PROVIDERS: &[&str] = &["simconnect", "mock", "replay"];
+pub const PROVIDERS: &[&str] = &["simconnect", "xplane", "mock", "replay"];
 
 const TELEMETRY_EMIT_INTERVAL: Duration = Duration::from_millis(100);
 /// `sim:telemetry` while the window is hidden.
@@ -239,6 +240,12 @@ pub struct ProviderManager {
     replay: Mutex<ReplayConfig>,
     /// The window is visible (frontend `set_ui_visible`); false throttles the periodic emits.
     ui_visible: Arc<AtomicBool>,
+    /// Where `select_provider("xplane")` connects (env `VECTASIM_XPLANE_HOST/PORT`, then the setting).
+    xplane: Mutex<XPlaneConfig>,
+    /// The configured simulator (`auto` | `simconnect` | `xplane`) that `start("sim")` runs.
+    sim_mode: Mutex<String>,
+    /// Bumped by every `start`; the automatic-choice supervisor of an older generation quits.
+    pub(crate) auto_gen: std::sync::atomic::AtomicU64,
 }
 
 impl ProviderManager {
@@ -259,7 +266,31 @@ impl ProviderManager {
             }),
             replay: Mutex::new(ReplayConfig::from_env()),
             ui_visible: Arc::new(AtomicBool::new(true)),
+            xplane: Mutex::new(XPlaneConfig::from_env()),
+            sim_mode: Mutex::new(crate::simselect::MODE_AUTO.into()),
+            auto_gen: std::sync::atomic::AtomicU64::new(0),
         }
+    }
+
+    pub fn xplane_config(&self) -> XPlaneConfig {
+        lock(&self.xplane).clone()
+    }
+
+    pub fn set_xplane_config(&self, cfg: XPlaneConfig) {
+        *lock(&self.xplane) = cfg;
+    }
+
+    pub fn sim_mode(&self) -> String {
+        lock(&self.sim_mode).clone()
+    }
+
+    pub fn set_sim_mode(&self, mode: &str) {
+        *lock(&self.sim_mode) = mode.to_owned();
+    }
+
+    /// A flight is open in the running session.
+    pub fn flight_open(&self) -> bool {
+        self.flight_active.load(Ordering::Relaxed)
     }
 
     /// The frontend reports whether the window is visible (`visibilitychange`, minimise, tray).
@@ -327,12 +358,12 @@ impl ProviderManager {
     /// "Fortsetzen" on a `flight:resumable` offer: the running session continues that flight.
     /// Blocks until the forwarder thread did it (or failed); call off the main thread.
     pub fn resume_flight(&self, flight_id: &str) -> Result<(), String> {
-        let control = lock(&self.active).as_ref().map(|a| a.control.clone()).ok_or("Kein Simulator verbunden.")?;
+        let control = lock(&self.active).as_ref().map(|a| a.control.clone()).ok_or(crate::lang::tr("Kein Simulator verbunden.", "No simulator connected."))?;
         let (reply, rx) = mpsc::channel();
         control
             .send(Control::Resume { flight_id: flight_id.to_owned(), reply })
-            .map_err(|_| "Die Aufzeichnung läuft nicht mehr.".to_string())?;
-        rx.recv_timeout(RESUME_REPLY_TIMEOUT).map_err(|_| "Die Aufzeichnung hat nicht geantwortet.".to_string())?
+            .map_err(|_| crate::lang::tr("Die Aufzeichnung läuft nicht mehr.", "The recording is no longer running.").to_string())?;
+        rx.recv_timeout(RESUME_REPLY_TIMEOUT).map_err(|_| crate::lang::tr("Die Aufzeichnung hat nicht geantwortet.", "The recording did not answer.").to_string())?
     }
 
     fn make_provider(&self, kind: &str) -> Result<Box<dyn SimProvider>, String> {
@@ -343,18 +374,35 @@ impl ProviderManager {
                 dump: Some(self.diag.dump.clone()),
                 ..Default::default()
             })),
-            "replay" => Ok(Box::new(self.replay_config().provider()?)),
+            "xplane" => Ok(Box::new(XPlaneProvider {
+                config: self.xplane_config(),
+                dump: Some(self.diag.dump.clone()),
+                diag: RawDiag::shared("xplane"),
+            })),
+            "replay" => Ok(Box::new(self.replay_config().provider(crate::lang::current())?)),
             // `VECTASIM_PROVIDER=replay:<file>`
             other if other.starts_with("replay:") => {
                 let cfg = self.replay_config();
-                Ok(Box::new(ReplayProvider::new(other["replay:".len()..].trim(), cfg.speed, cfg.loop_)))
+                Ok(Box::new(ReplayProvider::new(other["replay:".len()..].trim(), cfg.speed, cfg.loop_).with_lang(crate::lang::current())))
             }
             other => Err(format!("unknown provider '{other}'")),
         }
     }
 
     /// Stop whatever is running and start `kind`. A new provider gets a fresh flight session and recorder.
+    /// `sim` = the configured simulator ([`Self::sim_mode`]); `auto` = SimConnect first, X-Plane
+    /// when MSFS does not come up (see [`crate::simselect`]).
     pub fn start(&self, app: AppHandle, store: Store, resolver: Arc<dyn AirportResolver>, kind: &str) -> Result<(), String> {
+        let kind = if kind == "sim" { self.sim_mode() } else { kind.to_owned() };
+        let generation = self.auto_gen.fetch_add(1, Ordering::SeqCst) + 1;
+        if kind == crate::simselect::MODE_AUTO {
+            return crate::simselect::start_auto(self, app, store, resolver, generation);
+        }
+        self.start_kind(app, store, resolver, &kind)
+    }
+
+    /// Start `kind` without touching the automatic choice (its supervisor switches with this).
+    pub(crate) fn start_kind(&self, app: AppHandle, store: Store, resolver: Arc<dyn AirportResolver>, kind: &str) -> Result<(), String> {
         let provider = self.make_provider(kind)?;
         self.start_with(app, store, resolver, provider)
     }
@@ -520,7 +568,7 @@ impl<O: Outbox> Forwarder<O> {
         }
         // a request that came too late still gets an answer
         while let Ok(Control::Resume { reply, .. }) = control.try_recv() {
-            let _ = reply.send(Err("Die Aufzeichnung wurde beendet.".into()));
+            let _ = reply.send(Err(crate::lang::tr("Die Aufzeichnung wurde beendet.", "The recording was stopped.").into()));
         }
         self.close();
     }
@@ -571,10 +619,10 @@ impl<O: Outbox> Forwarder<O> {
     fn resume(&mut self, flight_id: &str) -> Result<(), String> {
         match &self.resume_offer {
             Some((id, at)) if id == flight_id && at.elapsed() <= RESUME_OFFER_TTL => {}
-            _ => return Err("Dieser Flug kann nicht mehr fortgesetzt werden.".into()),
+            _ => return Err(crate::lang::tr("Dieser Flug kann nicht mehr fortgesetzt werden.", "This flight can no longer be resumed.").into()),
         }
-        let t = lock(&self.status).last_telemetry.clone().ok_or("Noch keine Daten vom Simulator.")?;
-        let prev = self.store.flight_summary(flight_id).map_err(|e| e.to_string())?.ok_or("Flug nicht gefunden")?;
+        let t = lock(&self.status).last_telemetry.clone().ok_or(crate::lang::tr("Noch keine Daten vom Simulator.", "No data from the simulator yet."))?;
+        let prev = self.store.flight_summary(flight_id).map_err(crate::lang::ui_error)?.ok_or(crate::lang::tr("Flug nicht gefunden", "Flight not found"))?;
         let last_old = self.store.get_track_preview(flight_id).map_err(|e| e.to_string())?.and_then(|p| p.last().map(|s| s.t_ms));
         // first sample of what follows: the flight recorded since the restart, else now
         let first_new = match self.recorder.current_flight_id() {
@@ -615,7 +663,7 @@ impl<O: Outbox> Forwarder<O> {
 
     fn handle(&mut self, ev: ProviderEvent) {
         match ev {
-            ProviderEvent::Telemetry(t) => self.on_telemetry(t),
+            ProviderEvent::Telemetry(t) => self.on_telemetry(*t),
             ProviderEvent::Aircraft(info) => {
                 if let Err(e) = self.recorder.set_aircraft(info.clone()) {
                     log::error!("logbook aircraft update failed: {e}");
@@ -642,7 +690,12 @@ impl<O: Outbox> Forwarder<O> {
                 }
                 if std::mem::take(&mut self.link_lost) {
                     if self.session.has_open_flight() && !self.superseded() {
-                        self.out.notify(crate::notify::Kind::Connection, "Simulator wieder da", "Die Aufzeichnung läuft weiter.");
+                        let l = crate::lang::current();
+                        self.out.notify(
+                            crate::notify::Kind::Connection,
+                            l.tr("Simulator wieder da", "Simulator is back"),
+                            l.tr("Die Aufzeichnung läuft weiter.", "The recording continues."),
+                        );
                     }
                     log::info!("reconnected: position context reset");
                     let events = self.session.reset_position_context();
@@ -666,10 +719,14 @@ impl<O: Outbox> Forwarder<O> {
         let was_connected = lock(&self.status).state == "connected";
         self.link_lost = true;
         if was_connected && self.session.has_open_flight() && !self.superseded() {
+            let l = crate::lang::current();
             self.out.notify(
                 crate::notify::Kind::Connection,
-                "Verbindung zum Simulator verloren",
-                "Dein Flug ist gesichert und läuft weiter, sobald der Simulator zurück ist.",
+                l.tr("Verbindung zum Simulator verloren", "Connection to the simulator lost"),
+                l.tr(
+                    "Dein Flug ist gesichert und läuft weiter, sobald der Simulator zurück ist.",
+                    "Your flight is saved and continues as soon as the simulator is back.",
+                ),
             );
         }
     }
@@ -811,7 +868,7 @@ impl<O: Outbox> Forwarder<O> {
             TouchdownOutcome::Unknown | TouchdownOutcome::Pending => return,
         };
         let Some(td) = self.session.summary().touchdowns.get(o.index) else { return };
-        let (title, body) = crate::notify::landing_text(td.landing_rate_fpm, td.peak_g, td.bounces, touch_and_go);
+        let (title, body) = crate::notify::landing_text(crate::lang::current(), td.landing_rate_fpm, td.peak_g, td.bounces, touch_and_go);
         self.out.notify(crate::notify::Kind::Landing, &title, &body);
     }
 
@@ -825,8 +882,13 @@ impl<O: Outbox> Forwarder<O> {
             .as_ref()
             .map(|f| format!("{} → {}", f.dep_icao.as_deref().unwrap_or("····"), f.arr_icao.as_deref().unwrap_or("····")))
             .unwrap_or_default();
-        let body = if route.is_empty() { "Der Flug steht im Logbuch.".to_owned() } else { format!("{route} · steht im Logbuch.") };
-        self.out.notify(crate::notify::Kind::Saved, "Flug gespeichert", &body);
+        let l = crate::lang::current();
+        let body = match (route.is_empty(), l) {
+            (true, _) => l.tr("Der Flug steht im Logbuch.", "The flight is in the logbook.").to_owned(),
+            (false, crate::lang::Lang::De) => format!("{route} · steht im Logbuch."),
+            (false, crate::lang::Lang::En) => format!("{route} · in the logbook."),
+        };
+        self.out.notify(crate::notify::Kind::Saved, l.tr("Flug gespeichert", "Flight saved"), &body);
     }
 
     /// Provider gone (switched, or its thread ended): an open flight cannot go on.
@@ -1067,7 +1129,8 @@ mod tests {
             .collect();
         assert_eq!(touchdowns.len(), 1, "{touchdowns:?}");
         let rate = touchdowns[0]["landingRateFpm"].as_f64().unwrap();
-        assert!((-200.0..=-100.0).contains(&rate), "{rate}");
+        // the demo landing: about −230 fpm (mock.rs DEMO_TD_FPM)
+        assert!((-245.0..=-215.0).contains(&rate), "{rate}");
         // the fixture ends 20 s into the rollout, still fast: the outcome (and with it the
         // "Gelandet" notification) is not decided yet
         let landings: Vec<String> =
@@ -1082,7 +1145,9 @@ mod tests {
         let d = m.diagnostics();
         let raw = d.raw.expect("replay has raw definitions");
         assert_eq!(raw.source, "replay");
-        assert_eq!(raw.defs.len(), 3);
+        // FAST, SLOW, STATIC, APPROACH (1 Hz, track v2), DESIGN (once)
+        assert_eq!(raw.defs.len(), 5);
+        assert!(raw.defs[3].vars.iter().any(|v| v.name == "AMBIENT WIND VELOCITY" && v.value == Some(8.0)));
         assert_eq!(raw.defs[0].vars[0].name, "PLANE LATITUDE");
         assert!(raw.defs[0].vars[0].raw.is_some());
         wait_for("engine state", || m.diagnostics().engine.is_some_and(|e| e.touchdowns == 1));

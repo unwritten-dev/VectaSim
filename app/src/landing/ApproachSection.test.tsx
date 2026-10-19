@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
+import { setLanguageSetting } from "../i18n";
 import { NNBSP } from "../format";
 import ApproachSection from "./ApproachSection";
 import StabilisedTable from "./StabilisedTable";
@@ -10,11 +11,22 @@ import type { ApproachAnalysis } from "./approachTypes";
 const mock = mockJson as unknown as ApproachAnalysis;
 const N = (s: string) => s.split(NNBSP).join(" ");
 const html = (a: ApproachAnalysis) => N(renderToStaticMarkup(<ApproachSection status={{ kind: "ok", approach: a }} />));
+/** The fixture as a v1 track would give it: no sim ILS, wind or automation, the 3° assumption. */
+const asV1 = (a: ApproachAnalysis): ApproachAnalysis => ({
+  ...(JSON.parse(JSON.stringify(a)) as ApproachAnalysis),
+  reference: { ...a.reference, glidepathSource: "assumed", localizerSource: "geometric" },
+  ils: null,
+  wind: null,
+  automation: null,
+});
+
+// the expectations are German; jsdom reports en-US
+beforeEach(() => setLanguageSetting("de"));
 
 describe("ApproachSection", () => {
   it("renders key sentence, band, the three hero values and the compact facts", () => {
     const h = html(mock);
-    expect(h).toContain("Auf der Grundlinie ab 5,0 nm, stabil ab 1 500 ft. Bei FAF 16 kt schneller als die geflogene Referenz.");
+    expect(h).toContain("Auf dem Kurs ab 5,0 nm, stabil ab 1 500 ft. Bei FAF 16 kt schneller als die geflogene Referenz.");
     expect(h).toContain("RWY 25C");
     expect(h).toContain(">stabil<");
     expect(h).toContain("var(--aband-stable)");
@@ -23,15 +35,18 @@ describe("ApproachSection", () => {
     expect(h).toContain("1 500");
     expect(h).toContain("Gleitpfad (RMS)");
     expect(h).toContain("0,08");
-    expect(h).toContain("3°-Annahme");
-    expect(h).toContain("Grundlinie (RMS)");
+    // track v2: the sim's ILS is the reference, named as such
+    expect(h).toContain("3,0° (ILS)");
+    expect(h).toContain(">SIM<");
+    expect(html(asV1(mock))).toContain("3°-Annahme");
+    expect(h).toContain("Kurs (RMS)");
     expect(h).toContain("0,05");
     expect(h).toContain("max. +0,1 Dots · bei 500 ft 2 m rechts · Schwelle 2 m rechts");
-    expect(h).toContain("auf der Grundlinie · ohne Überschießen eingedreht · keine S-Kurven");
+    expect(h).toContain("auf dem Kurs · ohne Überschießen eingedreht · keine S-Kurven");
     expect(h).toContain("Speed (MAD)");
     expect(h).toContain("geflogene Referenz ≈ 128 kt – misst die Stabilität, nicht den Absolutwert");
     expect(h).toContain(">GEM.<");
-    expect(h).toContain(">ABGEL.<");
+    expect(N(html(asV1(mock)))).toContain(">ABGEL.<");
     expect(h).toContain("FAF ✓ · 1000 ✓ · 500 ✓");
     // established, configuration, no exceedance
     expect(h).toContain("5,0 nm · 1 652 ft");
@@ -76,7 +91,7 @@ describe("ApproachSection", () => {
   it("lateral hero without a value when the runway was derived from the track", () => {
     const a: ApproachAnalysis = { ...mock, runway: { ...mock.runway!, source: "derived" }, lateral: { ...mock.lateral!, measurable: false, lateralBand: null } };
     const h = html(a);
-    expect(h).toContain("Grundlinie (RMS)");
+    expect(h).toContain("Kurs (RMS)");
     expect(h).toContain("Piste aus Rollspur – nicht bewertbar");
     expect(h).not.toContain("0,05");
   });
@@ -88,6 +103,40 @@ describe("ApproachSection", () => {
   });
 });
 
+describe("ApproachSection: hero explanations", () => {
+  it("de: one explaining line, tooltips for RMS / MAD / P95 and the lateral caption", () => {
+    const h = html(mock);
+    expect(h).toContain("RMS = mittlere Abweichung über den Anflug, MAD = mittlere absolute Abweichung der Speed");
+    expect(h).toContain('title="Kurs = Ablage zur verlängerten Mittellinie in Dots; RMS = mittlere Abweichung über den Anflug"');
+    expect(h).toContain("Ablage zur verlängerten Mittellinie in Dots");
+    expect(h).toContain('title="MAD = mittlere absolute Abweichung der Speed von der Referenz"');
+    expect(h).toContain('title="P95: 95 % der Samples liegen innerhalb dieses Werts"');
+  });
+  it("en: explaining line, lateral tooltip, English labels and numbers", () => {
+    setLanguageSetting("en");
+    try {
+      const h = html(mock);
+      expect(h).toContain("RMS = average deviation over the approach, MAD = mean absolute deviation of the speed");
+      expect(h).toContain("Lateral (RMS)");
+      expect(h).toContain('title="Lateral = extended centreline, deviation in dots; RMS = average deviation over the approach"');
+      expect(h).toContain("extended centreline, deviation in dots");
+      expect(h).toContain('title="P95: 95% of the samples lie within this value"');
+      expect(h).toContain("Glide path (RMS)");
+      expect(h).toContain("Stable from");
+      expect(h).toContain("1,500");
+      expect(h).toContain("0.08");
+      expect(h).toContain("Gear down 1,904 ft");
+      expect(h).toContain("Flaps 3→4 1,505 ft");
+      expect(h).toContain("No exceedance between 1,000 and 50 ft.");
+      expect(h).toContain("Save approach card");
+      expect(h).not.toContain("Kurs (RMS)");
+      expect(h).not.toContain("0,08");
+    } finally {
+      setLanguageSetting("de");
+    }
+  });
+});
+
 describe("StabilisedTable (approach gates)", () => {
   it("shows five gates, limits per cell, unmeasurable reasons and the time outside", () => {
     const h = N(renderToStaticMarkup(<StabilisedTable approach={mock} />));
@@ -96,7 +145,7 @@ describe("StabilisedTable (approach gates)", () => {
     expect(h).toContain("5 nm zuerst");
     expect(h).toContain("bei 10 nm nicht eingedreht");
     expect(h).toContain("≤ 250 kt IAS");
-    expect(h).toContain("Kurs (Lokalizer)");
+    expect(h).toContain("Kurs (Localizer)");
     expect(h).toContain("±1 Dot zum 3°-Pfad");
     expect(h).toContain("Stufe 4 (Landeklappen)");
     expect(h).toContain("+16 kt (144 kt)");

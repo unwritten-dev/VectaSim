@@ -1,0 +1,520 @@
+{
+  "csvImport": {
+    "title": "Import CSV",
+    "steps": "Steps",
+    "close": "Close import",
+    "step": {
+      "file": "File",
+      "columns": "Map columns",
+      "preview": "Preview"
+    },
+    "preset": {
+      "vectasim": "VectaSim logbook (CSV)",
+      "volanta": "Volanta import CSV",
+      "stkp": "SimToolkitPro (no guarantee)",
+      "generic": "Custom mapping"
+    },
+    "encodingBom": "UTF-8 (with BOM)",
+    "delimiter": {
+      "comma": "Comma",
+      "semicolon": "Semicolon",
+      "tab": "Tab",
+      "pipe": "Vertical bar",
+      "custom": "“{char}”"
+    },
+    "group": {
+      "route": "Route",
+      "times": "Times",
+      "flight": "Flight and aircraft",
+      "values": "Values",
+      "own": "Your own"
+    },
+    "field": {
+      "depIcao": "Departure airport",
+      "arrIcao": "Arrival airport",
+      "distanceNm": "Distance (nm)",
+      "date": "Date",
+      "offBlock": "Off-block (departure)",
+      "takeoff": "Takeoff (wheels up)",
+      "landing": "Landing (touchdown)",
+      "onBlock": "On-block (arrival)",
+      "blockMin": "Block time",
+      "airMin": "Air time",
+      "callsign": "Callsign",
+      "flightNumber": "Flight number",
+      "airline": "Airline",
+      "aircraftTitle": "Aircraft (name)",
+      "aircraftIcao": "Aircraft type (ICAO)",
+      "registration": "Registration",
+      "fuelStart": "Fuel at start",
+      "fuelEnd": "Fuel at end",
+      "fuelUsed": "Fuel used",
+      "maxAltFt": "Max. altitude (ft)",
+      "landingRateFpm": "Landing rate (fpm)",
+      "notes": "Notes",
+      "tags": "Tags",
+      "rating": "Rating (1–5)"
+    },
+    "dateFormat": {
+      "label": "Date format",
+      "auto": "detect automatically",
+      "iso": "ISO (2026-10-18 14:05)",
+      "dmy": "DD.MM.YYYY (18.10.2026 14:05)",
+      "mdy": "MM/DD/YYYY (10/18/2026 2:05 PM)",
+      "epochS": "Unix time (seconds)",
+      "epochMs": "Unix time (milliseconds)"
+    },
+    "missing": {
+      "dep": "Map the departure airport.",
+      "arr": "Map the arrival airport.",
+      "date": "Map the date or off-block.",
+      "file": "Pick a file first."
+    },
+    "summary": {
+      "added": {
+        "one": "{count} flight imported",
+        "other": "{count} flights imported"
+      },
+      "duplicate": {
+        "one": "{count} already there",
+        "other": "{count} already there"
+      },
+      "invalid": {
+        "one": "{count} invalid",
+        "other": "{count} invalid"
+      },
+      "airframes": {
+        "one": "{count} new aircraft",
+        "other": "{count} new aircraft"
+      }
+    },
+    "pickTitle": "Choose a CSV file to import",
+    "fileType": "CSV file",
+    "done": {
+      "title": "CSV imported · {added} of {rows} rows",
+      "bodyWarnings": "{summary} · {warnings}: {list}",
+      "warnings": {
+        "one": "{count} note",
+        "other": "{count} notes"
+      }
+    },
+    "chooseFile": "Choose file",
+    "intro": "Bring over flights from other logbooks: Volanta's import CSV, a SimToolkitPro or VA export (phpVMS) or VectaSim's own logbook CSV. Imported flights count towards hours, routes, fleet and countries – landing analysis, dispersion and approach stay empty because there is no recording.",
+    "reading": "Reading …",
+    "otherFile": "Other file …",
+    "pickFile": "Choose file …",
+    "facts": {
+      "detected": "Detected",
+      "delimiter": "Delimiter",
+      "encoding": "Encoding",
+      "rows": "Rows",
+      "withHeader": "(plus header row)",
+      "noHeader": "(no header row)"
+    },
+    "format": "Format",
+    "stkpHint": "SimToolkitPro's columns are not documented – check the mapping in the next step.",
+    "next": "Next",
+    "back": "Back",
+    "mappingIntro": "Prefilled from {preset} and the column names. Date and time may be in one column or separate (then date + off-block time). If the arrival is missing, VectaSim calculates it from the block time.",
+    "zone": {
+      "label": "Times without a time zone",
+      "utc": "are UTC",
+      "local": "are this PC's local time"
+    },
+    "weightUnit": "Weights in",
+    "durationUnit": {
+      "label": "Durations as a number in",
+      "minutes": "minutes",
+      "hours": "hours"
+    },
+    "map": {
+      "caption": "Target field and source column",
+      "field": "Field in VectaSim",
+      "column": "Column in the file",
+      "sample": "Sample",
+      "unmapped": "– not mapped –"
+    },
+    "counts": {
+      "rows": "{rows} rows · {valid} valid",
+      "invalid": {
+        "one": "{count} invalid (skipped)",
+        "other": "{count} invalid (skipped)"
+      },
+      "duplicates": {
+        "one": "{count} already in the logbook",
+        "other": "{count} already in the logbook"
+      },
+      "shown": {
+        "one": "Shown: the first row. The whole file is counted and imported.",
+        "other": "Shown: the first {count} rows. The whole file is counted and imported."
+      }
+    },
+    "dedupe": "Skip duplicates (same route, off-block less than 15 min apart)",
+    "sourceTag": "Source (tag)",
+    "tagsHint": "Every flight gets the tags “import” and the source. A landing rate from the file goes into the notes – it comes from a different measuring method and does not count for the landing statistics.",
+    "importing": "Importing …",
+    "importButton": {
+      "one": "Import {count} flight",
+      "other": "Import {count} flights"
+    },
+    "noRows": "The file contains no data rows.",
+    "sampleCaption": "First rows of the file",
+    "previewCaption": "Preview of the first rows",
+    "col": {
+      "line": "Row",
+      "offBlock": "Off-block",
+      "route": "Route",
+      "aircraft": "Aircraft",
+      "block": "Block",
+      "distance": "Distance",
+      "status": "Status"
+    },
+    "row": {
+      "error": "Error: {error}",
+      "duplicate": "already in the logbook – skipped",
+      "ok": "ok",
+      "approx": "approx. {value}"
+    }
+  },
+  "dispatch": {
+    "user": {
+      "placeholder": "SimBrief pilot ID or username",
+      "title": "You can find your pilot ID on simbrief.com under Account. It is saved.",
+      "change": "change",
+      "missing": "Enter your SimBrief pilot ID first"
+    },
+    "load": "Load flight plan",
+    "reload": "Reload",
+    "remove": "Remove flight plan",
+    "empty": {
+      "title": "No flight plan loaded",
+      "text": "Load your latest SimBrief flight plan to see route, remaining distance, ETA and plan vs. actual.",
+      "idHint": "You can find your pilot ID on simbrief.com → Account."
+    },
+    "stat": {
+      "departure": "Departure",
+      "arrival": "Arrival",
+      "alternate": "Alternate",
+      "cruise": "Cruise altitude",
+      "blockTimes": "Off-block / on-block (plan)",
+      "blockAir": "Block time / air time",
+      "airTime": "Air time {time}",
+      "rampFuel": "Ramp fuel",
+      "fuelSub": "Trip {trip} · landing {landing}",
+      "taxi": "Taxi out / in (plan)",
+      "taxiFuel": "Taxi fuel {fuel}"
+    },
+    "route": "Route",
+    "footer": "AIRAC {airac} · created {created} · {waypoints}",
+    "waypoints": {
+      "one": "{count} waypoint",
+      "other": "{count} waypoints"
+    }
+  },
+  "errors": {
+    "service": {
+      "sim": "Simulator",
+      "simbrief": "SimBrief",
+      "vatsim": "VATSIM",
+      "ivao": "IVAO",
+      "metar": "Weather service",
+      "logbook": "Logbook",
+      "export": "Export",
+      "settings": "Settings",
+      "unknown": "The service"
+    },
+    "dllMissingText": "SimConnect is still missing – download it with one click under Settings → Simulator",
+    "dllMissing": {
+      "title": "SimConnect is still missing.",
+      "hint": "Download it with one click under Settings → Simulator (official MSFS SDK from Microsoft) or pick the file there. To try things out: “Demo flight” on the map."
+    },
+    "waitingForSim": {
+      "title": "Waiting for simulator …",
+      "hint": "Start the simulator – VectaSim connects automatically.",
+      "hintRetry": "Start the simulator – VectaSim connects automatically (next attempt in {seconds} s)."
+    },
+    "unknownProvider": {
+      "title": "Unknown simulator.",
+      "hint": "Pick an available simulator in Settings under “Simulator”."
+    },
+    "simException": {
+      "title": "The simulator rejected a request.",
+      "hint": "Usually harmless. If it keeps happening, restart the flight in the simulator."
+    },
+    "simQuit": {
+      "title": "Simulator closed.",
+      "hint": "Start the simulator again – VectaSim connects automatically."
+    },
+    "simbriefNoId": {
+      "title": "No SimBrief pilot ID set.",
+      "hint": "Enter your pilot ID or username (simbrief.com → Account)."
+    },
+    "simbriefNoPlan": {
+      "title": "No flight plan found.",
+      "titleUser": "No flight plan found for “{user}”.",
+      "hint": "Check your pilot ID or create a flight plan on simbrief.com first."
+    },
+    "simbriefFetch": {
+      "title": "SimBrief returned no flight plan.",
+      "hint": "Create a flight plan on simbrief.com and load it again."
+    },
+    "rateLimit": {
+      "title": "{service}: too many requests.",
+      "hint": "VectaSim waits a moment and retries automatically."
+    },
+    "unreachable": {
+      "title": "{service} is not reachable.",
+      "hintIvao": "No internet connection? IVAO traffic is paused, tracking continues locally. VectaSim retries automatically.",
+      "hintOnline": "No internet connection? Weather and VATSIM are paused, tracking continues locally. VectaSim retries automatically.",
+      "hint": "Check your internet connection and try again."
+    },
+    "http": {
+      "title": "{service} responded with an error (HTTP {code}).",
+      "hintServer": "The service is having problems right now. Try again later.",
+      "hintClient": "Try again. If the error persists, check your input."
+    },
+    "parse": {
+      "title": "The response could not be read.",
+      "hint": "Try again later. If the error persists, report it with the details below."
+    },
+    "pathNotAllowed": {
+      "title": "This location is not allowed.",
+      "hint": "Pick a folder outside the Windows and program directories, e.g. Documents or the desktop."
+    },
+    "flightNotFound": {
+      "title": "Flight not found.",
+      "hint": "It was probably deleted. The list is being refreshed."
+    },
+    "dbLocked": {
+      "title": "The logbook is busy.",
+      "hint": "Try again in a few seconds."
+    },
+    "accessDenied": {
+      "title": "The file could not be written.",
+      "hint": "Pick a different folder or close the file in other programs."
+    },
+    "unexpected": {
+      "title": "Unexpected error.",
+      "titleService": "{service}: unexpected error.",
+      "hint": "Try again. If the error persists, the text under “Details” helps with troubleshooting."
+    }
+  },
+  "online": {
+    "part": {
+      "off": "{name} off",
+      "error": "{name} on ({error} – next attempt in {seconds} s)",
+      "waiting": "{name} on (waiting for first download …)",
+      "on": "{name} on ({pilots} pilots, {controllers} controllers)"
+    },
+    "line": {
+      "loading": "Online traffic: loading status …",
+      "status": "Online traffic: {parts}"
+    },
+    "ago": {
+      "seconds": "{n} s ago",
+      "minutes": "{n} min ago",
+      "hours": "{n} h ago"
+    },
+    "diag": {
+      "label": "Online traffic",
+      "rowLabel": "Online {name}",
+      "off": "off",
+      "on": "on",
+      "noFetch": "not downloaded yet",
+      "counts": "{pilots} pilots, {controllers} controllers",
+      "error": "Error: {error} · next attempt in {seconds} s",
+      "errorRepeated": "Error ({times}× in a row): {error} · next attempt in {seconds} s",
+      "ok": "OK",
+      "waiting": "waiting for first download"
+    }
+  },
+  "resume": {
+    "title": "Resume flight?",
+    "body": "{flight}. Recording stopped {ago} ago, {distance} from here. Without an answer, the rest counts as a new flight.",
+    "bodySince": "{flight} since {since}. Recording stopped {ago} ago, {distance} from here. Without an answer, the rest counts as a new flight.",
+    "merge": {
+      "text": "{second} is probably the continuation of {first} ({time})",
+      "detail": "Gap {gap} · {offset} offset"
+    },
+    "gap": {
+      "inside": "Recording gap {gap}",
+      "resumed": "Recording gap {gap} (resumed after a crash/restart)",
+      "nextFlight": "Next flight follows after {gap} – “Merge” above the logbook",
+      "noShutdown": "Ended without shutdown (crash, restart or reloaded flight)",
+      "interrupted": "Recording interrupted"
+    }
+  },
+  "shell": {
+    "action": {
+      "show": "Show",
+      "hide": "Hide",
+      "copy": "Copy",
+      "openBrowser": "Open in browser",
+      "cancel": "Cancel",
+      "close": "Close",
+      "save": "Save",
+      "retry": "Try again",
+      "details": "Details"
+    },
+    "errorNotice": {
+      "dismiss": "Dismiss notice"
+    },
+    "toast": {
+      "closeTitle": "Close (Esc)"
+    },
+    "stat": {
+      "noValue": "no value",
+      "warning": "Warning: {text}"
+    },
+    "source": {
+      "nameDiffers": "{name} – sources disagree",
+      "aria": "Source: {name}. Details",
+      "popover": "Source of the value",
+      "differs": "sources disagree"
+    },
+    "titleBar": {
+      "minimize": "Minimize",
+      "maximize": "Maximize",
+      "restore": "Restore"
+    },
+    "statusButton": {
+      "aria": "Recording: {label}. Show details",
+      "popover": "Recording status",
+      "privacyTitle": "Streamer mode on – registrations, callsigns, IDs and paths hidden. Click to turn off (Ctrl+Shift+P)",
+      "privacyAria": "Streamer mode on. Turn off",
+      "dataRate": "Data rate",
+      "rate": "{rate} · {frames} records",
+      "lastError": "Last error ({time}):",
+      "error": "Error:",
+      "setupTitle": "Settings → Simulator: download SimConnect with one click",
+      "connectTitle": "Start a connection attempt now instead of waiting for the next automatic one",
+      "connect": "Connect now"
+    },
+    "demo": {
+      "start": "Start demo flight",
+      "startTitle": "Try it without a simulator – a simulated flight",
+      "stop": "Stop demo flight",
+      "stopReplay": "Stop replay",
+      "badge": "Demo",
+      "banner": "{demo} – the flight data is simulated. Demo flights stay in the logbook only until the demo ends and are then deleted."
+    },
+    "online": {
+      "off": "Online traffic is off. You can also pick a network on the map next to “Traffic”.",
+      "enable": "Enable {name}",
+      "counts": "{pilots} pilots · {controllers} controllers",
+      "nextAttempt": "Next attempt in {seconds} s.",
+      "nearby": "Nearby traffic",
+      "noTraffic": "No traffic in the map view",
+      "loading": "Loading …",
+      "showOnMap": "Show {callsign} on the map",
+      "atc": "ATC in view",
+      "noAtc": "No controllers in view"
+    },
+    "navShortcut": "{label} (Ctrl+{key})",
+    "flightSaved": "Flight saved · {dep} → {arr} · {block}",
+    "logbookTab": {
+      "label": "Logbook sections",
+      "flights": "Flights",
+      "aircraft": "Aircraft",
+      "airports": "Airports",
+      "landings": "Landings",
+      "year": "Year"
+    },
+    "resume": {
+      "continue": "Resume",
+      "newFlight": "New flight",
+      "resumed": "Resuming flight",
+      "resumedBody": "The recording continues the interrupted flight.",
+      "failed": "Could not resume"
+    },
+    "simEvent": {
+      "paused": "Simulator paused",
+      "resumed": "Simulator resumed",
+      "running": "Simulation running",
+      "stopped": "Simulation stopped (menu)",
+      "crashed": "Crash detected",
+      "aircraftLoaded": "Aircraft loaded: {name}",
+      "flightLoaded": "Flight loaded: {name}"
+    },
+    "flightEvent": {
+      "started": "Flight started (off-block)",
+      "interrupted": "Flight saved as interrupted",
+      "saved": "Flight saved (on-block)",
+      "touchdown": "Landing {rate}, {g}",
+      "fullStop": "Landing confirmed (full stop)"
+    },
+    "landing": {
+      "touchdown": "Touchdown",
+      "landed": "Landed",
+      "touchAndGo": "Touch-and-go",
+      "announce": "{headline}. Landing rate {rate}, g-load {g}, {bounces}. Alt+T for the landing debrief.",
+      "rate": "Landing rate",
+      "gLoad": "g-load",
+      "bounces": "Bounces",
+      "debrief": "Landing debrief",
+      "card": "Landing card",
+      "cardFailed": "Landing card not created"
+    },
+    "ofp": {
+      "loaded": "Flight plan loaded",
+      "failed": "SimBrief flight plan not loaded"
+    },
+    "quit": {
+      "title": "Recording in progress – quit anyway?",
+      "message": "The flight is aborted and saved in the logbook as interrupted.",
+      "ok": "Quit",
+      "cancel": "Keep flying"
+    },
+    "update": {
+      "available": "Update available",
+      "availableVersion": "Update {version} available",
+      "hint": "Install it under Settings → Updates."
+    },
+    "conn": {
+      "lost": "Sim gone – flight saved",
+      "lostBody": "Your flight is saved and continues as soon as the simulator is back.",
+      "back": "Simulator is back",
+      "backBody": "Recording continues."
+    }
+  },
+  "status": {
+    "demoLabel": "Demo flight",
+    "replayLabel": "Replay (raw dump)",
+    "waitingText": "Waiting for simulator – recording starts when you taxi",
+    "waitingShort": "Waiting for simulator",
+    "hint": {
+      "dllMissing": "{text}.",
+      "simQuit": "Simulator closed. VectaSim reconnects automatically as soon as it is running again.",
+      "xplaneNotRunning": "X-Plane is not running yet (or its Web API is off). As soon as X-Plane is running, VectaSim connects on its own.",
+      "msfsNotRunning": "The simulator is not running yet. As soon as MSFS reaches the main menu, VectaSim connects on its own.",
+      "waiting": "As soon as your simulator is running, VectaSim connects on its own. Recording starts when you taxi."
+    },
+    "replay": {
+      "label": "Replay",
+      "text": "Replay · recorded raw data, no simulator",
+      "textActive": "Replay running · since {since}",
+      "hint": "A recorded dump is playing. For real flights, stop the replay – the simulator is then detected automatically."
+    },
+    "demo": {
+      "text": "Demo flight · simulated data, no simulator",
+      "textActive": "Demo flight running · since {since}",
+      "hint": "A simulated flight to try things out. For real flights, stop the demo flight – the simulator is then detected automatically."
+    },
+    "recording": {
+      "label": "Recording",
+      "text": "Recording · since {since}",
+      "hint": "Your flight is being recorded. You don't need to keep an eye on VectaSim for that."
+    },
+    "suspended": {
+      "label": "Interrupted, will resume",
+      "text": "Sim gone – flight saved, still running",
+      "hint": "Sim gone – your flight is saved and continues as soon as the simulator is back."
+    },
+    "ready": {
+      "label": "Ready",
+      "text": "Ready · recording starts when you taxi",
+      "hint": "Connected to the simulator. Recording starts automatically as soon as you taxi.",
+      "hintSim": "Connected to {sim}. Recording starts automatically as soon as you taxi."
+    }
+  }
+}

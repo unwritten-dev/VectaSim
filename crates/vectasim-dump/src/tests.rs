@@ -6,6 +6,7 @@ fn header() -> Header {
         fast: vec![("PLANE LATITUDE".into(), "degrees".into()), ("SIM ON GROUND".into(), "bool".into())],
         slow: vec![("TOTAL WEIGHT".into(), "pounds".into())],
         statics: vec!["TITLE".into()],
+        ..Default::default()
     };
     let reqs = [("fast".to_string(), 1), ("slow".to_string(), 2), ("static".to_string(), 3)].into_iter().collect();
     Header::new("", "simconnect", defs, reqs)

@@ -2,7 +2,7 @@
 
 use std::path::Path;
 use vectasim_core::landing::RunwayEnd;
-use vectasim_core::{FlightSession, MockFlight};
+use vectasim_core::{FlightSession, Lang, MockFlight};
 use vectasim_store::bundle::{self, BUNDLE_FORMAT};
 use vectasim_store::{
     AirframeEdit, AirframePhoto, ExportOptions, FlightRecorder, ImportMode, ImportOptions, RecorderContext, RunwayRefinement, Store, UserRunwayEdit, UserRunwaySource,
@@ -36,11 +36,11 @@ fn all_ids(store: &Store) -> Vec<String> {
 }
 
 fn all_opts() -> ExportOptions {
-    ExportOptions { include_deleted: true, include_demo: true, app_version: "0.1.0-test".into() }
+    ExportOptions { include_deleted: true, include_demo: true, app_version: "0.1.0-test".into(), lang: Lang::De }
 }
 
 fn merge(images: &Path) -> ImportOptions {
-    ImportOptions { mode: ImportMode::Merge, images_dir: Some(images.to_path_buf()), backup_dir: None }
+    ImportOptions { mode: ImportMode::Merge, images_dir: Some(images.to_path_buf()), backup_dir: None, lang: Lang::De }
 }
 
 /// Three flights (one in the Papierkorb), an edited airframe with an own picture.
@@ -124,9 +124,9 @@ fn export_without_trash_and_demo_filters() {
     let dir = tempfile::tempdir().unwrap();
     let a = source_logbook(dir.path());
     let file = dir.path().join("x.vectasim");
-    let r = a.export_bundle(&file, &ExportOptions { include_deleted: false, include_demo: true, app_version: "t".into() }).unwrap();
+    let r = a.export_bundle(&file, &ExportOptions { include_deleted: false, include_demo: true, app_version: "t".into(), lang: Lang::De }).unwrap();
     assert_eq!((r.manifest.flights, r.manifest.flights_deleted), (2, 0));
-    let r = a.export_bundle(&file, &ExportOptions { include_deleted: true, include_demo: false, app_version: "t".into() }).unwrap();
+    let r = a.export_bundle(&file, &ExportOptions { include_deleted: true, include_demo: false, app_version: "t".into(), lang: Lang::De }).unwrap();
     assert_eq!(r.manifest.flights, 0, "mock flights are demo flights");
 }
 
@@ -181,7 +181,7 @@ fn replace_backs_up_first_and_swaps_the_logbook() {
     record_mock_flight(&b, T0 + 100 * HOUR);
     b.upsert_airframe(&AirframeEdit { registration: "OE-LBX".into(), ..Default::default() }, T0).unwrap();
     let backups = dir.path().join("backups");
-    let opts = ImportOptions { mode: ImportMode::Replace, images_dir: Some(dir.path().join("img")), backup_dir: Some(backups.clone()) };
+    let opts = ImportOptions { mode: ImportMode::Replace, images_dir: Some(dir.path().join("img")), backup_dir: Some(backups.clone()), lang: Lang::De };
     let r = b.import_bundle(&file, &opts).unwrap();
     assert_eq!((r.flights_added, r.flights_skipped_duplicate), (3, 0));
     let saved = r.backup.expect("pre-import backup");
@@ -248,7 +248,11 @@ fn broken_or_foreign_files_are_refused_untouched() {
     );
     let r = b.import_bundle(&minimal, &merge(&images)).unwrap();
     assert_eq!(r.flights_added, 1);
-    assert_eq!(r.warnings.len(), 1, "{:?}", r.warnings);
+    assert_eq!(r.warnings, ["Flug n1: tracks/n1.bin fehlt, Flug ohne Track übernommen"]);
+    // the warnings follow the language in the options
+    let c = Store::open(&dir.path().join("c.db")).unwrap();
+    let r = c.import_bundle(&minimal, &ImportOptions { lang: Lang::En, ..merge(&images) }).unwrap();
+    assert_eq!(r.warnings, ["Flight n1: tracks/n1.bin missing, flight imported without track"]);
     let f = b.get_flight("n1").unwrap().unwrap();
     assert_eq!(f.flight.state, "interrupted", "an exported running flight is not running here");
     assert!(!f.has_track);
@@ -336,7 +340,7 @@ fn remembered_runways_travel_with_the_bundle_and_merge() {
     assert_eq!(e.list_user_runways("EDXC").unwrap()[0].lon_thr, 10.001);
 
     // Replace swaps the runways too
-    let opts = ImportOptions { mode: ImportMode::Replace, images_dir: Some(dir.path().join("img")), backup_dir: Some(dir.path().join("bk")) };
+    let opts = ImportOptions { mode: ImportMode::Replace, images_dir: Some(dir.path().join("img")), backup_dir: Some(dir.path().join("bk")), lang: Lang::De };
     let f = Store::open(&dir.path().join("f.db")).unwrap();
     f.upsert_user_runway(&pilot_runway("EDXD", "09", 11.0), UserRunwaySource::User).unwrap();
     let r = f.import_bundle(&file, &opts).unwrap();

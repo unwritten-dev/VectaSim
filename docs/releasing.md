@@ -1,53 +1,53 @@
-# Releases und Auto-Update
+# Releases and automatic updates
 
-Dokumentation für Maintainer. Nutzer installieren nach [installation.md](installation.md).
+Documentation for maintainers. Users install according to [installation.md](installation.md).
 
-VectaSim aktualisiert sich selbst über `tauri-plugin-updater`: Die App lädt beim Start (still, nach 10 s) und auf Knopfdruck in *Einstellungen → Updates* die Datei
+VectaSim updates itself via `tauri-plugin-updater`: at startup (silently, after 10 s) and on request in *Settings → Updates*, the app downloads the file
 
 ```
 https://github.com/unwritten-dev/VectaSim/releases/latest/download/latest.json
 ```
 
-und installiert eine neuere Version nach Bestätigung (NSIS, `installMode: passive`), danach Neustart. Jede Update-Datei ist mit einem minisign-Schlüssel signiert; der öffentliche Schlüssel steht in `app/src-tauri/tauri.conf.json` → `plugins.updater.pubkey`. Ohne gültige Signatur installiert die App nichts.
+and installs a newer version after the user confirms (NSIS, `installMode: passive`), followed by a restart. Every update file is signed with a minisign key; the public key is in `app/src-tauri/tauri.conf.json` → `plugins.updater.pubkey`. Without a valid signature the app installs nothing.
 
-## Schlüssel
+## Keys
 
-Erzeugt mit `npx tauri signer generate`. **Nicht im Repo.** Liegt auf dem Rechner des Maintainers unter
+Generated with `npx tauri signer generate`. **Not in the repo.** Stored on the maintainer’s machine under
 
 ```
-%USERPROFILE%\.tauri\vectasim.key            (privater Schlüssel, passwortgeschützt)
-%USERPROFILE%\.tauri\vectasim.key.password   (Passwort)
-%USERPROFILE%\.tauri\vectasim.key.pub        (öffentlicher Schlüssel, identisch mit tauri.conf.json)
+%USERPROFILE%\.tauri\vectasim.key            (private key, password-protected)
+%USERPROFILE%\.tauri\vectasim.key.password   (password)
+%USERPROFILE%\.tauri\vectasim.key.pub        (public key, identical to tauri.conf.json)
 ```
 
-Schlüssel und Passwort sichern (Passwort-Manager). Geht der Schlüssel verloren, können bestehende Installationen kein Update mehr annehmen – dann hilft nur ein neuer Installer mit neuem Schlüssel.
+Back up the key and password (password manager). If the key is lost, existing installations can no longer accept updates – the only way out is a new installer with a new key.
 
-## GitHub-Secrets
+## GitHub secrets
 
-Der Release-Workflow braucht in *Repository → Settings → Secrets and variables → Actions*:
+The release workflow needs, under *Repository → Settings → Secrets and variables → Actions*:
 
-| Secret | Inhalt |
+| Secret | Content |
 |---|---|
-| `TAURI_SIGNING_PRIVATE_KEY` | kompletter Inhalt von `vectasim.key` |
-| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Inhalt von `vectasim.key.password` |
+| `TAURI_SIGNING_PRIVATE_KEY` | full content of `vectasim.key` |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | content of `vectasim.key.password` |
 
-## Release erstellen
+## Creating a release
 
-1. Version in `app/src-tauri/tauri.conf.json` (`version`) und `app/package.json` anheben, `CHANGELOG.md` ergänzen, committen.
-2. Tag setzen und pushen:
+1. Bump the version in `app/src-tauri/tauri.conf.json` (`version`) and `app/package.json`, add to `CHANGELOG.md` (in English), commit.
+2. Create and push the tag:
    ```bash
    git tag v0.2.0 && git push origin v0.2.0
    ```
-3. Der Workflow `.github/workflows/release.yml` baut auf `windows-latest` den NSIS-Installer, signiert das Updater-Artefakt und legt einen **Draft-Release** mit `VectaSim_0.2.0_x64-setup.exe`, `…-setup.exe.sig` und `latest.json` an (Dauer ca. 10–15 min).
-4. Draft prüfen und veröffentlichen – ab dann finden laufende Installationen das Update.
+3. The workflow `.github/workflows/release.yml` builds the NSIS installer on `windows-latest`, signs the updater artifact and creates a **draft release** with `VectaSim_0.2.0_x64-setup.exe`, `…-setup.exe.sig` and `latest.json` (takes about 10–15 min).
+4. Check the draft and publish it – from then on, running installations find the update.
 
-Der Workflow `ci.yml` führt bei jedem Push `cargo test`, `clippy -D warnings`, `tsc` und `npm test` aus.
+The workflow `ci.yml` runs `cargo test`, `clippy -D warnings`, `tsc` and `npm test` on every push.
 
-Der Release-Workflow pinnt `tauri-apps/tauri-action` auf einen festen Commit-SHA (Kommentar nennt die Version), damit ein geänderter Tag nicht unbemerkt in den Build mit Zugriff auf den Signaturschlüssel gelangt. Beim Aktualisieren SHA und Kommentar gemeinsam ändern.
+The release workflow pins `tauri-apps/tauri-action` to a fixed commit SHA (the comment names the version), so that a moved tag cannot slip unnoticed into the build that has access to the signing key. When updating, change the SHA and the comment together.
 
-## Lokal testen
+## Testing locally
 
-Ein `npm run tauri build` ohne gesetzte Signatur-Variablen schlägt fehl, solange `createUpdaterArtifacts` aktiv ist. Lokal signieren (cmd):
+An `npm run tauri build` without the signing variables set fails as long as `createUpdaterArtifacts` is enabled. To sign locally (cmd):
 
 ```bat
 set TAURI_SIGNING_PRIVATE_KEY=%USERPROFILE%\.tauri\vectasim.key
@@ -55,6 +55,6 @@ set /p TAURI_SIGNING_PRIVATE_KEY_PASSWORD=<%USERPROFILE%\.tauri\vectasim.key.pas
 cd app && npm run tauri build
 ```
 
-Ohne Schlüssel: `npm run tauri build -- --config "{\"bundle\":{\"createUpdaterArtifacts\":false}}"`.
+Without a key: `npm run tauri build -- --config "{\"bundle\":{\"createUpdaterArtifacts\":false}}"`.
 
-Im Dev-Modus (`npm run tauri dev`) läuft die Update-Prüfung ins Leere (kein Release passend zur Dev-Version) und meldet das nur still in der Diagnose.
+In dev mode (`npm run tauri dev`) the update check comes up empty (no release matches the dev version) and only reports this quietly in Diagnostics.

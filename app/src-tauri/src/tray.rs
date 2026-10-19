@@ -2,12 +2,15 @@
 //! default off).
 //!
 //! With the setting on there is a tray icon (the window icon) whose tooltip is the short status
-//! ("VectaSim · Aufzeichnung läuft · Reiseflug") and whose menu offers „Öffnen“, the recording
+//! ("VectaSim · Aufzeichnung läuft · Cruise") and whose menu offers „Öffnen“, the recording
 //! state (disabled line), „Debug-Modus“ (same switch as Einstellungen → Diagnose) and „Beenden“.
+//! Texts follow the backend language (`lang`), flight phases stay English like in the UI
+//! (format.ts → PHASE_LABEL); a language switch relabels the menu at once ([`relabel`]).
 //! Minimising the window then hides it into the tray; a double click on the icon (or „Öffnen“)
 //! brings it back. „Beenden“ shows the window and asks it to close, so the close guard of a
 //! running recording still asks first. Switched off, the icon goes away at once.
 
+use crate::lang::{self, Lang};
 use crate::manager::{ProviderManager, StatusSnapshot};
 use crate::notify::focus_main;
 use std::sync::Mutex;
@@ -24,8 +27,10 @@ const REFRESH: Duration = Duration::from_secs(2);
 
 #[derive(Clone)]
 struct Items {
+    open: MenuItem<Wry>,
     status: MenuItem<Wry>,
     debug: CheckMenuItem<Wry>,
+    quit: MenuItem<Wry>,
     last_text: String,
 }
 
@@ -40,20 +45,21 @@ pub fn enabled(store: &Store) -> bool {
     store.get_setting(SETTING_TRAY).ok().flatten().as_deref() == Some("1")
 }
 
-fn phase_label(p: FlightPhase) -> &'static str {
+/// English in both languages, like the UI (format.ts → PHASE_LABEL).
+pub fn phase_label(p: FlightPhase) -> &'static str {
     match p {
-        FlightPhase::Preflight => "Vorbereitung",
+        FlightPhase::Preflight => "Preflight",
         FlightPhase::Pushback => "Pushback",
-        FlightPhase::TaxiOut => "Rollen",
-        FlightPhase::Takeoff => "Start",
-        FlightPhase::Climb => "Steigflug",
-        FlightPhase::Cruise => "Reiseflug",
-        FlightPhase::Descent => "Sinkflug",
-        FlightPhase::Approach => "Anflug",
-        FlightPhase::Final => "Endanflug",
-        FlightPhase::Landing => "Landung",
-        FlightPhase::TaxiIn => "Rollen zum Gate",
-        FlightPhase::Shutdown => "Abgestellt",
+        FlightPhase::TaxiOut => "Taxi out",
+        FlightPhase::Takeoff => "Takeoff",
+        FlightPhase::Climb => "Climb",
+        FlightPhase::Cruise => "Cruise",
+        FlightPhase::Descent => "Descent",
+        FlightPhase::Approach => "Approach",
+        FlightPhase::Final => "Final",
+        FlightPhase::Landing => "Landing",
+        FlightPhase::TaxiIn => "Taxi in",
+        FlightPhase::Shutdown => "Shutdown",
     }
 }
 
@@ -62,24 +68,24 @@ fn recording(s: &StatusSnapshot) -> bool {
 }
 
 /// Menu line: „Aufzeichnung: läuft“ / „Aufzeichnung: bereit“ / „Aufzeichnung: wartet auf Simulator“.
-pub fn menu_text(s: &StatusSnapshot) -> String {
+pub fn menu_text(lang: Lang, s: &StatusSnapshot) -> String {
     let what = if recording(s) {
-        "läuft"
+        lang.tr("läuft", "running")
     } else if s.state == "connected" {
-        "bereit"
+        lang.tr("bereit", "ready")
     } else {
-        "wartet auf Simulator"
+        lang.tr("wartet auf Simulator", "waiting for simulator")
     };
-    format!("Aufzeichnung: {what}")
+    format!("{}: {what}", lang.tr("Aufzeichnung", "Recording"))
 }
 
 /// Tooltip: the short status.
-pub fn tooltip(s: &StatusSnapshot) -> String {
+pub fn tooltip(lang: Lang, s: &StatusSnapshot) -> String {
     let demo = if s.provider == "mock" || s.provider == "replay" { " (Demo)" } else { "" };
     let what = match s.flight.as_ref().filter(|_| recording(s)) {
-        Some(f) => format!("Aufzeichnung läuft · {}", phase_label(f.phase)),
-        None if s.state == "connected" => "verbunden, bereit".to_owned(),
-        None => "wartet auf Simulator".to_owned(),
+        Some(f) => format!("{} · {}", lang.tr("Aufzeichnung läuft", "Recording"), phase_label(f.phase)),
+        None if s.state == "connected" => lang.tr("verbunden, bereit", "connected, ready").to_owned(),
+        None => lang.tr("wartet auf Simulator", "waiting for simulator").to_owned(),
     };
     format!("VectaSim · {what}{demo}")
 }
@@ -111,16 +117,17 @@ fn quit(app: &AppHandle) {
 fn create(app: &AppHandle) -> tauri::Result<()> {
     let debug_on = app.try_state::<Store>().is_some_and(|s| crate::debug_mode_on(&s));
     let snap = app.state::<ProviderManager>().snapshot();
-    let open = MenuItem::with_id(app, "tray-open", "Öffnen", true, None::<&str>)?;
-    let status = MenuItem::with_id(app, "tray-status", menu_text(&snap), false, None::<&str>)?;
-    let debug = CheckMenuItem::with_id(app, "tray-debug", "Debug-Modus", true, debug_on, None::<&str>)?;
-    let quit_item = MenuItem::with_id(app, "tray-quit", "Beenden", true, None::<&str>)?;
+    let l = lang::current();
+    let open = MenuItem::with_id(app, "tray-open", open_text(l), true, None::<&str>)?;
+    let status = MenuItem::with_id(app, "tray-status", menu_text(l, &snap), false, None::<&str>)?;
+    let debug = CheckMenuItem::with_id(app, "tray-debug", debug_text(l), true, debug_on, None::<&str>)?;
+    let quit_item = MenuItem::with_id(app, "tray-quit", quit_text(l), true, None::<&str>)?;
     let menu = Menu::with_items(
         app,
         &[&open, &status, &PredefinedMenuItem::separator(app)?, &debug, &PredefinedMenuItem::separator(app)?, &quit_item],
     )?;
     let mut builder = TrayIconBuilder::with_id(TRAY_ID)
-        .tooltip(tooltip(&snap))
+        .tooltip(tooltip(l, &snap))
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, ev| match ev.id().as_ref() {
@@ -138,8 +145,30 @@ fn create(app: &AppHandle) -> tauri::Result<()> {
         builder = builder.icon(icon.clone());
     }
     builder.build(app)?;
-    *lock(&app.state::<TrayState>()) = Some(Items { status, debug, last_text: tooltip(&snap) });
+    *lock(&app.state::<TrayState>()) = Some(Items { open, status, debug, quit: quit_item, last_text: tooltip(l, &snap) });
     Ok(())
+}
+
+fn open_text(l: Lang) -> &'static str {
+    l.tr("Öffnen", "Open")
+}
+fn debug_text(l: Lang) -> &'static str {
+    l.tr("Debug-Modus", "Debug mode")
+}
+fn quit_text(l: Lang) -> &'static str {
+    l.tr("Beenden", "Quit")
+}
+
+/// The backend language changed: menu entries in the new language (tooltip and status line
+/// follow with the next refresh).
+pub fn relabel(app: &AppHandle) {
+    let Some(items) = lock(&app.state::<TrayState>()).clone() else { return };
+    let l = lang::current();
+    let _ = items.open.set_text(open_text(l));
+    let _ = items.debug.set_text(debug_text(l));
+    let _ = items.quit.set_text(quit_text(l));
+    let snap = app.state::<ProviderManager>().snapshot();
+    let _ = items.status.set_text(menu_text(l, &snap));
 }
 
 /// Icon on or off as the setting says (start, and after the switch in Einstellungen).
@@ -166,7 +195,8 @@ pub fn start(app: AppHandle) {
         loop {
             std::thread::sleep(REFRESH);
             let snap = app.state::<ProviderManager>().snapshot();
-            let tip = tooltip(&snap);
+            let l = lang::current();
+            let tip = tooltip(l, &snap);
             let debug_on = app.try_state::<Store>().is_some_and(|s| crate::debug_mode_on(&s));
             // copies out of the lock: menu calls from this thread wait for the main thread,
             // which may itself be waiting for the lock (tray menu click)
@@ -182,7 +212,7 @@ pub fn start(app: AppHandle) {
                 if let Some(tray) = app.tray_by_id(TRAY_ID) {
                     let _ = tray.set_tooltip(Some(&tip));
                 }
-                let _ = status.set_text(menu_text(&snap));
+                let _ = status.set_text(menu_text(l, &snap));
             }
             if debug.is_checked().is_ok_and(|c| c != debug_on) {
                 let _ = debug.set_checked(debug_on);
@@ -210,7 +240,7 @@ pub fn on_window_event(window: &Window, event: &WindowEvent) {
 /// Einstellungen → Integrationen → Tray switch.
 #[tauri::command]
 pub fn set_tray_enabled(on: bool, app: AppHandle, store: tauri::State<'_, Store>) -> Result<bool, String> {
-    store.set_setting(SETTING_TRAY, if on { "1" } else { "0" }).map_err(|e| e.to_string())?;
+    store.set_setting(SETTING_TRAY, if on { "1" } else { "0" }).map_err(lang::ui_error)?;
     apply(&app);
     Ok(app.tray_by_id(TRAY_ID).is_some())
 }
@@ -229,14 +259,19 @@ mod tests {
     #[test]
     fn status_texts() {
         let mut s = StatusSnapshot { provider: "simconnect".into(), state: "connecting".into(), ..Default::default() };
-        assert_eq!(menu_text(&s), "Aufzeichnung: wartet auf Simulator");
-        assert_eq!(tooltip(&s), "VectaSim · wartet auf Simulator");
+        let de = Lang::De;
+        assert_eq!(menu_text(de, &s), "Aufzeichnung: wartet auf Simulator");
+        assert_eq!(tooltip(de, &s), "VectaSim · wartet auf Simulator");
+        assert_eq!(tooltip(Lang::En, &s), "VectaSim · waiting for simulator");
         s.state = "connected".into();
-        assert_eq!(menu_text(&s), "Aufzeichnung: bereit");
+        assert_eq!(menu_text(de, &s), "Aufzeichnung: bereit");
+        assert_eq!(menu_text(Lang::En, &s), "Recording: ready");
         s.flight = Some(FlightSummary { state: FlightState::Active, phase: FlightPhase::Cruise, ..Default::default() });
-        assert_eq!(menu_text(&s), "Aufzeichnung: läuft");
-        assert_eq!(tooltip(&s), "VectaSim · Aufzeichnung läuft · Reiseflug");
+        assert_eq!(menu_text(de, &s), "Aufzeichnung: läuft");
+        assert_eq!(tooltip(de, &s), "VectaSim · Aufzeichnung läuft · Cruise");
+        assert_eq!(tooltip(Lang::En, &s), "VectaSim · Recording · Cruise");
         s.provider = "mock".into();
-        assert!(tooltip(&s).ends_with("(Demo)"));
+        assert!(tooltip(de, &s).ends_with("(Demo)"));
+        assert_eq!(phase_label(FlightPhase::TaxiIn), "Taxi in");
     }
 }

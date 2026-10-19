@@ -155,7 +155,10 @@
       "onGround": true,
       "flapsIndex": 2,
       "gearPct": 100.0,
-      "fuelTotalKg": 6197.0
+      "fuelTotalKg": 6197.0,
+      "tasKt": 143.25,
+      "windDirTrueDeg": 244.6,
+      "windKt": 12.25
     },
     {
       "tMs": 1792137603250,
@@ -173,7 +176,10 @@
       "onGround": true,
       "flapsIndex": 2,
       "gearPct": 100.0,
-      "fuelTotalKg": 6195.5
+      "fuelTotalKg": 6195.5,
+      "tasKt": 144.25,
+      "windDirTrueDeg": 244.6,
+      "windKt": 12.25
     },
     {
       "tMs": 1792137604000,
@@ -191,7 +197,10 @@
       "onGround": false,
       "flapsIndex": 2,
       "gearPct": 100.0,
-      "fuelTotalKg": 6194.0
+      "fuelTotalKg": 6194.0,
+      "tasKt": 145.25,
+      "windDirTrueDeg": 244.6,
+      "windKt": 12.25
     },
     {
       "tMs": 1792137605000,
@@ -209,7 +218,8 @@
       "onGround": false,
       "flapsIndex": 2,
       "gearPct": 100.0,
-      "fuelTotalKg": 6192.5
+      "fuelTotalKg": 6192.5,
+      "tasKt": 146.25
     },
     {
       "tMs": 1792137606000,
@@ -227,7 +237,10 @@
       "onGround": false,
       "flapsIndex": 2,
       "gearPct": 0.0,
-      "fuelTotalKg": 6191.0
+      "fuelTotalKg": 6191.0,
+      "tasKt": 147.25,
+      "windDirTrueDeg": 244.6,
+      "windKt": 12.25
     },
     {
       "tMs": 1792137607000,
@@ -245,7 +258,10 @@
       "onGround": false,
       "flapsIndex": 2,
       "gearPct": 0.0,
-      "fuelTotalKg": 6189.5
+      "fuelTotalKg": 6189.5,
+      "tasKt": 148.25,
+      "windDirTrueDeg": 244.6,
+      "windKt": 12.25
     },
     {
       "tMs": 1792137608000,
@@ -263,7 +279,10 @@
       "onGround": false,
       "flapsIndex": 2,
       "gearPct": 0.0,
-      "fuelTotalKg": 6188.0
+      "fuelTotalKg": 6188.0,
+      "tasKt": 149.25,
+      "windDirTrueDeg": 244.6,
+      "windKt": 12.25
     },
     {
       "tMs": 1792137609000,
@@ -281,7 +300,10 @@
       "onGround": true,
       "flapsIndex": 2,
       "gearPct": 0.0,
-      "fuelTotalKg": 6186.5
+      "fuelTotalKg": 6186.5,
+      "tasKt": 150.25,
+      "windDirTrueDeg": 244.6,
+      "windKt": 12.25
     }
   ]
 }

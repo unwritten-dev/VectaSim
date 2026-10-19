@@ -1,180 +1,275 @@
 # Changelog
 
+Entries are in English from 2026-10-18 on; earlier entries were translated.
+
 ## Unreleased
+
+## 0.4.0 – 2026-10-19 (Beta)
+
+First beta: X-Plane 12, approach assessment stage 2 with the simulator ILS, lateral tracking, overlay and API server, IVAO and a traffic card with photos, year in review, globe map, English and German UI, installer SimConnect download.
+
+### Integrations
+
+- Discord status works without any setup: the VectaSim Discord application is built in (public Application ID, not a secret); the field for a custom app ID is now only visible under “Custom Discord application (experts)”
+
+### Overlay & API
+
+- New local server for OBS, a second screen and your own tools, *Settings → Overlay & API*: off by default, then only on this PC (`http://127.0.0.1:8095`, port configurable). Status with “running since” and connected overlays; a port in use is reported.
+- OBS overlays with a transparent background: `/overlay/hud` (phase, altitude, speed, V/S, heading, remaining, ETA), `/overlay/landing` (20 s after touchdown: landing rate, g, bounces, band, runway) and `/overlay/route` (route, block time, aircraft, phase bar); `?scale=`, `?preview=1`, `?local=1`. Copy the URLs in the panel or open them in the browser; the start page `/` explains everything, including OBS instructions.
+- JSON API v1, read-only: `GET /api/v1/status`, `/flight`, `/telemetry`, `/landing`, `/logbook?limit=` and the WebSocket `/api/v1/ws` (telemetry at 2 Hz, events `phase`, `landing`, `flightSaved`, `status`). Docs with examples: `docs/overlay-api.md`.
+- “Reachable on the network” opens the server to tablets and phones on your Wi-Fi – only with a random token (show, copy, regenerate); on this PC it still works without. Other websites get no data (CORS localhost only, protection against DNS rebinding), and streamer mode masks registration, callsign and airline here too.
+
+### Map
+
+- World view as a globe instead of a flat Mercator map – on the live map, the track map in logbook/debrief and the countries world map; no more duplicated Canada at the edge, no more inflated Greenland. Zooming in turns the globe into the flat map by itself; follow, 3D altitude profile, airport diagrams and VATSIM layers stay unchanged. New “Globe” switch next to “3D” (Countries view: “Globe” checkbox); the choice applies to all maps and is on by default.
+
+### Installer
+
+- At the end, the installer offers to fetch `SimConnect.dll` from Microsoft right away (official MSFS SDK 0.24.6.0, about 108 MB, SHA-256-verified, only the DLL is kept) – VectaSim then connects to MSFS on its very first start. The question only appears if no suitable DLL or MSFS SDK is present yet; silent and passive installations (including automatic updates) never ask and download nothing. A failed download does not abort the installation; *Settings → Simulator* keeps offering it.
+- New headless mode `vectasim.exe --install-simconnect [--check]` (no window; exit codes 0/1/2/3, log `%LOCALAPPDATA%\io.vectasim.app\logs\simconnect-install.log`), which the installer calls for this.
+
+### Online networks
+
+- IVAO alongside VATSIM on the live map: next to “Traffic” in the map bar you choose VATSIM, IVAO or both. IVAO aircraft have an outline in the accent colour, controller dots staffed on IVAO a ring; popups and the online list in the “Dispatch” side panel name the network. The data source is IVAO’s public Whazzup file (no login, fetched at most every 15 s as IVAO requires). Existing installations stay on VATSIM; IVAO is off until you choose it.
+- The diagnostics package contains source, age of the last fetch and the last error for both networks.
+- Flight card for other traffic: clicking a VATSIM/IVAO aircraft (or its entry in the online list in the “Dispatch” panel) opens a card at the right edge of the map in the style of “Ready”/“After the flight” instead of the previous popup – with callsign, network, airline (from the callsign prefix), type as ICAO code and in plain text, route with airport names, flight rules, planned cruise altitude, current altitude with climb/descent trend, GS, heading, squawk, distance and bearing from your own aircraft, “online for”, expandable route and remarks, and the pilot’s name (VATSIM only, not in streamer mode). The selected aircraft gets an accent ring, stays selected across feed updates and reports “no longer online” before the card closes after 30 s. “Follow” moves the camera with it (cancels following your own aircraft), “Show route” draws the great circle departure → destination as a dashed line; Esc closes.
+- Photo in the flight card: if the registration is in the remarks (`REG/DAIZB`) or the callsign itself is one (GA), the card shows a Planespotters photo with the photographer (click opens the page in the browser), otherwise the type silhouette with “no photo (registration unknown)”. Requests go through the same queue as the fleet photos (at most 1 per second), are cached for the session only, never written to the logbook, and are skipped when aircraft photos are off in the settings.
+- Settings → Display: the status line names each network separately (“Online traffic: VATSIM on (2,176 pilots, 211 controllers) · IVAO off”) instead of the sum of both networks under “VATSIM”; two checkboxes VATSIM/IVAO switch the networks right there, equivalent to “Traffic” on the map. Settings → Diagnostics shows one row per network with source (host), age of the last fetch (“12 s ago”), counts and status or last error; “Copy diagnostics” includes them. Errors of an IVAO fetch are now also called “IVAO is not reachable” where VATSIM used to be assumed. Footer: “Online traffic VATSIM · IVAO”; the simulator card names X-Plane 12 alongside MSFS 2020/2024.
+
+### Interface
+- German UI: the lateral metric is now called „Kurs“ (as in the ILS pair Gleitpfad/Kurs) instead of „Grundlinie“ – hero „Kurs (RMS)“ with the caption „Ablage zur verlängerten Mittellinie in Dots“, bands „auf dem Kurs“ · „leichte Ablage“ · „deutliche Ablage“, key sentence, hints, facts row, trends, dispersion tile and approach card; English texts unchanged.
+- README (English/German) reviewed for end users: corrected status, theme names, update signing, Fleet/Discord/overlay wording; new sections System requirements, Your data & privacy, Uninstall, Known limitations; screenshots per language (`docs/screenshots/en|de/`). The countries and landing hints about demo flights now point to the “Demo flights” filter in the logbook instead of a non-existent setting.
+- Map and settings polish: other traffic in a muted blue-grey in every theme (own aircraft stays yellow with a ring), traffic split button with keyboard-navigable network menu, follow mode restored after closing the traffic card, base-map labels in the UI language, globe option under Display and dimmed below the flat-map zoom, diagnostics across both columns, X-Plane address folded while automatic detection runs, shorter installer dialog
+
+- The event list of the live view (“Flight” side panel, badge on the tab) now stays complete for the current flight: it used to live in the state of the app root and was empty after every rebuild of the interface (reloading the window, in development every hot reload), while off-block and block time came back from the backend – after a go-around the badge then showed 1. Now it has its own store outside the component tree with a copy in the window session, bound to the provider; up to 200 instead of 40 rows.
+- Settings: two evenly filled columns – Simulator, Flight planning and Updates on the left, Integrations on the right; Keyboard and Diagnostics share the last row. Below 1100 px a single column; “Display” and “Data” still full width.
+- Logbook → Landings → Trends: the fifth chart (touchdown zone) takes the whole row in the two-column grid instead of standing alone on the left; the number of columns follows the measured width so grid and chart width match.
+- UX review fixes (2026-10-18): the traffic flight card no longer covers the selected aircraft or its route (camera fits into the free area beside the card and above the HUD), Follow / Show route sit right under the title, the card takes at most ~45 % of the map and a smaller photo on short windows; the route line is drawn above the traffic; the Dispatch traffic list keeps its order while the pointer is over it (two fixed lines per entry with a chevron); light themes get darker traffic symbols and callsigns (≥ 4.5:1) and a dark ring around the own aircraft; checkboxes in settings rows stay next to their label; Simulator and overlay port save on leaving the field or Enter with a short “✓ saved”, both 1024–65535; the countries map refits the world when switching globe/flat; the installer shows the real data folder instead of `%LOCALAPPDATA%` and tells X-Plane users they can answer “No”.
+- UX review section 3 (year in review and trends): Logbook → Year labels its switches („Zeitraum“, „Format“) with a visible active segment in light themes, hides the year chip in „Letzte 12 Monate“ and shows a single year as text, disables Save/Copy on cards without data (with tooltip and per-card screen-reader labels), renames the exports to „Alle einzeln speichern“ / „Alle als ein langes Bild“, and explains imports, the first recorded flight and the 200-facts window as hint lines; new optional eighth card „Mit Sternchen“ (recorded flights with pause, time acceleration, slew or a position jump; only when there are such flights). Trends: y axis up to the next tick above the data with its unit, no lone „Alle“ chip, legend for the dashed band limits, the „Kurs“ tooltip explained, UTC/local note following the setting, no empty month comparison, sticky first table column, and an empty state with a demo hint and a link to the last debrief.
+
+### Recording
+
+- Future flights record the data for the extended approach rating (track v2): true airspeed (TAS), wind at the aircraft according to the simulator, ILS on NAV 1 (localizer/glide slope present and received, deviations, published glide path angle and course), autopilot/autothrust state, N1, spoilers (surface, lever, armed), angle of attack, number of flap positions and the aircraft’s design speeds VS0/VS1. Older flights stay readable unchanged; these values are simply missing for them.
+- SimConnect: a separate 1 Hz definition for this and a one-off one for the design speeds. If the simulator or an add-on doesn’t know one of these variables, only that one drops out – position, speeds and landing detection carry on unchanged. ILS deviations only count when the tuned station has a localizer or glide slope. Raw dumps record the new definitions as well, and the replay plays them back.
+- Exports: CSV, GPX, KML and JSON contain TAS and sim wind where recorded (CSV: three new columns at the end, empty for older flights).
+- Settings → Diagnostics → Live raw data shows the new values (raw and converted, also in the demo flight); the debrief’s measurement log names TAS, sim wind and ILS of the final approach. The rating itself does not change yet.
+- Demo flight: provides wind (250°/8 kt), ILS 25C, autopilot, N1, spoilers and angle of attack, so everything can be checked without a simulator.
+
+### Year in review
+
+- New logbook section “Year”: “Your year 2026” as seven story cards – Overview (flights, block hours, distance in nm and “x times around the Earth”, countries, airports), Your routes (top 5 routes, longest flight, great circles on a Natural Earth world map), Your fleet (types and registrations by hours), Your landings (count, median landing rate, smoothest and hardest landing with runway and date, bands, yearly dispersion plot on the normalised runway with touchdown zone rate), Your approaches (share stable, Ø “stable from”, go-arounds as a decision), Your months (flights and block hours per month, most active month and day) and Your countries (world map, countries visited for the first time highlighted).
+- Year selection (years with flights) and a switch calendar year / last 12 months; portrait 1080 × 1920 or landscape 1200 × 675 (PNG 2400 × 1350). Save each card individually (the dialog starts in the card folder, default Pictures\VectaSim) or copy it, “Save all” into a folder, “Save stack” puts all portrait cards one below the other into a single image. Cards without data are skipped in the bulk export.
+- Calculated in the frontend from the existing data: imported flights count for hours, routes, fleet, months and countries, not for landings and approaches; demo flights only with “Include demo flights”. The dispersion plot uses the last 200 landings with a known runway (with a note if the year goes further back). Registrations are masked by streamer mode or “Landing card without registration”.
+
+### X-Plane
+
+- **X-Plane 12 as a second simulator** (from 12.1.1, via the built-in Web API – no plugin, no SimConnect.dll): position, altitudes, speeds, V/S, attitude, g, ground, gear, flaps (index from lever and detents), parking brake, fuel and weight in kg, engines, transponder, Zulu time, pause, time acceleration, lights, wind, angle of attack, N1, thrust lever, speedbrake and aircraft (title, ICAO, registration). 10 values per second (the Web API’s maximum); datarefs that an X-Plane version or aircraft doesn’t know stay empty without disturbing the connection.
+- Connection: waits for X-Plane (attempt every 5 s), reconnects by itself after a restart, detects an aircraft change; a silent sim (pause) is checked via the REST API instead of being disconnected.
+- Landing rate: X-Plane reports no touchdown value – VectaSim takes the last vertical speed measured in the air (source “measured”).
+- *Settings → Simulator*: choice of “Automatic (MSFS first, then X-Plane)” (default), “MSFS 2020/2024” or “X-Plane 12”, and host/port of the Web API (default `localhost:8086`; also `VECTASIM_XPLANE_HOST`/`VECTASIM_XPLANE_PORT`, `VECTASIM_PROVIDER=xplane`). Automatic only switches if no MSFS is there for 10 s (or SimConnect.dll is missing) and an X-Plane Web API responds; every switch is logged.
+- Diagnostics: source `X-Plane Web API localhost:8086`, X-Plane and API version, data rate and all datarefs raw and converted; raw dumps record X-Plane sessions as well (`source: "xplane"`), and the replay plays them back. The connection rows of the live raw data are labelled per source (DLL, RECV_OPEN, SimConnect version and HRESULTs only for SimConnect).
+- Texts: “Waiting for simulator” instead of “Waiting for MSFS” in the status bar and on the ready card.
+
+### Demo
+
+- The demo flight now always lands normally, but with a few small, deliberate mistakes so the debrief has something to show: ≈ 12 kt fast at the FAF (reduced to ≈ +4 kt by 500 ft), ≈ 0.5 dots above the glide path at 1,000 ft (captured by 500 ft, briefly 0.3 dots low below 300 ft), ≈ 90 m (0.6 dots) overshoot of the extended centreline on the intercept followed by a gentle S (2 side changes), landing flaps only at ≈ 1,100 ft, a short float (flare from ≈ 25 ft, ≈ 6 s) and touchdown ≈ 520 m past the threshold (in the touchdown zone, beyond the aiming point), ≈ 9 m right, ≈ −230 fpm, ≈ 1.3 g. The approach stays “stable”, the landing “normal”. Wind, ILS deviations, N1 and angle of attack match the deviations. The go-around, bounce, teleport and reconnect variants are unchanged.
+
+### Languages
+
+- Backend bilingual (DE/EN) according to the setting `language` (`system` = Windows display language): Windows notifications, tray menu and tooltip (flight phases now in English as in the app), Discord status, the startup dialog “logbook not opened”, diagnostics package (`README.txt`, `HINWEISE.txt`/`NOTES.txt`) and the commands’ error messages; logbook errors have stable codes with parameters (`store.flight_not_found`, `store.merge_gap` …); overlays with `?lang=de|en` (default: app language), start page bilingual, `/api/v1/status` with `lang`, `bandLabel` in the app language.
+- Countries and year in review bilingual (DE/EN): list, filters, continents, map tooltip and countries PNG, all seven story cards (“Your year 2026”, “Your landings”, “1.8 times around the Earth”), month names via `Intl.DateTimeFormat`, file names per language (`VectaSim_Year_2026_1-Overview_portrait.png`, `VectaSim_Countries_…`); country names and sorting follow the language (German/English name from the country list).
+- Live view and map bilingual (DE/EN): HUD (Remaining, ETA, Heading), the “Ready”/“After the flight” cards, side panel Flight/Systems/Events, map bar (Follow, Globe, Traffic, Weather), network choice, the flight card for other traffic including compass points (NO/NE) and photo notes, airfield display and *Settings → Diagnostics → Live raw data*; numbers and limits in texts follow the language’s number format (`4 000 fpm` / `4,000 fpm`), flight phases stay in English.
+- Logbook and flight bilingual (DE/EN): flight list with search, filters, tags, trash and merge, flight strips including screen reader text, flight detail (landings, circuits, plan vs. actual, phases, integrity, export menu), notes & tags with rating and corrections, fleet and aircraft selection, activities, landings tab and altitude profile; the PIREP text follows the language (`Flight no.`, `Date 16 Oct 2026 (UTC)`, `Punctuality on time`), the PIREP JSON stays language-neutral (`pirep/v1`, only the integrity findings are text); technical terms such as block time, air time, off-block/on-block, touch-and-go and go-around.
+- Language choice in *Settings → Display → Language*: System / Deutsch / English, applies immediately (System = Windows display language). Interface and settings bilingual (DE/EN): sidebar, logbook tabs, title bar, recording status (status button, map pill), toasts and prompts (landing, flight saved, sim gone, resume, quitting during a recording), error messages with the next step, all settings panels (Simulator, SimConnect download, Flight planning, Updates, Integrations, Overlay & API, Display, Data, Keyboard with “Ctrl” shortcuts, Diagnostics), CSV import and SimBrief dispatch; the confirmation word for “Delete all data” per language (LÖSCHEN / DELETE).
+- Landing and approach debrief bilingual (DE/EN): key sentence, notes, provenance chips (SIM/MEAS./DERIV. with plain-language tooltips), methodology and measurement log, history, scatter plots, runway editor, replay bar, landing and approach card PNG in the UI language, theme names; import warnings, replay status and download/PIREP errors from the backend in the backend language. Debrief wording: “centreline” for the runway, “extended centreline” for the approach (the key figure *Lateral* – German „Kurs“ – gets a tooltip), German UI “Localizer” instead of “Lokalizer”, an explaining line for RMS/MAD under the approach heroes, a new note for speed above the reference at the FAF/1000 ft (info from +10 kt, warning from +15 kt), S-turns from 2 side changes and landing flaps below 1,200 ft now warnings.
+
+### Security
+
+- Hardening after the security audit: the X-Plane client no longer crashes on a broken chunk size (limit of 4 MiB per response and WebSocket message, overall deadline per request), and auto-detection no longer mistakes another service on port 8086 (e.g. InfluxDB) for X-Plane. The METAR decoder copes with non-ASCII characters. All web requests (VATSIM, IVAO, METAR, Planespotters, SimBrief) now only go over HTTPS, also on redirects, and with a size limit; SimBrief error messages no longer contain the pilot ID. The overlay server has a header timeout (10 s), at most 64 simultaneous connections, a tight 16-client limit for WebSockets and `frame-ancestors 'none'`; in streamer mode the callsign is also masked in the aircraft title of the landing. The SimConnect download aborts a stalled connection (below 1 KiB/s for 60 s, at most 30 min).
+
+### Approach
+
+- Approach rating stage 2 with the track v2 data (future flights; older flights and approaches without ILS stay unchanged with geometry and the 3° assumption): if NAV 1 receives a valid glide slope over at least 60 % of the samples 1000 → 200 ft, the simulator’s ILS is the reference – angle from `NAV RAW GLIDE SLOPE`, deviation from `NAV GLIDE SLOPE ERROR` (“3.0° (ILS)”, chip “SIM”); likewise the localizer from `NAV CDI` instead of the geometry. Both sources appear in the measurement log; if their median differs by more than 0.5 dot, the note “sim ILS and geometry differ (check runway coordinates)” appears, and at more than 1° glide path or 1.5 dots course the ILS counts as foreign (a different ILS tuned) and VectaSim rates geometrically.
+- Sim wind on final: head-/crosswind relative to the runway (median 1000 → 50 ft), range as gustiness and change between 1000 ft and the threshold – next to the METAR wind in the debrief, in the approach section and in the measurement log. Notes for tailwind above 5 kt, crosswind above 15 kt and wind shear above 15 kt. The energy uses the simulator’s TAS instead of the ISA approximation.
+- New criteria after FSF ALAR BN 7.1 (only with data, otherwise “not measured”): **landing flaps** at 1000/500 ft (the setting entered for the aircraft, otherwise the highest lever position, otherwise the one at touchdown), **thrust** N1 ≥ 40 % below 1000 ft (idle only counts after 5 s and not below 50 ft; piston engines without N1 are excluded), **spoilers** retracted on final (≤ 2 %). They count in the bands like the other criteria. Autopilot and A/THR are shown for information only (“autopilot until 800 ft, then manual”).
+- Vapp cascade: the aircraft’s entered Vapp → flown median → 1.3 × the simulator’s VS0 (source “assumption (VS0×1.3)”); the SimBrief OFP contains no approach speed. New field *Fleet → Landing flaps (setting)* per aircraft (e.g. 3 for CONF 3 on the A320).
+- Energy 10 nm → 1000 ft as a band (“on profile” / “too high” from +500 ft / “too low” from −300 ft) in the facts block.
+- **Approach card** (1200 × 675 PNG) with summary sentence, band, gates FAF/1000/500 with ticks, mini profile (height to the path and speed to the reference), lateral strip, sim wind and wordmark: “save/copy approach card” in the approach section, registration masked in streamer mode; with “save landing card automatically” it is saved next to the landing card after every landing.
+- Approach facts in the cache recalculated (version 5), schema 15 (landing flaps per aircraft). The demo flight now delivers the localizer needle at the usual scale (full deflection = 2 dots).
 
 ## 0.3.0 – 2026-10-18 (Alpha)
 
-Zweite Alpha: Grundlinie als eigene Dimension der Anflugbewertung, überarbeitete 3D-Ansicht.
+Second alpha: lateral tracking as a dimension of its own in the approach rating, reworked 3D view.
 
-### Karte
+### Map
 
-- 3D-Ansicht überarbeitet: Das Band in Flughöhe folgt jetzt Abtastung für Abtastung statt in 200-ft-Stufen zu springen, keine Lücken oder Sägezähne mehr an den Abschnittsgrenzen; der Vorhang ist dezenter (14 % statt 22 %) und liegt unter den Beschriftungen von Flughäfen und Orten
+- 3D view reworked: the band at flight altitude now follows the track sample by sample instead of jumping in 200 ft steps, no more gaps or sawtooth at the segment boundaries; the curtain is more subtle (14 % instead of 22 %) and lies below the labels of airports and places
 
-### Anflug
-- **Grundlinie als eigene Kennzahl** neben dem Gleitpfad: vierte Hero-Kennzahl *Grundlinie (RMS)* im Debrief (Dots, sonst Meter; Herkunft ABGEL.) mit größter Ablage, Ablage bei 500 ft und über der Schwelle (+ = rechts); Zeile *Grundlinie* mit Band, Überschießen beim Eindrehen und S-Kurven
-- Neue Werte der Anflugbewertung (`lateral`): `locMaxDots` (größte Ablage 1000 → 50 ft), `latAt500M`/`locAt500Dots`, `latAtThresholdM`, `interceptOvershootM`/`-Dots` (Gegenseite in den ersten 20 s nach „eingedreht“), `lateralReversals` (Seitenwechsel über 0,3 Dot zwischen 1000 und 100 ft) und `lateralBand` – „auf der Grundlinie“ (RMS ≤ 0,3 und max. ≤ 0,5 Dot), „leichte Abweichung“ (RMS ≤ 0,6 und max. ≤ 1 Dot = FSF-Gate), „deutlich“ darüber; die feineren Stufen sind VectaSim-Konvention, Schwellen in `ApproachConfig`. Ohne Piste oder mit aus der Rollspur abgeleiteter Piste nicht bewertet
-- Kernsatz nennt die Ablage bei 500 ft, wenn der Anflug nicht auf der Grundlinie lag; neue Hinweise zu Überschießen (> 0,5 Dot), S-Kurven (ab 2/3), Ablage unter 500 ft (> 0,5 Dot), Ablage über der Schwelle (> 10 m / > ¼ Pistenbreite) und zu nicht bewertbarer Querablage
-- Streubild: Kachel *Grundlinie 500 ft* (Ø |Ablage|); Verlauf: Reihe *Grundlinie (RMS)* in Dots. Die gecachten Anflug-Fakten werden einmal neu berechnet (Version 4)
+### Approach
+- **Lateral tracking as a metric of its own** next to the glide path: a fourth hero metric *Lateral (RMS)* (“Grundlinie (RMS)”) in the debrief (dots, otherwise metres; source DERIVED) with the largest offset, offset at 500 ft and over the threshold (+ = right); a *lateral* row (“Grundlinie”) with band, overshoot on the intercept and S-turns
+- New values in the approach rating (`lateral`): `locMaxDots` (largest offset 1000 → 50 ft), `latAt500M`/`locAt500Dots`, `latAtThresholdM`, `interceptOvershootM`/`-Dots` (opposite side within the first 20 s after “established”), `lateralReversals` (side changes beyond 0.3 dot between 1000 and 100 ft) and `lateralBand` – “on the centreline” (RMS ≤ 0.3 and max. ≤ 0.5 dot), “slight deviation” (RMS ≤ 0.6 and max. ≤ 1 dot = FSF gate), “significant” above that; the finer steps are a VectaSim convention, thresholds in `ApproachConfig`. Not rated without a runway or with a runway derived from the ground track
+- The summary sentence names the offset at 500 ft when the approach was not on the centreline; new notes on overshoot (> 0.5 dot), S-turns (from 2/3), offset below 500 ft (> 0.5 dot), offset over the threshold (> 10 m / > ¼ runway width) and on lateral offsets that cannot be rated
+- Dispersion plot: tile *Lateral 500 ft* (Ø |offset|); Trends: row *Lateral (RMS)* in dots. The cached approach facts are recalculated once (version 4)
 
-### Oberfläche
-- Die Titelleiste ist Teil der Fläche: gleicher Hintergrund wie Sidebar und Inhalt, keine Trennlinie mehr darunter; die Fensterknöpfe heben sich nur noch beim Überfahren ab
+### Interface
+- The title bar is part of the surface: same background as sidebar and content, no more dividing line below it; the window buttons only stand out on hover
 
 ## 0.2.0 – 2026-10-18 (Alpha)
 
-Erste öffentliche Vorabversion. Alles unten ist seit 0.1.0 dazugekommen; die Oberfläche ist deutsch, Flugphasen englisch.
+First public pre-release. Everything below was added since 0.1.0; the interface is German, flight phases English.
 
-### Karte
+### Map
 
-- Der geflogene Track ist deutlich besser zu sehen: breitere Linie mit kräftigem Rand, und die Höhenfarben der dunklen Themes beginnen heller (Signal zeichnet den Track jetzt in Cyan statt Grau, Graphit & Amber in Amber)
-- **3D-Ansicht** auf der Live-Karte und auf der Karte im Logbuch/Debrief (Schalter *3D* in der Kartenleiste): Die Karte neigt sich, und der Track steht als Höhenprofil im Raum – ein durchscheinender Vorhang vom Boden bis zur geflogenen Höhe mit einem farbigen Band an der Höhe selbst. Drehen und neigen geht auch mit der rechten Maustaste oder Strg + Ziehen; der Kompass zeigt die Neigung
+- The flown track is much easier to see: a wider line with a strong outline, and the altitude colours of the dark themes start brighter (Signal now draws the track in cyan instead of grey, Graphit & Amber in amber)
+- **3D view** on the live map and on the map in logbook/debrief (switch *3D* in the map bar): the map tilts, and the track stands in space as an altitude profile – a translucent curtain from the ground up to the flown altitude with a coloured band at the altitude itself. Rotating and tilting also works with the right mouse button or Ctrl + drag; the compass shows the tilt
 
 ### SimConnect
-- *SimConnect herunterladen*: VectaSim holt die `SimConnect.dll` auf Klick aus dem offiziellen MSFS-2020-SDK-Download von Microsoft (0.24.6.0, ~108 MB, SHA-256-geprüft, ohne Installation/Adminrechte) nach `%LOCALAPPDATA%\io.vectasim.app\simconnect\` – passt zu MSFS 2020 und 2024; die Diagnose zeigt die Herkunft der DLL (Commands `simconnect_download_info`, `download_simconnect`)
-- Karte *SimConnect einrichten* in *Einstellungen → Simulator* (Fortschritt Laden/Prüfen/Entpacken, „Erneut versuchen“ bei Fehlern, Lizenzhinweis); Hinweise lauten jetzt „SimConnect fehlt noch – unter Einstellungen → Simulator mit einem Klick herunterladen“, das Status-Popover springt mit *SimConnect einrichten* dorthin, die Diagnose zeigt Pfad und Herkunft der DLL
+- *Download SimConnect*: on click, VectaSim fetches `SimConnect.dll` from Microsoft’s official MSFS 2020 SDK download (0.24.6.0, ~108 MB, SHA-256-verified, without installation/admin rights) into `%LOCALAPPDATA%\io.vectasim.app\simconnect\` – works with MSFS 2020 and 2024; Diagnostics shows where the DLL came from (commands `simconnect_download_info`, `download_simconnect`)
+- *Set up SimConnect* card in *Settings → Simulator* (progress downloading/verifying/extracting, “Try again” on errors, license note); notices now read “SimConnect is still missing – download it with one click under Settings → Simulator”, the status popover jumps there with *Set up SimConnect*, Diagnostics shows the path and origin of the DLL
 
 ### Import
-- *Einstellungen → Daten → Import → CSV importieren …*: Flüge aus anderen Logbüchern übernehmen – die **Volanta-Import-CSV** (13 Spalten `Origin,Destination,DepartureTime,Duration,…`), das **eigene Logbuch-CSV** von VectaSim, ein **SimToolkitPro**-Export (ohne Gewähr, Spalten nicht dokumentiert) oder jede andere Tabelle (VA/phpVMS …) mit freier Spaltenzuordnung
-- Dialog in drei Schritten: Datei wählen (erkannt werden Format, Trennzeichen `,` `;` Tab `|` inkl. Excels `sep=`-Zeile, Kodierung UTF-8/mit BOM/UTF-16/Latin-1 und die Kopfzeile), Spalten zuordnen (vorbelegt aus dem Format und deutschen/englischen Spaltennamen; Datum und Uhrzeit zusammen oder getrennt; Formate ISO, `TT.MM.JJJJ`, `MM/TT/JJJJ`, Unix-Zeit; Zeiten ohne Zone als UTC oder als Ortszeit dieses PCs mit Sommerzeit; kg/lb; Dauer als `H:MM` oder Zahl), Vorschau der ersten 20 Zeilen mit Hinweisen und Fehlern, dann Import mit Ergebnis-Hinweis. Die Zuordnung merkt sich VectaSim je Format
-- Importierte Flüge sind abgeschlossene Flüge ohne Track (`provider = import:<format>`, Simulator „Import“, Tags `import` + Quelle wie `volanta`/`stkp`/Dateiname): sie zählen für Stunden, Strecken, Flotte (Kennzeichen legt das Flugzeug an), Flughäfen und Länder, nicht für Landeanalyse, Streubild und Anflugbewertung. Fehlt die Distanz, trägt VectaSim den Großkreis zwischen den Flughäfen ein; fehlt die Ankunft, rechnet es sie aus der Blockzeit
-- Eine **Landerate aus der Datei** steht als Zeile in den Notizen („Landerate laut Importdatei: −142 fpm (nicht von VectaSim gemessen)“) – sie stammt von einem anderen Messverfahren und wird bewusst nicht als Aufsetzer gespeichert; ebenso ein Verbrauch ohne Start-/Endwert
-- **Duplikate** (abschaltbar): gleiche Strecke und Off-Block weniger als 15 Minuten auseinander – gegen das Logbuch samt Papierkorb und innerhalb der Datei. Fehlerhafte Zeilen (Flughafen oder Datum fehlt/unlesbar) werden mit Zeilennummer übersprungen
-- Commands `csv_sniff`, `csv_preview`, `csv_import` (nur `.csv`/`.txt`, höchstens 50 MB, 100 Zeilen je Transaktion); Modul `vectasim_store::csvimport`
+- *Settings → Data → Import → Import CSV …*: bring over flights from other logbooks – the **Volanta import CSV** (13 columns `Origin,Destination,DepartureTime,Duration,…`), VectaSim’s **own logbook CSV**, a **SimToolkitPro** export (no guarantee, columns not documented) or any other table (VA/phpVMS …) with free column mapping
+- Dialog in three steps: choose the file (detects format, delimiter `,` `;` tab `|` including Excel’s `sep=` line, encoding UTF-8/with BOM/UTF-16/Latin-1 and the header row), map columns (prefilled from the format and German/English column names; date and time together or separate; formats ISO, `DD.MM.YYYY`, `MM/DD/YYYY`, Unix time; times without a zone as UTC or as this PC’s local time with daylight saving; kg/lb; duration as `H:MM` or a number), preview of the first 20 rows with notes and errors, then import with a result notice. VectaSim remembers the mapping per format
+- Imported flights are completed flights without a track (`provider = import:<format>`, simulator “Import”, tags `import` + source such as `volanta`/`stkp`/file name): they count for hours, routes, fleet (the registration creates the aircraft), airports and countries, not for landing analysis, dispersion plot and approach rating. If the distance is missing, VectaSim enters the great circle between the airports; if the arrival is missing, it calculates it from the block time
+- A **landing rate from the file** goes into the notes as a line (“Landing rate according to the import file: −142 fpm (not measured by VectaSim)”) – it comes from a different measuring method and is deliberately not stored as a touchdown; likewise a fuel burn without start/end values
+- **Duplicates** (can be turned off): same route and off-block less than 15 minutes apart – against the logbook including the trash and within the file. Faulty rows (airport or date missing/unreadable) are skipped with their row number
+- Commands `csv_sniff`, `csv_preview`, `csv_import` (only `.csv`/`.txt`, at most 50 MB, 100 rows per transaction); module `vectasim_store::csvimport`
 
-### Integrationen
-- Neues Panel *Einstellungen → Integrationen* (zwischen Flugplanung und Anzeige) mit Discord, Benachrichtigungen und Infobereich
-- **Discord-Status** (Rich Presence, Standard aus): „DLH4YA · EDDF → EGLL · A20N“ und „Reiseflug FL360 · noch 420 nm“ / „Anflug EGLL“ / „Bereit – wartet auf MSFS“, Flugzeit ab Off-Block; nach der Landung eine Minute „Gelandet · −155 fpm“; Demo und Replay erscheinen als „Demo“; im Streamer-Modus ohne Rufzeichen. Höchstens ein Update alle 15 s; läuft Discord nicht, versucht VectaSim es still alle 30 s erneut. Eigene Discord-App-ID optional eintragbar (Setting `discord_app_id`)
-- **Windows-Benachrichtigungen**, solange VectaSim nicht im Vordergrund ist (Standard an): Landung mit Landerate, g-Last und Bounces, Flug gespeichert, Verbindung zum Simulator verloren/wieder da (während eines Flugs), Update verfügbar – einzeln abschaltbar, mit *Test senden*; nie mit Kennzeichen oder Rufzeichen; ein Klick holt das Fenster nach vorn
-- **Infobereich (Tray)** (Standard aus): Symbol mit Status als Tooltip und Menü *Öffnen*, Aufzeichnungsstatus, *Debug-Modus*, *Beenden*; Minimieren versteckt das Fenster dorthin, Doppelklick öffnet es wieder; *Beenden* fragt während einer Aufzeichnung wie gewohnt nach
-- Settings `discord_presence`, `discord_app_id`, `notifications`, `notify_landing`, `notify_saved`, `notify_connection`, `notify_update`, `tray_minimize`; Commands `discord_status`, `notify`, `notify_test`, `set_tray_enabled`, `tray_active`; Plugin `tauri-plugin-notification`, Crate `discord-rich-presence`
+### Integrations
+- New panel *Settings → Integrations* (between Flight planning and Display) with Discord, notifications and notification area
+- **Discord status** (Rich Presence, off by default): “DLH4YA · EDDF → EGLL · A20N” and “Cruise FL360 · 420 nm to go” / “Approach EGLL” / “Ready – waiting for MSFS”, flight time from off-block; after landing, “Landed · −155 fpm” for one minute; demo and replay appear as “Demo”; no callsign in streamer mode. At most one update every 15 s; if Discord isn’t running, VectaSim quietly retries every 30 s. A custom Discord app ID can optionally be entered (setting `discord_app_id`)
+- **Windows notifications** while VectaSim is not in the foreground (on by default): landing with landing rate, g-load and bounces, flight saved, connection to the simulator lost/back (during a flight), update available – each can be turned off, with *Send test*; never with registration or callsign; clicking brings the window to the front
+- **Notification area (tray)** (off by default): icon with the status as tooltip and a menu with open, recording status, *Debug mode*, quit; minimising hides the window there, double-clicking opens it again; quitting during a recording asks first as usual
+- Settings `discord_presence`, `discord_app_id`, `notifications`, `notify_landing`, `notify_saved`, `notify_connection`, `notify_update`, `tray_minimize`; commands `discord_status`, `notify`, `notify_test`, `set_tray_enabled`, `tray_active`; plugin `tauri-plugin-notification`, crate `discord-rich-presence`
 
-### Notizen & Tags
-- Im Flugdetail unter dem Kopf der neue Bereich **Notizen & Tags**: eigene Notizen (bis 2000 Zeichen, Klartext mit Zeilenumbrüchen, gespeichert beim Verlassen des Felds oder mit Strg/⌘+S), Tags als Chips (Eingabe oder Komma fügt hinzu, Rücktaste entfernt den letzten, Vorschläge aus den Tags des Logbuchs; höchstens 20 à 30 Zeichen, „VATSIM“ und „vatsim“ zählen als ein Tag) und eine persönliche **Bewertung** des Flugs mit 1–5 Sternen (auch mit den Pfeiltasten; bewertet den Flug, nicht die Landung)
-- *Korrigieren …*: falsch aufgezeichnetes Rufzeichen, Abflug/Ankunft (ICAO, 4 Zeichen), Flugzeugname oder Kennzeichen überschreiben – Logbuch, Flight-Strip, Suche und CSV zeigen die Korrektur, der Tooltip den aufgezeichneten Wert („Sim: ASXGS“); das Original bleibt gespeichert, leere Felder stellen es wieder her. Ein korrigiertes Kennzeichen bucht den Flug auf dieses Flugzeug um (Flotte)
-- Logbuch: die Suche findet auch Notizen, Tags und Korrekturen; neuer Chip-Filter **Tags** mit Mehrfachauswahl (mindestens ein Tag passt); Flight-Strips zeigen bis zu zwei Tags, die Sterne kompakt („★4“) und ein Notiz-Symbol mit der ersten Zeile als Tooltip
-- Logbuch-CSV mit den neuen Spalten `notes`, `tags` (mit „; “ getrennt) und `rating`; die Spalten Abflug, Ankunft, Rufzeichen, Flugzeug und Kennzeichen enthalten die Korrekturen. Der Gesamtexport (`.vectasim`) nimmt alles mit; beim Zusammenführen bekommt ein schon vorhandener Flug Notizen, Tags, Bewertung und Korrekturen aus der Datei, wenn er selbst keine hat; beim Zusammenführen zweier Flugteile bleiben die Angaben beider Teile erhalten
-- Datenformat v14 (Spalten `notes`, `tags`, `rating`, `user_callsign`, `user_dep_icao`, `user_arr_icao`, `user_aircraft_title`, `user_registration`), Commands `update_flight_user` und `list_tags`
+### Notes & tags
+- In the flight detail, below the header, the new **Notes & tags** section: your own notes (up to 2000 characters, plain text with line breaks, saved when leaving the field or with Ctrl/⌘+S), tags as chips (Enter or comma adds, Backspace removes the last one, suggestions from the logbook’s tags; at most 20 of 30 characters each, “VATSIM” and “vatsim” count as one tag) and a personal **rating** of the flight with 1–5 stars (also with the arrow keys; rates the flight, not the landing)
+- *Correct …*: overwrite a wrongly recorded callsign, departure/arrival (ICAO, 4 characters), aircraft name or registration – logbook, flight strip, search and CSV show the correction, the tooltip the recorded value (“Sim: ASXGS”); the original stays saved, and empty fields restore it. A corrected registration moves the flight to that aircraft (fleet)
+- Logbook: the search also finds notes, tags and corrections; new chip filter **Tags** with multiple selection (at least one tag matches); flight strips show up to two tags, the stars compactly (“★4”) and a note icon with the first line as tooltip
+- Logbook CSV with the new columns `notes`, `tags` (separated by “; ”) and `rating`; the columns departure, arrival, callsign, aircraft and registration contain the corrections. The full export (`.vectasim`) takes everything along; when merging, an existing flight gets notes, tags, rating and corrections from the file if it has none itself; when merging two parts of a flight, the details of both parts are kept
+- Data format v14 (columns `notes`, `tags`, `rating`, `user_callsign`, `user_dep_icao`, `user_arr_icao`, `user_aircraft_title`, `user_registration`), commands `update_flight_user` and `list_tags`
 
-### Streamer-Modus
-- Neuer **Streamer-Modus** (*Einstellungen → Anzeige* oder Strg+Umschalt+P, mit kurzem Hinweis): blendet in der ganzen Oberfläche Kennzeichen („D-••••“, das Länderkürzel bleibt), Rufzeichen und Flugnummer, Airline, die SimBrief-ID und deinen Windows-Benutzernamen in Pfaden aus (`%LOCALAPPDATA%\…` statt `C:\Users\<Name>\…`) – Live-HUD und Seitenpanel, Bereit-Karte, Flotte, Landeauswertung, Einstellungen und Diagnose. Nur die Anzeige ändert sich, gespeichert bleibt alles; Foto-Credits bleiben sichtbar. Ein dezentes Augen-Symbol im Status-Popover zeigt den Modus an und schaltet ihn mit einem Klick aus
-- Landekarte (PNG) im Streamer-Modus ohne Kennzeichen; dafür auch ohne Streamer-Modus der Schalter *Landekarte ohne Kennzeichen*
-- **Landekarte automatisch speichern**: Nach jeder Landung legt VectaSim die Landekarte als `VectaSim_<ICAO>_<RWY>_<Datum_Uhrzeit>.png` in einen Ordner (Standard `Bilder\VectaSim`, *Ändern …*/*Öffnen*/*Zurücksetzen*), mit kurzem Hinweis und *Ordner öffnen*
-- Diagnosepaket im Streamer-Modus ohne Benutzernamen in Pfaden (JSON-Dateien, Protokolle, Hinweise); die README im Paket sagt es dazu
+### Streamer mode
+- New **streamer mode** (*Settings → Display* or Ctrl+Shift+P, with a short notice): hides registrations (“D-••••”, the country prefix stays), callsign and flight number, airline, the SimBrief ID and your Windows user name in paths (`%LOCALAPPDATA%\…` instead of `C:\Users\<name>\…`) across the whole interface – live HUD and side panel, ready card, fleet, landing debrief, settings and diagnostics. Only the display changes, everything is still saved; photo credits stay visible. A subtle eye icon in the status popover shows the mode and turns it off with one click
+- Landing card (PNG) without registration in streamer mode; also, without streamer mode, the switch *Landing card without registration*
+- **Save landing card automatically**: after every landing, VectaSim saves the landing card as `VectaSim_<ICAO>_<RWY>_<date_time>.png` into a folder (default `Pictures\VectaSim`, change/open/reset), with a short notice and an open-folder button
+- Diagnostics package in streamer mode without user names in paths (JSON files, logs, notes); the README in the package says so
 
-### Länder
-- Neuer Menüpunkt *Länder* in der Sidebar (zwischen Logbuch und Einstellungen, Strg+3; Einstellungen jetzt Strg+4): Weltkarte mit Ländergrenzen (Natural Earth 1:110m, gleiche Basemap und Themes wie die Live-Karte, Zoom 1–6), besuchte Länder in der Akzentfarbe, Tooltip beim Überfahren, Legende
-- Ein Land gilt nur durch eine Landung als besucht: Ankunftsflughafen abgeschlossener Flüge (nicht im Papierkorb, Demo nur mit *Demo-Flüge einbeziehen*), Land aus der Flughafen-Datenbank; aktualisiert sich bei jeder Änderung im Logbuch
-- Liste aller 250 Länder (ISO 3166 + Kosovo) mit ✓/–, Landungen und letztem Datum als Tabellen-Alternative zur Karte; Fortschritt „n / 250“ gesamt und je Kontinent, Kontinent-Chips, Suche (Deutsch, Englisch, ISO-Code), Filter Besucht/Offen
-- Klick auf ein Land: erste/letzte Landung, Flughäfen und die Flüge dorthin, jeder öffnet sich im Logbuch; Ankunftsflughäfen als Punkte (abschaltbar) – auch für kleine Staaten ohne Umriss in 1:110m
-- *Als Bild speichern*: Karte mit Fortschrittszeile als PNG (`VectaSim_Laender_<datum>.png`)
-- Commands `countries_list`, `countries_geojson` (eingebettet zstd-komprimiert, ≈ 40 KiB) und `visited_countries`; Daten über `scripts/update-countries.py`
+### Countries
+- New menu item *Countries* in the sidebar (between Logbook and Settings, Ctrl+3; Settings now Ctrl+4): world map with country borders (Natural Earth 1:110m, same basemap and themes as the live map, zoom 1–6), visited countries in the accent colour, tooltip on hover, legend
+- A country only counts as visited through a landing: arrival airport of completed flights (not in the trash, demo only with *Include demo flights*), country from the airport database; updates with every change in the logbook
+- List of all 250 countries (ISO 3166 + Kosovo) with ✓/–, landings and last date as a table alternative to the map; progress “n / 250” overall and per continent, continent chips, search (German, English, ISO code), filter visited/open
+- Click on a country: first/last landing, airports and the flights there, each opens in the logbook; arrival airports as dots (can be turned off) – also for small states without an outline at 1:110m
+- *Save as image*: map with progress line as PNG (`VectaSim_Laender_<date>.png`)
+- Commands `countries_list`, `countries_geojson` (embedded zstd-compressed, ≈ 40 KiB) and `visited_countries`; data via `scripts/update-countries.py`
 
-### Leistung
-- Die Live-Karte bleibt auch auf Langstreckenflügen flüssig: Der Flugweg wird in Abschnitten gezeichnet statt jede Sekunde komplett neu; Logbuch-Karte und Höhenprofil öffnen lange Flüge schneller, kurze Spitzen (Sinkrate beim Aufsetzen) bleiben sichtbar
-- Flughafen-Datenbank startet in Millisekunden statt in einer halben Sekunde; im Hintergrund oder minimiert sendet VectaSim nur noch 1 Mal pro Sekunde an die Oberfläche; die SimConnect-Verbindung wartet auf Ereignisse statt dauernd zu fragen; Tracks werden alle 15 s statt 60 s gesichert
-- Graphit & Amber: Warnungen sind jetzt rot-orange und nicht mehr mit Akzent oder Fehlern zu verwechseln; Karten-Schalter sehen einheitlich aus, Zoom/Kompass/Quellenhinweis mit Fokusrahmen und größeren Klickflächen
+### Performance
+- The live map stays smooth even on long-haul flights: the flight path is drawn in segments instead of completely anew every second; logbook map and altitude profile open long flights faster, short peaks (sink rate at touchdown) stay visible
+- The airport database starts in milliseconds instead of half a second; in the background or minimised, VectaSim sends to the interface only once per second; the SimConnect connection waits for events instead of polling constantly; tracks are saved every 15 s instead of 60 s
+- Graphit & Amber: warnings are now red-orange and can no longer be confused with the accent or errors; map switches look consistent, zoom/compass/source note with focus rings and larger click targets
 
-### Nachbesprechung
-- Profil, Pistenansicht, Querablage und Gate-Tabelle zeigen denselben Zeitpunkt – zeigen oder klicken in einem Diagramm bewegt alle mit; neue Wiedergabe des Anflugs (Play/Pause, 1–8×, Schieberegler, Sprünge zu 10 nm/FAF/1000/500 ft/Schwelle/Aufsetzen/Stillstand) mit den Messwerten am Cursor; im Logbuch zeigt die Karte die Position zum Profil-Cursor
-- Piste aus der Rollspur: Landet man an einem Platz, dessen Piste in der Datenbank keine Koordinaten hat (viele kleine Plätze, Grasbahnen), leitet VectaSim die Bahn aus Anflug und Ausrollen ab, kennzeichnet sie als „abgeleitet“ und merkt sie sich pro Flughafen; weitere Landungen verfeinern sie
-  - Unter dem Pistennamen steht jetzt, woher die Piste stammt: „Piste aus OurAirports“, „Piste aus deiner Rollspur abgeleitet (n Landungen)“ oder „Piste von dir festgelegt“
-  - Ehrliche Werte bei abgeleiteten Pisten: Der Aufsetzpunkt steht mit „± 50 m“ da, die Abweichung von der Mittellinie heißt „nicht messbar“ (die Achse ist ja deine eigene Linie), ohne bekannte Länge gilt die Aufsetzzone als „angenommen (0–900 m)“ und der Rest der Piste wird nicht mehr angezeigt; der VectaSim-Index heißt dann „nicht vergleichbar“
-  - Im Streubild stehen solche Landungen hohl auf der Mittellinie und zählen nicht zur Ø Mittellinie; bei den Anflügen fehlt für sie die Querablage bei 1000/500 ft
-  - Neu: *Piste korrigieren …* in der Landeauswertung – Bezeichnung, Schwelle und Ende (Breite/Länge in Dezimalgrad), Breite und Höhe selbst eintragen, mit einem Klick die Werte aus der aktuellen Landung übernehmen oder mit *Zurücksetzen auf Datenbank* wieder vergessen; dazu die Liste der gemerkten Pisten des Platzes mit Herkunft und Anzahl der Landungen. Deine eigene Piste hat Vorrang vor OurAirports, alle Landungen an dem Platz werden damit neu ausgewertet
-  - Gemerkte und selbst festgelegte Pisten wandern beim Gesamtexport (`.vectasim`) mit; beim Zusammenführen gewinnt eine selbst festgelegte Piste, zwei abgeleitete werden nach Anzahl der Landungen gemittelt
+### Debrief
+- Profile, runway view, lateral offset and gate table show the same moment – pointing or clicking in one chart moves all of them; new approach playback (play/pause, 1–8×, slider, jumps to 10 nm/FAF/1000/500 ft/threshold/touchdown/standstill) with the measured values at the cursor; in the logbook the map shows the position at the profile cursor
+- Runway from the ground track: if you land at an airfield whose runway has no coordinates in the database (many small airfields, grass strips), VectaSim derives the runway from the approach and rollout, marks it as “derived” and remembers it per airport; further landings refine it
+  - Below the runway name it now says where the runway comes from: “runway from OurAirports”, “runway derived from your ground track (n landings)” or “runway set by you”
+  - Honest values for derived runways: the touchdown point is shown with “± 50 m”, the centreline deviation is “not measurable” (the axis is your own line, after all), without a known length the touchdown zone is “assumed (0–900 m)” and the rest of the runway is no longer shown; the VectaSim index is then “not comparable”
+  - In the dispersion plot such landings appear hollow on the centreline and don’t count towards the Ø centreline; for the approaches, the lateral offset at 1000/500 ft is missing for them
+  - New: *Correct runway …* („Piste korrigieren …“) in the landing debrief – enter designation, threshold and end (latitude/longitude in decimal degrees), width and elevation yourself, take the values from the current landing with one click, or forget them again with “Zurücksetzen auf Datenbank” (reset to database); plus the list of the airfield’s remembered runways with origin and number of landings. Your own runway takes precedence over OurAirports, and all landings at the airfield are re-evaluated with it
+  - Remembered and user-defined runways are included in the full export (`.vectasim`); when merging, a user-defined runway wins, and two derived ones are averaged by number of landings
 
-- Fehlersuche ohne Simulator: Roh-Dump der SimConnect-Daten (*Einstellungen → Diagnose*, ca. 5–10 MB pro Stunde), Replay eines Dumps als Datenquelle, Live-Rohdaten-Ansicht, **Debug-Modus** und **Diagnosepaket** (ZIP mit Protokollen, Dumps, Einstellungen ohne Geheimnisse, System- und Datenbankinfo) zum Weitergeben
-- Verlässlichkeit für den ersten Sim-Einsatz: Protokolldatei mit Rotation (*Einstellungen → Diagnose → Protokoll-Ordner öffnen*, Protokollstufe einstellbar, „Diagnose kopieren“), nur eine App-Instanz, Rückfrage beim Schließen oder Update während einer Aufzeichnung
-- SimConnect: Absturz des Simulators wird erkannt und neu verbunden (Watchdog), Fehler einzelner Variablen legen die Telemetrie nicht mehr still, korrekte Fehlernamen, Slew/Zeitraffer ohne Verzögerung, Transponder korrekt, breitere Suche nach `SimConnect.dll` mit Liste der durchsuchten Pfade und Auswahl der Datei in den Einstellungen
-- Keine Geister-Landungen mehr: Neuladen eines Flugs, Hauptmenü, Teleport und Wiederverbinden setzen die Erkennung zurück; unterbrochene Flüge werden sauber abgeschlossen; Pausen ohne Telemetrie werden erkannt; Startzeit ab dem Abheben; Block-on erst mit abgestellten Triebwerken; Flag „Positionssprung“ im Logbuch und Export
-- Anflugbewertung: neues Core-Modul wertet jeden Anflug auf dem 1-Hz-Track aus (Anflugversuche inkl. Go-around, Runway-Zuordnung ohne Touchdown, Gates 10 nm/FAF/1000/500/50 ft, Gleitpfad- und Grundlinien-Dots, Speed gegen geflogene Referenz, V/S, Bank, Konfiguration, Energie-Proxy, Stabilitätsmaße, „stabil ab“); EASA-Zwei-Stufen-Kriterien mit Mindestdauern; vier Bänder
-- Debrief: Abschnitt „Anflug“ mit Kernsatz, Band, drei Kennzahlen mit Herkunft, Konfigurationsereignissen und Überschreitungen; Gate-Tabelle mit fünf Gates und „nicht messbar“ samt Grund; Anflugprofil mit Bereichen Final/10 nm/ab TOD und Grundlinien-Streifen; Anflugwähler; eigener Durchstarten-Debrief; Index-Anteil „Stabilisierter Anflug“ aus „stabil ab“ + Gates
-- Landekarte zeigt Referenz, „stabil ab“ und Gate-Ergebnis; Flight-Strips zeigen „stabil ab“ und Go-arounds; Logbuch → Landungen hat die Ansichten „Aufsetzpunkte“ und „Anflüge“
-- Cache-Tabelle `approach_facts` (Schema 8), Commands `approach_analysis` und `approach_facts_recent`, Berechnung beim Flugende; Mock-Variante `VECTASIM_MOCK=goaround`
-- Sidebar auf drei Einträge (Karte, Logbuch, Einstellungen; Strg+1/2/3); Flotte und Aktivitäten sind jetzt die Logbuch-Bereiche *Flugzeuge* und *Flughäfen*, dazu *Landungen*
-- Logbuch-Zeilen als Flight-Strips: Rufzeichen/Muster, Route mit Blockzeiten, Integritätszeichen (Pause, Slew, Zeitraffer), Landerate mit Runway-Glyphe und Aufsetzpunkt
-- Landekarte als PNG (1200×675) aus dem Debrief und dem Lande-Toast: speichern oder in die Zwischenablage kopieren
-- Streubild der letzten 20 Landungen im Logbuch-Bereich *Landungen*: normierte Runway, Band-Farben, 1σ-Ellipse, TDZ-Quote, Sparkline, Filter nach Typ/Flughafen; Ergebnisse werden in der Tabelle `landing_facts` zwischengespeichert (Schema 7)
-- „Bereit“-Karte auf der Live-Karte vor dem Flug: Verbindungsstatus, geladener Flugplan, erkanntes bzw. zuletzt geflogenes Flugzeug, Demo-Start ohne Simulator
-- SimBrief-Flugplan wird mit hinterlegter Pilot-ID automatisch geladen (Start und Verbinden, höchstens alle 5 Minuten; Einstellung *Flugplanung*)
-- Seitenpanel der Live-Karte auf zwei Tabs reduziert: *Flug* (bisher Flug, Systeme, Ereignisse) und *Dispatch* (bisher Flugplan, Online)
-- Demo-Flüge sind nur noch Sitzungsgäste: beim Beenden der Demo und beim nächsten Start werden sie samt nur von ihnen angelegter Flugzeuge gelöscht
+- Troubleshooting without a simulator: raw dump of the SimConnect data (*Settings → Diagnostics*, about 5–10 MB per hour), replay of a dump as a data source, live raw data view, **debug mode** and **diagnostics package** (ZIP with logs, dumps, settings without secrets, system and database info) to pass on
+- Reliability for the first sim use: log file with rotation (*Settings → Diagnostics → Open log folder*, adjustable log level, “Copy diagnostics”), only one app instance, a prompt when closing or updating during a recording
+- SimConnect: a simulator crash is detected and reconnected (watchdog), errors in individual variables no longer stall the telemetry, correct error names, slew/time acceleration without delay, transponder correct, a wider search for `SimConnect.dll` with a list of the searched paths and file selection in the settings
+- No more ghost landings: reloading a flight, main menu, teleport and reconnect reset the detection; interrupted flights are closed cleanly; pauses without telemetry are detected; takeoff time from liftoff; block-on only with engines shut down; flag “position jump” in the logbook and export
+- Approach rating: a new core module rates every approach on the 1 Hz track (approach attempts including go-arounds, runway assignment without touchdown, gates 10 nm/FAF/1000/500/50 ft, glide path and lateral dots, speed against the flown reference, V/S, bank, configuration, energy proxy, stability measures, “stable from”); EASA two-stage criteria with minimum durations; four bands
+- Debrief: “Approach” section with summary sentence, band, three metrics with source, configuration events and exceedances; gate table with five gates and “not measurable” with the reason; approach profile with ranges final/10 nm/from TOD and lateral strip; approach selector; a separate go-around debrief; index share “stabilised approach” from “stable from” + gates
+- The landing card shows the reference, “stable from” and the gate result; flight strips show “stable from” and go-arounds; Logbook → Landings has the views “Touchdowns” and “Approaches”
+- Cache table `approach_facts` (schema 8), commands `approach_analysis` and `approach_facts_recent`, computed at flight end; mock variant `VECTASIM_MOCK=goaround`
+- Sidebar reduced to three entries (Map, Logbook, Settings; Ctrl+1/2/3); fleet and activities are now the logbook sections *Aircraft* and *Airports*, plus *Landings*
+- Logbook rows as flight strips: callsign/type, route with block times, integrity marks (pause, slew, time acceleration), landing rate with runway glyph and touchdown point
+- Landing card as PNG (1200×675) from the debrief and the landing toast: save or copy to the clipboard
+- Dispersion plot of the last 20 landings in the logbook section *Landings*: normalised runway, band colours, 1σ ellipse, TDZ rate, sparkline, filter by type/airport; results are cached in the table `landing_facts` (schema 7)
+- “Ready” card on the live map before the flight: connection status, loaded flight plan, detected or last flown aircraft, demo start without a simulator
+- The SimBrief flight plan is loaded automatically with a stored pilot ID (start and connect, at most every 5 minutes; setting *Flight planning*)
+- Side panel of the live map reduced to two tabs: *Flight* (previously Flight, Systems, Events) and *Dispatch* (previously Flight plan, Online)
+- Demo flights are now only session guests: when the demo ends and at the next start they are deleted, together with aircraft created only by them
 
-### Einordnung & Verlauf
+### Ranking & trends
 
-- *Einordnung* im Flugdetail (unter der Landezusammenfassung): ein Satz „Deine letzten 20 Landungen auf EDDF 25C: Median −180 fpm · du: −155 fpm (besser als 70 %)“ und drei Kacheln Landerate, Aufsetzpunkt und „stabil ab“ – jeweils Ist gegen Median mit Abstand und Perzentil; Umschalter *gleiche Piste / gleicher Typ / alle* (automatisch die engste Auswahl mit mindestens drei Vergleichslandungen); unter drei Landungen nur der Hinweis „Noch zu wenig Landungen zum Vergleich“
-- Die *Nach dem Flug*-Karte zeigt eine Zeile „besser als 70 % deiner letzten 20 Landungen auf EDDF 25C“
-- Neuer Tab *Logbuch → Landungen → Verlauf*: Landerate (Betrag), Aufsetzdistanz, „stabil ab“ und Anteil in der Aufsetzzone je Landung, Woche oder Monat mit gleitendem Median (Fenster 5 bzw. 10 Landungen, 3 Zeiträume) und Quartilsband; Filter Typ, Flughafen und Zeitraum (letzte 20/50/200); Kacheln „Dieser Monat vs. Vormonat“ mit Δ; alle Werte auch als Tabelle
-- *Platzrunden* im Flugdetail ab zwei Bodenkontakten: jeder Touch-and-go und der Full Stop als Zeile (Zeit, Art, Landerate, g, Bounces, Aufsetzpunkt und „stabil ab“, wo ausgewertet) mit Mini-Verlauf der Landeraten; ein Klick öffnet die Landeauswertung des Kontakts
-- Fehlende Werte (Mittellinie, nicht bewerteter Anflug) bleiben aus Median und Quoten heraus; Demo-Landungen zählen nur im Vergleich mit Demo-Landungen oder wenn Demo-Flüge eingeblendet sind
+- *Ranking* (“Einordnung”) in the flight detail (below the landing summary): a sentence “Your last 20 landings on EDDF 25C: median −180 fpm · you: −155 fpm (better than 70 %)” and three tiles landing rate, touchdown point and “stable from” – each actual vs. median with distance and percentile; switch *same runway / same type / all* (automatically the narrowest selection with at least three comparison landings); below three landings only the note “not enough landings to compare yet”
+- The *After the flight* card shows a line “better than 70 % of your last 20 landings on EDDF 25C”
+- New tab *Logbook → Landings → Trends*: landing rate (absolute), touchdown distance, “stable from” and share in the touchdown zone per landing, week or month with a rolling median (window 5 or 10 landings, 3 periods) and quartile band; filter type, airport and period (last 20/50/200); tiles “this month vs. last month” with Δ; all values also as a table
+- *Circuits* in the flight detail from two ground contacts: every touch-and-go and the full stop as a row (time, kind, landing rate, g, bounces, touchdown point and “stable from” where evaluated) with a mini trend of the landing rates; a click opens the landing debrief of that contact
+- Missing values (centreline, unrated approach) are left out of median and rates; demo landings only count in comparison with demo landings or when demo flights are shown
 
-### Plan gegen Ist
+### Plan vs. actual
 
-- Neuer Abschnitt *Plan gegen Ist* im Flugdetail, sobald ein SimBrief-Flugplan am Flug hängt: Plan, Ist und Abweichung für Off-Block, Takeoff, Landung und On-Block, Taxi-out/-in, Block- und Luftzeit, Treibstoff beim Off-Block, Trip-Fuel, Blockverbrauch, Landetreibstoff, Distanz und Reiseflughöhe
-- Pünktlichkeit nach Airline-Definition: bis 15 Minuten nach Plan gilt als „pünktlich“, sonst „verspätet“ (am On-Block, ohne Ankunft am Off-Block)
-- Trip-Fuel kommt aus dem Track (Treibstoff beim Abheben minus beim Aufsetzen); ohne Track wird er aus dem Blockverbrauch abzüglich des geplanten Taxi-Treibstoffs geschätzt und mit „≈“ markiert
-- Die Live-Ansicht (*Flug → Ist gegen Plan*) rechnet mit denselben Regeln und zeigt jetzt auch die Abweichung bei Off-Block, Start und Landung
-- *Dispatch* zeigt zusätzlich geplante Taxi-Zeiten, Taxi-Treibstoff, Reserve, Alternate und Contingency
-- PIREP: *Flug exportieren → PIREP als Text kopieren* legt einen Bericht für VA-Formulare in die Zwischenablage (Callsign, Flugnummer, Strecke, Zeiten in UTC, Block-/Luftzeit, Distanz, Treibstoff, Landerate, g-Last, Bounces, „stabil ab“, Pünktlichkeit, Integrität, Sim, Flugzeug, Kennzeichen); *PIREP als JSON speichern …* schreibt dieselben Angaben als Datei (Schema `pirep/v1`)
-- Logbuch-CSV hat sechs neue Spalten am Ende: `sched_out`, `sched_in`, `delay_out_min`, `delay_in_min`, `planned_block_s`, `planned_trip_kg`
+- New section *Plan vs. actual* in the flight detail as soon as a SimBrief flight plan is attached to the flight: plan, actual and deviation for off-block, takeoff, landing and on-block, taxi out/in, block and air time, fuel at off-block, trip fuel, block fuel, landing fuel, distance and cruise altitude
+- Punctuality by airline definition: up to 15 minutes after plan counts as “on time”, otherwise “delayed” (at on-block; without an arrival, at off-block)
+- Trip fuel comes from the track (fuel at liftoff minus at touchdown); without a track it is estimated from the block fuel minus the planned taxi fuel and marked with “≈”
+- The live view (*Flight → actual vs. plan*) calculates with the same rules and now also shows the deviation at off-block, takeoff and landing
+- *Dispatch* additionally shows planned taxi times, taxi fuel, reserve, alternate and contingency
+- PIREP: *Export flight → Copy PIREP as text* puts a report for VA forms on the clipboard (callsign, flight number, route, times in UTC, block/air time, distance, fuel, landing rate, g-load, bounces, “stable from”, punctuality, integrity, sim, aircraft, registration); *Save PIREP as JSON …* writes the same details to a file (schema `pirep/v1`)
+- The logbook CSV has six new columns at the end: `sched_out`, `sched_in`, `delay_out_min`, `delay_in_min`, `planned_block_s`, `planned_trip_kg`
 
-### Nach einem Absturz
+### After a crash
 
-- **Flug fortsetzen:** Stürzt VectaSim oder der Simulator mitten im Flug ab und bist du danach wieder in der Nähe (letzte Aufzeichnung höchstens 30 Minuten alt, höchstens 5 nm und ±3000 ft entfernt, in der Luft oder noch nicht abgestellt), fragt VectaSim beim Verbinden „Flug fortsetzen?“ mit Strecke und Off-Block-Zeit. *Fortsetzen* hängt den Rest an den unterbrochenen Flug an – Off-Block- und Startzeit, Strecke, Treibstoff und Landungen zählen weiter, die Pause steht als Aufzeichnungslücke im Flug; *Neuer Flug* oder keine Antwort innerhalb von 60 Sekunden lässt den Rest als eigenen Flug stehen. Bei Demo und Replay wird nicht gefragt
-- **Nachträglich zusammenführen:** Folgt auf einen unterbrochenen Flug innerhalb von 60 Minuten und höchstens 5 nm entfernt ein weiterer, zeigt das Logbuch über der Liste „… ist vermutlich die Fortsetzung von …“ mit *Zusammenführen*: Zeiten, Track, Landungen, Distanz, Treibstoff und Integritätszeichen werden ein Flug, Flugplan, Wetter und Flugzeug kommen vom ersten Teil (Fehlendes vom zweiten); der zweite Teil landet vollständig im Papierkorb. *Ignorieren* blendet den Hinweis aus
-- Flight-Strips zeigen „unterbrochen“ mit Erklärung und Abstand zum nächsten Flug im Tooltip; fortgesetzte oder zusammengeführte Flüge tragen das Zeichen „⋯“ mit der Länge der Lücke
-- Technisch: Schema 13 (Spalte `flights.gap_ms`, `integrity.gapMs`), Event `flight:resumable` / `flight:resumed`, Commands `resume_flight`, `list_merge_candidates`, `merge_flights`
+- **Resume flight:** if VectaSim or the simulator crashes mid-flight and you are back nearby afterwards (last recording at most 30 minutes old, at most 5 nm and ±3000 ft away, in the air or not yet shut down), VectaSim asks “Resume flight?” on connecting, with route and off-block time. *Resume* appends the rest to the interrupted flight – off-block and takeoff time, route, fuel and landings keep counting, and the break appears as a recording gap in the flight; *New flight* or no answer within 60 seconds leaves the rest as a flight of its own. Demo and replay don’t ask
+- **Merging afterwards:** if an interrupted flight is followed within 60 minutes and at most 5 nm away by another one, the logbook shows “… is probably the continuation of …” above the list with *Merge*: times, track, landings, distance, fuel and integrity marks become one flight, flight plan, weather and aircraft come from the first part (missing items from the second); the second part goes to the trash in full. *Ignore* hides the notice
+- Flight strips show “interrupted” with an explanation and the distance to the next flight in the tooltip; resumed or merged flights carry the mark “⋯” with the length of the gap
+- Technical: schema 13 (column `flights.gap_ms`, `integrity.gapMs`), events `flight:resumable` / `flight:resumed`, commands `resume_flight`, `list_merge_candidates`, `merge_flights`
 
-### Datensicherheit
-- SQLite auf 3.53.2 aktualisiert (rusqlite 0.40.2 / libsqlite3-sys 0.38.2, vorher 3.46.0) – behebt CVE-2025-6965
-- Kartenbibliothek MapLibre GL JS auf 6.12 aktualisiert (behebt die XSS-Lücke GHSA-jrc7-96c5-q579 aus 5.x); die CI prüft die Frontend-Abhängigkeiten jetzt mit `npm audit`
-- Mehr Sicherheit: Die App lädt Inhalte nur noch von bekannten Quellen, und beim Öffnen des CSV-Logbuchs in Excel werden Flugzeugnamen oder Rufzeichen nicht mehr als Formel ausgeführt
-- Eine verstellte Systemuhr (Zeitumstellung, Synchronisierung) bringt die Phasen- und Landeerkennung nicht mehr durcheinander; Zeitraffer wird bei Phasen und Landungen einheitlich behandelt
+### Data safety
+- SQLite updated to 3.53.2 (rusqlite 0.40.2 / libsqlite3-sys 0.38.2, previously 3.46.0) – fixes CVE-2025-6965
+- Map library MapLibre GL JS updated to 6.12 (fixes the XSS vulnerability GHSA-jrc7-96c5-q579 from 5.x); CI now checks the frontend dependencies with `npm audit`
+- More security: the app now only loads content from known sources, and when the CSV logbook is opened in Excel, aircraft names or callsigns are no longer executed as formulas
+- A changed system clock (DST change, synchronisation) no longer confuses phase and landing detection; time acceleration is treated consistently for phases and landings
 
-- Datenformat-Umstellungen (Migrationen) laufen pro Schritt in einer Transaktion; vorher kopiert VectaSim das Logbuch nach `vectasim-pre-v<alt>-<Datum>.db` im Sicherungsordner. Schlägt ein Schritt fehl, bleibt die Datei unverändert
-- Ein Logbuch aus einer neueren VectaSim-Version wird nicht mehr geöffnet (statt es mit der alten Version weiterzubeschreiben); Fehler beim Öffnen zeigen einen Dialog mit den Pfaden von Datenbank und Sicherung, statt dass das Fenster verschwindet
-- Papierkorb: gelöschte Flüge bleiben 30 Tage wiederherstellbar (Toast mit *Rückgängig*, Logbuch-Filter *Papierkorb*), Summen, Flotte, Landungen, Anflüge und Flughäfen zählen sie nicht mehr mit (Schema 10, Spalte `deleted_ms`); Bestätigen beim Löschen mit Fokus auf *Abbrechen*
-- *Einstellungen → Daten*: Speicherort der Datenbank, Sicherungsordner frei wählbar (z. B. OneDrive/Dropbox/NAS, mit Hinweis), tägliche automatische Sicherung und vor jedem Update, 7 Tage Rotation, *Jetzt sichern*, *Wiederherstellen* mit Neustart, *Papierkorb leeren*, *Alle Daten löschen* (zweistufig, mit Sicherung davor); Warnung, wenn die Datenbank in einem Sync-Ordner liegt
-- Gesamtexport/-import: *Einstellungen → Daten → Alles exportieren …* schreibt das ganze Logbuch (Flüge mit Tracks, Flotte, eigene Flugzeugbilder; Papierkorb auf Wunsch) in eine `.vectasim`-Datei; *Aus Datei importieren …* führt sie zusammen (Duplikate – gleicher Flug oder gleiche Strecke mit weniger als 15 min Abstand beim Off-Block – werden übersprungen, vorhandene Flugzeugdaten bleiben) oder ersetzt das Logbuch nach einer Sicherung (`vectasim-pre-import-…`). Für den Umzug auf einen anderen PC oder zum Zusammenführen zweier PCs
-- Schreibende Befehle (Flug-Export, Logbuch-CSV, Landekarte, Gesamtexport, Diagnosepaket) nehmen nur noch vollständige Pfade ohne `..` mit passender Dateiendung an und nie in Windows-, Programm- oder Installationsordnern („Pfad nicht erlaubt“)
-- Track laden, Exporte, Logbuch-Liste und Landungs-Streubild laufen außerhalb des UI-Threads; das Logbuch prüft alle 30 s nur noch eine Zählung (`flight_summary_counts`) und lädt die Liste nur bei Änderungen neu
-- Diagnosepaket zählt Flüge im Papierkorb getrennt (`flightsDeleted`)
+- Data format migrations run step by step, each in a transaction; beforehand VectaSim copies the logbook to `vectasim-pre-v<old>-<date>.db` in the backup folder. If a step fails, the file stays unchanged
+- A logbook from a newer VectaSim version is no longer opened (instead of continuing to write to it with the old version); errors on opening show a dialog with the paths of the database and the backup instead of the window disappearing
+- Trash: deleted flights stay restorable for 30 days (toast with undo, logbook filter *Trash*); totals, fleet, landings, approaches and airports no longer count them (schema 10, column `deleted_ms`); confirming a delete with the focus on *Cancel*
+- *Settings → Data*: database location, freely selectable backup folder (e.g. OneDrive/Dropbox/NAS, with a note), daily automatic backup and before every update, 7-day rotation, *Back up now*, *Restore* with restart, *Empty trash*, *Delete all data* (two-stage, with a backup beforehand); a warning if the database is in a sync folder
+- Full export/import: *Settings → Data → Export everything …* writes the whole logbook (flights with tracks, fleet, your own aircraft images; trash on request) into a `.vectasim` file; *Import from file …* merges it (duplicates – the same flight or the same route with less than 15 min difference at off-block – are skipped, existing aircraft data is kept) or replaces the logbook after a backup (`vectasim-pre-import-…`). For moving to another PC or merging two PCs
+- Writing commands (flight export, logbook CSV, landing card, full export, diagnostics package) only accept complete paths without `..` with a matching file extension, and never in Windows, program or installation folders (“path not allowed”)
+- Track loading, exports, logbook list and landing dispersion plot run outside the UI thread; the logbook only checks a count every 30 s (`flight_summary_counts`) and reloads the list only on changes
+- The diagnostics package counts flights in the trash separately (`flightsDeleted`)
 
-### Fachliche Korrekturen
+### Domain corrections
 
-- Geschwindigkeit am Gate wird gegen eine echte Referenz geprüft (eigene Vapp, sonst der geflogene Mittelwert 500 → 100 ft, sonst 1,3 × VS0) statt gegen sich selbst; die Herkunft steht im Debrief
-- Gleitpfad-Toleranz am Gate jetzt ±0,35° (1 Dot) statt ±0,7°; mehr als 2 Dots wird als Stufe S2 genannt
-- Aufsetzzone beginnt an der Schwelle (bis 900 m bzw. erstes Pistendrittel); der Zielpunkt (150–400 m je nach Pistenlänge) ist nur noch eine Markierung – eine Landung bei 200 m ist jetzt „in der Aufsetzzone“
-- Versetzte Schwellen aus OurAirports werden berücksichtigt; unbekannte Pistenbreite heißt „Breite unbekannt“ statt „0 m“; Mittellinien-Abstand auf ganze Meter gerundet (Pistendaten ca. ±5 m genau)
-- METAR: Hinweis, wenn die Meldung mehr als 1 h vor oder nach der Landung beobachtet wurde; bei VRB oder Richtungs-Spanne zusätzlich der ungünstigste Seitenwind; Böen in der Windzeile
-- Wirbelschleppen-Klassen nach ICAO: TBM, PC-12, Caravan, Twin Otter, Beaver, King Air, Phenom 100, Citation CJ/M2, Premier als Light; C-130 und UH-60 als Medium; Concorde als Heavy
-- VectaSim-Index: „normal“ zählt so viel wie „sanft“, Aufsetzpunkt nach neuer Zone gewertet; ohne Piste, Pistenbreite oder Gate heißt er „nicht vergleichbar“ statt einen Teilwert zu zeigen
-- g-Band „hart“ erst ab 2,0 g (bisher 1,75 g) – Begründung in der Methodik
-- Begriffe: Aufsetzzone, Mittellinie, Piste, Einheit „g“, „Luftzeit“ statt „Flugzeit“ (auch Export-Spalte `air_time`); Höhen über 5000 ft als Flugfläche; keine „20 Hz“-Angaben mehr
-- Bounce erst ab 0,3 s ohne Bodenkontakt – kurzes Flackern auf Gras oder einem Fahrwerksbein ist kein Bounce mehr
+- The speed at the gate is checked against a real reference (your own Vapp, otherwise the flown mean 500 → 100 ft, otherwise 1.3 × VS0) instead of against itself; the source is shown in the debrief
+- Glide path tolerance at the gate now ±0.35° (1 dot) instead of ±0.7°; more than 2 dots is named as level S2
+- The touchdown zone starts at the threshold (up to 900 m or the first third of the runway); the aiming point (150–400 m depending on runway length) is only a marker now – a landing at 200 m is now “in the touchdown zone”
+- Displaced thresholds from OurAirports are taken into account; an unknown runway width is shown as “width unknown” instead of “0 m”; centreline distance rounded to whole metres (runway data accurate to about ±5 m)
+- METAR: a note if the report was observed more than 1 h before or after the landing; with VRB or a direction range, additionally the most unfavourable crosswind; gusts in the wind line
+- Wake turbulence categories per ICAO: TBM, PC-12, Caravan, Twin Otter, Beaver, King Air, Phenom 100, Citation CJ/M2, Premier as Light; C-130 and UH-60 as Medium; Concorde as Heavy
+- VectaSim index: “normal” counts as much as “smooth”, touchdown point rated by the new zone; without runway, runway width or gate it is “not comparable” instead of showing a partial value
+- g-band “hard” only from 2.0 g (previously 1.75 g) – reasoning in the methodology
+- Terms (German UI): “Aufsetzzone” (touchdown zone), “Mittellinie” (centreline), “Piste” (runway), unit “g”, “Luftzeit” (air time) instead of “Flugzeit” (flight time) (also the export column `air_time`); altitudes above 5000 ft as flight level; no more “20 Hz” statements
+- A bounce only from 0.3 s without ground contact – a short flicker on grass or on one gear leg is no longer a bounce
 
-### Oberfläche
+### Interface
 
-- Vor dem Flug führt die Bereit-Karte: Die Statuspille auf der Karte sagt dann nur noch „Warte auf MSFS“, die Phasen-Kachel zeigt kein zweites „Bereit“ mehr; ohne Bereit-Karte heißt die Pille „Warte auf MSFS – Aufzeichnung startet beim Losrollen“
-- Die Demo heißt überall „Demo-Flug“ (*Demo-Flug starten* / *Demo-Flug beenden*); *Demo-Flug beenden* gibt es jetzt immer, und danach verschwinden Flugzeug, Ereignisse und der Zähler am Tab „Flug“ der Demo von der Karte
-- Logbuch-Filter „Abgeschlossen“ statt „Gespeichert“ (gespeichert sind alle Flüge), auch in der Summenleiste und am Flug
-- Nach der Landung: Der Debrief hat oben *Im Logbuch* (öffnet den Flug) neben *Schließen*; die Nach-dem-Flug-Karte hat *Landekarte* zum Speichern als Bild; die Bild-Aktion heißt überall „Landekarte speichern“ / „Landekarte kopieren“
-- Logbuch bei rund 1100 px Fensterbreite: Rufzeichen-Spalte passt sich an (gekürzt erst ab 110 px), Route in einer Zeile, Abzeichen hinter Datum und Blockzeit, Uhrzeiten und „stabil ab“ nur wenn Platz ist (immer im Tooltip); Flugzeugliste ohne waagrechten Scrollbalken; Werkzeugleiste ohne Umbruch (schmalere Suche, kurzes *Export* unter 1200 px)
-- Einstellung *Anzeige → Gewichte*: Treibstoff und Gewichte in kg oder lb
-- Vapp pro Flugzeug (*Logbuch → Flugzeuge → Angaben*): Die Anflug- und Landeauswertung nimmt sie als Referenz-Geschwindigkeit („Vapp 138 kt (eingetragen)“), sonst wie bisher den geflogenen Wert (Schema 11)
-- Fehlerzustände: Schlägt das Laden des Logbuchs fehl, gibt es *Erneut versuchen* statt eines endlosen „wird geladen“; Flugdetail und Landeauswertung bieten ebenfalls *Erneut versuchen*; lädt die Karte nicht (offline), sagt eine Pille „Karte offline – Tracking läuft weiter“; scheitert der Schalter *Verkehr*, erklärt ein Hinweis warum
-- Installationsanleitung: keine feste Hz-Angabe mehr, SimBrief-Autoload richtig beschrieben
-- Tastatur und Screenreader: Die Landeauswertung ist ein echtes Fenster im Fenster – Tab bleibt darin, Esc schließt erst einen offenen Herkunfts-Hinweis, Kürzel wirken nicht mehr dahinter; Hinweise (Toasts) werden zuverlässig vorgelesen und sind mit Alt+T erreichbar; Streubilder lassen sich mit den Pfeiltasten durchgehen und als Tabelle aufklappen; alle Kürzel stehen unter *Einstellungen → Tastatur*
-- Fenster: kleiner ziehbar (ab 1024 × 640), Größe, Position, Bildschirm und Maximiert merkt sich VectaSim; die Oberfläche lässt sich mit Strg+Plus/Minus vergrößern (Strg+0 zurück, auch unter *Einstellungen → Anzeige → Größe*)
-- Beim Wechsel zwischen Karte, Logbuch und Einstellungen bleibt alles, wie es war: Kartenausschnitt, Suche, Filter, Auswahl und Scrollposition im Logbuch, Position in den Einstellungen; eine ausgeblendete Bereit-Karte bleibt bis zum nächsten Flug weg
+- Before the flight the ready card leads: the status pill on the map then only says “Waiting for MSFS”, the phase tile no longer shows a second “Ready”; without the ready card the pill reads “Waiting for MSFS – recording starts when you taxi”
+- The demo is called “demo flight” everywhere (*Start demo flight* / *Stop demo flight*); *Stop demo flight* is now always available, and afterwards the demo’s aircraft, events and the counter on the “Flight” tab disappear from the map
+- Logbook filter “completed” instead of “saved” (all flights are saved), also in the totals bar and on the flight
+- After landing: the debrief has a button at the top to open the flight in the logbook next to *Close*; the *After the flight* card has *Landing card* to save it as an image; the image action is called “save landing card” / “copy landing card” everywhere
+- Logbook at around 1100 px window width: the callsign column adapts (truncated only from 110 px), route on one line, badges after date and block time, times and “stable from” only when there is room (always in the tooltip); aircraft list without a horizontal scrollbar; toolbar without wrapping (narrower search, short *Export* below 1200 px)
+- Setting *Display → Weights*: fuel and weights in kg or lb
+- Vapp per aircraft (*Logbook → Aircraft → details*): the approach and landing analysis uses it as the reference speed (“Vapp 138 kt (entered)”), otherwise the flown value as before (schema 11)
+- Error states: if loading the logbook fails, there is *Try again* instead of an endless “loading”; flight detail and landing debrief also offer *Try again*; if the map doesn’t load (offline), a pill says “Map offline – tracking continues”; if the *Traffic* switch fails, a notice explains why
+- Installation guide: no fixed Hz figure any more, SimBrief autoload described correctly
+- Keyboard and screen reader: the landing debrief is a real window within the window – Tab stays inside, Esc first closes an open source note, shortcuts no longer act behind it; notices (toasts) are read out reliably and reachable with Alt+T; dispersion plots can be stepped through with the arrow keys and expanded as a table; all shortcuts are listed under *Settings → Keyboard*
+- Window: can be dragged smaller (from 1024 × 640), VectaSim remembers size, position, monitor and maximised state; the interface can be enlarged with Ctrl+Plus/Minus (Ctrl+0 to reset, also under *Settings → Display → Size*)
+- When switching between map, logbook and settings everything stays as it was: map view, search, filters, selection and scroll position in the logbook, position in the settings; a dismissed ready card stays hidden until the next flight
 
 ## 0.1.0 – 2026-10-17
 
-Erster Stand – Phase 1 (MVP).
+First version – phase 1 (MVP).
 
-- Live-Karte (MapLibre/OpenFreeMap) mit Flugzeug, höhencodiertem Track, Flughäfen (OurAirports), Airport-Diagramm beim Hineinzoomen, VATSIM-Verkehr/ATC, METAR-Badges
-- Flugphasen-Erkennung, Touchdown-Detektor nach festen, dokumentierten Regeln (Sim-Wert, V/S-Rückfall, Worst-of-Bounces, AGL-Korroboration), Flugzusammenfassung mit Integritäts-Flags
-- Lokales SQLite-Logbuch mit komprimierten Tracks, Profil-Chart, Export (CSV/GPX/KML/JSON), Flotte, besuchte Flughäfen
-- SimBrief-Dispatch mit geplanter Route und OFP-vs-Ist
-- Landing-Debrief: Runway-Draufsicht mit Aufsetzpunkt, Anflugprofil, Stabilized-Approach-Checkliste, gespeichertes METAR
-- Oberfläche mit Icon-Sidebar, Vollbild-Karte, Seitenleiste, Logbuch (Liste/Detail), Demo-Modus
-- Auto-Update über signierte GitHub-Releases
+- Live map (MapLibre/OpenFreeMap) with aircraft, altitude-coloured track, airports (OurAirports), airport diagram when zooming in, VATSIM traffic/ATC, METAR badges
+- Flight phase detection, touchdown detector by fixed, documented rules (sim value, V/S fallback, worst of bounces, AGL corroboration), flight summary with integrity flags
+- Local SQLite logbook with compressed tracks, profile chart, export (CSV/GPX/KML/JSON), fleet, visited airports
+- SimBrief dispatch with planned route and OFP vs. actual
+- Landing debrief: runway top view with touchdown point, approach profile, stabilised approach checklist, stored METAR
+- Interface with icon sidebar, full-screen map, side panel, logbook (list/detail), demo mode
+- Automatic updates via signed GitHub releases

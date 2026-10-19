@@ -1,5 +1,6 @@
 import { useEffect, useMemo, type KeyboardEvent } from "react";
-import { NNBSP, fmt, fmtClock, fmtNum, fmtSigned } from "../format";
+import { NNBSP, fmt, fmtClock, fmtNum, fmtSigned } from "../i18n/number";
+import { useT, type TFunction } from "../i18n";
 import { sideLabel } from "./geometry";
 import { REPLAY_SPEEDS, sampleAt, useReplay, useReplayCursor, useReplayStore, type ReplayStore } from "./replayStore";
 import type { ApproachAnalysis } from "./approachTypes";
@@ -58,6 +59,7 @@ export function replayKey(store: ReplayStore, e: KeyboardEvent): boolean {
 }
 
 export default function ReplayBar() {
+  const tr = useT();
   const store = useReplayStore();
   const { tMs, playing, speed, range, markers } = useReplay(store);
   usePlaybackLoop(store, playing);
@@ -66,6 +68,7 @@ export default function ReplayBar() {
   const t = tMs ?? range.startMs;
   const dur = range.endMs - range.startMs;
   const atMarker = markers.reduce<string | null>((k, m) => (Math.abs(m.tMs - t) < 500 ? m.key : k), null);
+  const atLabel = atMarker ? markers.find((m) => m.key === atMarker)?.label : undefined;
   const elapsedS = Math.round((t - range.startMs) / 1000);
   const elapsed = `${Math.floor(elapsedS / 60)}:${String(elapsedS % 60).padStart(2, "0")}`;
 
@@ -77,20 +80,20 @@ export default function ReplayBar() {
   };
 
   return (
-    <div className="replay" role="group" aria-label="Wiedergabe des Anflugs" onKeyDown={onKey}>
+    <div className="replay" role="group" aria-label={tr("replay.aria")} onKeyDown={onKey}>
       <div className="replay-row">
-        <button className="btn-sm replay-step" onClick={() => store.step(-1)} aria-label="Eine Sekunde zurück" title="1 s zurück (←, Shift: 10 s)">
+        <button className="btn-sm replay-step" onClick={() => store.step(-1)} aria-label={tr("replay.back")} title={tr("replay.backTitle")}>
           −1{NNBSP}s
         </button>
-        <button className="btn-sm replay-play" onClick={() => store.toggle()} aria-label={playing ? "Pause" : "Wiedergabe starten"} aria-pressed={playing} title="Wiedergabe / Pause (Leertaste)">
+        <button className="btn-sm replay-play" onClick={() => store.toggle()} aria-label={playing ? tr("replay.pause") : tr("replay.play")} aria-pressed={playing} title={tr("replay.playTitle")}>
           <span aria-hidden="true">{playing ? "⏸" : "▶"}</span>
         </button>
-        <button className="btn-sm replay-step" onClick={() => store.step(1)} aria-label="Eine Sekunde vor" title="1 s vor (→, Shift: 10 s)">
+        <button className="btn-sm replay-step" onClick={() => store.step(1)} aria-label={tr("replay.forward")} title={tr("replay.forwardTitle")}>
           +1{NNBSP}s
         </button>
-        <span className="segmented replay-speed" role="radiogroup" aria-label="Wiedergabegeschwindigkeit">
+        <span className="segmented replay-speed" role="radiogroup" aria-label={tr("replay.speed")}>
           {REPLAY_SPEEDS.map((s) => (
-            <button key={s} role="radio" aria-checked={speed === s} className={speed === s ? "active" : ""} onClick={() => store.setSpeed(s)} aria-label={`${s}-fache Geschwindigkeit`}>
+            <button key={s} role="radio" aria-checked={speed === s} className={speed === s ? "active" : ""} onClick={() => store.setSpeed(s)} aria-label={tr("replay.speedOption", { speed: s })}>
               {s}×
             </button>
           ))}
@@ -103,22 +106,22 @@ export default function ReplayBar() {
           step={100}
           value={Math.round(t - range.startMs)}
           onChange={(e) => store.setCursor(range.startMs + Number(e.currentTarget.value))}
-          aria-label="Zeitpunkt im Anflug"
-          aria-valuetext={`${clock(t)}, ${elapsed} min nach Beginn${atMarker ? `, ${markers.find((m) => m.key === atMarker)?.label}` : ""}`}
+          aria-label={tr("replay.slider")}
+          aria-valuetext={atLabel ? tr("replay.sliderValueMarker", { clock: clock(t), elapsed, marker: atLabel }) : tr("replay.sliderValue", { clock: clock(t), elapsed })}
         />
         <span className="replay-time num" aria-hidden="true">
           {clock(t)}
         </span>
       </div>
       {markers.length > 0 && (
-        <div className="replay-marks" role="group" aria-label="Springen zu">
-          <span className="detail">Springen:</span>
+        <div className="replay-marks" role="group" aria-label={tr("replay.jumpGroup")}>
+          <span className="detail">{tr("replay.jump")}</span>
           {markers.map((m) => (
             <button
               key={m.key}
               className={`btn-sm replay-mark${atMarker === m.key ? " active" : ""}`}
               onClick={() => store.jumpTo(m)}
-              aria-label={`Zu ${m.label} springen (${clock(m.tMs)})`}
+              aria-label={tr("replay.jumpTo", { label: m.label, clock: clock(m.tMs) })}
               title={clock(m.tMs)}
             >
               {m.label}
@@ -136,8 +139,8 @@ function distText(m: number): string {
   return Math.abs(m) >= M_PER_NM ? fmt(Math.abs(m) / M_PER_NM, 1, "nm") : fmt(Math.abs(m), 0, "m");
 }
 
-function gearText(pct: number): string {
-  return pct >= 95 ? "ausgefahren" : pct <= 5 ? "eingefahren" : `${fmtNum(pct)}${NNBSP}%`;
+function gearText(t: TFunction, pct: number): string {
+  return pct >= 95 ? t("replay.gearDown") : pct <= 5 ? t("replay.gearUp") : `${fmtNum(pct)}${NNBSP}%`;
 }
 
 export interface CursorValues {
@@ -184,23 +187,24 @@ export function cursorValues(a: LandingAnalysis | null, apr: ApproachAnalysis | 
 
 /** Small strip beside the bar: the measured values at the cursor. */
 export function ReplayValues({ analysis, approach }: { analysis: LandingAnalysis | null; approach: ApproachAnalysis | null }) {
+  const t = useT();
   const tMs = useReplayCursor();
   const v = useMemo(() => cursorValues(analysis, approach, tMs), [analysis, approach, tMs]);
   const withRunway = (approach?.runway ?? analysis?.runway) != null;
   const rows: Array<[string, string]> = v
     ? [
-        ["HAT", v.onGround ? "am Boden" : fmt(v.hatFt, 0, "ft")],
+        ["HAT", v.onGround ? t("replay.onGround") : fmt(v.hatFt, 0, "ft")],
         ["IAS", `${fmt(v.iasKt, 0, "kt")}${v.iasDevKt != null ? ` (${fmtSigned(Math.round(v.iasDevKt), 0, "kt")})` : ""}`],
         ["V/S", fmtSigned(Math.round(v.vsFpm / 10) * 10, 0, "fpm")],
         ["GS", fmt(v.groundSpeedKt, 0, "kt")],
-        ["Bank", `${fmt(Math.abs(v.bankDeg), 0, "°")}${Math.abs(v.bankDeg) >= 0.5 ? (v.bankDeg > 0 ? " R" : " L") : ""}`],
-        ["Fahrwerk / Klappen", `${gearText(v.gearPct)} · ${fmtNum(Math.round(v.flapsIndex))}`],
-        ["Schwelle (x)", !withRunway || v.xM == null ? "–" : `${distText(v.xM)} ${v.xM < 0 ? "davor" : "dahinter"}`],
-        ["Querablage (y)", !withRunway || v.yM == null ? "–" : sideLabel(v.yM)],
+        [t("replay.row.bank"), `${fmt(Math.abs(v.bankDeg), 0, "°")}${Math.abs(v.bankDeg) >= 0.5 ? (v.bankDeg > 0 ? " R" : " L") : ""}`],
+        [t("replay.row.gearFlaps"), `${gearText(t, v.gearPct)} · ${fmtNum(Math.round(v.flapsIndex))}`],
+        [t("replay.row.threshold"), !withRunway || v.xM == null ? "–" : t(v.xM < 0 ? "replay.before" : "replay.past", { distance: distText(v.xM) })],
+        [t("replay.row.lateral"), !withRunway || v.yM == null ? "–" : sideLabel(v.yM)],
       ]
     : [];
   return (
-    <div className="replay-values" role="group" aria-label="Werte am Cursor">
+    <div className="replay-values" role="group" aria-label={t("replay.valuesAria")}>
       {v ? (
         <dl>
           {rows.map(([k, val]) => (
@@ -211,9 +215,9 @@ export function ReplayValues({ analysis, approach }: { analysis: LandingAnalysis
           ))}
         </dl>
       ) : (
-        <p className="detail">Kein Zeitpunkt gewählt – im Diagramm zeigen oder ▶ drücken.</p>
+        <p className="detail">{t("replay.noCursor")}</p>
       )}
-      <p className="detail replay-source">gemessen (1{NNBSP}Hz, interpoliert)</p>
+      <p className="detail replay-source">{t("replay.source")}</p>
     </div>
   );
 }

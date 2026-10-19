@@ -6,6 +6,7 @@
 // outline), no purple / violet / magenta / indigo anywhere (product rule).
 
 import { useSyncExternalStore } from "react";
+import { t } from "./i18n";
 
 export type ThemeId = "nachtcockpit" | "graphit-amber" | "papierkarte" | "phosphor" | "arktis-studio" | "signal";
 /** Default direction; App.css :root carries the same tokens for the first paint. */
@@ -38,6 +39,11 @@ export interface ThemeColors {
   route: string;
   /** Overlay background over the map (glass when the theme has glass, opaque otherwise). */
   glass: string;
+  /**
+   * Other (VATSIM/IVAO) traffic: a muted blue-grey per theme, the cool opposite of the own
+   * aircraft yellow, so the own plane is found at a busy hub. Never purple.
+   * aircraftIcons.trafficColorsOf() lifts it to 3:1 / 4.5:1 on the map land colour.
+   */
   traffic: string;
   /** Outline of the own aircraft: dark halo on dark themes, ink on light ones. */
   aircraftEdge: string;
@@ -135,7 +141,7 @@ export const THEMES: ThemeDef[] = [
       info: "#3fb8af",
       route: "#aab6c4",
       glass: "rgba(14, 18, 24, 0.72)",
-      traffic: "#a88a3a",
+      traffic: "#7f98b2",
       aircraftEdge: "#0a0d11",
       band: { soft: "#4fd2dc", normal: "#d6f58a", firm: "#e8922a", hard: "#cc3a26" },
     },
@@ -194,7 +200,7 @@ export const THEMES: ThemeDef[] = [
       info: "#c9b48a",
       route: "#7fc4d4",
       glass: "rgba(23, 21, 19, 0.95)",
-      traffic: "#9c8443",
+      traffic: "#8ea2b6",
       aircraftEdge: "#0d0b0a",
       band: { soft: "#4fd2dc", normal: "#d6f58a", firm: "#f08a2c", hard: "#cc3a26" },
     },
@@ -252,7 +258,7 @@ export const THEMES: ThemeDef[] = [
       info: "#6a5b39",
       route: "#1c2128",
       glass: "rgba(248, 244, 234, 0.97)",
-      traffic: "#c9a43a",
+      traffic: "#5c7891",
       aircraftEdge: "#1c2128",
       band: { soft: "#0b8188", normal: "#1f3d63", firm: "#b56500", hard: "#851812" },
     },
@@ -311,7 +317,7 @@ export const THEMES: ThemeDef[] = [
       info: "#6fb88c",
       route: "#6fb88c",
       glass: "rgba(4, 7, 6, 0.93)",
-      traffic: "#8a7a3a",
+      traffic: "#7ea4b6",
       aircraftEdge: "#040706",
       band: { soft: "#4fd2dc", normal: "#d6f58a", firm: "#e8922a", hard: "#cc3a26" },
     },
@@ -370,7 +376,7 @@ export const THEMES: ThemeDef[] = [
       info: "#5b6672",
       route: "#0e1620",
       glass: "rgba(255, 255, 255, 0.97)",
-      traffic: "#c7a33c",
+      traffic: "#5a7286",
       aircraftEdge: "#0e1620",
       band: { soft: "#0b8188", normal: "#26364f", firm: "#b56500", hard: "#871a10" },
     },
@@ -428,7 +434,7 @@ export const THEMES: ThemeDef[] = [
       info: "#9a9a9c",
       route: "#d0d0d2",
       glass: "rgba(12, 12, 13, 0.88)",
-      traffic: "#8f7c3e",
+      traffic: "#86a0b9",
       aircraftEdge: "#0c0c0d",
       band: { soft: "#4fd2dc", normal: "#d6f58a", firm: "#e8922a", hard: "#cc3a26" },
     },
@@ -459,6 +465,14 @@ export const THEMES: ThemeDef[] = [
     fonts: { sans: '"Geist Variable"', num: '"Geist Mono Variable"', label: "Geist + Geist Mono" },
   },
 ];
+
+// Name, mood and the Arktis font note follow the UI language (i18n landing.json → themes.<id>);
+// the ids stay the stored setting values.
+for (const th of THEMES) {
+  Object.defineProperty(th, "name", { get: () => t(`themes.${th.id}.name`), enumerable: true, configurable: true });
+  Object.defineProperty(th, "mood", { get: () => t(`themes.${th.id}.mood`), enumerable: true, configurable: true });
+  if (th.id === "arktis-studio") Object.defineProperty(th.fonts, "label", { get: () => t("themes.arktis-studio.fonts"), enumerable: true, configurable: true });
+}
 
 export function themeById(id: string | null | undefined): ThemeDef {
   return THEMES.find((t) => t.id === id) ?? THEMES.find((t) => t.id === DEFAULT_THEME)!;

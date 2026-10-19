@@ -11,7 +11,10 @@
 
 import type { FlightDetail, FlightRow, FlightSummary, IntegrityFlags, Ofp, Telemetry, TouchdownReport, TrackSample } from "./types";
 import type { ApproachBand } from "./landing/approachTypes";
-import { DASH, MINUS, fmt, fmtAltitude, fmtClock, fmtDate, fmtDeltaKg, fmtDeltaMin, fmtDuration, fmtSigned, fmtWeight, haversineNm, type WeightUnit } from "./format";
+import { haversineNm, type WeightUnit } from "./format";
+import { DASH, SEPARATORS, fmt, fmtAltitude, fmtClock, fmtDate, fmtDeltaKg, fmtDeltaMin, fmtDuration, fmtSigned, fmtWeight } from "./i18n/number";
+import { RESOURCES, getLanguage, tIn, type Language, type TKey, type Vars } from "./i18n";
+import { translate } from "./i18n/translate";
 import { callsignOf } from "./logbookFilter";
 
 /** Airline on-time definition (A15/D15): up to 15 minutes after schedule counts as on time. */
@@ -185,7 +188,7 @@ export interface Punctuality {
   status: PunctualityStatus;
   /** Delay in whole minutes (negative = early). */
   delayMin: number;
-  /** "pünktlich" / "verspätet". */
+  /** "pünktlich" / "verspätet" ("on time" / "late"), in the language it was built for. */
   label: string;
   /** Which event: out = off-block (D15), in = on-block (A15). */
   event: "out" | "in";
@@ -208,17 +211,18 @@ const delayMin = (actual: number | null | undefined, plan: number | null | undef
   return d == null ? null : Math.round(d / 60000);
 };
 
-export function punctuality(delay: number | null, event: "out" | "in"): Punctuality | null {
+export function punctuality(delay: number | null, event: "out" | "in", lang: Language = getLanguage()): Punctuality | null {
   if (delay == null) return null;
   const late = delay > ON_TIME_THRESHOLD_MIN;
-  return { status: late ? "late" : "onTime", delayMin: delay, label: late ? "verspätet" : "pünktlich", event };
+  return { status: late ? "late" : "onTime", delayMin: delay, label: tIn(lang, late ? "logbook.pva.late" : "logbook.pva.onTime"), event };
 }
 
 /**
  * Plan against actual for one flight. `plan` are the row's plan columns (may be null), `ofp` the
  * full OFP (may be null); OFP values win where both exist. Without either, every plan is null.
  */
-export function planVsActual(actual: PvaActual, plan: PvaPlan | null, ofp?: Ofp | null): PlanVsActual {
+export function planVsActual(actual: PvaActual, plan: PvaPlan | null, ofp?: Ofp | null, lang: Language = getLanguage()): PlanVsActual {
+  const tr = (key: TKey, vars?: Vars) => translate(RESOURCES, lang, key, vars);
   const a = actual;
   const t = ofp?.times;
   const fuel = ofp?.fuel;
@@ -231,10 +235,10 @@ export function planVsActual(actual: PvaActual, plan: PvaPlan | null, ofp?: Ofp 
   };
 
   // event times
-  add({ key: "offBlock", label: "Off-Block", kind: "time", plan: s2ms(t?.schedOutS), actual: pos(a.offBlockMs) });
-  add({ key: "takeoff", label: "Takeoff", kind: "time", plan: s2ms(t?.schedOffS), actual: pos(a.takeoffMs) });
-  add({ key: "landing", label: "Landung", kind: "time", plan: s2ms(t?.schedOnS), actual: pos(a.landingMs) });
-  add({ key: "onBlock", label: "On-Block", kind: "time", plan: s2ms(t?.schedInS), actual: pos(a.onBlockMs) });
+  add({ key: "offBlock", label: tr("logbook.pva.offBlock"), kind: "time", plan: s2ms(t?.schedOutS), actual: pos(a.offBlockMs) });
+  add({ key: "takeoff", label: tr("logbook.pva.takeoff"), kind: "time", plan: s2ms(t?.schedOffS), actual: pos(a.takeoffMs) });
+  add({ key: "landing", label: tr("logbook.pva.landing"), kind: "time", plan: s2ms(t?.schedOnS), actual: pos(a.landingMs) });
+  add({ key: "onBlock", label: tr("logbook.pva.onBlock"), kind: "time", plan: s2ms(t?.schedInS), actual: pos(a.onBlockMs) });
 
   // durations; live they run on with the telemetry clock until the closing event
   const now = pos(a.nowMs);
@@ -244,29 +248,29 @@ export function planVsActual(actual: PvaActual, plan: PvaPlan | null, ofp?: Ofp 
     return { value: null, running: false };
   };
   const taxiOut = running(a.offBlockMs, a.takeoffMs);
-  add({ key: "taxiOut", label: "Taxi-out", kind: "duration", plan: s2ms(t?.taxiOutS), actual: taxiOut.value, running: taxiOut.running, note: "Off-Block bis Takeoff" });
+  add({ key: "taxiOut", label: tr("logbook.pva.taxiOut"), kind: "duration", plan: s2ms(t?.taxiOutS), actual: taxiOut.value, running: taxiOut.running, note: tr("logbook.pva.taxiOutNote") });
   const taxiIn = running(a.landingMs, a.onBlockMs);
-  add({ key: "taxiIn", label: "Taxi-in", kind: "duration", plan: s2ms(t?.taxiInS), actual: taxiIn.value, running: taxiIn.running, note: "Landung bis On-Block" });
+  add({ key: "taxiIn", label: tr("logbook.pva.taxiIn"), kind: "duration", plan: s2ms(t?.taxiInS), actual: taxiIn.value, running: taxiIn.running, note: tr("logbook.pva.taxiInNote") });
   const block = running(a.offBlockMs, a.onBlockMs);
   const blockPlan = s2ms(t?.blockS) ?? s2ms(plan?.blockS);
   const blockDelta = block.running ? null : sub(block.value, blockPlan);
   add({
     key: "block",
-    label: "Blockzeit",
+    label: tr("logbook.pva.block"),
     kind: "duration",
     plan: blockPlan,
     actual: block.value,
     running: block.running,
     delta: blockDelta,
-    warn: blockDelta != null && blockDelta >= ON_TIME_THRESHOLD_MIN * 60000 ? `Blockzeit ${fmtDeltaMin(block.value, blockPlan)} über Plan` : null,
+    warn: blockDelta != null && blockDelta >= ON_TIME_THRESHOLD_MIN * 60000 ? tr("logbook.pva.blockWarn", { delta: fmtDeltaMin(block.value, blockPlan, lang) }) : null,
   });
   const air = running(a.takeoffMs, a.landingMs);
-  add({ key: "air", label: "Luftzeit", kind: "duration", plan: s2ms(t?.enrouteS), actual: air.value, running: air.running, note: "Abheben bis Aufsetzen" });
+  add({ key: "air", label: tr("logbook.pva.air"), kind: "duration", plan: s2ms(t?.enrouteS), actual: air.value, running: air.running, note: tr("logbook.pva.airNote") });
 
   // fuel
   const rampPlan = pos(fuel?.planRampKg) ?? pos(plan?.fuelRampKg);
   const landingPlan = pos(fuel?.planLandingKg) ?? pos(plan?.fuelLandingKg);
-  add({ key: "fuelStart", label: "Treibstoff Off-Block", kind: "weight", plan: rampPlan, actual: pos(a.fuelStartKg), note: "Plan: Rampentreibstoff" });
+  add({ key: "fuelStart", label: tr("logbook.pva.fuelStart"), kind: "weight", plan: rampPlan, actual: pos(a.fuelStartKg), note: tr("logbook.pva.fuelStartNote") });
 
   const blockFuelEnd = pos(a.fuelEndKg) ?? (pos(a.onBlockMs) == null ? pos(a.fuelNowKg) : null);
   const blockFuelRunning = pos(a.fuelEndKg) == null && blockFuelEnd != null;
@@ -278,36 +282,36 @@ export function planVsActual(actual: PvaActual, plan: PvaPlan | null, ofp?: Ofp 
   // trip: takeoff → landing; exact from the track, else block fuel minus the planned taxi fuel
   let trip: number | null = null;
   let tripApprox = false;
-  let tripNote = "Takeoff bis Landung (aus dem Track)";
+  let tripNote = tr("logbook.pva.tripNoteTrack");
   if (pos(a.fuelTakeoffKg) != null && pos(a.fuelLandingKg) != null && pos(a.landingMs) != null) {
     trip = (a.fuelTakeoffKg as number) - (a.fuelLandingKg as number);
   } else if (blockFuel != null && !blockFuelRunning && pos(a.onBlockMs) != null) {
     trip = blockFuel - (taxiFuelPlan ?? 0);
     tripApprox = true;
-    tripNote = taxiFuelPlan != null ? "geschätzt: Blockverbrauch abzüglich geplantem Taxi-Treibstoff" : "geschätzt: Blockverbrauch (kein Taxi-Treibstoff im Plan)";
+    tripNote = taxiFuelPlan != null ? tr("logbook.pva.tripNoteEstimated") : tr("logbook.pva.tripNoteEstimatedNoTaxi");
   }
-  add({ key: "tripFuel", label: "Trip-Fuel", kind: "weight", plan: tripPlan, actual: trip, approx: tripApprox, note: tripNote });
+  add({ key: "tripFuel", label: tr("logbook.pva.tripFuel"), kind: "weight", plan: tripPlan, actual: trip, approx: tripApprox, note: tripNote });
   add({
     key: "blockFuel",
-    label: "Verbrauch (Block)",
+    label: tr("logbook.pva.blockFuel"),
     kind: "weight",
     plan: blockFuelPlan,
     actual: blockFuel,
     running: blockFuelRunning,
-    note: "Off-Block bis On-Block; Plan: Rampe minus Landung",
+    note: tr("logbook.pva.blockFuelNote"),
   });
 
   const landingFuel = pos(a.fuelLandingKg) ?? (pos(a.landingMs) != null ? pos(a.fuelEndKg) : null);
   const landingApprox = pos(a.fuelLandingKg) == null && landingFuel != null;
   add({
     key: "landingFuel",
-    label: "Landetreibstoff",
+    label: tr("logbook.pva.landingFuel"),
     kind: "weight",
     plan: landingPlan,
     actual: landingFuel,
     approx: landingApprox,
-    note: landingApprox ? "Wert bei On-Block (kein Track)" : "beim Aufsetzen",
-    warn: landingFuel != null && landingPlan != null && landingFuel < landingPlan - 0.5 ? "Weniger Treibstoff bei der Landung als geplant" : null,
+    note: landingApprox ? tr("logbook.pva.landingFuelNoteOnBlock") : tr("logbook.pva.landingFuelNote"),
+    warn: landingFuel != null && landingPlan != null && landingFuel < landingPlan - 0.5 ? tr("logbook.pva.landingFuelWarn") : null,
   });
 
   // distance and altitude
@@ -317,22 +321,22 @@ export function planVsActual(actual: PvaActual, plan: PvaPlan | null, ofp?: Ofp 
   const distRunning = pos(a.onBlockMs) == null && pos(a.landingMs) == null && dist != null && now != null;
   add({
     key: "distance",
-    label: "Distanz",
+    label: tr("logbook.pva.distance"),
     kind: "distance",
     plan: pos(ofp?.routeDistanceNm),
     actual: dist,
     running: distRunning,
-    note: `Ist: geflogener Track${gc != null ? ` (Großkreis ${fmt(gc, 0, "nm")})` : ""}; Plan: Route`,
+    note: gc != null ? tr("logbook.pva.distanceNoteGc", { gc: fmt(gc, 0, "nm", lang) }) : tr("logbook.pva.distanceNote"),
   });
-  add({ key: "cruise", label: "Reiseflughöhe", kind: "altitude", plan: pos(ofp?.cruiseAltitudeFt), actual: pos(a.maxAltFt), note: "Ist: maximale Höhe MSL" });
+  add({ key: "cruise", label: tr("logbook.pva.cruise"), kind: "altitude", plan: pos(ofp?.cruiseAltitudeFt), actual: pos(a.maxAltFt), note: tr("logbook.pva.cruiseNote") });
 
   const byKey: Partial<Record<PvaKey, PvaLine>> = {};
   for (const l of lines) byKey[l.key] = l;
 
   const delayOut = delayMin(byKey.offBlock?.actual, byKey.offBlock?.plan);
   const delayIn = delayMin(byKey.onBlock?.actual, byKey.onBlock?.plan);
-  const departure = punctuality(delayOut, "out");
-  const arrival = punctuality(delayIn, "in");
+  const departure = punctuality(delayOut, "out", lang);
+  const arrival = punctuality(delayIn, "in", lang);
   return { lines, byKey, delayOutMin: delayOut, delayInMin: delayIn, departure, arrival, headline: arrival ?? departure };
 }
 
@@ -370,23 +374,23 @@ export function fmtPvaDelta(l: PvaLine, unit?: WeightUnit): string {
 }
 
 /** "pünktlich (+4 min)" / "verspätet (+22 min)". */
-export function fmtPunctuality(p: Punctuality | null): string {
+export function fmtPunctuality(p: Punctuality | null, lang: Language = getLanguage()): string {
   if (!p) return DASH;
   const d = p.delayMin;
-  return `${p.label} (${d > 0 ? "+" : d < 0 ? MINUS : "±"}${Math.abs(d)} min)`;
+  return `${p.label} (${d > 0 ? "+" : d < 0 ? SEPARATORS[lang].minus : "±"}${Math.abs(d)} min)`;
 }
 
 // ---- integrity ---------------------------------------------------------------------------
 
-/** Integrity findings in UI words, empty when the flight is clean. */
-export function integrityIssues(i: IntegrityFlags): string[] {
+/** Integrity findings in UI words (the given language), empty when the flight is clean. */
+export function integrityIssues(i: IntegrityFlags, lang: Language = getLanguage()): string[] {
   return [
-    i.slewDetected && "Slew",
-    i.timeAccelerationDetected && `Zeitraffer (max. ${fmt(i.maxSimRate, 0)}×)`,
-    i.crashed && "Absturz",
-    i.fuelIncreasedAirborne && "Treibstoff in der Luft erhöht",
-    i.teleportDetected && "Positionssprung (Teleport/Neuladen)",
-    i.pauseCount > 0 && `${i.pauseCount}× Pause (${fmtDuration(i.pausedMs)})`,
+    i.slewDetected && tIn(lang, "logbook.integrity.slew"),
+    i.timeAccelerationDetected && tIn(lang, "logbook.integrity.timeAccel", { rate: fmt(i.maxSimRate, 0, "", lang) }),
+    i.crashed && tIn(lang, "logbook.integrity.crash"),
+    i.fuelIncreasedAirborne && tIn(lang, "logbook.integrity.fuelIncreased"),
+    i.teleportDetected && tIn(lang, "logbook.integrity.teleport"),
+    i.pauseCount > 0 && tIn(lang, "logbook.integrity.pause", { n: i.pauseCount, duration: fmtDuration(i.pausedMs, {}, lang) }),
   ].filter((s): s is string => typeof s === "string");
 }
 
@@ -405,6 +409,8 @@ export interface PirepMeta {
   track?: readonly TrackSample[] | null;
   /** Unit of the text version (JSON is always kg). */
   weightUnit?: WeightUnit;
+  /** Language of the text version and of the integrity findings (default: the UI language). */
+  lang?: Language;
 }
 
 /** `pirep/v1`: stable keys, null for unknown values, times ISO 8601 UTC, weights kg. */
@@ -505,10 +511,11 @@ function judgedTouchdown(tds: readonly TouchdownReport[]): TouchdownReport | nul
  */
 export function buildPirep(detail: FlightDetail, plan: Ofp | null, landing?: PirepApproach | null, meta: PirepMeta = {}): Pirep {
   const row = detail.flight;
-  const pva = planVsActual(actualFromRow(row, meta.track), planFromRow(row), plan);
+  const lang = meta.lang ?? getLanguage();
+  const pva = planVsActual(actualFromRow(row, meta.track), planFromRow(row), plan, lang);
   const L = pva.byKey;
   const td = judgedTouchdown(detail.touchdowns);
-  const issues = integrityIssues(row.integrity);
+  const issues = integrityIssues(row.integrity, lang);
   const i = row.integrity;
 
   // "DLH4YA" from the OFP, else the flight number the sim reports (its airline is a name, not a code)
@@ -595,49 +602,62 @@ export function buildPirep(detail: FlightDetail, plan: Ofp | null, landing?: Pir
     sim: { name: str(row.simName), provider: str(row.provider) },
   };
 
-  return { json, text: pirepText(json, pva, meta.weightUnit ?? "kg") };
+  return { json, text: pirepText(json, pva, meta.weightUnit ?? "kg", lang) };
 }
 
 // The text goes into foreign web forms: plain ASCII digits, "-" as minus, "." as decimal point,
-// UTC clock times "08:15z" regardless of the time preference.
+// UTC clock times "08:15z" regardless of the time preference. Labels in the UI language
+// (German labels keep their English twin, "Datum / Date"); numbers go in as strings so the
+// placeholders do not group them.
 const z = (isoTime: string | null) => (isoTime ? `${isoTime.slice(11, 16)}z` : "--:--");
 const hmm = (min: number | null) => (min == null ? "-:--" : `${Math.floor(min / 60)}:${String(min % 60).padStart(2, "0")}`);
 const signed = (n: number | null, unit: string) => (n == null ? "-" : `${n > 0 ? "+" : ""}${n} ${unit}`);
 const LB_PER_KG = 1 / 0.45359237;
 
-function pirepText(p: PirepJson, pva: PlanVsActual, unit: WeightUnit): string {
+function pirepText(p: PirepJson, pva: PlanVsActual, unit: WeightUnit, lang: Language): string {
+  const tr = (key: TKey, vars?: Vars) => translate(RESOURCES, lang, key, vars);
   const w = (kg: number | null) => (kg == null ? "-" : `${Math.round(unit === "lb" ? kg * LB_PER_KG : kg)}`);
   const or = (s: string | null) => s ?? "-";
   const t = p.times;
   const f = p.fuel;
   const l = p.landing;
-  const dateDe = p.times.offBlock ? fmtDate(Date.parse(p.times.offBlock), { local: false }) : p.date ? p.date.split("-").reverse().join(".") : "-";
-  const plan = (s: string) => ` (Plan ${s})`;
+  const date = p.times.offBlock
+    ? fmtDate(Date.parse(p.times.offBlock), { local: false, lang })
+    : p.date
+      ? lang === "de"
+        ? p.date.split("-").reverse().join(".")
+        : p.date
+      : "-";
+  const plan = (s: string) => ` (${tr("logbook.pirep.plan", { value: s })})`;
   const lines: [string, string][] = [
     ["Callsign", or(p.callsign)],
-    ["Flugnr. / Flight", or(p.flightNumber)],
+    [tr("logbook.pirep.flightNo"), or(p.flightNumber)],
     ["DEP / ARR", `${or(p.departure)} - ${or(p.arrival)}${p.alternate ? ` (ALTN ${p.alternate})` : ""}`],
-    ["Datum / Date", `${dateDe} (UTC)`],
+    [tr("logbook.pirep.date"), tr("logbook.pirep.dateUtc", { date })],
     ["OUT / OFF / ON / IN", `${z(t.offBlock)} / ${z(t.takeoff)} / ${z(t.landing)} / ${z(t.onBlock)}`],
   ];
   if (t.schedOut || t.schedIn) lines.push(["STD / STA", `${z(t.schedOut)} / ${z(t.schedIn)}`]);
   lines.push(
     ["Block / Air", `${hmm(t.blockMin)} / ${hmm(t.airMin)}${t.plannedBlockMin != null ? plan(`${hmm(t.plannedBlockMin)} / ${hmm(t.plannedAirMin)}`) : ""}`],
     ["Taxi out / in", `${t.taxiOutMin ?? "-"} / ${t.taxiInMin ?? "-"} min`],
-    ["Distanz / Dist", `${p.distanceNm != null ? Math.round(p.distanceNm) : "-"} nm${p.plannedDistanceNm != null ? plan(`${p.plannedDistanceNm} nm`) : ""}`],
+    [tr("logbook.pirep.distance"), `${p.distanceNm != null ? Math.round(p.distanceNm) : "-"} nm${p.plannedDistanceNm != null ? plan(`${p.plannedDistanceNm} nm`) : ""}`],
     ["Max. Alt", `${p.maxAltitudeFt ?? "-"} ft${p.plannedCruiseFt != null ? plan(`FL${Math.round(p.plannedCruiseFt / 100)}`) : ""}`],
     ["Fuel Start / End", `${w(f.start)} / ${w(f.end)} ${unit} (Block ${w(f.used)} ${unit})`],
-    ["Trip Fuel", `${f.trip != null ? `${f.tripEstimated ? "ca. " : ""}${w(f.trip)} ${unit}` : "-"}${f.plannedTrip != null ? plan(`${w(f.plannedTrip)} ${unit}`) : ""}`],
-    ["Landerate / LDG", `${l.rateFpm != null ? `${l.rateFpm} fpm` : "-"} | max. ${l.maxG != null ? l.maxG.toFixed(2) : "-"} g | Bounces ${l.bounces ?? "-"}`],
+    [
+      "Trip Fuel",
+      `${f.trip != null ? (f.tripEstimated ? tr("logbook.pirep.approx", { value: `${w(f.trip)} ${unit}` }) : `${w(f.trip)} ${unit}`) : "-"}${f.plannedTrip != null ? plan(`${w(f.plannedTrip)} ${unit}`) : ""}`,
+    ],
+    [tr("logbook.pirep.landingRate"), `${l.rateFpm != null ? `${l.rateFpm} fpm` : "-"} | max. ${l.maxG != null ? l.maxG.toFixed(2) : "-"} g | Bounces ${l.bounces ?? "-"}`],
   );
-  if (l.stableFromFt !== null || l.approachBand) lines.push(["Anflug / Appr", l.stableFromFt != null ? `stabil ab ${l.stableFromFt} ft` : "nie stabil"]);
+  if (l.stableFromFt !== null || l.approachBand)
+    lines.push([tr("logbook.pirep.approach"), l.stableFromFt != null ? tr("logbook.pirep.stableFrom", { alt: String(l.stableFromFt) }) : tr("logbook.pirep.neverStable")]);
   const pu = pva.headline;
   lines.push(
-    ["Pünktlichkeit", pu ? `${pu.label} (${signed(pu.delayMin, "min")} ${pu.event === "in" ? "On-Block" : "Off-Block"})` : "-"],
-    ["Integrität", p.integrity.clean ? "OK" : p.integrity.issues.join(", ")],
+    [tr("logbook.pirep.punctuality"), pu ? `${pu.label} (${signed(pu.delayMin, "min")} ${tr(pu.event === "in" ? "logbook.pva.onBlock" : "logbook.pva.offBlock")})` : "-"],
+    [tr("logbook.pirep.integrity"), p.integrity.clean ? "OK" : p.integrity.issues.join(", ")],
     ["Sim", or(p.sim.name ?? p.sim.provider)],
-    ["Flugzeug / Acft", [p.aircraft.icao, p.aircraft.title].filter(Boolean).join(" - ") || "-"],
-    ["Reg.", or(p.aircraft.registration)],
+    [tr("logbook.pirep.aircraft"), [p.aircraft.icao, p.aircraft.title].filter(Boolean).join(" - ") || "-"],
+    [tr("logbook.pirep.registration"), or(p.aircraft.registration)],
   );
   const width = Math.max(...lines.map(([k]) => k.length));
   const body = lines.map(([k, v]) => `${k.padEnd(width)}  ${v}`).join("\n");
@@ -645,7 +665,7 @@ function pirepText(p: PirepJson, pva: PlanVsActual, unit: WeightUnit): string {
 }
 
 /** Default file name of the PIREP JSON: "pirep-EDDF-LIRF-2026-10-16.json". */
-export function pirepFileName(p: PirepJson): string {
+export function pirepFileName(p: PirepJson, lang: Language = getLanguage()): string {
   const safe = (s: string | null) => (s ?? "XXXX").replace(/[^A-Za-z0-9_-]/g, "");
-  return `pirep-${safe(p.departure ?? p.plannedDeparture)}-${safe(p.arrival ?? p.plannedArrival)}-${p.date ?? "undatiert"}.json`;
+  return `pirep-${safe(p.departure ?? p.plannedDeparture)}-${safe(p.arrival ?? p.plannedArrival)}-${p.date ?? tIn(lang, "logbook.pirep.undated")}.json`;
 }

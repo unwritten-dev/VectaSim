@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { setLanguageSetting } from "../i18n";
 import { PHOTO_HIT_TTL_MS, PHOTO_MISS_TTL_MS, airframeName, matchesAirframe, needsPhotoLookup, normalizeRegistration, parseVapp, photoCredit, pickerOptions } from "./airframe";
 
 const base = { registration: "D-AINA", customName: null, title: null, airline: null, icaoType: null };
@@ -35,7 +36,11 @@ describe("names and credits", () => {
   it("credits Planespotters photos", () => {
     expect(photoCredit({ imageSource: "planespotters", imageCredit: "Max" })).toBe("© Max · Planespotters.net");
     expect(photoCredit({ imageSource: "planespotters", imageCredit: null })).toBe("© Planespotters.net");
+    setLanguageSetting("de");
     expect(photoCredit({ imageSource: "user", imageCredit: null })).toBe("Eigenes Bild");
+    setLanguageSetting("en");
+    expect(photoCredit({ imageSource: "user", imageCredit: null })).toBe("Own image");
+    setLanguageSetting("system");
     expect(photoCredit({ imageSource: "none", imageCredit: null })).toBeNull();
   });
 });

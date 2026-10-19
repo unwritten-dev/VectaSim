@@ -96,9 +96,16 @@
 }
 .tr-charts {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  /* the column count follows the measured width (Trends.tsx: .two from 760 px), so the SVG widths match */
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--sp-3) var(--sp-4);
   min-width: 0;
+}
+.tr-charts.two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.tr-charts.two > .tr-chart-wide {
+  grid-column: 1 / -1;
 }
 .tr-chart {
   margin: 0;
@@ -117,6 +124,12 @@
 }
 .tr-chart-title {
   font-weight: var(--fw-strong);
+}
+/* a title with an explanation in its tooltip (Kurs) */
+.tr-chart-title.has-hint {
+  text-decoration: underline dotted var(--text-faint);
+  text-underline-offset: 3px;
+  cursor: help;
 }
 .tr-chart-now {
   color: var(--accent);
@@ -171,6 +184,22 @@
   width: 14px;
   height: 10px;
   background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.tr-swatch.ref {
+  width: 16px;
+  height: 0;
+  border-top: 1px dashed var(--text-faint);
+}
+.tr-unit {
+  fill: var(--text-faint);
+}
+/* narrow windows: the tables scroll sideways, the first column (date / period) stays in view */
+.tr .dp-table-scroll table.data-table th:first-child,
+.tr .dp-table-scroll table.data-table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--bg);
 }
 
 /* ---- Platzrunden (FlightDetail.tsx) ---- */

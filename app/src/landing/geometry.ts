@@ -2,7 +2,8 @@
 // geometry.test.ts. Runway coordinates come from the Rust analysis (landing.rs): x metres
 // past the threshold along the runway, y metres right of the centreline.
 
-import { NNBSP, fmtNum } from "../format";
+import { t } from "../i18n";
+import { fmt } from "../i18n/number";
 
 export const M_PER_FT = 0.3048;
 export const M_PER_NM = 1852;
@@ -179,6 +180,6 @@ export function nearestByDist<T extends { distM: number }>(samples: T[], d: numb
  */
 export function sideLabel(lateralM: number): string {
   const a = Math.abs(lateralM);
-  if (a < 0.5) return "auf der Mittellinie";
-  return `${fmtNum(a, 0)}${NNBSP}m ${lateralM > 0 ? "rechts" : "links"}`;
+  if (a < 0.5) return t("landing.side.onCentreline");
+  return t(lateralM > 0 ? "landing.side.right" : "landing.side.left", { m: fmt(a, 0, "m") });
 }

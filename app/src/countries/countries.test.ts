@@ -1,13 +1,18 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { setLanguageSetting } from "../i18n";
 import {
   NO_FILTER,
+  globeZoomFor,
   buildRows,
+  continentLabel,
   continentProgress,
+  countryName,
   exportFileName,
   filterRows,
   fold,
   geometryBounds,
   landingsLabel,
+  otherCountryName,
   progressLabel,
   progressOf,
   visitSummary,
@@ -26,6 +31,10 @@ const LIST: Country[] = [
 ];
 const V = (iso2: string, landings: number, firstMs: number, lastMs: number): CountryVisit => ({ iso2, landings, firstMs, lastMs, airports: [], flightIds: [] });
 const VISITS = [V("DE", 3, 100, 900), V("US", 1, 500, 500), V("ZZ", 2, 1, 2)];
+
+// texts are pinned to German; the English cases switch explicitly
+beforeEach(() => setLanguageSetting("de"));
+afterEach(() => setLanguageSetting("de"));
 
 describe("buildRows", () => {
   it("joins visits to the list, sorted by German name, unknown codes dropped", () => {
@@ -91,6 +100,24 @@ describe("helpers", () => {
     expect(landingsLabel(4)).toBe("4 Landungen");
   });
 
+  it("English: names, sort order, continents, file name and labels", () => {
+    const rows = buildRows(LIST, VISITS, "en");
+    expect(rows.map((r) => r.country.iso2)).toEqual(["AT", "CW", "FR", "DE", "JP", "US"]);
+    const at = LIST[0];
+    expect(countryName(at, "en")).toBe("Austria");
+    expect(countryName(at, "de")).toBe("Österreich");
+    expect(otherCountryName(at, "en")).toBe("Österreich");
+    expect(countryName({ nameDe: "Kosovo", nameEn: "" }, "en")).toBe("Kosovo");
+    expect(continentLabel("NA", "en")).toBe("North America");
+    expect(continentLabel("NA", "de")).toBe("Nordamerika");
+    expect(continentLabel("XX", "en")).toBe("XX");
+    expect(exportFileName(new Date(2026, 9, 8, 23, 30), "en")).toBe("VectaSim_Countries_2026-10-08.png");
+    expect(landingsLabel(1, "en")).toBe("1 landing");
+    expect(landingsLabel(1500, "en")).toBe("1,500 landings");
+    setLanguageSetting("en");
+    expect(landingsLabel(4)).toBe("4 landings");
+  });
+
   it("bounds of polygons", () => {
     const poly: GeoJSON.Polygon = { type: "Polygon", coordinates: [[[5, 47], [15, 47], [15, 55], [5, 47]]] };
     expect(geometryBounds(poly)).toEqual([[5, 47], [15, 55]]);
@@ -98,5 +125,15 @@ describe("helpers", () => {
     expect(geometryBounds(multi)).toEqual([[-60, 2], [15, 55]]);
     expect(geometryBounds({ type: "Point", coordinates: [1, 2] })).toBeNull();
     expect(geometryBounds(null)).toBeNull();
+  });
+});
+
+describe("globeZoomFor", () => {
+  it("fills ~90 % of the smaller side and stays within 1..3", () => {
+    const z = globeZoomFor(960, 750);
+    expect((512 * 2 ** z) / Math.PI).toBeCloseTo(0.9 * 750, 0);
+    expect(globeZoomFor(100, 100)).toBe(1);
+    expect(globeZoomFor(10000, 10000)).toBe(3);
+    expect(globeZoomFor(0, 0)).toBe(1.9);
   });
 });

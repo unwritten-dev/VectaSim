@@ -1,0 +1,1200 @@
+{
+  "facts": {
+    "unit": {
+      "dots": "dots",
+      "dot": "dot"
+    },
+    "and": "{rest} and {last}",
+    "gScale": "smooth < {smooth} · normal < {normal} · firm < {firm} · hard ≥ {firm} g",
+    "gBandReason": "“Hard” from {hard}: the landing rate only becomes hard at the certification limit ({vsHard} = {fps}, CS/FAR 25.473); {old} was well below the manufacturers' inspection thresholds (Airbus A320 {a320}, Boeing 737-600 {b737}). VectaSim does not state type-specific limits.",
+    "speedRef": {
+      "user": "pilot's Vapp",
+      "flown": "flown reference – measures consistency, not the absolute value",
+      "design": "{factor} × VS0 (the aircraft's design value)",
+      "unavailable": "no reference"
+    },
+    "criterion": {
+      "gear": "Gear down",
+      "flaps": "Flaps set",
+      "verticalSpeed": "Sink rate",
+      "speed": "Speed",
+      "glidepath": "Glide path",
+      "bank": "Bank",
+      "localizer": "Course (localiser)",
+      "altitudeDeviation": "Height to path",
+      "speedLimit": "IAS limit",
+      "energy": "Energy",
+      "flapChange": "Flap change",
+      "landingFlaps": "Landing flaps",
+      "thrust": "Thrust (N1)",
+      "spoilers": "Spoilers retracted"
+    },
+    "criterionShort": {
+      "gear": "Gear",
+      "flaps": "Flaps",
+      "verticalSpeed": "Sink rate",
+      "speed": "Speed",
+      "glidepath": "Glide path",
+      "bank": "Bank",
+      "localizer": "Course",
+      "altitudeDeviation": "Height",
+      "speedLimit": "IAS",
+      "energy": "Energy",
+      "flapChange": "Flap change",
+      "landingFlaps": "Landing flaps",
+      "thrust": "Thrust",
+      "spoilers": "Spoilers"
+    },
+    "limit": {
+      "gearDown": "down",
+      "flapsLanding": "Flaps {stage} (landing flaps)",
+      "flapsMin": "Flaps ≥ {stage}",
+      "flapsAny": "Flaps > 0",
+      "speed": "{min}/{max} kt to the reference",
+      "glidepathApproach": "±{dots} dot to the {angle} path",
+      "glidepathLanding": "{ref} ±{tol}° (1 dot)",
+      "localizer": "±{dots} dot",
+      "altitude": "±{limit} to the {angle} path",
+      "energy": "≤ {limit} above profile",
+      "flapChange": "no change",
+      "spoilers": "≤ {limit} extended"
+    },
+    "value": {
+      "naNoRunway": "n/a without runway",
+      "naNoReference": "n/a without reference",
+      "na": "n/a",
+      "gearDown": "down",
+      "gearUp": "up",
+      "flapsStage": "Flaps {stage}",
+      "flapsUp": "up",
+      "flapChanged": "changed",
+      "flapNone": "none",
+      "spoilersIn": "retracted",
+      "spoilersOut": "{pct} extended"
+    },
+    "at": "at {gate}",
+    "criterionHint": {
+      "gear": "Gear not down {at} ({value})",
+      "flapsStage": "Flaps {measured} {at} – landing flaps ({ref}) expected",
+      "flapsUp": "Flaps up {at}",
+      "flapsUpLanding": "Flaps up {at} – landing flaps ({ref}) expected",
+      "verticalSpeed": "Sink rate {at} {value} – above the limit of {limit}",
+      "speed": "Speed {at} {value} against the reference ({ref}) – window {min}/{max} kt",
+      "glidepathAbove": "Glide path {at} {value} above the {angle} path – tolerance ±{tol} dot",
+      "glidepathBelow": "Glide path {at} {value} below the {angle} path – tolerance ±{tol} dot",
+      "glidepathLandingAbove": "Glide path {at} {value} above the {angle} path – tolerance ±{tol}° (1 dot)",
+      "glidepathLandingBelow": "Glide path {at} {value} below the {angle} path – tolerance ±{tol}° (1 dot)",
+      "fullScale": "{text}, more than 2 dots (full scale, level S2)",
+      "localizerRight": "Course {at} {value} right of the extended centreline – tolerance ±{tol} dot",
+      "localizerLeft": "Course {at} {value} left of the extended centreline – tolerance ±{tol} dot",
+      "bank": "Bank {at} {value} – above {limit}",
+      "altitudeAbove": "Height {at} {value} above the {angle} path – tolerance ±{tol}",
+      "altitudeBelow": "Height {at} {value} below the {angle} path – tolerance ±{tol}",
+      "speedLimit": "IAS {at} {value} – above {limit}",
+      "energy": "Energy {at} {value} above the profile – limit {limit}",
+      "flapChange": "Flaps moved {at}",
+      "thrust": "Thrust {at} {value} N1 – below {limit} (idle instead of approach thrust)",
+      "spoilers": "Spoilers {value} extended {at} – expected retracted on final"
+    },
+    "hint": {
+      "touchAndGo": "Touch-and-go: took off again after touchdown – no rollout",
+      "metarAge": "{note} – its wind may not match the landing",
+      "zoneDetail": "{zone}, aiming point {aim}",
+      "short": "Touchdown {dist} before the threshold – short of the touchdown zone ({zone})",
+      "inZone": "Touchdown {dist} past the threshold – in the touchdown zone ({zone})",
+      "long": "Touchdown {dist} past the threshold – beyond the touchdown zone ({zone})",
+      "longRest": "Touchdown {dist} past the threshold – beyond the touchdown zone ({zone}), {rest} of runway left",
+      "derivedRunway": "Runway derived from your rollout track – threshold estimated to ±{u}; use “Correct runway …” to set it exactly",
+      "derivedRunwayNoLength": "Runway derived from your rollout track – threshold estimated to ±{u}, runway length unknown; use “Correct runway …” to set it exactly",
+      "lateralUnmeasurable": "Lateral offset not measurable: {reason}",
+      "offRunway": "Touchdown point {side} – off the runway ({width}); RWY {ident} is the nearest matching runway",
+      "widthUnknown": "Touchdown point {side} (runway width unknown)",
+      "width": "Touchdown point {side} (runway {width} wide)",
+      "noRunway": "No runway matched – touchdown point, centreline and glide path cannot be determined",
+      "threshold": "Threshold crossed at {height} (reference {tch}), {ias} IAS, {airborne} to touchdown",
+      "refFlown": "Reference speed is the median of the flown IAS {from} → {to} ({ref}) – measures consistency, not the absolute value",
+      "refDesign": "Reference speed {ref} = {factor} × VS0 ({vs0}) – no flown value between {from} and {to}",
+      "refUnavailable": "No reference speed measurable – the speed criterion is dropped",
+      "refImplausible": "Reference {ref} is outside {min}–{max} × VS0 ({vs0})",
+      "gateNotReached": "Approach was never above {gate} – check at {gate} dropped",
+      "gatesOk": "All criteria met at {gates}",
+      "gatesOkMeasurable": "All measurable criteria met at {gates}",
+      "rateMeasured": "The sim delivered no touchdown value for this landing – landing rate {rate} from the last airborne V/S sample",
+      "rateDiff": "Landing rate {rate} (sim value), last airborne V/S sample {vs} – for the difference see Methodology",
+      "bounces": {
+        "one": "{count} bounce after the first touchdown – hardest contact {hardest}; the landing rate is the hardest contact of this event (ground contacts less than {gap} apart count as one)",
+        "other": "{count} bounces after the first touchdown – hardest contact {hardest}; the landing rate is the hardest contact of this event (ground contacts less than {gap} apart count as one)"
+      },
+      "flare": "Flare from {from}: sink rate from {vs1} to {vs2}, {dur} to touchdown",
+      "noFlare": "No flare detected: the sink rate stayed above {pct} of the approach sink rate until touchdown",
+      "wind": "{parts} (METAR {metar}, relative to {ref})",
+      "windHeading": "heading",
+      "windGustCross": "{kt} across in gusts",
+      "windWorstWithin": "{worst} within the wind direction range",
+      "windVariable": "Wind variable {kt} – no head/crosswind components",
+      "windVariableGust": "Wind variable {kt}, gusts {gust} – no head/crosswind components",
+      "windWorstCase": "{text}; worst case: crosswind {worst}",
+      "rollout": "Rollout to {end}: {dist} in {dur}",
+      "rolloutRest": "Rollout to {end}: {dist} in {dur}, {rest} of runway left",
+      "rolloutOverrun": "Rollout to {end}: {dist} in {dur} – ended {over} beyond the runway end"
+    },
+    "widthUnknown": "width unknown",
+    "zoneAssumed": "assumed ({range})",
+    "lateralReason": "The runway was derived from your rollout track – its axis is your own line, not the real centreline.",
+    "notMeasurable": "not measurable",
+    "runwaySource": {
+      "database": "Runway from OurAirports",
+      "derived": "Runway derived from your rollout track ({landings})",
+      "databaseDerived": "Runway derived from your rollout track ({landings}) · designator and length from OurAirports",
+      "user": "Runway set by you"
+    },
+    "runwaySourceShort": {
+      "database": "OurAirports",
+      "derived": "derived from your rollout track",
+      "user": "set by you"
+    },
+    "wind": {
+      "head": "Headwind {kt}",
+      "tail": "Tailwind {kt}",
+      "noCross": "no crosswind",
+      "crossRight": "Crosswind {kt} from the right",
+      "crossLeft": "Crosswind {kt} from the left",
+      "crossOnly": "Crosswind {worst}",
+      "gusts": "{text}, gusts {kt}",
+      "worst": "up to {kt} {side}",
+      "worstLong": "up to {kt} {side}",
+      "worstGust": "{text}, gusting up to {kt}",
+      "sideAny": "from either side",
+      "sideRight": "from the right",
+      "sideLeft": "from the left",
+      "spread": "{wind} (spread {kt})"
+    },
+    "metarOld": "METAR from {at} (older than {age})",
+    "metarAfter": "METAR from {at} (more than {age} after the landing)",
+    "key": {
+      "sentence": "{head} {clauses}.",
+      "head": {
+        "smooth": "Smooth landing",
+        "normal": "Normal landing",
+        "firm": "Firm landing",
+        "hard": "Hard landing"
+      },
+      "headTouchAndGo": {
+        "smooth": "Touch-and-go with a smooth landing rate",
+        "normal": "Touch-and-go with a normal landing rate",
+        "firm": "Touch-and-go with a firm landing rate",
+        "hard": "Touch-and-go with a hard landing rate"
+      },
+      "beforeThreshold": "before the threshold",
+      "inZone": "in the touchdown zone",
+      "beyondZone": "beyond the touchdown zone",
+      "noRunway": "without a matched runway",
+      "noBounce": "no bounce",
+      "bounces": {
+        "one": "with {count} bounce",
+        "other": "with {count} bounces"
+      }
+    },
+    "source": {
+      "label": {
+        "sim": "SIM",
+        "measured": "MEAS.",
+        "derived": "DERIV."
+      },
+      "name": {
+        "sim": "Sim value – reported by the simulator",
+        "measured": "measured – by VectaSim from the track",
+        "derived": "derived – calculated by VectaSim from geometry"
+      }
+    },
+    "runwayAccuracy": "Runway coordinates often have only {decimals} decimal places (about ±{accuracy}) – distances are therefore rounded to whole metres.",
+    "prov": {
+      "rateSim": "{rate} from PLANE TOUCHDOWN NORMAL VELOCITY. Our measurement: {measured} (last airborne sample).",
+      "rateHardest": "Hardest contact: {hardest}.",
+      "rateDiff": "Sim and measured values differ by {diff} – see Methodology.",
+      "rateMeasured": "The sim delivered no touchdown value. {rate} is the vertical speed of the last airborne sample (telemetry stream at the simulator's frame rate).",
+      "pointDerived": "Calculated from the position at first ground contact and a threshold of RWY {ident} derived from your rollout track: {dist} past the threshold. The threshold is only known to ±{u} (assumed aiming point, 1 sample per second); the lateral offset is not measurable because the axis is your own line.",
+      "lengthUnknown": "The runway length is unknown (only up to the end of your rollout).",
+      "pointDb": "Calculated from the position at first ground contact and the threshold coordinates of RWY {ident} ({source}): {dist} past the threshold, {side}.",
+      "byYou": "set by you",
+      "displaced": "The threshold is displaced by {m} (DB).",
+      "noRunway": "No runway matched – the touchdown point cannot be related to a threshold.",
+      "g": "Highest load factor (G FORCE) in the half second after contact, from the telemetry stream. Implausible values (above {max}, negative) are discarded."
+    },
+    "index": {
+      "label": {
+        "rate": "Landing rate",
+        "g": "g-load",
+        "bounces": "Bounces",
+        "zone": "Touchdown point",
+        "centreline": "Centreline",
+        "stable": "Stabilised approach"
+      },
+      "noRunway": "no runway",
+      "widthUnknown": "width unknown",
+      "lateralUnmeasurable": "lateral offset not measurable",
+      "noGate": "no gate reached",
+      "notComparable": "not comparable ({why})",
+      "bandPoints": "{band} {points}",
+      "formula": {
+        "total": "VectaSim index = 100 × Σ(weight × points) ÷ Σ weights, rounded. It is only shown when every part is measurable; without a runway, a known runway width or a reached gate it reads “not comparable” – leaving parts out would fake a comparison.",
+        "rate": "Landing rate (weight {wRate}) and g-load (weight {wG}): points by band – {bands}. “Normal” counts as much as “smooth”: a firm touchdown without floating is intended.",
+        "bounces": "Bounces (weight {w}): none {p0} · one {p1} · two or more {p2}.",
+        "zone": "Touchdown point (weight {w}): in the touchdown zone (from the threshold) {inZone} · from there to the runway midpoint {toMid} · beyond {beyond} · before the threshold {before}.",
+        "centreline": "Centreline (weight {w}): offset up to a quarter of the runway width {p1} · up to half the width {p2} · beyond {p3}.",
+        "stable": "Stabilised approach (weight {w}): half “stable from” ({one} from {high}, linear down to {zero} at {low}, below that or never stable {zero}), half the share of measurable gate criteria met at {gate1} and {gate2}. Without a measurable gate criterion only “stable from” counts; without an approach analysis only the gate share of the landing check."
+      }
+    },
+    "approachBand": {
+      "stable": "stable",
+      "deviations": "with deviations",
+      "unstable": "unstable",
+      "unstableBelow500": "unstable below {ft}"
+    },
+    "unavailable": {
+      "gateNotReached": "gate not reached",
+      "noRunway": "no runway",
+      "noRefSpeed": "no reference speed",
+      "notEstablished": "not established at {gate}",
+      "notOnFinal": "not on final",
+      "noData": "no data"
+    },
+    "exceedance": {
+      "at": "at {h}",
+      "between": "between {hi} and {lo}",
+      "flapChange": "Flaps moved {range}",
+      "phrase": "{name} {peak} for {dur} {range}",
+      "phraseRef": "{name} {peak} to the reference for {dur} {range}",
+      "hint": "{phrase} – {limit}",
+      "hintS2": "{phrase} – {limit} (level S2)",
+      "limit": "limit {value}",
+      "limitFlaps": "flap change below {ft}"
+    },
+    "ref": {
+      "flown": "the flown reference",
+      "value": "the reference ({kt})"
+    },
+    "faf": {
+      "faster": "At the FAF {kt} faster than {ref}.",
+      "slower": "At the FAF {kt} slower than {ref}.",
+      "above": "At the FAF {ft} above the {angle} path",
+      "below": "At the FAF {ft} below the {angle} path"
+    },
+    "lateralBand": {
+      "onCentreline": "on the extended centreline",
+      "slight": "slight deviation",
+      "marked": "marked deviation"
+    },
+    "lateral": {
+      "noRunway": "not measurable without a runway",
+      "derived": "runway from rollout track – not assessable",
+      "fewSamples": "too few samples",
+      "max": "max. {dots} dots",
+      "atGate": "at {gate} {side}",
+      "threshold": "threshold {side}",
+      "overshoot": "overshot by {m} ({dots} dots) on intercept",
+      "noOvershoot": "intercepted without overshoot",
+      "noSTurns": "no S-turns",
+      "reversals": {
+        "one": "{count} side change (S-turns)",
+        "other": "{count} side changes (S-turns)"
+      },
+      "clauseRight": "at {gate} {m} right of the extended centreline",
+      "clauseLeft": "at {gate} {m} left of the extended centreline",
+      "clauseBand": "{band} from the extended centreline",
+      "clauseBandMax": "{band} from the extended centreline (max. {max} dots)"
+    },
+    "lateralHint": {
+      "derived": "Runway derived from your rollout track – offset from the extended centreline not assessable",
+      "overshootRight": "Overshot the extended centreline by {m} ({dots} dots) to the right on intercept",
+      "overshootLeft": "Overshot the extended centreline by {m} ({dots} dots) to the left on intercept",
+      "sTurns": {
+        "one": "{count} side change across the extended centreline between {top} and {floor} (S-turns, offset above {dots} dots)",
+        "other": "{count} side changes across the extended centreline between {top} and {floor} (S-turns, offset above {dots} dots)"
+      },
+      "lowRight": "Below {gate} up to {dots} dots right of the extended centreline – above {limit} dots",
+      "lowLeft": "Below {gate} up to {dots} dots left of the extended centreline – above {limit} dots",
+      "threshold": "Over the threshold {side}",
+      "thresholdWide": "Over the threshold {side} – more than a quarter of the runway width ({width})",
+      "held": "Extended centreline held {top} → {bottom} (RMS {rms} dots)"
+    },
+    "approachKey": {
+      "goAround": "Go-around",
+      "goAroundAt": "Go-around at {h}",
+      "afterDeviations": "{lead} after deviations in {kinds}",
+      "afterStable": "{lead} after a stable approach",
+      "rightDecision": "{lead} – right decision.",
+      "noRunway": "No runway matched – only speed, sink rate, bank and configuration assessed",
+      "established": "On the extended centreline from {dist}",
+      "notEstablished": "Not established on the extended centreline",
+      "stableFrom": "stable from {ft}",
+      "neverStable": "never continuously stable down to {ft}",
+      "sentence": "{clauses}.",
+      "unstableBelow500": "Unstable below {ft}",
+      "unstableAbove500": "Unstable above {ft} ({kinds})",
+      "deviationAbove500": "Deviation above {ft}",
+      "lead": "{lead}: {phrase}.",
+      "touchAndGo": "Touch-and-go."
+    },
+    "approachLabel": {
+      "n": "Approach {n}",
+      "goAroundAt": "{n} – go-around at {h}",
+      "goAround": "{n} – go-around",
+      "touchAndGo": "{n} – touch-and-go",
+      "landed": "{n} – landing"
+    },
+    "glidepathAssumed": "{angle} assumed",
+    "vappSource": {
+      "user": "entered",
+      "flown": "flown median",
+      "design": "assumed (VS0×{factor})",
+      "unavailable": "not measurable"
+    },
+    "neverStable": "never continuously stable",
+    "ils": {
+      "gs": "glide path",
+      "loc": "localiser",
+      "rejected": "The simulator's ILS was not used: its {name} does not match this runway (another ILS tuned?).",
+      "shareGs": "The simulator's glide path was received in only {pct} of the samples (at least {min} needed) – assessed geometrically.",
+      "shareLoc": "The simulator's localiser was received in only {pct} of the samples (at least {min} needed) – assessed geometrically.",
+      "hintRejected": "The simulator's ILS does not match RWY {ident} ({which}) – another ILS tuned? Assessed geometrically",
+      "hintGs": "glide path {dots} dots",
+      "hintLoc": "course {dots} dots",
+      "hintMismatch": "Sim ILS and geometry disagree (check the runway coordinates) – median {parts}",
+      "simUsed": "sim used",
+      "simRejected": "sim rejected, geometry used",
+      "geoUsed": "geometry used",
+      "protocolGs": "Glide path: sim RMS {sim} / geometry {geo} dots, median difference {diff} dots, received {share}{angle} – {used}",
+      "protocolLoc": "Localiser: sim RMS {sim} / geometry {geo} dots, median difference {diff} dots, received {share} – {used}"
+    },
+    "approachProv": {
+      "stable": "Highest height (up to {max}, rounded down to {round} ft) from which no criterion stayed outside its tolerance for longer than its minimum duration down to {bottom} – from the 1 Hz track ({samples} samples in the window {top} → {bottom}).",
+      "gsIls": "Glide path deviation from the simulator (NAV GLIDE SLOPE ERROR, ILS on NAV 1), path angle {angle} from the ILS (NAV RAW GLIDE SLOPE). Received in {share} of the samples {top} → {floor}; the geometry from position and threshold differs by a median of {diff} dots. 1 dot = {dot}°.",
+      "gsGeo": "Height against an assumed {angle} path over a threshold crossing height of {tch}, calculated from position and threshold coordinates (no procedure data). 1 dot = {dot}°. RMS over {top} → {floor}.",
+      "locIls": "Course offset from the simulator's needle (NAV CDI, ±127 = ±{full} dots), received in {share} of the samples {top} → {bottom}. Metres from position and threshold coordinates; the geometric dots differ by a median of {diff} dots. Band by VectaSim convention as for the geometry.",
+      "locNoRunway": "No runway matched – the offset from the extended centreline is not measurable.",
+      "locDerived": "{reason} The lateral offset on the approach therefore cannot be assessed.",
+      "locGeo": "Offset from the extended centreline from position and threshold coordinates. Geometric dots: angle from a virtual antenna {antenna} beyond the runway end, 1 dot = {dotM} at the threshold. RMS over {top} → {bottom}. Band by VectaSim convention: on the extended centreline RMS ≤ {onRms} and max. ≤ {onMax} dots, slight deviation RMS ≤ {slightRms} and max. ≤ {slightMax} dots (FSF gate ±1 dot), marked beyond that.",
+      "speedFlown": "IAS against the median of your own IAS between {from} and {to} ({ref}). This measures how steady the speed was, not whether it was right for the aircraft.",
+      "speedUser": "IAS against the reference set by the pilot, {ref}; flown median {flown}.",
+      "speedDesign": "Assumption: {factor} × VS0 ({vs0}, the simulator's design value) = {ref} – no flown value between {from} and {to}, no Vapp entered.",
+      "speedNone": "No reference speed measurable – speed criteria are dropped."
+    },
+    "approachHint": {
+      "goAround": "Went around: lowest point {low} above {base}, then {climb} in {window}, IAS min. {ias}",
+      "baseField": "field elevation",
+      "baseGround": "ground",
+      "established": "Established on final from {dist} / {ft} (RWY {ident})",
+      "notEstablished": "Not established on the extended centreline – glide path and course only assessed where the approach was inside the final approach cone",
+      "noRunway": "No runway matched – glide path, course, height to path and energy are dropped",
+      "refFlown": "Reference speed is the median of the flown IAS {from} → {to} ({ref}) – assesses consistency, not the absolute speed",
+      "refDesign": "Reference speed {ref} is an assumption: {factor} × VS0 ({vs0}) – no Vapp entered, no flown value",
+      "refUnavailable": "No reference speed measurable – speed and energy criteria are dropped",
+      "speedHigh": "{at} {kt} above the reference ({ref}) – reduce speed earlier",
+      "speedHighAt": "At the FAF",
+      "speedHighAtGate": "At {gate}",
+      "gearLate": "Gear only down at {ft} – landing configuration expected by {gate}",
+      "gear": "Gear down at {ft}",
+      "flapsStage": "Landing flaps ({stage})",
+      "flapsPlain": "Landing flaps",
+      "flapsLate": "{flaps} only set at {ft} – landing configuration expected by {gate}",
+      "flapsJustInTime": "{flaps} only set at {ft} – just above the {gate} gate, better configured before {early}",
+      "flaps": "{flaps} set at {ft}",
+      "gateNotFlown": "Gate {gate} not passed – check dropped",
+      "allMet": "All measurable criteria met without interruption from {top} {bottom}",
+      "toGoAround": "until the go-around",
+      "toBottom": "down to {ft}",
+      "energyHigh": "Energy between {from} and {to} too high: up to {value} to the profile (threshold {limit})",
+      "energyLow": "Energy between {from} and {to} too low: up to {value} to the profile (threshold {limit})",
+      "energyAt10Above": "Energy at {at} {total} above the profile ({height} of it height, {speed} from speed)",
+      "energyAt10Below": "Energy at {at} {total} below the profile ({height} of it height, {speed} from speed)"
+    },
+    "energyBand": {
+      "good": "on profile",
+      "high": "too high",
+      "low": "too low",
+      "text": "{band} · {min} … {max} (limits {low}/{high}) · TAS {tas}",
+      "tasRecorded": "from the sim",
+      "tasIsa": "from IAS (ISA)"
+    },
+    "windHint": {
+      "tail": "Tailwind {kt} on final (sim wind, median {top} → {bottom}) – above {limit}",
+      "crossRight": "Crosswind {kt} from the right on final (sim wind) – above {limit}",
+      "crossLeft": "Crosswind {kt} from the left on final (sim wind) – above {limit}",
+      "shear": "Wind shear: the wind changes by {kt} between {top} and the threshold ({from} → {to})",
+      "shearMore": "Wind shear: the wind changes by {kt} between {top} and the threshold ({from} → {to}), headwind increases by {change}",
+      "shearLess": "Wind shear: the wind changes by {kt} between {top} and the threshold ({from} → {to}), headwind decreases by {change}",
+      "protocolChange": "{top}: {from} → threshold {to} (change {kt})",
+      "protocol": "{parts} – AMBIENT WIND at the aircraft, {samples} samples {top} → {bottom}"
+    },
+    "automation": {
+      "apToGoAround": "Autopilot until the go-around",
+      "apToTouchdown": "Autopilot until touchdown (autoland)",
+      "apOff": "Autopilot down to {ft}, then manual",
+      "manual": "Approach flown manually (autopilot off)",
+      "athrEnd": "A/THR until the end",
+      "athrOff": "A/THR down to {ft}",
+      "thrustManual": "manual thrust",
+      "apprMode": "APPR mode"
+    },
+    "recorded": {
+      "wind": "Wind at the aircraft {dir} true / {kt}",
+      "noNavFlags": "ILS status not delivered",
+      "noIls": "no ILS on NAV 1",
+      "gsReceived": "GS (received)",
+      "gsNotReceived": "GS (not received)",
+      "gsAngle": "glide path {angle}",
+      "course": "course {course}",
+      "text": "{parts} (sim values from the last 3 min before touchdown)"
+    }
+  },
+  "landing": {
+    "side": {
+      "onCentreline": "on the centreline",
+      "right": "{m} right",
+      "left": "{m} left",
+      "rightOfCentreline": "{m} right of the centreline",
+      "leftOfCentreline": "{m} left of the centreline"
+    }
+  },
+  "landingCard": {
+    "aria": "Landing card {where}",
+    "landing": "Landing",
+    "unknownAircraft": "Unknown aircraft",
+    "rate": "Landing rate",
+    "simValue": "sim value",
+    "measured": "measured",
+    "gPeak": "Peak g",
+    "fromThreshold": "From threshold",
+    "derivedSuffix": "{zone} · runway derived",
+    "noRunway": "no runway matched",
+    "centreline": "Centreline",
+    "right": "R",
+    "left": "L",
+    "notMeasurable": "not measurable · runway from rollout track",
+    "width": "{side} · runway {width} wide",
+    "widthUnknown": "{side} · width unknown",
+    "runwayTop": "RUNWAY {ident} FROM ABOVE",
+    "runwayTopDerived": "RUNWAY {ident} FROM ABOVE · DERIVED",
+    "runwayTopUser": "RUNWAY {ident} FROM ABOVE · SET BY YOU",
+    "touchdownPoint": "TOUCHDOWN POINT",
+    "noRunwayPanel": "No runway matched – touchdown point and centreline not available",
+    "approach": "APPROACH",
+    "windNote": "Wind: {note}",
+    "windNoMetar": "Wind: no METAR",
+    "wind": "Wind",
+    "toHeading": "{text} (to heading)",
+    "currentWeather": "current weather",
+    "zone": "Touchdown zone {zone} · aiming point {aim}",
+    "inAir": "airborne",
+    "onGround": "on the ground",
+    "exaggerated": "lateral axis ×{factor} exaggerated",
+    "profileTitle": "APPROACH · LAST {nm}",
+    "reference": "{angle} reference ±{tol}° (1 dot)",
+    "threshold": "Threshold {height} · {ias}",
+    "flare": "Flare from {ft}",
+    "tooFewPoints": "Too few track points for an approach profile",
+    "thresholdShort": "Threshold",
+    "touchdown": "Touchdown",
+    "export": {
+      "notDrawn": "The landing card could not be drawn",
+      "notLoaded": "The landing card could not be loaded as an image",
+      "noCanvas": "Canvas not available",
+      "noPng": "The PNG could not be created",
+      "saved": "Landing card saved",
+      "bothSaved": "Landing and approach card saved",
+      "notSaved": "Landing card not saved: {title}",
+      "noClipboardImages": "The clipboard does not support images here",
+      "copied": "Landing card copied to the clipboard",
+      "notCopied": "Landing card not copied",
+      "pngFilter": "PNG image",
+      "openFolder": "Open folder",
+      "notAutoSaved": "Landing card not saved automatically: {title}"
+    }
+  },
+  "themes": {
+    "nachtcockpit": {
+      "name": "Night Cockpit",
+      "mood": "Dimmed cockpit at night: bluish neutrals, a calm cyan, hairlines instead of boxes."
+    },
+    "graphit-amber": {
+      "name": "Graphite & Amber",
+      "mood": "Warm overhead panel at night: graphite like painted sheet metal, labels in amber, values in warm white."
+    },
+    "papierkarte": {
+      "name": "Paper Chart",
+      "mood": "Approach chart on the kneeboard: cream paper, black ink, chart blue – for daylight."
+    },
+    "phosphor": {
+      "name": "Phosphor",
+      "mood": "Monochrome instrument: green phosphor on black, hierarchy through brightness only, yellow as the only second colour."
+    },
+    "arktis-studio": {
+      "name": "Arctic Studio",
+      "mood": "Cool studio light: light grey, white sheets, deep petrol blue and large, calm typography.",
+      "fonts": "Inter Tight (tabular figures)"
+    },
+    "signal": {
+      "name": "Signal",
+      "mood": "Reduced telemetry: neutral graphite, capital micro-labels and exactly one signal green where something is happening; the track in cool cyan."
+    }
+  },
+  "debrief": {
+    "bar": {
+      "kickerLanding": "Landing debrief",
+      "kickerApproach": "Approach debrief",
+      "pickApproach": "Choose approach",
+      "pickLanding": "Choose landing",
+      "prevLanding": "Previous landing",
+      "nextLanding": "Next landing",
+      "landingOf": "Landing {n} of {count}",
+      "inLogbook": "In logbook",
+      "inLogbookTitle": "Open this flight in the logbook",
+      "close": "Close",
+      "closeTitle": "Close (Esc)"
+    },
+    "state": {
+      "retry": "Try again",
+      "loading": "Analysing the landing …",
+      "noApproachForLanding": "no approach to this landing was found in the track"
+    },
+    "card": {
+      "save": "Save landing card",
+      "saving": "Saving …",
+      "saveTitle": "Save the landing card as PNG ({size})",
+      "copy": "Copy landing card",
+      "copying": "Copying …",
+      "copyTitle": "Copy the landing card to the clipboard as PNG"
+    },
+    "section": {
+      "approachProfile": "Approach profile",
+      "hints": "Notes",
+      "gates": "Stabilised approach – gates",
+      "stabilised": "Stabilised approach",
+      "methodology": "Methodology",
+      "flareRollout": "Flare & rollout",
+      "protocol": "Measurement log",
+      "runwayFromAbove": "Runway {ident} from above",
+      "touchdownOnMap": "Touchdown point on the map"
+    },
+    "goAround": {
+      "noRunway": "Approach without a matched runway",
+      "suffix": "Go-around",
+      "methodTitle": "Go-around:",
+      "methodText": "detected when, after a descent below {agl}, the aircraft climbs at least {climb} within {window} (or the phase detection reports Approach/Final → Climb). The lowest point is the decision point; there is no landing card."
+    },
+    "header": {
+      "titleNoRunway": "{place} · no runway matched",
+      "titleNoAirport": "Landing without an airport",
+      "noRunway": "No runway matched",
+      "correctRunway": "Correct runway …",
+      "correctRunwayTitle": "Set the runway threshold and end yourself",
+      "unknownAircraft": "Unknown aircraft"
+    },
+    "wind": {
+      "label": "Wind ({source})",
+      "atLanding": "Weather at the time of landing",
+      "current": "current weather",
+      "noWind": "no wind reported",
+      "componentsToHeading": "{components} (relative to heading)",
+      "noMetar": "no METAR",
+      "simTitle": "Wind at the aircraft according to the simulator (AMBIENT WIND), median {top} → {bottom}",
+      "simLabel": "Sim wind on final"
+    },
+    "hero": {
+      "rate": "Landing rate",
+      "bandsTitle": "Bands: {bands}",
+      "rateSubSim": "Measured {measured} · last sample airborne",
+      "rateSubMeasured": "No value from the sim – measured",
+      "point": "Touchdown point",
+      "inTdz": "in the touchdown zone",
+      "inTdzAssumed": "in the touchdown zone (assumed)",
+      "outsideTdz": "outside the touchdown zone",
+      "outsideTdzAssumed": "outside the touchdown zone (assumed)",
+      "onCentreline": "on the centreline",
+      "rightOfCentreline": "{dist} right of the centreline",
+      "leftOfCentreline": "{dist} left of the centreline",
+      "lateralNotMeasurable": "Lateral offset not measurable",
+      "noRunway": "no runway matched",
+      "g": "g-load",
+      "gSub": "Peak {window} after contact",
+      "bandsLine": "Bands – landing rate: {vs} · g-load: {g}"
+    },
+    "facts": {
+      "hardestContact": "hardest contact {vs}",
+      "touchAndGo": "Touch-and-go",
+      "fullStop": "Full stop",
+      "bounceWarn": "Bounce after the first touchdown",
+      "derivedTitle": "The runway was derived from your ground track: its axis is your own line, so the offset from the real centreline cannot be determined from it.",
+      "notMeasurable": "not measurable",
+      "derivedLabel": "Centreline · runway derived from your ground track",
+      "centreline": "Centreline",
+      "centrelineWidth": "Centreline · runway {width} wide",
+      "centrelineWidthUnknown": "Centreline · width unknown",
+      "centrelineWarn": "More than a quarter of the runway width off the centreline",
+      "rollout": "Rollout",
+      "rolloutTo": "Rollout to {speed}",
+      "rolloutToRest": "Rollout to {speed} · {rest} remaining",
+      "rolloutWarn": "Rollout ended beyond the runway end",
+      "indexTitle": "Summary of the raw values – formula under “Methodology”",
+      "index": "VectaSim index",
+      "indexOutOf": "/ 100 · formula under “Methodology”",
+      "indexNa": "{reason} · only measurable with all parts, see “Methodology”"
+    },
+    "noRunway": {
+      "text": "No runway matched: within {radius} of the touchdown point there is no runway whose direction matches the heading within ±{heading}. Touchdown point, centreline offset and glide path are not available."
+    },
+    "stabilised": {
+      "noteApproach": "Speed against the {vapp} reference ({source}); glide path against the {path}.",
+      "ilsPath": "{deg} ILS path (sim)",
+      "assumedPath": "{deg} path (assumed)",
+      "noteGates": "Speed against the {speed} reference ({source}); glide path ±{tol} = {oneDot}, more than {full} ({twoDots}, full scale) is level S2."
+    },
+    "flare": {
+      "flareFrom": "Flare from",
+      "notDetectable": "not detected",
+      "durationToTd": "Time to touchdown",
+      "vsBeforeAfter": "Sink rate before / after flare",
+      "thresholdCrossing": "Threshold crossing",
+      "thresholdToTd": "Time threshold → touchdown",
+      "iasMinMax": "IAS min / max",
+      "iasAt": "IAS at {h1} / {h2} / touchdown",
+      "vsBelow": "V/S below {alt}",
+      "bankMaxBelow": "Max. bank below {alt}",
+      "gpMax": "Glide path max. above / below",
+      "noRunwayNa": "n/a without runway",
+      "pitchBank": "Pitch / bank at touchdown",
+      "gs": "GS at touchdown",
+      "rollout": "Rollout",
+      "rolloutValue": "{dist} in {time}",
+      "runwayDb": "Runway (database)",
+      "runwayUser": "Runway (set by you)",
+      "runwayDerived": "Runway (derived)",
+      "lengthMin": "at least {len} (length unknown)"
+    },
+    "integrity": {
+      "slew": "Slew",
+      "timeAccel": "Time acceleration (max. {rate})",
+      "crashed": "Crash",
+      "fuelIncreased": "Fuel increased in flight",
+      "pauses": {
+        "one": "{count} pause",
+        "other": "{count} pauses"
+      }
+    },
+    "unit": {
+      "dots": {
+        "one": "{n} dot",
+        "other": "{n} dots"
+      }
+    },
+    "method": {
+      "landingRate": {
+        "title": "Landing rate:",
+        "text": "the simulator's value (PLANE TOUCHDOWN NORMAL VELOCITY, ×60 in fpm, negative = descending). If the sim delivers no new value (below 1 fpm or unchanged), the vertical speed of the last airborne sample is used. With bounces the hardest contact of this landing event counts, never a peak over the whole flight; two ground contacts with less than {gap} of air between them count as one contact. The flight's landing rate in the logbook is the last full-stop landing."
+      },
+      "measured": {
+        "title": "Measured value:",
+        "text": "the last sample before ground contact from the telemetry stream (at the simulator's frame rate). Because V/S on the ground is meaningless and even a high sample rate can miss the moment of contact, it differs from the sim value. “On the ground” only counts when the height above ground is at most {agl}; the landing is only confirmed after three consecutive ground samples (≥ {confirm})."
+      },
+      "gLoad": {
+        "title": "g-load:",
+        "text": "the highest load factor in the half second after each contact (the nose wheel touching down afterwards is not included); implausible values (above {max}, negative) are discarded."
+      },
+      "track": {
+        "title": "Track:",
+        "text": "approach, flare and rollout come from the stored track at 1 sample per second. Heights are “above the touchdown point”: altitude MSL minus the MSL of the first ground sample – independent of the terrain under the approach and of the airport elevation in the database. The approach starts at the last descent through {start}, otherwise {fallback} before touchdown."
+      },
+      "runway": {
+        "title": "Runway:",
+        "source": "OurAirports (public domain); coordinates of both runway ends, width from the database (if missing: “width unknown”).",
+        "displaced": "A displaced threshold from the database moves the threshold along the axis.",
+        "displacedHere": "A displaced threshold from the database moves the threshold along the axis (here {dist}).",
+        "match": "The nearest runway within {radius} whose direction matches the heading at touchdown within ±{heading} is matched.",
+        "tdzTitle": "Touchdown zone",
+        "tdz": "(ICAO/FAA): from the threshold to {end}, on runways shorter than {short} the first third.",
+        "aiming": "The aiming point (marking per ICAO Annex 14: {marks} depending on runway length) lies within the zone and is only a mark.",
+        "aimingHere": "The aiming point (marking per ICAO Annex 14: {marks} depending on runway length, here {here}) lies within the zone and is only a mark.",
+        "derivedTitle": "Without coordinates in OurAirports,",
+        "derived": "VectaSim derives the runway from your ground track: axis = the line of your rollout, threshold assumed {offset} before the touchdown point (or at the aiming point of the database length), ±{along} along. The lateral offset is then not measurable; without a known length the touchdown zone is the fixed assumption 0–{tdzEnd} and the rest of the runway is not available. Every further landing there refines the remembered runway.",
+        "correct": "With “Correct runway …” you set the threshold and end yourself – your runway takes precedence over OurAirports.",
+        "thisDerived": "This landing: derived runway."
+      },
+      "glidepath": {
+        "title": "Glide path:",
+        "text": "angle from the touchdown point of the {deg} reference ({tch} above the threshold) to the aircraft, only from {from} before it. Tolerance ±{tol} = {oneDot} (FSF: “within one dot”); ±{full} is full scale ({twoDots}) and is only named as level S2. Without a matched runway it is not available."
+      },
+      "stabilised": {
+        "title": "Stabilised approach",
+        "text": "at {gate1} and {gate2} (interpolated): gear down, flaps set, |V/S| ≤ {vs}, IAS {below}/{above} to the reference speed, glide path ±{oneDot}, bank ≤ {bank}. Reference: 1. the Vapp entered for the aircraft (Logbook → Aircraft); 2. otherwise the median of the flown IAS between {from} and {to} – this measures consistency, not whether the speed was right for the type; 3. otherwise {factor} × VS0. This landing: {speed} ({source})."
+      },
+      "flare": {
+        "title": "Flare:",
+        "text": "from the sample after which the sink rate stayed below {pct} of the mean approach sink rate (500–200 ft) until touchdown; resolution 1 s."
+      },
+      "rollout": {
+        "title": "Rollout:",
+        "text": "from touchdown until GS below {speed}."
+      },
+      "wind": {
+        "title": "Wind:",
+        "text": "the airport's METAR at the time of landing (stored at landing), otherwise the current one – without its own METAR that of the nearest station within {radius} (aviationweather.gov or VATSIM), only for landings in the last {hours}. If the report's observation time is more than {maxAge} before or after touchdown, this is noted with the wind. Headwind/crosswind refer to the runway direction (true); with VRB or a direction range (dddVddd) VectaSim also shows the most unfavourable crosswind within it.",
+        "hours": {
+          "one": "{count} hour",
+          "other": "{count} hours"
+        }
+      },
+      "bands": "Bands: landing rate {vs}; g-load {g}.",
+      "index": {
+        "title": "VectaSim index",
+        "text": "(small, below the raw values, never meant as a verdict):",
+        "thisLanding": "This landing:",
+        "part": "{label} {points} × {weight}",
+        "partNa": "{label} n/a"
+      }
+    },
+    "approachMethod": {
+      "references": {
+        "title": "Approach references:",
+        "text": "the glide path is an assumed {deg} path over a {tch} threshold crossing height – without procedure data, the real ILS/RNAV angle may differ (“{deg} assumption”). 1 dot of glide path = {gsDot}. Course (localiser substitute): angle from an imaginary antenna {antenna} beyond the runway end, 1 dot = {locDot} at the threshold. “Established” from the first point after which the track stayed within {track} of the runway and the lateral offset within max. {minM} or {ratio} of the distance."
+      },
+      "ils": {
+        "title": "ILS from the simulator (from track v2):",
+        "text": "if NAV 1 receives a valid glide path for at least {share} of the samples {top} → {floor}, it replaces the assumption: angle from NAV RAW GLIDE SLOPE, deviation from NAV GLIDE SLOPE ERROR (“{deg} (ILS)”). Likewise the localiser (NAV CDI, ±127 = ±{fullScale}) replaces the geometry. Both values are always calculated (measurement log); if their medians differ by more than {mismatch}, a note is shown; at more than {rejectGs} of glide path or {rejectLoc} of course the ILS does not belong to this runway and VectaSim assesses geometrically."
+      },
+      "vapp": {
+        "title": "Reference speed (Vapp):",
+        "text": "1. the Vapp entered for the aircraft (Logbook → Aircraft); 2. otherwise the median of your own IAS between {from} and {to} on this approach – this assesses the consistency of the speed, not whether it was right for the type; 3. without measurable IAS {factor} × the simulator's VS0 (assumption); 4. otherwise the speed and energy criteria are not available. The SimBrief OFP contains no approach speed. Once VS0 is known, the reference is checked against {min}–{max} × VS0. This approach: {speed} ({source})."
+      },
+      "config": {
+        "title": "Configuration and thrust (from track v2, FSF BN 7.1):",
+        "text": "at 1,000 and 500 ft the landing flaps – the setting entered for the aircraft, otherwise the simulator's highest lever position, otherwise the setting at touchdown; N1 at least {n1} below {gate} (idle only counts after {idle}, below {floor} not at all – flare), spoilers extended at most {spoilers}. Without values (older flights, piston engine without N1) the criteria are not available. Autopilot and A/THR appear in the measurement log for information only."
+      },
+      "windEnergy": {
+        "title": "Wind and energy:",
+        "text": "sim wind at the aircraft {top} → {bottom} as the median relative to the runway; notes for tailwind above {tail}, crosswind above {cross} and a change of more than {shear} between {topFt} and the threshold (VectaSim convention). Energy uses the simulator's TAS, otherwise IAS (ISA); band 10 nm → 1,000 ft on final: too high from {high}, too low from {low}."
+      },
+      "gates": {
+        "title": "Gates:",
+        "text": "10 nm – altitude ±{tenAlt} to the path and energy ≤ {tenEnergy} (only when established), IAS ≤ {tenIas}; FAF ({fafDist} before the threshold or {fafHat}, whichever comes first) – gear, flaps ≥ 1, altitude ±{fafAlt}, speed {fafBelow}/{fafAbove}; 1,000 and 500 ft – gear ≥ {gear}, landing flaps, |V/S| ≤ {vs}, speed {below}/{above}, glide path and course ±{dots}, bank ≤ {bank}; 50 ft values only. Values are interpolated at the last crossing. “Not measurable” never counts as “not met”."
+      },
+      "stability": {
+        "title": "Stability and 3-second rule:",
+        "text": "the window {top} → {bottom} is assessed (glide path down to {gsFloor}). A deviation only counts once it lasts its minimum duration without interruption – speed {speedS}, bank {bankS}, sink rate {vsS1} (S2 {vsS2}), glide path and course {gsS}; shorter excursions under {momentary} count as momentary values. Level S1/S2: speed {speed1} or {speed2}, sink rate {vs}, glide path {gs}, course {loc}, bank {bank}. “Stable from” is the highest height (up to {stableMax}, rounded down to {round}) from which nothing was exceeded down to {bottom}."
+      },
+      "bands": {
+        "title": "Bands:",
+        "text": "{stable} – no exceedance; {deviations} – 1–2 criteria above 500 ft, none below; {unstable} – 3 or more criteria above 500 ft; {unstableBelow500} – at least one exceedance below 500 ft (per EASA / Data4Safety). A go-around is not a band but the outcome of the approach."
+      },
+      "resolution": {
+        "title": "Resolution:",
+        "text": "based on the stored track at 1 sample per second (thinned to one every {sparse} above {dense}). Durations are whole seconds; the analysis does not see peaks between two samples. Heights are above the touchdown point (HAT); for a go-around above the airport elevation from the database."
+      }
+    },
+    "protocol": {
+      "simulator": "Simulator",
+      "sampleRate": "Sample rate",
+      "sampleRateValue": {
+        "one": "Landing detection in the telemetry stream (simulator frame rate) · stored track {hz} ({count} sample on the approach)",
+        "other": "Landing detection in the telemetry stream (simulator frame rate) · stored track {hz} ({count} samples on the approach)"
+      },
+      "landingRate": "Landing rate",
+      "rateSim": "Sim value (PLANE TOUCHDOWN NORMAL VELOCITY) {sim} · measured {measured}",
+      "rateMeasured": "Measured {measured} (no value from the sim)",
+      "runwayData": "Runway data",
+      "noRunway": "no runway matched",
+      "runwayDb": "OurAirports (public domain) · RWY {ident}/{opposite}, {surface}, direction ±{diff} to the heading",
+      "surfaceUnknown": "surface unknown",
+      "displaced": "threshold displaced {dist} (DB)",
+      "accuracy": "accuracy approx. ±{acc}",
+      "runwayUser": "set by you · RWY {ident}/{opposite}, direction ±{diff} to the heading",
+      "derivedUncertainty": "threshold ±{along} along, axis ±{cross} across (your line)",
+      "lateralNotMeasurable": "lateral offset not measurable",
+      "lengthUnknown": "length unknown",
+      "wind": "Wind",
+      "observed": "{metar} (observed {time})",
+      "storedAtLanding": "stored at landing",
+      "currentApprox": "current (approximation)",
+      "noMetar": "no METAR",
+      "recorded": "Sim recording",
+      "ilsGeometry": "ILS / geometry",
+      "simWind": "Sim wind",
+      "automation": "Automation",
+      "automationInfo": "{text} (information only, not a criterion)",
+      "approachStart": "Approach start",
+      "startAltitude": "last descent through {alt}",
+      "startDistance": "{dist} before touchdown",
+      "startTrack": "start of the track",
+      "integrity": "Integrity",
+      "integrityOk": "nothing unusual (no slew, no time acceleration, no pause)",
+      "thresholds": "Thresholds",
+      "thresholdsValue": "Touchdown zone {tdz} · glide path {gp} ±{tol} ({oneDot}) · |V/S| ≤ {vs} · speed {below}/{above} to the reference · bank ≤ {bank}"
+    },
+    "summary": {
+      "lastLanding": "Last landing",
+      "loading": "Analysing the last landing …",
+      "rate": "Landing rate",
+      "openTitle": "Open the landing debrief",
+      "pastThreshold": "{distance} past the threshold",
+      "runwayUser": "runway set by you",
+      "runwayDerived": "runway derived",
+      "approach": "Approach",
+      "stableFrom": "stable from {alt}",
+      "neverStable": "never stable",
+      "goArounds": {
+        "one": "{count} go-around",
+        "other": "{count} go-arounds"
+      },
+      "stabilised": "Stabilised approach: {result}",
+      "notApplicable": "not applicable",
+      "allMet": "all criteria met",
+      "failed": {
+        "one": "{count} criterion not met",
+        "other": "{count} criteria not met"
+      },
+      "open": "Landing debrief"
+    }
+  },
+  "trends": {
+    "bucket": {
+      "flight": "per landing",
+      "week": "per week",
+      "month": "per month"
+    },
+    "months": "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec",
+    "monthLabel": "{month} {year}",
+    "weekLabel": "Wk {week} {year}",
+    "unitDots": "dots",
+    "unitPp": "pp",
+    "chart": {
+      "rate": {
+        "title": "Landing rate",
+        "note": "absolute value, smaller is softer"
+      },
+      "distance": {
+        "title": "Touchdown distance",
+        "note": "past the threshold"
+      },
+      "stableFrom": {
+        "title": "Stable from",
+        "note": "from the approach assessment; never stable does not count"
+      },
+      "lateral": {
+        "title": "Lateral track (RMS)",
+        "hint": "Lateral track = extended runway centreline (localiser course); RMS = mean sideways deviation in dots",
+        "note": "localiser RMS {from} → {to}, only with a known centreline"
+      },
+      "tdz": {
+        "title": "Touchdown zone",
+        "note": "share in the touchdown zone"
+      }
+    },
+    "chartAria": {
+      "trend": {
+        "one": "{title} {bucket}: {count} value, moving median from {from} to {to} – values in the table below",
+        "other": "{title} {bucket}: {count} values, moving median from {from} to {to} – values in the table below"
+      },
+      "single": {
+        "one": "{title} {bucket}: {count} value, {value} – values in the table below",
+        "other": "{title} {bucket}: {count} values, {value} – values in the table below"
+      },
+      "plain": {
+        "one": "{title} {bucket}: {count} value – values in the table below",
+        "other": "{title} {bucket}: {count} values – values in the table below"
+      }
+    },
+    "noValues": "no values",
+    "month": {
+      "rate": "Landing rate (median, absolute)",
+      "distance": "Touchdown distance (median)",
+      "stableFrom": "Stable from (median)",
+      "tdz": "Touchdown zone",
+      "aria": "This month ({current}) against the previous month ({previous})",
+      "head": {
+        "one": "This month vs previous month · {current} against {count} landing",
+        "other": "This month vs previous month · {current} against {count} landings"
+      },
+      "previous": "Previous month {value}",
+      "better": "better",
+      "worse": "worse"
+    },
+    "loading": "Calculating trends …",
+    "emptyTitle": "No trends yet",
+    "demoOnly": "Only demo landings so far ({count}) – they do not count here (filter “Demo flights” in the logbook).",
+    "emptyText": "Once you complete flights with a landing on a known runway, the trends show how your landing rate, touchdown point and approach develop.",
+    "demoHint": "A demo flight shows its analysis in the debrief but does not count here.",
+    "openLastDebrief": "Debrief of the last landing",
+    "aria": "Trends of your landings",
+    "period": "Period",
+    "lastN": "last {count}",
+    "groupBy": "Group by",
+    "legend": {
+      "single": "single landing",
+      "median": "median {bucket}",
+      "rollingLandings": {
+        "one": "moving median ({count} landing)",
+        "other": "moving median ({count} landings)"
+      },
+      "rollingPeriods": {
+        "one": "moving median ({count} period)",
+        "other": "moving median ({count} periods)"
+      },
+      "iqr": "middle half (quartiles)",
+      "refs": "dashed: band limits (landing rate {rate}, stable from {stable}, lateral track {lateral})",
+      "timesUtc": "times in UTC",
+      "timesLocal": "dates in local time, weeks and months by UTC",
+      "approaches": {
+        "one": "{count} assessed approach",
+        "other": "{count} assessed approaches"
+      },
+      "note": "{landings} · {approaches} · {times}"
+    },
+    "table": {
+      "caption": "Landing trends, newest first",
+      "captionBucket": "Trends {bucket}, medians, newest first",
+      "stableFrom": "Stable from",
+      "neverStable": "never stable",
+      "period": "Period",
+      "landings": "Landings",
+      "lateral": "Lateral track"
+    }
+  },
+  "dispersion": {
+    "noLateral": "Lateral offset not measurable (derived runway)",
+    "lateralUnmeasurable": "Lateral offset not measurable",
+    "pastThreshold": "{distance} past the threshold",
+    "inTdz": "in the touchdown zone",
+    "outTdz": "outside the touchdown zone",
+    "loading": "Analysing landings …",
+    "emptyTitle": "No analysed landings yet",
+    "emptyText": "No analysed landings yet – once you complete a flight with a landing on a known runway, the dispersion of your touchdown points appears here.",
+    "skipped": {
+      "one": "{count} landing without an assigned runway not included.",
+      "other": "{count} landings without an assigned runway not included."
+    },
+    "summary": "Touchdown zone {inTdz}/{count} · avg {mean} ± {sd} · {lateral}",
+    "lateralMean": "avg centreline offset {value}",
+    "lateralMeanPartial": "avg centreline offset {value} ({n} of {count} measurable)",
+    "lateralNone": "centreline offset not measurable",
+    "aria": "Dispersion of the recent landings",
+    "chartAria": "Dispersion: {summary}",
+    "threshold": "Threshold",
+    "listAria": "Landings, oldest first – arrow keys move, Enter opens the debrief",
+    "pointAria": "{line}, {band} – open debrief",
+    "pointAriaNewest": "Latest landing: {line}, {band} – open debrief",
+    "sparkAria": "Landing rate of the landings, oldest on the left – values in the table below",
+    "newest": "Latest: {line}",
+    "tile": {
+      "tdz": "Touchdown zone",
+      "tdzTitle": "Per runway: from the threshold to {end}, on shorter runways the first third",
+      "tdzDetail": "{rate} from the threshold to {end} or first third",
+      "distance": "Avg touchdown point",
+      "distanceDetail": "past the threshold (1σ)",
+      "lateral": "Avg centreline offset",
+      "tendency": "tendency {side}",
+      "lateralNone": "not measurable (derived runways)",
+      "fromOf": "from {n} of {count}"
+    },
+    "legend": {
+      "rate": "Landing rate (fpm)",
+      "newest": "latest",
+      "ellipse": "1σ spread",
+      "noLateralTitle": "The runway was derived from your rollout track: its axis is your own line, so the deviation from the real centreline cannot be determined. The point is therefore drawn hollow on the centreline and does not count towards the average centreline offset.",
+      "tdzAim": "Touchdown zone from the threshold · aiming point {aim}",
+      "note": "{landings} · runway normalised to {length}, lateral axis ±{half} exaggerated"
+    },
+    "filter": {
+      "label": "Filter",
+      "all": "All",
+      "only": "Only {key} ({count})",
+      "none": "No landings match this filter."
+    },
+    "table": {
+      "asTable": "As a table ({count})",
+      "caption": "Touchdown points of the recent landings, newest first",
+      "date": "Date",
+      "airportRunway": "Airport · runway",
+      "aircraft": "Aircraft",
+      "landingRate": "Landing rate",
+      "band": "Band",
+      "touchdownPoint": "Touchdown point",
+      "centreline": "Centreline",
+      "tdz": "Touchdown zone",
+      "action": "Action",
+      "yes": "yes",
+      "no": "no",
+      "debrief": "Debrief"
+    }
+  },
+  "runwayEditor": {
+    "noteTaken": "Taken from this landing: axis from your rollout track, threshold assumed {aim} before the touchdown point.",
+    "noteTakenEstimated": "Taken from this landing: axis from your rollout track, threshold assumed {aim} before the touchdown point, runway end at the end of the rollout (length unknown).",
+    "error": {
+      "ident": "Runway designator: 1–4 characters, e.g. 09 or 27L",
+      "coords": "Threshold and end need latitude and longitude in decimal degrees",
+      "globe": "Coordinates outside the globe",
+      "length": "Threshold and end are {length} apart – allowed are {min} to {max}",
+      "width": "Width: {min}–{max} m or empty",
+      "elevation": "Elevation: a number in ft or empty"
+    },
+    "savedTitle": "{airport} RWY {ident} saved",
+    "savedBody": "Landings at this airport are re-analysed with your runway.",
+    "forgotTitle": "{airport} RWY {ident} forgotten",
+    "forgotBody": "The database runway, or one newly derived from your rollout track, applies again.",
+    "title": "Correct runway · {airport}",
+    "titleRunway": "Correct runway · {airport} RWY {ident}",
+    "now": "now: {source}",
+    "intro": "Enter the threshold (start of the landing distance) and the end of the runway in landing direction, e.g. from the simulator’s ground chart. Your runway takes precedence over OurAirports and is used for all landings at this airport.",
+    "ident": "Designator",
+    "threshold": "Threshold (decimal degrees)",
+    "thresholdLat": "Threshold latitude",
+    "thresholdLon": "Threshold longitude",
+    "end": "End in landing direction (decimal degrees)",
+    "endLat": "End latitude",
+    "endLon": "End longitude",
+    "lat": "Latitude",
+    "lon": "Longitude",
+    "width": "Width (m)",
+    "widthPlaceholder": "unknown",
+    "elevation": "Threshold elevation (ft)",
+    "elevationPlaceholder": "Airport elevation",
+    "check": "Length {length} · course {course} true",
+    "checkEstimated": "Length {length} (minimum, end estimated) · course {course} true",
+    "take": "Take from this landing",
+    "takeTitle": "Axis and threshold from this landing’s rollout track",
+    "takeNone": "This landing has no usable rollout",
+    "reset": "Reset to database",
+    "resetTitle": "Delete the remembered runway – OurAirports or a newly derived runway applies again",
+    "cancel": "Cancel",
+    "saving": "Saving …",
+    "save": "Save",
+    "listTitle": "Remembered runways at {airport}",
+    "listLoading": "Loading …",
+    "listNone": "None – the OurAirports runways apply.",
+    "col": {
+      "runway": "Runway",
+      "source": "Source",
+      "landings": "Landings",
+      "length": "Length",
+      "changed": "Changed",
+      "action": "Action"
+    },
+    "sourceUser": "set by you",
+    "sourceDerived": "derived from your rollout track",
+    "forgetAria": "Forget RWY {ident}",
+    "forget": "Forget"
+  },
+  "runwayDiagram": {
+    "aria": "Runway {ident} from above with the touchdown point {distance} past the threshold, {lateral}",
+    "lateralNone": "lateral offset not measurable",
+    "tdzLabel": "Touchdown zone {zone}",
+    "aimTitle": "Aiming point {aim} past the threshold (marking per ICAO Annex 14)",
+    "legend": {
+      "air": "Ground track in the air (last {distance})",
+      "ground": "on the ground",
+      "touchdown": "Touchdown point",
+      "bounce": "Bounce",
+      "rollout": "GS below {speed}",
+      "tdz": "Touchdown zone from the threshold",
+      "aim": "Aiming point {aim}",
+      "widthUnknown": "Width unknown – drawn as {width}",
+      "derivedTitle": "Axis and threshold are estimated from your rollout track, not surveyed",
+      "derived": "Runway derived from your rollout track: axis = your line, threshold ±{uncertainty}",
+      "derivedNoEnd": "Runway derived from your rollout track: axis = your line, threshold ±{uncertainty} · runway end unknown (drawn to the end of the rollout)",
+      "scaleExaggerated": "Longitudinal axis to scale · lateral axis exaggerated ×{factor}",
+      "scaleTrue": "Longitudinal axis to scale · lateral axis to scale"
+    }
+  },
+  "landingHistory": {
+    "unknownType": "Unknown",
+    "scope": {
+      "runway": "on {runway}",
+      "thisRunway": "on this runway",
+      "type": "in the {type}",
+      "label": {
+        "runway": "same runway",
+        "type": "same type",
+        "all": "all"
+      },
+      "count": {
+        "one": "{scope}: {count} landing to compare with",
+        "other": "{scope}: {count} landings to compare with"
+      },
+      "aria": "Compare with"
+    },
+    "betterPct": "better than {pct}",
+    "betterAll": "better than all",
+    "peers": {
+      "one": "your last {count} landing",
+      "other": "your last {count} landings"
+    },
+    "afterLine": "{better} of {peers}",
+    "afterLineTitle": "Landing rate against the median {median} of your comparison landings",
+    "delta": {
+      "same": "same as the median",
+      "softer": "{value} softer",
+      "harder": "{value} firmer",
+      "longer": "{value} longer",
+      "shorter": "{value} shorter",
+      "higher": "{value} higher",
+      "lower": "{value} lower"
+    },
+    "median": "Median {value}",
+    "loading": "Comparing …",
+    "kicker": "Compared",
+    "aria": "Compared with your own landings",
+    "noFact": "No comparison: only full-stop landings with an assigned runway are compared.",
+    "tooFew": "Not enough landings to compare with yet.",
+    "tooFewWhere": "Not enough landings {where} to compare with yet.",
+    "sentence": "Your last {count} landings: median {median} · you: {you}",
+    "sentenceWhere": "Your last {count} landings {where}: median {median} · you: {you}",
+    "youBetter": "{value} ({better})",
+    "tile": {
+      "rate": "Landing rate",
+      "distance": "Touchdown point",
+      "stableFrom": "Stable from",
+      "tdzIn": "Touchdown zone {yes}/{total} · you: inside",
+      "tdzOut": "Touchdown zone {yes}/{total} · you: outside",
+      "neverStable": "never stable",
+      "notAssessed": "Approach not assessed"
+    }
+  },
+  "replay": {
+    "aria": "Approach playback",
+    "back": "One second back",
+    "backTitle": "1 s back (←, Shift: 10 s)",
+    "pause": "Pause",
+    "play": "Start playback",
+    "playTitle": "Play / pause (Space)",
+    "forward": "One second forward",
+    "forwardTitle": "1 s forward (→, Shift: 10 s)",
+    "speed": "Playback speed",
+    "speedOption": "{speed}× speed",
+    "slider": "Time in the approach",
+    "sliderValue": "{clock}, {elapsed} min after start",
+    "sliderValueMarker": "{clock}, {elapsed} min after start, {marker}",
+    "jumpGroup": "Jump to",
+    "jump": "Jump:",
+    "jumpTo": "Jump to {label} ({clock})",
+    "marker": {
+      "threshold": "Threshold",
+      "touchdown": "Touchdown",
+      "goAround": "Go-around",
+      "standstill": "Standstill"
+    },
+    "gearDown": "down",
+    "gearUp": "up",
+    "onGround": "on the ground",
+    "row": {
+      "bank": "Bank",
+      "gearFlaps": "Gear / flaps",
+      "threshold": "Threshold (x)",
+      "lateral": "Lateral offset (y)"
+    },
+    "before": "{distance} before",
+    "past": "{distance} past",
+    "valuesAria": "Values at the cursor",
+    "noCursor": "No time selected – point in a chart or press ▶.",
+    "source": "measured (1 Hz, interpolated)"
+  }
+}

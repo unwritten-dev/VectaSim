@@ -45,6 +45,78 @@ pub struct Telemetry {
     pub slew: bool,
     pub lights: Lights,
     pub transponder_code: u32,
+
+    // ---- approach data (track v2, SimConnect `DEF_APPROACH` 1 Hz / `DEF_DESIGN` once) ----
+    // `None` = not delivered (variable unknown to the sim, provider without it, old dump).
+    // Skipped in JSON when absent so the 10 Hz IPC stream stays small.
+    /// `AMBIENT WIND DIRECTION`: true direction the wind blows from at the aircraft, °.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wind_dir_true_deg: Option<f64>,
+    /// `AMBIENT WIND VELOCITY`, kt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wind_kt: Option<f64>,
+    /// `NAV HAS LOCALIZER:1` / `NAV HAS GLIDE SLOPE:1`: the tuned NAV 1 station has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nav_has_localizer: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nav_has_glide_slope: Option<bool>,
+    /// `NAV GS FLAG:1` as delivered (meaning "glideslope received/valid" – to be confirmed on the sim PC).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nav_gs_flag: Option<bool>,
+    /// `NAV GLIDE SLOPE ERROR:1`, ° – only while `nav_has_glide_slope` is true.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nav_gs_error_deg: Option<f64>,
+    /// `NAV RAW GLIDE SLOPE:1`: published glideslope angle, ° – only with a glideslope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nav_gs_angle_deg: Option<f64>,
+    /// `NAV CDI:1`, raw needle −127…+127 – only while `nav_has_localizer` is true.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nav_cdi: Option<f64>,
+    /// `NAV RADIAL ERROR:1`, ° – only with a localizer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nav_radial_error_deg: Option<f64>,
+    /// `NAV LOCALIZER:1`: localizer course, ° – only with a localizer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nav_loc_course_deg: Option<f64>,
+    /// `AUTOPILOT MASTER`, `AUTOPILOT APPROACH HOLD`, `AUTOPILOT GLIDESLOPE HOLD` (default
+    /// autopilot; most airliner add-ons do not fill them).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub autopilot_master: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub autopilot_approach_hold: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub autopilot_glideslope_hold: Option<bool>,
+    /// `AUTOPILOT MANAGED THROTTLE ACTIVE` or `AUTOPILOT THROTTLE ARM` (there is no
+    /// `AUTOTHROTTLE ACTIVE` SimVar).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub autothrottle_active: Option<bool>,
+    /// Mean of `TURB ENG N1:1..2` over the reported engines, %.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub n1_pct: Option<f64>,
+    /// `GENERAL ENG THROTTLE LEVER POSITION:1`, %.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub throttle_lever_pct: Option<f64>,
+    /// `SPOILERS HANDLE POSITION`, % (0–100).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spoilers_handle_pct: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spoilers_armed: Option<bool>,
+    /// `SPOILERS LEFT POSITION`: deployed surface, % (physical, more reliable than the handle).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spoilers_pct: Option<f64>,
+    /// `INCIDENCE ALPHA`, °.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alpha_deg: Option<f64>,
+    /// `FLAPS NUM HANDLE POSITIONS` (the last index, n − 1, is the landing flap setting).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flap_positions: Option<i32>,
+    /// `DESIGN SPEED VS0` / `VS1` / `VC` (aircraft.cfg constants, weight-independent), kt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub design_vs0_kt: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub design_vs1_kt: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub design_vc_kt: Option<f64>,
 }
 
 impl Telemetry {

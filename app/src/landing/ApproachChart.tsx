@@ -1,7 +1,8 @@
 import { useMemo } from "react";
 import { niceStep, ticks, useWidth } from "./chartUtils";
 import { useThemeId } from "../themes";
-import { NNBSP, fmt, fmtNum, fmtSigned } from "../format";
+import { NNBSP, fmt, fmtNum, fmtSigned } from "../i18n/number";
+import { useT } from "../i18n";
 import { PROFILE } from "../theme";
 import { M_PER_FT, M_PER_NM, referenceHeightFt } from "./geometry";
 import { sampleAt, timeAtValue, useReplayCursor, useReplayStore } from "./replayStore";
@@ -25,11 +26,17 @@ const M = { top: 26, right: 96, bottom: 30, left: 52 };
 export default function ApproachChart({ analysis, approach }: { analysis?: LandingAnalysis | null; approach?: ApproachAnalysis | null }) {
   if (approach && approach.samples.length >= 2) return <ApproachProfile a={approach} />;
   if (analysis) return <LandingProfile analysis={analysis} />;
-  return <div className="ac empty detail">Zu wenige Trackpunkte für ein Anflugprofil.</div>;
+  return <NoProfile />;
+}
+
+function NoProfile() {
+  const t = useT();
+  return <div className="ac empty detail">{t("approach.common.tooFewTrackPoints")}.</div>;
 }
 
 function LandingProfile({ analysis: a }: { analysis: LandingAnalysis }) {
   useThemeId(); // colours come from the active theme
+  const t = useT();
   const [setWrap, width] = useWidth();
   const store = useReplayStore();
 
@@ -65,7 +72,7 @@ function LandingProfile({ analysis: a }: { analysis: LandingAnalysis }) {
     return { dMax, dMin, hHi, iasLo, iasHi, vsLo, vsHi };
   }, [samples]);
 
-  if (!model) return <div ref={setWrap} className="ac empty detail">Zu wenige Trackpunkte für ein Anflugprofil.</div>;
+  if (!model) return <div ref={setWrap} className="ac empty detail">{t("approach.common.tooFewTrackPoints")}.</div>;
 
   const { dMax, dMin, hHi, iasLo, iasHi, vsLo, vsHi } = model;
   const plotW = width - M.left - M.right;
@@ -122,16 +129,16 @@ function LandingProfile({ analysis: a }: { analysis: LandingAnalysis }) {
   return (
     <div ref={setWrap} className="ac">
       <div className="profile-legend">
-        <span style={{ color: PROFILE.alt }}>━ Höhe über Aufsetzpunkt (ft)</span>
+        <span style={{ color: PROFILE.alt }}>━ {t("approach.common.heightAboveTouchdown")}</span>
         {withRunway && (
           <span className="ac-ref">
-            ┅ {fmt(gp, 0, "°")}-Referenz ±{fmtNum(tol, 1)}° (Schwelle {fmt(tch, 0, "ft")})
+            ┅ {t("approach.chart.refBand", { deg: fmt(gp, 0, "°"), tol: fmt(tol, 1, "°"), tch: fmt(tch, 0, "ft") })}
           </span>
         )}
         <span style={{ color: PROFILE.gs }}>━ IAS (kt)</span>
         <span style={{ color: PROFILE.vs }}>━ V/S (fpm)</span>
       </div>
-      <svg width={width} height={HEIGHT} role="img" aria-label="Anflugprofil: Höhe über Distanz zur Schwelle mit Gleitpfad-Referenz, IAS und Sinkrate">
+      <svg width={width} height={HEIGHT} role="img" aria-label={t("approach.chart.ariaLabel")}>
         <defs>
           <clipPath id="ac-clip">
             <rect x={M.left} y={M.top - 2} width={plotW} height={plotH + 4} />
@@ -164,7 +171,7 @@ function LandingProfile({ analysis: a }: { analysis: LandingAnalysis }) {
           </g>
         ))}
         <text x={M.left + plotW} y={HEIGHT - 1} textAnchor="end" className="pc-tick">
-          {withRunway ? "Distanz zur Schwelle (nm)" : "Distanz zum Aufsetzpunkt entlang der Bahn (nm)"}
+          {withRunway ? t("approach.chart.axisThreshold") : t("approach.chart.axisTouchdown")}
         </text>
         <line x1={M.left} x2={M.left + plotW} y1={M.top + plotH} y2={M.top + plotH} className="pc-axis" />
 
@@ -181,7 +188,7 @@ function LandingProfile({ analysis: a }: { analysis: LandingAnalysis }) {
           <g>
             <line x1={x(0)} x2={x(0)} y1={M.top} y2={M.top + plotH} className="ac-marker" />
             <text x={x(0) + 4} y={M.top + 10} className="pc-phase-label">
-              Schwelle
+              {t("approach.common.threshold")}
             </text>
           </g>
         )}
@@ -201,7 +208,7 @@ function LandingProfile({ analysis: a }: { analysis: LandingAnalysis }) {
           <line x1={x(tdDist)} x2={x(tdDist)} y1={M.top} y2={M.top + plotH} stroke={PROFILE.touchdown} strokeWidth={1} opacity={0.8} />
           <path d={`M${x(tdDist) - 5},${M.top + plotH - 9}L${x(tdDist) + 5},${M.top + plotH - 9}L${x(tdDist)},${M.top + plotH - 1}Z`} fill={PROFILE.touchdown} />
           <text x={x(tdDist) + 4} y={M.top + 22} className="pc-td-label">
-            Aufsetzen
+            {t("approach.common.touchdown")}
           </text>
         </g>
 
@@ -229,6 +236,7 @@ type Scales = { x: (d: number) => number; yH: (h: number) => number; yIas: (v: n
 
 /** The shared cursor: vertical line plus the values at that time (own component: cheap playback frames). */
 function LandingCursor({ samples, withRunway, scales }: { samples: ApproachPoint[]; withRunway: boolean; scales: Scales }) {
+  const t = useT();
   const tMs = useReplayCursor();
   const hs = sampleAt(samples, tMs);
   if (!hs) return null;
@@ -236,11 +244,11 @@ function LandingCursor({ samples, withRunway, scales }: { samples: ApproachPoint
   const tipX = x(hs.distM);
   const tipLeft = tipX > M.left + plotW - 170;
   const tipRows: Array<[string, string]> = [
-    [PROFILE.alt, `Höhe ${fmt(hs.hatFt, 0, "ft")} über Aufsetzpunkt`],
+    [PROFILE.alt, t("approach.chart.tipHeight", { height: fmt(hs.hatFt, 0, "ft") })],
     [PROFILE.gs, `IAS ${fmt(hs.iasKt, 0, "kt")} · GS ${fmt(hs.groundSpeedKt, 0, "kt")}`],
     [PROFILE.vs, `V/S ${fmtSigned(Math.round(hs.vsFpm), 0, "fpm")}`],
-    ...(hs.glidepathDevDeg != null ? [["var(--text-muted)", `Gleitpfad ${fmt(hs.glidepathDeg, 2, "°")} (${fmtSigned(hs.glidepathDevDeg, 2, "°")})`] as [string, string]] : []),
-    ...(hs.onGround ? [["var(--text-muted)", "am Boden"] as [string, string]] : []),
+    ...(hs.glidepathDevDeg != null ? [["var(--text-muted)", t("approach.chart.tipGlidepath", { deg: fmt(hs.glidepathDeg, 2, "°"), dev: fmtSigned(hs.glidepathDevDeg, 2, "°") })] as [string, string]] : []),
+    ...(hs.onGround ? [["var(--text-muted)", t("approach.common.onGround")] as [string, string]] : []),
   ];
   return (
     <g pointerEvents="none" aria-hidden="true" className="replay-cursor">
@@ -251,11 +259,20 @@ function LandingCursor({ samples, withRunway, scales }: { samples: ApproachPoint
       <g transform={`translate(${tipLeft ? tipX - 208 : tipX + 8},${M.top + 4})`}>
         <rect width={200} height={22 + tipRows.length * 14} rx={6} className="pc-tip" />
         <text x={8} y={16} className="pc-tip-head">
-          {fmt(Math.abs(hs.distM) / M_PER_NM, 2, "nm")} {hs.distM >= 0 ? (withRunway ? "vor der Schwelle" : "vor dem Aufsetzen") : withRunway ? "hinter der Schwelle" : "nach dem Aufsetzen"}
+          {t(
+            hs.distM >= 0
+              ? withRunway
+                ? "approach.chart.beforeThreshold"
+                : "approach.chart.beforeTouchdown"
+              : withRunway
+                ? "approach.chart.pastThreshold"
+                : "approach.chart.afterTouchdown",
+            { dist: fmt(Math.abs(hs.distM) / M_PER_NM, 2, "nm") },
+          )}
         </text>
-        {tipRows.map(([c, t], i) => (
+        {tipRows.map(([c, row], i) => (
           <text key={i} x={8} y={31 + i * 14} className="pc-tip-text" fill={c}>
-            {t}
+            {row}
           </text>
         ))}
       </g>

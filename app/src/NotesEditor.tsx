@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { FlightRow, FlightUserEdit, TagCount } from "./types";
 import { showToast } from "./ui/Toast";
 import { NOTES_MAX_CHARS, TAG_MAX_CHARS, TAGS_MAX, normalizeTags, recordedCallsignOf } from "./logbookFilter";
+import { t as tr, useT, type TKey } from "./i18n";
 
 interface Props {
   flight: FlightRow;
@@ -23,7 +24,7 @@ async function saveEdit(id: string, edit: FlightUserEdit): Promise<FlightRow | n
   try {
     return await invoke<FlightRow>("update_flight_user", { id, edit });
   } catch (e) {
-    showToast({ tone: "err", title: "Nicht gespeichert", body: String(e) });
+    showToast({ tone: "err", title: tr("logbook.notes.saveFailed"), body: String(e) });
     return null;
   }
 }
@@ -36,9 +37,10 @@ async function saveEdit(id: string, edit: FlightUserEdit): Promise<FlightRow | n
  */
 export default function NotesEditor({ flight: f, readOnly = false }: Props) {
   const ids = useId();
+  const t = useT();
   return (
     <section className="detail-section notes-editor" aria-labelledby={`${ids}-h`}>
-      <h3 id={`${ids}-h`}>Notizen &amp; Tags</h3>
+      <h3 id={`${ids}-h`}>{t("logbook.notes.heading")}</h3>
       <div className="notes-grid">
         <NotesField flight={f} readOnly={readOnly} />
         <div className="notes-side">
@@ -58,6 +60,7 @@ function NotesField({ flight: f, readOnly }: { flight: FlightRow; readOnly: bool
   const ref = useRef<HTMLTextAreaElement>(null);
   const [draft, setDraft] = useState(f.notes ?? "");
   const [status, setStatus] = useState<"idle" | "saving" | "saved">("idle");
+  const t = useT();
   const saved = f.notes ?? "";
 
   // another flight, or the stored notes changed elsewhere: take them unless the pilot is typing
@@ -77,8 +80,8 @@ function NotesField({ flight: f, readOnly }: { flight: FlightRow; readOnly: bool
   if (readOnly) {
     return (
       <div className="notes-field">
-        <span className="notes-label">Notizen</span>
-        {saved ? <p className="notes-text">{saved}</p> : <span className="detail">Keine Notizen.</span>}
+        <span className="notes-label">{t("logbook.notes.notes")}</span>
+        {saved ? <p className="notes-text">{saved}</p> : <span className="detail">{t("logbook.notes.noNotes")}</span>}
       </div>
     );
   }
@@ -86,7 +89,7 @@ function NotesField({ flight: f, readOnly }: { flight: FlightRow; readOnly: bool
   return (
     <div className="notes-field">
       <label className="notes-label" htmlFor={id}>
-        Notizen
+        {t("logbook.notes.notes")}
       </label>
       <textarea
         id={id}
@@ -95,7 +98,7 @@ function NotesField({ flight: f, readOnly }: { flight: FlightRow; readOnly: bool
         value={draft}
         maxLength={NOTES_MAX_CHARS}
         rows={4}
-        placeholder="Was war besonders? Wetter, Ausweichflughafen, Lernpunkte … (wird beim Verlassen gespeichert)"
+        placeholder={t("logbook.notes.placeholder")}
         aria-describedby={`${id}-hint`}
         onChange={(e) => {
           setDraft(e.target.value);
@@ -110,8 +113,8 @@ function NotesField({ flight: f, readOnly }: { flight: FlightRow; readOnly: bool
         }}
       />
       <div id={`${id}-hint`} className="notes-hint detail" aria-live="polite">
-        <span>{status === "saving" ? "Wird gespeichert …" : status === "saved" ? "Gespeichert" : "Strg+S speichert sofort · Klartext, kein Markdown"}</span>
-        <span className={`num${left < 100 ? " warn-text" : ""}`}>{left < 500 ? `noch ${left} Zeichen` : ""}</span>
+        <span>{status === "saving" ? t("logbook.notes.saving") : status === "saved" ? t("logbook.notes.saved") : t("logbook.notes.hint")}</span>
+        <span className={`num${left < 100 ? " warn-text" : ""}`}>{left < 500 ? t("logbook.notes.charsLeft", { count: left }) : ""}</span>
       </div>
     </div>
   );
@@ -128,6 +131,7 @@ function TagsField({ flight: f, readOnly }: { flight: FlightRow; readOnly: boole
   const [active, setActive] = useState(-1);
   const inputRef = useRef<HTMLInputElement>(null);
   const tagsKey = (f.tags ?? []).join("\u0000");
+  const tt = useT();
 
   useEffect(() => {
     setTags(f.tags ?? []);
@@ -160,7 +164,7 @@ function TagsField({ flight: f, readOnly }: { flight: FlightRow; readOnly: boole
     setActive(-1);
     if (!parts.length) return;
     if (tags.length >= TAGS_MAX) {
-      showToast({ tone: "warn", title: `Höchstens ${TAGS_MAX} Tags pro Flug` });
+      showToast({ tone: "warn", title: tt("logbook.notes.tagsMax", { max: TAGS_MAX }) });
       return;
     }
     void commit([...tags, ...parts]);
@@ -197,10 +201,10 @@ function TagsField({ flight: f, readOnly }: { flight: FlightRow; readOnly: boole
   return (
     <div className="notes-tags">
       <label className="notes-label" htmlFor={`${id}-in`}>
-        Tags
+        {tt("logbook.notes.tags")}
       </label>
       <div className="tag-box" onClick={() => !readOnly && inputRef.current?.focus()}>
-        <ul className="tag-chips" aria-label="Tags dieses Flugs">
+        <ul className="tag-chips" aria-label={tt("logbook.notes.tagsOfFlight")}>
           {tags.map((t) => (
             <li key={t} className="tag-chip">
               <span>{t}</span>
@@ -208,8 +212,8 @@ function TagsField({ flight: f, readOnly }: { flight: FlightRow; readOnly: boole
                 <button
                   type="button"
                   className="tag-chip-x"
-                  aria-label={`Tag ${t} entfernen`}
-                  title="Entfernen"
+                  aria-label={tt("logbook.notes.removeTag", { tag: t })}
+                  title={tt("logbook.notes.remove")}
                   onClick={(e) => {
                     e.stopPropagation();
                     remove(t);
@@ -220,7 +224,7 @@ function TagsField({ flight: f, readOnly }: { flight: FlightRow; readOnly: boole
               )}
             </li>
           ))}
-          {readOnly && tags.length === 0 && <li className="detail">Keine Tags.</li>}
+          {readOnly && tags.length === 0 && <li className="detail">{tt("logbook.notes.noTags")}</li>}
         </ul>
         {!readOnly && (
           <div className="tag-input-wrap">
@@ -230,7 +234,7 @@ function TagsField({ flight: f, readOnly }: { flight: FlightRow; readOnly: boole
               className="tag-input"
               value={input}
               maxLength={TAG_MAX_CHARS * 3}
-              placeholder={tags.length ? "" : "z. B. vatsim, event"}
+              placeholder={tags.length ? "" : tt("logbook.notes.tagPlaceholder")}
               role="combobox"
               aria-autocomplete="list"
               aria-expanded={showList}
@@ -259,7 +263,7 @@ function TagsField({ flight: f, readOnly }: { flight: FlightRow; readOnly: boole
               onKeyDown={onKey}
             />
             {showList && (
-              <ul id={`${id}-list`} className="tag-suggest" role="listbox" aria-label="Vorhandene Tags">
+              <ul id={`${id}-list`} className="tag-suggest" role="listbox" aria-label={tt("logbook.notes.existingTags")}>
                 {suggestions.map((s, i) => (
                   <li
                     key={s.tag}
@@ -284,7 +288,7 @@ function TagsField({ flight: f, readOnly }: { flight: FlightRow; readOnly: boole
       </div>
       {!readOnly && (
         <span id={`${id}-hint`} className="sr-only">
-          Eingabe oder Komma fügt einen Tag hinzu, Rücktaste entfernt den letzten, Pfeil nach unten zeigt vorhandene Tags.
+          {tt("logbook.notes.tagHint")}
         </span>
       )}
     </div>
@@ -293,13 +297,15 @@ function TagsField({ flight: f, readOnly }: { flight: FlightRow; readOnly: boole
 
 // ---- rating ---------------------------------------------------------------------------
 
-const RATING_TEXT = ["", "schlecht", "mäßig", "ordentlich", "gut", "hervorragend"];
+/** Index = stars (0 is never shown). */
+const RATING_TEXT: TKey[] = ["logbook.notes.rating1", "logbook.notes.rating1", "logbook.notes.rating2", "logbook.notes.rating3", "logbook.notes.rating4", "logbook.notes.rating5"];
 
 function RatingField({ flight: f, readOnly }: { flight: FlightRow; readOnly: boolean }) {
   const id = useId();
   const [rating, setRating] = useState<number>(f.rating ?? 0);
   const [hover, setHover] = useState(0);
   const refs = useRef<Array<HTMLButtonElement | null>>([]);
+  const t = useT();
   useEffect(() => setRating(f.rating ?? 0), [f.id, f.rating]);
 
   const set = async (n: number, focus = false) => {
@@ -329,7 +335,7 @@ function RatingField({ flight: f, readOnly }: { flight: FlightRow; readOnly: boo
   return (
     <div className="notes-rating">
       <span className="notes-label" id={`${id}-l`}>
-        Bewertung
+        {t("logbook.notes.rating")}
       </span>
       <div
         className="star-group"
@@ -348,7 +354,7 @@ function RatingField({ flight: f, readOnly }: { flight: FlightRow; readOnly: boo
             type="button"
             role="radio"
             aria-checked={rating === n}
-            aria-label={`${n} ${n === 1 ? "Stern" : "Sterne"} (${RATING_TEXT[n]})`}
+            aria-label={t("logbook.notes.stars", { count: n, text: t(RATING_TEXT[n]) })}
             tabIndex={(rating || 1) === n ? 0 : -1}
             disabled={readOnly}
             className={`star${n <= shown ? " on" : ""}`}
@@ -360,13 +366,13 @@ function RatingField({ flight: f, readOnly }: { flight: FlightRow; readOnly: boo
           </button>
         ))}
         {!readOnly && rating > 0 && (
-          <button type="button" className="link-btn star-clear" onClick={() => void set(0)} title="Bewertung entfernen (Entf)">
-            entfernen
+          <button type="button" className="link-btn star-clear" onClick={() => void set(0)} title={t("logbook.notes.clearRatingTitle")}>
+            {t("logbook.notes.clearRating")}
           </button>
         )}
       </div>
       <span id={`${id}-d`} className="detail notes-rating-text">
-        {shown ? RATING_TEXT[shown] : "persönliche Bewertung des Flugs (nicht der Landung)"}
+        {shown ? t(RATING_TEXT[shown]) : t("logbook.notes.ratingHint")}
       </span>
     </div>
   );
@@ -392,15 +398,15 @@ function draftOf(f: FlightRow): Draft {
   };
 }
 
-/** Field errors of a draft (German, for the form); empty = valid. Empty fields clear the correction. */
+/** Field errors of a draft (UI language, for the form); empty = valid. Empty fields clear the correction. */
 function correctionErrors(d: Draft): Partial<Record<keyof Draft, string>> {
   const e: Partial<Record<keyof Draft, string>> = {};
-  if (d.callsign.trim().length > 16) e.callsign = "Höchstens 16 Zeichen";
-  if (d.depIcao.trim() && !ICAO_RE.test(d.depIcao.trim())) e.depIcao = "4 Buchstaben/Ziffern, z. B. EDDF";
-  if (d.arrIcao.trim() && !ICAO_RE.test(d.arrIcao.trim())) e.arrIcao = "4 Buchstaben/Ziffern, z. B. EDDM";
-  if (d.aircraftTitle.trim().length > 120) e.aircraftTitle = "Höchstens 120 Zeichen";
+  if (d.callsign.trim().length > 16) e.callsign = tr("logbook.notes.errMaxChars", { max: 16 });
+  if (d.depIcao.trim() && !ICAO_RE.test(d.depIcao.trim())) e.depIcao = tr("logbook.notes.errIcao", { example: "EDDF" });
+  if (d.arrIcao.trim() && !ICAO_RE.test(d.arrIcao.trim())) e.arrIcao = tr("logbook.notes.errIcao", { example: "EDDM" });
+  if (d.aircraftTitle.trim().length > 120) e.aircraftTitle = tr("logbook.notes.errMaxChars", { max: 120 });
   const reg = d.registration.replace(/\s+/g, "");
-  if (reg && !REG_RE.test(reg)) e.registration = "3–8 Zeichen: Buchstaben, Ziffern, Bindestrich";
+  if (reg && !REG_RE.test(reg)) e.registration = tr("logbook.notes.errReg");
   return e;
 }
 
@@ -410,6 +416,7 @@ function CorrectionForm({ flight: f }: { flight: FlightRow }) {
   const [draft, setDraft] = useState<Draft>(() => draftOf(f));
   const [touched, setTouched] = useState(false);
   const [busy, setBusy] = useState(false);
+  const t = useT();
   useEffect(() => {
     setOpen(false);
     setTouched(false);
@@ -419,11 +426,11 @@ function CorrectionForm({ flight: f }: { flight: FlightRow }) {
   }, [f, open]);
 
   const corrected = [
-    f.userCallsign && "Rufzeichen",
-    f.userDepIcao && "Abflug",
-    f.userArrIcao && "Ankunft",
-    f.userAircraftTitle && "Flugzeugname",
-    f.userRegistration && "Kennzeichen",
+    f.userCallsign && t("logbook.notes.fieldCallsign"),
+    f.userDepIcao && t("logbook.notes.fieldDep"),
+    f.userArrIcao && t("logbook.notes.fieldArr"),
+    f.userAircraftTitle && t("logbook.notes.fieldAircraft"),
+    f.userRegistration && t("logbook.notes.fieldReg"),
   ].filter(Boolean) as string[];
   const errors = correctionErrors(draft);
   const invalid = Object.keys(errors).length > 0;
@@ -443,7 +450,7 @@ function CorrectionForm({ flight: f }: { flight: FlightRow }) {
     setBusy(false);
     if (row) {
       setOpen(false);
-      showToast({ tone: "ok", title: "Korrektur gespeichert", body: "Die aufgezeichneten Werte bleiben erhalten (Tooltip „Sim: …“)." });
+      showToast({ tone: "ok", title: t("logbook.notes.correctionSaved"), body: t("logbook.notes.correctionSavedBody") });
     }
   };
 
@@ -461,7 +468,7 @@ function CorrectionForm({ flight: f }: { flight: FlightRow }) {
         onBlur={() => setTouched(true)}
       />
       <span id={`${id}-${key}`} className={`detail corr-help${touched && errors[key] ? " warn-text" : ""}`}>
-        {touched && errors[key] ? errors[key] : `Sim: ${recorded || "–"}`}
+        {touched && errors[key] ? errors[key] : t("logbook.recorded", { value: recorded || "–" })}
       </span>
     </label>
   );
@@ -470,15 +477,15 @@ function CorrectionForm({ flight: f }: { flight: FlightRow }) {
     <div className="notes-correct">
       <div className="notes-correct-head">
         <button type="button" className="btn-sm" aria-expanded={open} aria-controls={`${id}-form`} onClick={() => setOpen((o) => !o)}>
-          Korrigieren …
+          {t("logbook.notes.correct")}
         </button>
-        {corrected.length > 0 && <span className="detail">korrigiert: {corrected.join(", ")}</span>}
+        {corrected.length > 0 && <span className="detail">{t("logbook.notes.corrected", { fields: corrected.join(", ") })}</span>}
       </div>
       {open && (
         <form
           id={`${id}-form`}
           className="corr-form"
-          aria-label="Aufgezeichnete Werte korrigieren"
+          aria-label={t("logbook.notes.formLabel")}
           onSubmit={(e) => void submit(e)}
           onKeyDown={(e) => {
             if (e.key === "Escape") {
@@ -487,21 +494,21 @@ function CorrectionForm({ flight: f }: { flight: FlightRow }) {
             }
           }}
         >
-          <p className="detail corr-intro">Leere Felder zeigen wieder den aufgezeichneten Wert. Das Original bleibt immer gespeichert.</p>
+          <p className="detail corr-intro">{t("logbook.notes.intro")}</p>
           <div className="corr-grid">
-            {field("callsign", "Rufzeichen", recordedCallsignOf(f), { upper: true, maxLength: 16 })}
-            {field("depIcao", "Abflug (ICAO)", f.depIcao, { upper: true, maxLength: 4 })}
-            {field("arrIcao", "Ankunft (ICAO)", f.arrIcao, { upper: true, maxLength: 4 })}
-            {field("aircraftTitle", "Flugzeugname", f.aircraft.title, { maxLength: 120 })}
-            {field("registration", "Kennzeichen", f.aircraft.atcId, { upper: true, maxLength: 10 })}
+            {field("callsign", t("logbook.notes.fieldCallsign"), recordedCallsignOf(f), { upper: true, maxLength: 16 })}
+            {field("depIcao", t("logbook.notes.fieldDepIcao"), f.depIcao, { upper: true, maxLength: 4 })}
+            {field("arrIcao", t("logbook.notes.fieldArrIcao"), f.arrIcao, { upper: true, maxLength: 4 })}
+            {field("aircraftTitle", t("logbook.notes.fieldAircraft"), f.aircraft.title, { maxLength: 120 })}
+            {field("registration", t("logbook.notes.fieldReg"), f.aircraft.atcId, { upper: true, maxLength: 10 })}
           </div>
-          <p className="detail corr-intro">Ein korrigiertes Kennzeichen bucht den Flug auf dieses Flugzeug um (Flotte).</p>
+          <p className="detail corr-intro">{t("logbook.notes.regHint")}</p>
           <div className="corr-actions">
             <button type="submit" className="btn-sm btn-primary" disabled={busy || (touched && invalid)}>
-              {busy ? "Wird gespeichert …" : "Speichern"}
+              {busy ? t("logbook.notes.saving") : t("logbook.notes.save")}
             </button>
             <button type="button" className="btn-sm" onClick={() => setOpen(false)}>
-              Abbrechen
+              {t("logbook.notes.cancel")}
             </button>
             {corrected.length > 0 && (
               <button
@@ -514,7 +521,7 @@ function CorrectionForm({ flight: f }: { flight: FlightRow }) {
                   void submit(e, empty);
                 }}
               >
-                Alle Korrekturen entfernen
+                {t("logbook.notes.clearAll")}
               </button>
             )}
           </div>

@@ -1,0 +1,1200 @@
+{
+  "facts": {
+    "unit": {
+      "dots": "Dots",
+      "dot": "Dot"
+    },
+    "and": "{rest} und {last}",
+    "gScale": "sanft < {smooth} · normal < {normal} · fest < {firm} · hart ≥ {firm} g",
+    "gBandReason": "„Hart“ ab {hard}: Die Landerate wird erst an der Zulassungsgrenze hart ({vsHard} = {fps}, CS/FAR 25.473); {old} lag deutlich unter den Inspektionsschwellen der Hersteller (Airbus A320 {a320}, Boeing 737-600 {b737}). Typbezogene Grenzen nennt VectaSim nicht.",
+    "speedRef": {
+      "user": "Vapp des Piloten",
+      "flown": "geflogene Referenz – misst Konstanz, nicht Absolutwert",
+      "design": "{factor} × VS0 (Konstruktionswert des Flugzeugs)",
+      "unavailable": "keine Referenz"
+    },
+    "criterion": {
+      "gear": "Fahrwerk ausgefahren",
+      "flaps": "Klappen gesetzt",
+      "verticalSpeed": "Sinkrate",
+      "speed": "Geschwindigkeit",
+      "glidepath": "Gleitpfad",
+      "bank": "Querneigung",
+      "localizer": "Kurs (Localizer)",
+      "altitudeDeviation": "Höhe zum Pfad",
+      "speedLimit": "IAS-Obergrenze",
+      "energy": "Energie",
+      "flapChange": "Klappenänderung",
+      "landingFlaps": "Landeklappen",
+      "thrust": "Schub (N1)",
+      "spoilers": "Spoiler eingefahren"
+    },
+    "criterionShort": {
+      "gear": "Fahrwerk",
+      "flaps": "Klappen",
+      "verticalSpeed": "Sinkrate",
+      "speed": "Speed",
+      "glidepath": "Gleitpfad",
+      "bank": "Querneigung",
+      "localizer": "Kurs",
+      "altitudeDeviation": "Höhe",
+      "speedLimit": "IAS",
+      "energy": "Energie",
+      "flapChange": "Klappenänderung",
+      "landingFlaps": "Landeklappen",
+      "thrust": "Schub",
+      "spoilers": "Spoiler"
+    },
+    "limit": {
+      "gearDown": "unten",
+      "flapsLanding": "Stufe {stage} (Landeklappen)",
+      "flapsMin": "Stufe ≥ {stage}",
+      "flapsAny": "Stufe > 0",
+      "speed": "{min}/{max} kt zur Referenz",
+      "glidepathApproach": "±{dots} Dot zum {angle}-Pfad",
+      "glidepathLanding": "{ref} ±{tol}° (1 Dot)",
+      "localizer": "±{dots} Dot",
+      "altitude": "±{limit} zum {angle}-Pfad",
+      "energy": "≤ {limit} über Profil",
+      "flapChange": "keine Änderung",
+      "spoilers": "≤ {limit} ausgefahren"
+    },
+    "value": {
+      "naNoRunway": "ohne Piste n. v.",
+      "naNoReference": "ohne Referenz n. v.",
+      "na": "n. v.",
+      "gearDown": "ausgefahren",
+      "gearUp": "eingefahren",
+      "flapsStage": "Stufe {stage}",
+      "flapsUp": "eingefahren",
+      "flapChanged": "geändert",
+      "flapNone": "keine",
+      "spoilersIn": "eingefahren",
+      "spoilersOut": "{pct} ausgefahren"
+    },
+    "at": "bei {gate}",
+    "criterionHint": {
+      "gear": "Fahrwerk {at} nicht ausgefahren ({value})",
+      "flapsStage": "Klappen {at} auf Stufe {measured} – Landeklappen (Stufe {ref}) erwartet",
+      "flapsUp": "Klappen {at} eingefahren",
+      "flapsUpLanding": "Klappen {at} eingefahren – Landeklappen (Stufe {ref}) erwartet",
+      "verticalSpeed": "Sinkrate {at} {value} – über dem Limit von {limit}",
+      "speed": "Geschwindigkeit {at} {value} gegenüber der Referenz ({ref}) – Fenster {min}/{max} kt",
+      "glidepathAbove": "Gleitpfad {at} {value} über dem {angle}-Pfad – Toleranz ±{tol} Dot",
+      "glidepathBelow": "Gleitpfad {at} {value} unter dem {angle}-Pfad – Toleranz ±{tol} Dot",
+      "glidepathLandingAbove": "Gleitpfad {at} {value} über dem {angle}-Pfad – Toleranz ±{tol}° (1 Dot)",
+      "glidepathLandingBelow": "Gleitpfad {at} {value} unter dem {angle}-Pfad – Toleranz ±{tol}° (1 Dot)",
+      "fullScale": "{text}, mehr als 2 Dots (Vollausschlag, Stufe S2)",
+      "localizerRight": "Kurs {at} {value} rechts der verlängerten Mittellinie – Toleranz ±{tol} Dot",
+      "localizerLeft": "Kurs {at} {value} links der verlängerten Mittellinie – Toleranz ±{tol} Dot",
+      "bank": "Querneigung {at} {value} – über {limit}",
+      "altitudeAbove": "Höhe {at} {value} über dem {angle}-Pfad – Toleranz ±{tol}",
+      "altitudeBelow": "Höhe {at} {value} unter dem {angle}-Pfad – Toleranz ±{tol}",
+      "speedLimit": "IAS {at} {value} – über {limit}",
+      "energy": "Energie {at} {value} über dem Profil – Grenze {limit}",
+      "flapChange": "Klappen {at} verstellt",
+      "thrust": "Schub {at} {value} N1 – unter {limit} (Leerlauf statt Anflugschub)",
+      "spoilers": "Spoiler {at} {value} ausgefahren – im Endanflug eingefahren erwartet"
+    },
+    "hint": {
+      "touchAndGo": "Touch-and-go: nach dem Aufsetzen wieder durchgestartet – kein Rollout",
+      "metarAge": "{note} – der Wind darin passt evtl. nicht zur Landung",
+      "zoneDetail": "{zone}, Zielpunkt {aim}",
+      "short": "Aufsetzen {dist} vor der Schwelle – vor der Aufsetzzone ({zone})",
+      "inZone": "Aufsetzen {dist} hinter der Schwelle – in der Aufsetzzone ({zone})",
+      "long": "Aufsetzen {dist} hinter der Schwelle – nach der Aufsetzzone ({zone})",
+      "longRest": "Aufsetzen {dist} hinter der Schwelle – nach der Aufsetzzone ({zone}), {rest} Piste übrig",
+      "derivedRunway": "Piste aus deiner Rollspur abgeleitet – Schwelle auf ±{u} geschätzt; mit „Piste korrigieren …“ kannst du sie genau festlegen",
+      "derivedRunwayNoLength": "Piste aus deiner Rollspur abgeleitet – Schwelle auf ±{u} geschätzt, Pistenlänge unbekannt; mit „Piste korrigieren …“ kannst du sie genau festlegen",
+      "lateralUnmeasurable": "Querablage nicht messbar: {reason}",
+      "offRunway": "Aufsetzpunkt {side} – außerhalb der Piste ({width}); RWY {ident} ist die nächstgelegene passende Piste",
+      "widthUnknown": "Aufsetzpunkt {side} (Breite der Piste unbekannt)",
+      "width": "Aufsetzpunkt {side} (Piste {width} breit)",
+      "noRunway": "Keine Piste zugeordnet – Aufsetzpunkt, Mittellinie und Gleitpfad lassen sich nicht bestimmen",
+      "threshold": "Schwelle in {height} überflogen (Referenz {tch}), {ias} IAS, {airborne} bis zum Aufsetzen",
+      "refFlown": "Referenz-Speed ist der Median der geflogenen IAS {from} → {to} ({ref}) – misst die Konstanz, nicht den Absolutwert",
+      "refDesign": "Referenz-Speed {ref} = {factor} × VS0 ({vs0}) – kein geflogener Wert zwischen {from} und {to}",
+      "refUnavailable": "Keine Referenz-Geschwindigkeit messbar – das Speed-Kriterium entfällt",
+      "refImplausible": "Referenz {ref} liegt außerhalb von {min}–{max} × VS0 ({vs0})",
+      "gateNotReached": "Anflug lag nie über {gate} – Prüfung bei {gate} entfällt",
+      "gatesOk": "Bei {gates} alle Kriterien erfüllt",
+      "gatesOkMeasurable": "Bei {gates} alle messbaren Kriterien erfüllt",
+      "rateMeasured": "Der Sim hat für diese Landung keinen Touchdown-Wert geliefert – Landerate {rate} aus dem letzten V/S-Sample in der Luft",
+      "rateDiff": "Landerate {rate} (Sim-Wert), letztes V/S-Sample in der Luft {vs} – Unterschied siehe Methodik",
+      "bounces": {
+        "one": "{count} Bounce nach dem ersten Aufsetzen – härtester Kontakt {hardest}, Landerate ist der härteste Kontakt dieses Ereignisses (Bodenkontakte unter {gap} Abstand zählen als einer)",
+        "other": "{count} Bounces nach dem ersten Aufsetzen – härtester Kontakt {hardest}, Landerate ist der härteste Kontakt dieses Ereignisses (Bodenkontakte unter {gap} Abstand zählen als einer)"
+      },
+      "flare": "Abfangen ab {from}: Sinkrate von {vs1} auf {vs2}, {dur} bis zum Aufsetzen",
+      "noFlare": "Kein Abfangen erkennbar: die Sinkrate lag bis zum Aufsetzen über {pct} der Anflug-Sinkrate",
+      "wind": "{parts} (METAR {metar}, bezogen auf {ref})",
+      "windHeading": "Steuerkurs",
+      "windGustCross": "in Böen {kt} quer",
+      "windWorstWithin": "{worst} innerhalb der Windrichtungs-Spanne",
+      "windVariable": "Wind variabel {kt} – keine Gegen-/Seitenwind-Komponenten",
+      "windVariableGust": "Wind variabel {kt}, Böen {gust} – keine Gegen-/Seitenwind-Komponenten",
+      "windWorstCase": "{text}; ungünstigster Fall: Seitenwind {worst}",
+      "rollout": "Rollout bis {end}: {dist} in {dur}",
+      "rolloutRest": "Rollout bis {end}: {dist} in {dur}, {rest} Piste übrig",
+      "rolloutOverrun": "Rollout bis {end}: {dist} in {dur} – endete {over} hinter dem Pistenende"
+    },
+    "widthUnknown": "Breite unbekannt",
+    "zoneAssumed": "angenommen ({range})",
+    "lateralReason": "Die Piste wurde aus deiner Rollspur abgeleitet – ihre Achse ist deine eigene Linie, nicht die echte Mittellinie.",
+    "notMeasurable": "nicht messbar",
+    "runwaySource": {
+      "database": "Piste aus OurAirports",
+      "derived": "Piste aus deiner Rollspur abgeleitet ({landings})",
+      "databaseDerived": "Piste aus deiner Rollspur abgeleitet ({landings}) · Bezeichnung und Länge aus OurAirports",
+      "user": "Piste von dir festgelegt"
+    },
+    "runwaySourceShort": {
+      "database": "OurAirports",
+      "derived": "aus deiner Rollspur abgeleitet",
+      "user": "von dir festgelegt"
+    },
+    "wind": {
+      "head": "Gegenwind {kt}",
+      "tail": "Rückenwind {kt}",
+      "noCross": "kein Seitenwind",
+      "crossRight": "Seitenwind {kt} von rechts",
+      "crossLeft": "Seitenwind {kt} von links",
+      "crossOnly": "Seitenwind {worst}",
+      "gusts": "{text}, Böen {kt}",
+      "worst": "bis {kt} {side}",
+      "worstLong": "bis zu {kt} {side}",
+      "worstGust": "{text}, in Böen bis {kt}",
+      "sideAny": "von beliebiger Seite",
+      "sideRight": "von rechts",
+      "sideLeft": "von links",
+      "spread": "{wind} (Spanne {kt})"
+    },
+    "metarOld": "METAR von {at} (älter als {age})",
+    "metarAfter": "METAR von {at} (über {age} nach der Landung)",
+    "key": {
+      "sentence": "{head} {clauses}.",
+      "head": {
+        "smooth": "Sanfte Landung",
+        "normal": "Normale Landung",
+        "firm": "Feste Landung",
+        "hard": "Harte Landung"
+      },
+      "headTouchAndGo": {
+        "smooth": "Touch-and-go mit sanfter Landerate",
+        "normal": "Touch-and-go mit normaler Landerate",
+        "firm": "Touch-and-go mit fester Landerate",
+        "hard": "Touch-and-go mit harter Landerate"
+      },
+      "beforeThreshold": "vor der Schwelle",
+      "inZone": "in der Aufsetzzone",
+      "beyondZone": "nach der Aufsetzzone",
+      "noRunway": "ohne zugeordnete Piste",
+      "noBounce": "ohne Bounce",
+      "bounces": {
+        "one": "mit {count} Bounce",
+        "other": "mit {count} Bounces"
+      }
+    },
+    "source": {
+      "label": {
+        "sim": "SIM",
+        "measured": "GEM.",
+        "derived": "ABGEL."
+      },
+      "name": {
+        "sim": "Sim-Wert – vom Simulator geliefert",
+        "measured": "gemessen – von VectaSim aus dem Track gemessen",
+        "derived": "abgeleitet – von VectaSim aus der Geometrie berechnet"
+      }
+    },
+    "runwayAccuracy": "Pistenkoordinaten oft nur auf {decimals} Nachkommastellen (ca. ±{accuracy}) – Abstände daher auf ganze Meter gerundet.",
+    "prov": {
+      "rateSim": "{rate} aus PLANE TOUCHDOWN NORMAL VELOCITY. Unser Messwert: {measured} (letztes Sample in der Luft).",
+      "rateHardest": "Härtester Kontakt: {hardest}.",
+      "rateDiff": "Sim- und Messwert liegen {diff} auseinander – siehe Methodik.",
+      "rateMeasured": "Der Sim lieferte keinen Touchdown-Wert. {rate} ist die Vertikalgeschwindigkeit des letzten Samples in der Luft (Telemetriestrom in der Bildrate des Simulators).",
+      "pointDerived": "Aus der Position beim ersten Bodenkontakt und einer aus deiner Rollspur abgeleiteten Schwelle von RWY {ident} berechnet: {dist} hinter der Schwelle. Die Schwelle ist nur auf ±{u} bekannt (angenommener Zielpunkt, 1 Sample pro Sekunde); die Querablage ist nicht messbar, weil die Achse deine eigene Linie ist.",
+      "lengthUnknown": "Die Pistenlänge ist unbekannt (nur bis zum Ende deines Rollouts).",
+      "pointDb": "Aus der Position beim ersten Bodenkontakt und den Schwellen-Koordinaten von RWY {ident} ({source}) berechnet: {dist} hinter der Schwelle, {side}.",
+      "byYou": "von dir festgelegt",
+      "displaced": "Die Schwelle ist um {m} versetzt (DB).",
+      "noRunway": "Keine Piste zugeordnet – der Aufsetzpunkt lässt sich nicht auf eine Schwelle beziehen.",
+      "g": "Höchstes Lastvielfaches (G FORCE) in der halben Sekunde nach dem Kontakt, aus dem Telemetriestrom. Unplausible Werte (über {max}, negativ) werden verworfen."
+    },
+    "index": {
+      "label": {
+        "rate": "Landerate",
+        "g": "g-Last",
+        "bounces": "Bounces",
+        "zone": "Aufsetzpunkt",
+        "centreline": "Mittellinie",
+        "stable": "Stabilisierter Anflug"
+      },
+      "noRunway": "ohne Piste",
+      "widthUnknown": "Breite unbekannt",
+      "lateralUnmeasurable": "Querablage nicht messbar",
+      "noGate": "ohne erreichtes Gate",
+      "notComparable": "nicht vergleichbar ({why})",
+      "bandPoints": "{band} {points}",
+      "formula": {
+        "total": "VectaSim-Index = 100 × Σ(Gewicht × Punkte) ÷ Σ Gewichte, gerundet. Er steht nur da, wenn alle Teile messbar sind; ohne Piste, ohne bekannte Pistenbreite oder ohne erreichtes Gate heißt er „nicht vergleichbar“ – herausgerechnete Teile würden einen Vergleich vortäuschen.",
+        "rate": "Landerate (Gewicht {wRate}) und g-Last (Gewicht {wG}): Punkte nach Band – {bands}. „Normal“ zählt so viel wie „sanft“: Ein festes Aufsetzen ohne Ausschweben ist gewollt.",
+        "bounces": "Bounces (Gewicht {w}): keiner {p0} · einer {p1} · zwei oder mehr {p2}.",
+        "zone": "Aufsetzpunkt (Gewicht {w}): in der Aufsetzzone (ab der Schwelle) {inZone} · danach bis zur Pistenmitte {toMid} · dahinter {beyond} · vor der Schwelle {before}.",
+        "centreline": "Mittellinie (Gewicht {w}): Abweichung bis ein Viertel der Pistenbreite {p1} · bis zur halben Breite {p2} · darüber {p3}.",
+        "stable": "Stabilisierter Anflug (Gewicht {w}): zur Hälfte „stabil ab“ (ab {high} {one}, bis {low} linear auf {zero}, darunter oder nie stabil {zero}), zur Hälfte Anteil der erfüllten messbaren Gate-Kriterien bei {gate1} und {gate2}. Ohne messbares Gate-Kriterium zählt nur „stabil ab“; ohne Anflugauswertung nur der Gate-Anteil der Landeprüfung."
+      }
+    },
+    "approachBand": {
+      "stable": "stabil",
+      "deviations": "mit Abweichungen",
+      "unstable": "instabil",
+      "unstableBelow500": "instabil unter {ft}"
+    },
+    "unavailable": {
+      "gateNotReached": "Gate nicht erreicht",
+      "noRunway": "ohne Piste",
+      "noRefSpeed": "ohne Referenz-Speed",
+      "notEstablished": "bei {gate} nicht eingedreht",
+      "notOnFinal": "nicht auf dem Endanflug",
+      "noData": "keine Daten"
+    },
+    "exceedance": {
+      "at": "bei {h}",
+      "between": "zwischen {hi} und {lo}",
+      "flapChange": "Klappen {range} verstellt",
+      "phrase": "{name} {peak} für {dur} {range}",
+      "phraseRef": "{name} {peak} zur Referenz für {dur} {range}",
+      "hint": "{phrase} – {limit}",
+      "hintS2": "{phrase} – {limit} (Stufe S2)",
+      "limit": "Grenze {value}",
+      "limitFlaps": "Klappenänderung unter {ft}"
+    },
+    "ref": {
+      "flown": "die geflogene Referenz",
+      "value": "die Referenz ({kt})"
+    },
+    "faf": {
+      "faster": "Bei FAF {kt} schneller als {ref}.",
+      "slower": "Bei FAF {kt} langsamer als {ref}.",
+      "above": "Bei FAF {ft} über dem {angle}-Pfad",
+      "below": "Bei FAF {ft} unter dem {angle}-Pfad"
+    },
+    "lateralBand": {
+      "onCentreline": "auf dem Kurs",
+      "slight": "leichte Ablage",
+      "marked": "deutliche Ablage"
+    },
+    "lateral": {
+      "noRunway": "ohne Piste nicht messbar",
+      "derived": "Piste aus Rollspur – nicht bewertbar",
+      "fewSamples": "zu wenige Samples",
+      "max": "max. {dots} Dots",
+      "atGate": "bei {gate} {side}",
+      "threshold": "Schwelle {side}",
+      "overshoot": "beim Eindrehen {m} ({dots} Dots) übergeschossen",
+      "noOvershoot": "ohne Überschießen eingedreht",
+      "noSTurns": "keine S-Kurven",
+      "reversals": {
+        "one": "{count} Seitenwechsel (S-Kurven)",
+        "other": "{count} Seitenwechsel (S-Kurven)"
+      },
+      "clauseRight": "bei {gate} {m} rechts der verlängerten Mittellinie",
+      "clauseLeft": "bei {gate} {m} links der verlängerten Mittellinie",
+      "clauseBand": "{band} vom Kurs",
+      "clauseBandMax": "{band} vom Kurs (max. {max} Dots)"
+    },
+    "lateralHint": {
+      "derived": "Piste aus deiner Rollspur abgeleitet – Querablage zur verlängerten Mittellinie nicht bewertbar",
+      "overshootRight": "Beim Eindrehen {m} ({dots} Dots) über den Kurs nach rechts hinausgeschossen",
+      "overshootLeft": "Beim Eindrehen {m} ({dots} Dots) über den Kurs nach links hinausgeschossen",
+      "sTurns": {
+        "one": "{count} Seitenwechsel um den Kurs zwischen {top} und {floor} (S-Kurven, Ablage über {dots} Dots)",
+        "other": "{count} Seitenwechsel um den Kurs zwischen {top} und {floor} (S-Kurven, Ablage über {dots} Dots)"
+      },
+      "lowRight": "Unter {gate} bis {dots} Dots rechts vom Kurs – über {limit} Dots",
+      "lowLeft": "Unter {gate} bis {dots} Dots links vom Kurs – über {limit} Dots",
+      "threshold": "Über der Schwelle {side}",
+      "thresholdWide": "Über der Schwelle {side} – mehr als ein Viertel der Pistenbreite ({width})",
+      "held": "Kurs {top} → {bottom} gehalten (RMS {rms} Dots)"
+    },
+    "approachKey": {
+      "goAround": "Durchstarten",
+      "goAroundAt": "Durchstarten bei {h}",
+      "afterDeviations": "{lead} nach Abweichungen bei {kinds}",
+      "afterStable": "{lead} nach stabilem Anflug",
+      "rightDecision": "{lead} – richtige Entscheidung.",
+      "noRunway": "Ohne zugeordnete Piste – nur Speed, Sinkrate, Querneigung und Konfiguration bewertet",
+      "established": "Auf dem Kurs ab {dist}",
+      "notEstablished": "Nicht stabil auf den Kurs eingedreht",
+      "stableFrom": "stabil ab {ft}",
+      "neverStable": "bis {ft} nie durchgehend stabil",
+      "sentence": "{clauses}.",
+      "unstableBelow500": "Instabil unter {ft}",
+      "unstableAbove500": "Instabil über {ft} ({kinds})",
+      "deviationAbove500": "Abweichung über {ft}",
+      "lead": "{lead}: {phrase}.",
+      "touchAndGo": "Touch-and-go."
+    },
+    "approachLabel": {
+      "n": "Anflug {n}",
+      "goAroundAt": "{n} – Durchstarten bei {h}",
+      "goAround": "{n} – Durchstarten",
+      "touchAndGo": "{n} – Touch-and-go",
+      "landed": "{n} – Landung"
+    },
+    "glidepathAssumed": "{angle}-Annahme",
+    "vappSource": {
+      "user": "eingetragen",
+      "flown": "geflogener Median",
+      "design": "Annahme (VS0×{factor})",
+      "unavailable": "nicht messbar"
+    },
+    "neverStable": "nie durchgehend stabil",
+    "ils": {
+      "gs": "Gleitpfad",
+      "loc": "Localizer",
+      "rejected": "Das ILS des Simulators wurde nicht verwendet: sein {name} passt nicht zu dieser Piste (anderes ILS gerastet?).",
+      "shareGs": "Gleitpfad des Simulators nur über {pct} der Samples empfangen (mindestens {min} nötig) – geometrisch bewertet.",
+      "shareLoc": "Localizer des Simulators nur über {pct} der Samples empfangen (mindestens {min} nötig) – geometrisch bewertet.",
+      "hintRejected": "ILS des Simulators passt nicht zu RWY {ident} ({which}) – anderes ILS gerastet? Bewertet wurde geometrisch",
+      "hintGs": "Gleitpfad {dots} Dots",
+      "hintLoc": "Kurs {dots} Dots",
+      "hintMismatch": "Sim-ILS und Geometrie weichen ab (Pistenkoordinaten prüfen) – Median {parts}",
+      "simUsed": "Sim verwendet",
+      "simRejected": "Sim verworfen, Geometrie verwendet",
+      "geoUsed": "Geometrie verwendet",
+      "protocolGs": "Gleitpfad: Sim RMS {sim} / Geometrie {geo} Dots, Median-Differenz {diff} Dots, empfangen {share}{angle} – {used}",
+      "protocolLoc": "Localizer: Sim RMS {sim} / Geometrie {geo} Dots, Median-Differenz {diff} Dots, empfangen {share} – {used}"
+    },
+    "approachProv": {
+      "stable": "Höchste Höhe (bis {max}, auf {round} ft abgerundet), ab der bis {bottom} kein Kriterium länger als seine Mindestdauer außerhalb der Toleranz lag – aus dem 1-Hz-Track ({samples} Samples im Fenster {top} → {bottom}).",
+      "gsIls": "Gleitpfad-Abweichung des Simulators (NAV GLIDE SLOPE ERROR, ILS auf NAV 1), Pfadwinkel {angle} aus dem ILS (NAV RAW GLIDE SLOPE). Empfangen über {share} der Samples {top} → {floor}; die Geometrie aus Position und Schwelle weicht im Median {diff} Dots ab. 1 Dot = {dot}°.",
+      "gsGeo": "Höhe gegen einen angenommenen {angle}-Pfad über {tch} Schwellenhöhe, aus Position und Schwellen-Koordinaten berechnet (keine Verfahrensdaten). 1 Dot = {dot}°. RMS über {top} → {floor}.",
+      "locIls": "Kursablage aus der Nadel des Simulators (NAV CDI, ±127 = ±{full} Dots), empfangen über {share} der Samples {top} → {bottom}. Meter aus Position und Schwellen-Koordinaten; die geometrischen Dots weichen im Median {diff} Dots ab. Band nach VectaSim-Konvention wie bei der Geometrie.",
+      "locNoRunway": "Keine Piste zugeordnet – die Querablage zur verlängerten Mittellinie ist nicht messbar.",
+      "locDerived": "{reason} Die Querablage im Anflug ist deshalb nicht bewertbar.",
+      "locGeo": "Querablage zur verlängerten Mittellinie aus Position und Schwellen-Koordinaten. Dots geometrisch: Winkel von einer virtuellen Antenne {antenna} hinter dem Pistenende, 1 Dot = {dotM} an der Schwelle. RMS über {top} → {bottom}. Band nach VectaSim-Konvention: auf der verlängerten Mittellinie RMS ≤ {onRms} und max. ≤ {onMax} Dots, leichte Abweichung RMS ≤ {slightRms} und max. ≤ {slightMax} Dots (FSF-Gate ±1 Dot), darüber deutlich.",
+      "speedFlown": "IAS gegen den Median der eigenen IAS zwischen {from} und {to} ({ref}). Das misst die Konstanz der Geschwindigkeit, nicht ob sie für das Flugzeug richtig war.",
+      "speedUser": "IAS gegen die vom Piloten gesetzte Referenz {ref}; geflogener Median {flown}.",
+      "speedDesign": "Annahme: {factor} × VS0 ({vs0}, Konstruktionswert des Simulators) = {ref} – kein geflogener Wert zwischen {from} und {to}, keine eingetragene Vapp.",
+      "speedNone": "Keine Referenz-Geschwindigkeit messbar – Speed-Kriterien entfallen."
+    },
+    "approachHint": {
+      "goAround": "Durchgestartet: tiefster Punkt {low} über {base}, danach {climb} in {window}, IAS min. {ias}",
+      "baseField": "Platzhöhe",
+      "baseGround": "Grund",
+      "established": "Auf dem Endanflug ab {dist} / {ft} eingedreht (RWY {ident})",
+      "notEstablished": "Nicht stabil auf den Kurs eingedreht – Gleitpfad und Kurs nur dort gewertet, wo der Anflug im Endanflug-Kegel lag",
+      "noRunway": "Keine Piste zugeordnet – Gleitpfad, Kurs, Höhe zum Pfad und Energie entfallen",
+      "refFlown": "Referenz-Speed ist der Median der geflogenen IAS {from} → {to} ({ref}) – bewertet die Konstanz, nicht die absolute Geschwindigkeit",
+      "refDesign": "Referenz-Speed {ref} ist eine Annahme: {factor} × VS0 ({vs0}) – keine eingetragene Vapp, kein geflogener Wert",
+      "refUnavailable": "Keine Referenz-Geschwindigkeit messbar – Speed- und Energiekriterien entfallen",
+      "speedHigh": "{at} {kt} über der Referenz ({ref}) – Speed früher reduzieren",
+      "speedHighAt": "Am FAF",
+      "speedHighAtGate": "Bei {gate}",
+      "gearLate": "Fahrwerk erst bei {ft} ausgefahren – Landekonfiguration bis {gate} erwartet",
+      "gear": "Fahrwerk bei {ft} ausgefahren",
+      "flapsStage": "Landeklappen (Stufe {stage})",
+      "flapsPlain": "Landeklappen",
+      "flapsLate": "{flaps} erst bei {ft} gesetzt – Landekonfiguration bis {gate} erwartet",
+      "flapsJustInTime": "{flaps} erst bei {ft} gesetzt – knapp über dem {gate}-Gate, besser vor {early} konfigurieren",
+      "flaps": "{flaps} bei {ft} gesetzt",
+      "gateNotFlown": "Gate {gate} nicht durchflogen – Prüfung entfällt",
+      "allMet": "Ab {top} {bottom} alle messbaren Kriterien ununterbrochen erfüllt",
+      "toGoAround": "bis zum Durchstarten",
+      "toBottom": "bis {ft}",
+      "energyHigh": "Energie zwischen {from} und {to} zu hoch: bis {value} zum Profil (Schwelle {limit})",
+      "energyLow": "Energie zwischen {from} und {to} zu niedrig: bis {value} zum Profil (Schwelle {limit})",
+      "energyAt10Above": "Energie bei {at} {total} über dem Profil (davon {height} Höhe, {speed} aus der Geschwindigkeit)",
+      "energyAt10Below": "Energie bei {at} {total} unter dem Profil (davon {height} Höhe, {speed} aus der Geschwindigkeit)"
+    },
+    "energyBand": {
+      "good": "im Profil",
+      "high": "zu hoch",
+      "low": "zu niedrig",
+      "text": "{band} · {min} … {max} (Grenzen {low}/{high}) · TAS {tas}",
+      "tasRecorded": "vom Sim",
+      "tasIsa": "aus IAS (ISA)"
+    },
+    "windHint": {
+      "tail": "Rückenwind {kt} im Endanflug (Sim-Wind, Median {top} → {bottom}) – über {limit}",
+      "crossRight": "Seitenwind {kt} von rechts im Endanflug (Sim-Wind) – über {limit}",
+      "crossLeft": "Seitenwind {kt} von links im Endanflug (Sim-Wind) – über {limit}",
+      "shear": "Windscherung: Wind ändert sich zwischen {top} und der Schwelle um {kt} ({from} → {to})",
+      "shearMore": "Windscherung: Wind ändert sich zwischen {top} und der Schwelle um {kt} ({from} → {to}), Gegenwind nimmt um {change} zu",
+      "shearLess": "Windscherung: Wind ändert sich zwischen {top} und der Schwelle um {kt} ({from} → {to}), Gegenwind nimmt um {change} ab",
+      "protocolChange": "{top}: {from} → Schwelle {to} (Änderung {kt})",
+      "protocol": "{parts} – AMBIENT WIND am Flugzeug, {samples} Samples {top} → {bottom}"
+    },
+    "automation": {
+      "apToGoAround": "Autopilot bis zum Durchstarten",
+      "apToTouchdown": "Autopilot bis zum Aufsetzen (Autoland)",
+      "apOff": "Autopilot bis {ft}, danach manuell",
+      "manual": "Anflug manuell geflogen (Autopilot aus)",
+      "athrEnd": "A/THR bis zum Ende",
+      "athrOff": "A/THR bis {ft}",
+      "thrustManual": "Schub manuell",
+      "apprMode": "APPR-Modus"
+    },
+    "recorded": {
+      "wind": "Wind am Flugzeug {dir} wahr / {kt}",
+      "noNavFlags": "ILS-Status nicht geliefert",
+      "noIls": "kein ILS auf NAV 1",
+      "gsReceived": "GS (empfangen)",
+      "gsNotReceived": "GS (nicht empfangen)",
+      "gsAngle": "Gleitpfad {angle}",
+      "course": "Kurs {course}",
+      "text": "{parts} (Sim-Werte der letzten 3 min vor dem Aufsetzen)"
+    }
+  },
+  "landing": {
+    "side": {
+      "onCentreline": "auf der Mittellinie",
+      "right": "{m} rechts",
+      "left": "{m} links",
+      "rightOfCentreline": "{m} rechts der Mittellinie",
+      "leftOfCentreline": "{m} links der Mittellinie"
+    }
+  },
+  "landingCard": {
+    "aria": "Landekarte {where}",
+    "landing": "Landung",
+    "unknownAircraft": "Unbekanntes Flugzeug",
+    "rate": "Landerate",
+    "simValue": "Sim-Wert",
+    "measured": "gemessen",
+    "gPeak": "g-Spitze",
+    "fromThreshold": "Ab Schwelle",
+    "derivedSuffix": "{zone} · Piste abgeleitet",
+    "noRunway": "keine Piste zugeordnet",
+    "centreline": "Mittellinie",
+    "right": "R",
+    "left": "L",
+    "notMeasurable": "nicht messbar · Piste aus der Rollspur",
+    "width": "{side} · Piste {width} breit",
+    "widthUnknown": "{side} · Breite unbekannt",
+    "runwayTop": "PISTE {ident} VON OBEN",
+    "runwayTopDerived": "PISTE {ident} VON OBEN · ABGELEITET",
+    "runwayTopUser": "PISTE {ident} VON OBEN · VON DIR FESTGELEGT",
+    "touchdownPoint": "AUFSETZPUNKT",
+    "noRunwayPanel": "Keine Piste zugeordnet – Aufsetzpunkt und Mittellinie entfallen",
+    "approach": "ANFLUG",
+    "windNote": "Wind: {note}",
+    "windNoMetar": "Wind: keine METAR",
+    "wind": "Wind",
+    "toHeading": "{text} (zum Steuerkurs)",
+    "currentWeather": "aktuelles Wetter",
+    "zone": "Aufsetzzone {zone} · Zielpunkt {aim}",
+    "inAir": "in der Luft",
+    "onGround": "am Boden",
+    "exaggerated": "Querachse ×{factor} überhöht",
+    "profileTitle": "ANFLUG · LETZTE {nm}",
+    "reference": "{angle}-Referenz ±{tol}° (1 Dot)",
+    "threshold": "Schwelle {height} · {ias}",
+    "flare": "Abfangen ab {ft}",
+    "tooFewPoints": "Zu wenige Trackpunkte für ein Anflugprofil",
+    "thresholdShort": "Schwelle",
+    "touchdown": "Aufsetzen",
+    "export": {
+      "notDrawn": "Landekarte konnte nicht gezeichnet werden",
+      "notLoaded": "Landekarte konnte nicht als Bild geladen werden",
+      "noCanvas": "Canvas nicht verfügbar",
+      "noPng": "PNG konnte nicht erzeugt werden",
+      "saved": "Landekarte gespeichert",
+      "bothSaved": "Lande- und Anflugkarte gespeichert",
+      "notSaved": "Landekarte nicht gespeichert: {title}",
+      "noClipboardImages": "Die Zwischenablage unterstützt hier keine Bilder",
+      "copied": "Landekarte in die Zwischenablage kopiert",
+      "notCopied": "Landekarte nicht kopiert",
+      "pngFilter": "PNG-Bild",
+      "openFolder": "Ordner öffnen",
+      "notAutoSaved": "Landekarte nicht automatisch gespeichert: {title}"
+    }
+  },
+  "themes": {
+    "nachtcockpit": {
+      "name": "Nachtcockpit",
+      "mood": "Gedimmtes Cockpit bei Nacht: bläuliche Neutraltöne, ein ruhiges Cyan, Haarlinien statt Kästen."
+    },
+    "graphit-amber": {
+      "name": "Graphit & Amber",
+      "mood": "Warmes Overhead-Panel bei Nacht: Graphit wie lackiertes Blech, Beschriftung in Amber, Werte in Warmweiß."
+    },
+    "papierkarte": {
+      "name": "Papierkarte",
+      "mood": "Anflugkarte auf dem Kniebrett: cremefarbenes Papier, schwarze Tusche, Kartenblau – für Tageslicht."
+    },
+    "phosphor": {
+      "name": "Phosphor",
+      "mood": "Monochromes Instrument: grüner Phosphor auf Schwarz, Hierarchie nur über Helligkeit, Gelb als einzige zweite Farbe."
+    },
+    "arktis-studio": {
+      "name": "Arktis Studio",
+      "mood": "Kühles Studiolicht: helles Grau, weiße Blätter, tiefes Petrolblau und große, ruhige Typografie.",
+      "fonts": "Inter Tight (tabellarische Ziffern)"
+    },
+    "signal": {
+      "name": "Signal",
+      "mood": "Reduzierte Telemetrie: unbuntes Graphit, Versal-Mikrolabels und genau ein Signalgrün, wo gerade etwas passiert; der Track in kühlem Cyan."
+    }
+  },
+  "debrief": {
+    "bar": {
+      "kickerLanding": "Landeauswertung",
+      "kickerApproach": "Anflugauswertung",
+      "pickApproach": "Anflug wählen",
+      "pickLanding": "Landung wählen",
+      "prevLanding": "Vorherige Landung",
+      "nextLanding": "Nächste Landung",
+      "landingOf": "Landung {n} von {count}",
+      "inLogbook": "Im Logbuch",
+      "inLogbookTitle": "Diesen Flug im Logbuch öffnen",
+      "close": "Schließen",
+      "closeTitle": "Schließen (Esc)"
+    },
+    "state": {
+      "retry": "Erneut versuchen",
+      "loading": "Landung wird ausgewertet …",
+      "noApproachForLanding": "zu dieser Landung wurde im Track kein Anflug gefunden"
+    },
+    "card": {
+      "save": "Landekarte speichern",
+      "saving": "Speichert …",
+      "saveTitle": "Landekarte als PNG speichern ({size})",
+      "copy": "Landekarte kopieren",
+      "copying": "Kopiert …",
+      "copyTitle": "Landekarte als PNG in die Zwischenablage kopieren"
+    },
+    "section": {
+      "approachProfile": "Anflugprofil",
+      "hints": "Hinweise",
+      "gates": "Stabilisierter Anflug – Gates",
+      "stabilised": "Stabilisierter Anflug",
+      "methodology": "Methodik",
+      "flareRollout": "Abfangen & Rollout",
+      "protocol": "Messprotokoll",
+      "runwayFromAbove": "Piste {ident} von oben",
+      "touchdownOnMap": "Aufsetzpunkt auf der Karte"
+    },
+    "goAround": {
+      "noRunway": "Anflug ohne zugeordnete Piste",
+      "suffix": "Durchstarten",
+      "methodTitle": "Durchstarten:",
+      "methodText": "erkannt, wenn nach einem Sinkflug unter {agl} innerhalb von {window} mindestens {climb} gestiegen wird (bzw. die Phasen-Erkennung Approach/Final → Climb meldet). Der tiefste Punkt ist der Entscheidungspunkt; es gibt keine Landekarte."
+    },
+    "header": {
+      "titleNoRunway": "{place} · keine Piste zugeordnet",
+      "titleNoAirport": "Landung ohne Flugplatz",
+      "noRunway": "Keine Piste zugeordnet",
+      "correctRunway": "Piste korrigieren …",
+      "correctRunwayTitle": "Schwelle und Ende der Piste selbst festlegen",
+      "unknownAircraft": "Unbekanntes Flugzeug"
+    },
+    "wind": {
+      "label": "Wind ({source})",
+      "atLanding": "Wetter zum Zeitpunkt der Landung",
+      "current": "aktuelles Wetter",
+      "noWind": "keine Windangabe",
+      "componentsToHeading": "{components} (zum Steuerkurs)",
+      "noMetar": "keine METAR",
+      "simTitle": "Wind am Flugzeug laut Simulator (AMBIENT WIND), Median {top} → {bottom}",
+      "simLabel": "Sim-Wind im Endanflug"
+    },
+    "hero": {
+      "rate": "Landerate",
+      "bandsTitle": "Bänder: {bands}",
+      "rateSubSim": "Messwert {measured} · letztes Sample in der Luft",
+      "rateSubMeasured": "Sim lieferte keinen Wert – Messwert",
+      "point": "Aufsetzpunkt",
+      "inTdz": "in der Aufsetzzone",
+      "inTdzAssumed": "in der Aufsetzzone (angenommen)",
+      "outsideTdz": "außerhalb der Aufsetzzone",
+      "outsideTdzAssumed": "außerhalb der Aufsetzzone (angenommen)",
+      "onCentreline": "auf der Mittellinie",
+      "rightOfCentreline": "{dist} rechts der Mittellinie",
+      "leftOfCentreline": "{dist} links der Mittellinie",
+      "lateralNotMeasurable": "Querablage nicht messbar",
+      "noRunway": "keine Piste zugeordnet",
+      "g": "g-Last",
+      "gSub": "Spitze {window} nach dem Kontakt",
+      "bandsLine": "Bänder – Landerate: {vs} · g-Last: {g}"
+    },
+    "facts": {
+      "hardestContact": "härtester Kontakt {vs}",
+      "touchAndGo": "Touch-and-go",
+      "fullStop": "Full Stop",
+      "bounceWarn": "Bounce nach dem ersten Aufsetzen",
+      "derivedTitle": "Die Piste wurde aus deiner Rollspur abgeleitet: ihre Achse ist deine eigene Linie, die Abweichung von der echten Mittellinie lässt sich daraus nicht bestimmen.",
+      "notMeasurable": "nicht messbar",
+      "derivedLabel": "Mittellinie · Piste aus deiner Rollspur abgeleitet",
+      "centreline": "Mittellinie",
+      "centrelineWidth": "Mittellinie · Piste {width} breit",
+      "centrelineWidthUnknown": "Mittellinie · Breite unbekannt",
+      "centrelineWarn": "Mehr als ein Viertel der Pistenbreite neben der Mittellinie",
+      "rollout": "Rollout",
+      "rolloutTo": "Rollout bis {speed}",
+      "rolloutToRest": "Rollout bis {speed} · Rest {rest}",
+      "rolloutWarn": "Rollout endete hinter dem Pistenende",
+      "indexTitle": "Zusammenfassung der Rohwerte – Formel unter „Methodik“",
+      "index": "VectaSim-Index",
+      "indexOutOf": "/ 100 · Formel unter „Methodik“",
+      "indexNa": "{reason} · nur mit allen Teilen messbar, siehe „Methodik“"
+    },
+    "noRunway": {
+      "text": "Keine Piste zugeordnet: Im Umkreis von {radius} um den Aufsetzpunkt liegt keine Piste, deren Richtung bis auf ±{heading} zum Steuerkurs passt. Aufsetzpunkt, Abweichung von der Mittellinie und Gleitpfad entfallen."
+    },
+    "stabilised": {
+      "noteApproach": "Speed gegen die Referenz {vapp} ({source}); Gleitpfad gegen den {path}.",
+      "ilsPath": "{deg}-Pfad des ILS (Sim)",
+      "assumedPath": "{deg}-Pfad (Annahme)",
+      "noteGates": "Speed gegen die Referenz {speed} ({source}); Gleitpfad ±{tol} = {oneDot}, mehr als {full} ({twoDots}, Vollausschlag) ist Stufe S2."
+    },
+    "flare": {
+      "flareFrom": "Abfangen ab",
+      "notDetectable": "nicht erkennbar",
+      "durationToTd": "Dauer bis Aufsetzen",
+      "vsBeforeAfter": "Sinkrate vor / nach Abfangen",
+      "thresholdCrossing": "Schwellenüberflug",
+      "thresholdToTd": "Zeit Schwelle → Aufsetzen",
+      "iasMinMax": "IAS min / max",
+      "iasAt": "IAS bei {h1} / {h2} / Aufsetzen",
+      "vsBelow": "V/S unter {alt}",
+      "bankMaxBelow": "Querneigung max. unter {alt}",
+      "gpMax": "Gleitpfad max. über / unter",
+      "noRunwayNa": "ohne Piste n. v.",
+      "pitchBank": "Pitch / Bank beim Aufsetzen",
+      "gs": "GS beim Aufsetzen",
+      "rollout": "Rollout",
+      "rolloutValue": "{dist} in {time}",
+      "runwayDb": "Piste (Datenbank)",
+      "runwayUser": "Piste (von dir festgelegt)",
+      "runwayDerived": "Piste (abgeleitet)",
+      "lengthMin": "mind. {len} (Länge unbekannt)"
+    },
+    "integrity": {
+      "slew": "Slew",
+      "timeAccel": "Zeitraffer (max. {rate})",
+      "crashed": "Absturz",
+      "fuelIncreased": "Treibstoff in der Luft erhöht",
+      "pauses": {
+        "one": "{count}× Pause",
+        "other": "{count}× Pause"
+      }
+    },
+    "unit": {
+      "dots": {
+        "one": "{n} Dot",
+        "other": "{n} Dots"
+      }
+    },
+    "method": {
+      "landingRate": {
+        "title": "Landerate:",
+        "text": "Wert des Simulators (PLANE TOUCHDOWN NORMAL VELOCITY, ×60 in fpm, negativ = sinkend). Liefert der Sim keinen neuen Wert (unter 1 fpm oder unverändert), gilt die Vertikalgeschwindigkeit des letzten Samples in der Luft. Bei Bounces zählt der härteste Kontakt dieses Landeereignisses, nie ein Spitzenwert über den ganzen Flug; zwei Bodenkontakte mit weniger als {gap} Luft dazwischen gelten als ein Kontakt. Die Flug-Landerate im Logbuch ist die letzte Landung mit Full Stop."
+      },
+      "measured": {
+        "title": "Messwert:",
+        "text": "letztes Sample vor dem Bodenkontakt aus dem Telemetriestrom (in der Bildrate des Simulators). Weil V/S am Boden bedeutungslos ist und auch eine hohe Abtastrate den Kontaktmoment verfehlen kann, weicht er vom Sim-Wert ab. „Am Boden“ zählt nur, wenn die Höhe über Grund höchstens {agl} beträgt; die Landung gilt erst nach drei aufeinanderfolgenden Boden-Samples (≥ {confirm}) als bestätigt."
+      },
+      "gLoad": {
+        "title": "g-Last:",
+        "text": "höchstes Lastvielfaches in der halben Sekunde nach jedem Kontakt (Bugrad-Aufsetzen danach nicht enthalten); unplausible Werte (über {max}, negativ) werden verworfen."
+      },
+      "track": {
+        "title": "Track:",
+        "text": "Anflug, Abfangen und Rollout stammen aus dem gespeicherten Track mit 1 Sample pro Sekunde. Höhen sind „über Aufsetzpunkt“: Höhe MSL minus MSL des ersten Boden-Samples – unabhängig von Gelände unter dem Anflug und von der Flugplatzhöhe in der Datenbank. Der Anflug beginnt beim letzten Sinken durch {start}, sonst {fallback} vor dem Aufsetzen."
+      },
+      "runway": {
+        "title": "Piste:",
+        "source": "OurAirports (Public Domain); Koordinaten beider Pistenenden, Breite aus der Datenbank (fehlt sie: „Breite unbekannt“).",
+        "displaced": "Eine versetzte Schwelle aus der Datenbank verschiebt die Schwelle entlang der Achse.",
+        "displacedHere": "Eine versetzte Schwelle aus der Datenbank verschiebt die Schwelle entlang der Achse (hier {dist}).",
+        "match": "Zugeordnet wird die nächste Piste innerhalb {radius}, deren Richtung bis auf ±{heading} zum Steuerkurs beim Aufsetzen passt.",
+        "tdzTitle": "Aufsetzzone",
+        "tdz": "(ICAO/FAA): ab der Schwelle bis {end}, auf Pisten unter {short} das erste Drittel.",
+        "aiming": "Der Zielpunkt (Markierung nach ICAO Annex 14: {marks} je nach Pistenlänge) liegt in der Zone und ist nur eine Marke.",
+        "aimingHere": "Der Zielpunkt (Markierung nach ICAO Annex 14: {marks} je nach Pistenlänge, hier {here}) liegt in der Zone und ist nur eine Marke.",
+        "derivedTitle": "Ohne Koordinaten in OurAirports",
+        "derived": "leitet VectaSim die Piste aus deiner Rollspur ab: Achse = Linie deines Rollouts, Schwelle {offset} vor dem Aufsetzpunkt (bzw. am Zielpunkt der Datenbank-Länge) angenommen, ±{along} entlang. Die Querablage ist dann nicht messbar; ohne bekannte Länge ist die Aufsetzzone die feste Annahme 0–{tdzEnd} und der Rest der Piste entfällt. Jede weitere Landung dort verfeinert die gemerkte Piste.",
+        "correct": "Mit „Piste korrigieren …“ legst du Schwelle und Ende selbst fest – deine Piste hat Vorrang vor OurAirports.",
+        "thisDerived": "Diese Landung: abgeleitete Piste."
+      },
+      "glidepath": {
+        "title": "Gleitpfad:",
+        "text": "Winkel vom Aufsetzpunkt der {deg}-Referenz ({tch} über der Schwelle) zum Flugzeug, erst ab {from} davor. Toleranz ±{tol} = {oneDot} (FSF: „within one dot“); ±{full} ist der Vollausschlag ({twoDots}) und wird nur als Stufe S2 genannt. Ohne zugeordnete Piste entfällt er."
+      },
+      "stabilised": {
+        "title": "Stabilisierter Anflug",
+        "text": "bei {gate1} und {gate2} (interpoliert): Fahrwerk unten, Klappen gesetzt, |V/S| ≤ {vs}, IAS {below}/{above} zur Referenz-Geschwindigkeit, Gleitpfad ±{oneDot}, Querneigung ≤ {bank}. Referenz: 1. die beim Flugzeug eingetragene Vapp (Logbuch → Flugzeuge); 2. sonst der Median der geflogenen IAS zwischen {from} und {to} – das misst die Konstanz, nicht ob die Geschwindigkeit für das Muster richtig war; 3. sonst {factor} × VS0. Diese Landung: {speed} ({source})."
+      },
+      "flare": {
+        "title": "Abfangen:",
+        "text": "ab dem Sample, nach dem die Sinkrate bis zum Aufsetzen unter {pct} der mittleren Anflug-Sinkrate (500–200 ft) blieb; Auflösung 1 s."
+      },
+      "rollout": {
+        "title": "Rollout:",
+        "text": "vom Aufsetzen bis GS unter {speed}."
+      },
+      "wind": {
+        "title": "Wind:",
+        "text": "METAR des Flugplatzes zum Zeitpunkt der Landung (bei der Landung gespeichert), sonst die aktuelle – ohne eigene METAR die der nächsten Station im Umkreis von {radius} (aviationweather.gov bzw. VATSIM), nur für Landungen der letzten {hours}. Liegt die Beobachtungszeit der Meldung mehr als {maxAge} vor oder nach dem Aufsetzen, steht das beim Wind. Gegen-/Seitenwind sind auf die Pistenrichtung (rechtweisend) bezogen; bei VRB oder einer Richtungs-Spanne (dddVddd) zeigt VectaSim zusätzlich den ungünstigsten Seitenwind darin.",
+        "hours": {
+          "one": "{count} Stunde",
+          "other": "{count} Stunden"
+        }
+      },
+      "bands": "Bänder: Landerate {vs}; g-Last {g}.",
+      "index": {
+        "title": "VectaSim-Index",
+        "text": "(klein unter den Rohwerten, nie als Urteil gedacht):",
+        "thisLanding": "Diese Landung:",
+        "part": "{label} {points} × {weight}",
+        "partNa": "{label} entfällt"
+      }
+    },
+    "approachMethod": {
+      "references": {
+        "title": "Anflug-Referenzen:",
+        "text": "Gleitpfad ist ein angenommener {deg}-Pfad über {tch} Schwellenhöhe – ohne Verfahrensdaten, der echte ILS-/RNAV-Winkel kann abweichen („{deg}-Annahme“). 1 Dot Gleitpfad = {gsDot}. Kurs (Localizer-Ersatz): Winkel von einer gedachten Antenne {antenna} hinter dem Pistenende, 1 Dot = {locDot} an der Schwelle. „Eingedreht“ ab dem ersten Punkt, ab dem Kurs ≤ {track} zur Bahn und Querablage ≤ max. {minM} bzw. {ratio} der Distanz blieben."
+      },
+      "ils": {
+        "title": "ILS aus dem Simulator (ab Track v2):",
+        "text": "Empfängt NAV 1 einen gültigen Gleitpfad über mindestens {share} der Samples {top} → {floor}, ersetzt er die Annahme: Winkel aus NAV RAW GLIDE SLOPE, Abweichung aus NAV GLIDE SLOPE ERROR („{deg} (ILS)“). Ebenso der Localizer (NAV CDI, ±127 = ±{fullScale}) statt der Geometrie. Beide Werte werden immer berechnet (Messprotokoll); weichen sie im Median um mehr als {mismatch} ab, steht ein Hinweis da; bei mehr als {rejectGs} Gleitpfad bzw. {rejectLoc} Kurs gehört das ILS nicht zu dieser Piste und VectaSim bewertet geometrisch."
+      },
+      "vapp": {
+        "title": "Referenz-Speed (Vapp):",
+        "text": "1. die beim Flugzeug eingetragene Vapp (Logbuch → Flugzeuge); 2. sonst der Median der eigenen IAS zwischen {from} und {to} dieses Anflugs – das bewertet die Konstanz der Geschwindigkeit, nicht ob sie für das Muster richtig war; 3. ohne messbare IAS {factor} × VS0 des Simulators (Annahme); 4. sonst entfallen Speed- und Energiekriterien. Der SimBrief-OFP enthält keine Anfluggeschwindigkeit. Sobald VS0 bekannt ist, wird die Referenz gegen {min}–{max} × VS0 geprüft. Dieser Anflug: {speed} ({source})."
+      },
+      "config": {
+        "title": "Konfiguration und Schub (ab Track v2, FSF BN 7.1):",
+        "text": "Bei 1000 und 500 ft die Landeklappen – die beim Flugzeug eingetragene Stufe, sonst die höchste Hebelstellung des Simulators, sonst die Stufe beim Aufsetzen; N1 mindestens {n1} unter {gate} (Leerlauf zählt erst nach {idle}, unter {floor} gar nicht – Abfangen), Spoiler höchstens {spoilers} ausgefahren. Ohne Werte (ältere Flüge, Kolbenmotor ohne N1) entfallen die Kriterien. Autopilot und A/THR stehen nur zur Information im Messprotokoll."
+      },
+      "windEnergy": {
+        "title": "Wind und Energie:",
+        "text": "Sim-Wind am Flugzeug {top} → {bottom} als Median zur Piste; Hinweise bei Rückenwind über {tail}, Seitenwind über {cross} und einer Änderung über {shear} zwischen {topFt} und der Schwelle (VectaSim-Konvention). Energie mit der TAS des Simulators, sonst aus IAS (ISA); Band 10 nm → 1 000 ft auf dem Endanflug: zu hoch ab {high}, zu niedrig ab {low}."
+      },
+      "gates": {
+        "title": "Gates:",
+        "text": "10 nm – Höhe ±{tenAlt} zum Pfad und Energie ≤ {tenEnergy} (nur wenn eingedreht), IAS ≤ {tenIas}; FAF ({fafDist} vor der Schwelle oder {fafHat}, was zuerst kommt) – Fahrwerk, Klappen ≥ 1, Höhe ±{fafAlt}, Speed {fafBelow}/{fafAbove}; 1000 und 500 ft – Fahrwerk ≥ {gear}, Landeklappen, |V/S| ≤ {vs}, Speed {below}/{above}, Gleitpfad und Kurs ±{dots}, Querneigung ≤ {bank}; 50 ft nur Werte. Werte sind beim letzten Durchflug interpoliert. „Nicht messbar“ zählt nie als „nicht erfüllt“."
+      },
+      "stability": {
+        "title": "Stabilität und 3-s-Regel:",
+        "text": "Bewertet wird das Fenster {top} → {bottom} (Gleitpfad bis {gsFloor}). Eine Abweichung zählt erst, wenn sie ununterbrochen ihre Mindestdauer anhält – Speed {speedS}, Querneigung {bankS}, Sinkrate {vsS1} (S2 {vsS2}), Gleitpfad und Kurs {gsS}; kürzere Ausreißer unter {momentary} gelten als Momentanwerte. Stufe S1/S2: Speed {speed1} bzw. {speed2}, Sinkrate {vs}, Gleitpfad {gs}, Kurs {loc}, Querneigung {bank}. „Stabil ab“ ist die höchste Höhe (bis {stableMax}, auf {round} abgerundet), ab der bis {bottom} nichts mehr überschritten wurde."
+      },
+      "bands": {
+        "title": "Bänder:",
+        "text": "{stable} – keine Überschreitung; {deviations} – 1–2 Kriterien über 500 ft, keine darunter; {unstable} – 3 oder mehr Kriterien über 500 ft; {unstableBelow500} – mindestens eine Überschreitung unter 500 ft (nach EASA / Data4Safety). Ein Durchstarten ist kein Band, sondern das Ergebnis des Anflugs."
+      },
+      "resolution": {
+        "title": "Auflösung:",
+        "text": "Grundlage ist der gespeicherte Track mit 1 Sample pro Sekunde (über {dense} auf eines je {sparse} ausgedünnt). Dauern sind ganze Sekunden; Spitzen zwischen zwei Samples sieht die Auswertung nicht. Höhen sind über dem Aufsetzpunkt (HAT); beim Durchstarten über der Platzhöhe aus der Datenbank."
+      }
+    },
+    "protocol": {
+      "simulator": "Simulator",
+      "sampleRate": "Abtastrate",
+      "sampleRateValue": {
+        "one": "Landeerkennung im Telemetriestrom (Bildrate des Simulators) · gespeicherter Track {hz} ({count} Sample im Anflug)",
+        "other": "Landeerkennung im Telemetriestrom (Bildrate des Simulators) · gespeicherter Track {hz} ({count} Samples im Anflug)"
+      },
+      "landingRate": "Landerate",
+      "rateSim": "Sim-Wert (PLANE TOUCHDOWN NORMAL VELOCITY) {sim} · Messwert {measured}",
+      "rateMeasured": "Messwert {measured} (Sim lieferte keinen Wert)",
+      "runwayData": "Pistendaten",
+      "noRunway": "keine Piste zugeordnet",
+      "runwayDb": "OurAirports (Public Domain) · RWY {ident}/{opposite}, {surface}, Richtung ±{diff} zum Steuerkurs",
+      "surfaceUnknown": "Belag unbekannt",
+      "displaced": "Schwelle {dist} versetzt (DB)",
+      "accuracy": "Genauigkeit ca. ±{acc}",
+      "runwayUser": "von dir festgelegt · RWY {ident}/{opposite}, Richtung ±{diff} zum Steuerkurs",
+      "derivedUncertainty": "Schwelle ±{along} entlang, Achse ±{cross} quer (deine Linie)",
+      "lateralNotMeasurable": "Querablage nicht messbar",
+      "lengthUnknown": "Länge unbekannt",
+      "wind": "Wind",
+      "observed": "{metar} (beobachtet {time})",
+      "storedAtLanding": "bei der Landung gespeichert",
+      "currentApprox": "aktuell (Näherung)",
+      "noMetar": "keine METAR",
+      "recorded": "Sim-Aufzeichnung",
+      "ilsGeometry": "ILS / Geometrie",
+      "simWind": "Sim-Wind",
+      "automation": "Automatik",
+      "automationInfo": "{text} (nur Information, kein Kriterium)",
+      "approachStart": "Anflugbeginn",
+      "startAltitude": "letztes Sinken durch {alt}",
+      "startDistance": "{dist} vor dem Aufsetzen",
+      "startTrack": "Beginn des Tracks",
+      "integrity": "Integrität",
+      "integrityOk": "keine Auffälligkeiten (kein Slew, kein Zeitraffer, keine Pause)",
+      "thresholds": "Schwellwerte",
+      "thresholdsValue": "Aufsetzzone {tdz} · Gleitpfad {gp} ±{tol} ({oneDot}) · |V/S| ≤ {vs} · Speed {below}/{above} zur Referenz · Bank ≤ {bank}"
+    },
+    "summary": {
+      "lastLanding": "Letzte Landung",
+      "loading": "Letzte Landung wird ausgewertet …",
+      "rate": "Landerate",
+      "openTitle": "Landeauswertung öffnen",
+      "pastThreshold": "{distance} hinter der Schwelle",
+      "runwayUser": "Piste von dir festgelegt",
+      "runwayDerived": "Piste abgeleitet",
+      "approach": "Anflug",
+      "stableFrom": "stabil ab {alt}",
+      "neverStable": "nie stabil",
+      "goArounds": {
+        "one": "{count}× durchgestartet",
+        "other": "{count}× durchgestartet"
+      },
+      "stabilised": "Stabilisierter Anflug: {result}",
+      "notApplicable": "nicht anwendbar",
+      "allMet": "alle Kriterien erfüllt",
+      "failed": {
+        "one": "{count} Kriterium nicht erfüllt",
+        "other": "{count} Kriterien nicht erfüllt"
+      },
+      "open": "Landeauswertung"
+    }
+  },
+  "trends": {
+    "bucket": {
+      "flight": "je Landung",
+      "week": "je Woche",
+      "month": "je Monat"
+    },
+    "months": "Jan Feb Mär Apr Mai Jun Jul Aug Sep Okt Nov Dez",
+    "monthLabel": "{month} {year}",
+    "weekLabel": "KW {week} {year}",
+    "unitDots": "Dots",
+    "unitPp": "Pp.",
+    "chart": {
+      "rate": {
+        "title": "Landerate",
+        "note": "Betrag, kleiner ist weicher"
+      },
+      "distance": {
+        "title": "Aufsetzdistanz",
+        "note": "hinter der Schwelle"
+      },
+      "stableFrom": {
+        "title": "Stabil ab",
+        "note": "aus der Anflugbewertung; nie stabil zählt nicht"
+      },
+      "lateral": {
+        "title": "Kurs (RMS)",
+        "hint": "Ablage zur verlängerten Pistenmittellinie (Localizer-Kurs), RMS = mittlere seitliche Ablage in Dots",
+        "note": "Localizer-RMS {from} → {to}, nur mit bekannter Mittellinie"
+      },
+      "tdz": {
+        "title": "Aufsetzzone",
+        "note": "Anteil in der Aufsetzzone"
+      }
+    },
+    "chartAria": {
+      "trend": {
+        "one": "{title} {bucket}: {count} Wert, gleitender Median von {from} auf {to} – Werte in der Tabelle unten",
+        "other": "{title} {bucket}: {count} Werte, gleitender Median von {from} auf {to} – Werte in der Tabelle unten"
+      },
+      "single": {
+        "one": "{title} {bucket}: {count} Wert, {value} – Werte in der Tabelle unten",
+        "other": "{title} {bucket}: {count} Werte, {value} – Werte in der Tabelle unten"
+      },
+      "plain": {
+        "one": "{title} {bucket}: {count} Wert – Werte in der Tabelle unten",
+        "other": "{title} {bucket}: {count} Werte – Werte in der Tabelle unten"
+      }
+    },
+    "noValues": "keine Werte",
+    "month": {
+      "rate": "Landerate (Median, Betrag)",
+      "distance": "Aufsetzdistanz (Median)",
+      "stableFrom": "Stabil ab (Median)",
+      "tdz": "Aufsetzzone",
+      "aria": "Dieser Monat ({current}) gegen den Vormonat ({previous})",
+      "head": {
+        "one": "Dieser Monat vs. Vormonat · {current} gegen {count} Landung",
+        "other": "Dieser Monat vs. Vormonat · {current} gegen {count} Landungen"
+      },
+      "previous": "Vormonat {value}",
+      "better": "besser",
+      "worse": "schwächer"
+    },
+    "loading": "Verlauf wird berechnet …",
+    "emptyTitle": "Noch kein Verlauf",
+    "demoOnly": "Bisher nur Demo-Landungen ({count}) – sie zählen hier nicht mit (Filter „Demo-Flüge“ im Logbuch).",
+    "emptyText": "Sobald du Flüge mit Landung auf einer bekannten Piste abschließt, zeigt der Verlauf, wie sich Landerate, Aufsetzpunkt und Anflug entwickeln.",
+    "demoHint": "Ein Demo-Flug zeigt die Auswertung in der Nachbesprechung, zählt hier aber nicht.",
+    "openLastDebrief": "Nachbesprechung der letzten Landung",
+    "aria": "Verlauf deiner Landungen",
+    "period": "Zeitraum",
+    "lastN": "letzte {count}",
+    "groupBy": "Zusammenfassen",
+    "legend": {
+      "single": "einzelne Landung",
+      "median": "Median {bucket}",
+      "rollingLandings": {
+        "one": "gleitender Median ({count} Landung)",
+        "other": "gleitender Median ({count} Landungen)"
+      },
+      "rollingPeriods": {
+        "one": "gleitender Median ({count} Zeitraum)",
+        "other": "gleitender Median ({count} Zeiträume)"
+      },
+      "iqr": "mittlere Hälfte (Quartile)",
+      "refs": "gestrichelt: Bandgrenzen (Landerate {rate}, stabil ab {stable}, Kurs {lateral})",
+      "timesUtc": "Zeiten in UTC",
+      "timesLocal": "Datum in Ortszeit, Wochen und Monate nach UTC",
+      "approaches": {
+        "one": "{count} bewerteter Anflug",
+        "other": "{count} bewertete Anflüge"
+      },
+      "note": "{landings} · {approaches} · {times}"
+    },
+    "table": {
+      "caption": "Verlauf der Landungen, neueste zuerst",
+      "captionBucket": "Verlauf {bucket}, Mediane, neueste zuerst",
+      "stableFrom": "Stabil ab",
+      "neverStable": "nie stabil",
+      "period": "Zeitraum",
+      "landings": "Landungen",
+      "lateral": "Kurs"
+    }
+  },
+  "dispersion": {
+    "noLateral": "Querablage nicht messbar (abgeleitete Piste)",
+    "lateralUnmeasurable": "Querablage nicht messbar",
+    "pastThreshold": "{distance} hinter der Schwelle",
+    "inTdz": "in der Aufsetzzone",
+    "outTdz": "außerhalb der Aufsetzzone",
+    "loading": "Landungen werden ausgewertet …",
+    "emptyTitle": "Noch keine ausgewerteten Landungen",
+    "emptyText": "Noch keine ausgewerteten Landungen – sobald du einen Flug mit Landung auf einer bekannten Piste abschließt, erscheint hier das Streubild deiner Aufsetzpunkte.",
+    "skipped": {
+      "one": "{count} Landung ohne Pisten-Zuordnung nicht berücksichtigt.",
+      "other": "{count} Landungen ohne Pisten-Zuordnung nicht berücksichtigt."
+    },
+    "summary": "Aufsetzzone {inTdz}/{count} · Ø {mean} ± {sd} · {lateral}",
+    "lateralMean": "Ø Mittellinie {value}",
+    "lateralMeanPartial": "Ø Mittellinie {value} ({n} von {count} messbar)",
+    "lateralNone": "Mittellinie nicht messbar",
+    "aria": "Streubild der letzten Landungen",
+    "chartAria": "Streubild: {summary}",
+    "threshold": "Schwelle",
+    "listAria": "Landungen, älteste zuerst – Pfeiltasten wechseln, Eingabetaste öffnet die Auswertung",
+    "pointAria": "{line}, {band} – Auswertung öffnen",
+    "pointAriaNewest": "Neueste Landung: {line}, {band} – Auswertung öffnen",
+    "sparkAria": "Sinkrate der Landungen, älteste links – Werte in der Tabelle unten",
+    "newest": "Neueste: {line}",
+    "tile": {
+      "tdz": "Aufsetzzone",
+      "tdzTitle": "Je Piste: ab der Schwelle bis {end}, auf kürzeren Pisten das erste Drittel",
+      "tdzDetail": "{rate} ab der Schwelle bis {end} bzw. erstes Drittel",
+      "distance": "Ø Aufsetzpunkt",
+      "distanceDetail": "hinter der Schwelle (1σ)",
+      "lateral": "Ø Mittellinie",
+      "tendency": "Tendenz {side}",
+      "lateralNone": "nicht messbar (abgeleitete Pisten)",
+      "fromOf": "aus {n} von {count}"
+    },
+    "legend": {
+      "rate": "Landerate (fpm)",
+      "newest": "neueste",
+      "ellipse": "Streuung 1σ",
+      "noLateralTitle": "Die Piste wurde aus deiner Rollspur abgeleitet: ihre Achse ist deine eigene Linie, die Abweichung von der echten Mittellinie lässt sich daraus nicht bestimmen. Der Punkt steht deshalb hohl auf der Mittellinie und zählt nicht zur Ø Mittellinie.",
+      "tdzAim": "Aufsetzzone ab der Schwelle · Zielpunkt {aim}",
+      "note": "{landings} · Piste auf {length} normiert, Querachse ±{half} überhöht"
+    },
+    "filter": {
+      "label": "Filter",
+      "all": "Alle",
+      "only": "Nur {key} ({count})",
+      "none": "Für diesen Filter gibt es keine Landungen."
+    },
+    "table": {
+      "asTable": "Als Tabelle ({count})",
+      "caption": "Aufsetzpunkte der letzten Landungen, neueste zuerst",
+      "date": "Datum",
+      "airportRunway": "Platz · Piste",
+      "aircraft": "Flugzeug",
+      "landingRate": "Landerate",
+      "band": "Band",
+      "touchdownPoint": "Aufsetzpunkt",
+      "centreline": "Mittellinie",
+      "tdz": "Aufsetzzone",
+      "action": "Aktion",
+      "yes": "ja",
+      "no": "nein",
+      "debrief": "Auswertung"
+    }
+  },
+  "runwayEditor": {
+    "noteTaken": "Aus dieser Landung übernommen: Achse aus deiner Rollspur, Schwelle {aim} vor dem Aufsetzpunkt angenommen.",
+    "noteTakenEstimated": "Aus dieser Landung übernommen: Achse aus deiner Rollspur, Schwelle {aim} vor dem Aufsetzpunkt angenommen, Pistenende am Ende des Rollouts (Länge unbekannt).",
+    "error": {
+      "ident": "Pistenbezeichnung: 1–4 Zeichen, z. B. 09 oder 27L",
+      "coords": "Schwelle und Ende brauchen Breite und Länge in Dezimalgrad",
+      "globe": "Koordinaten außerhalb des Erdballs",
+      "length": "Schwelle und Ende liegen {length} auseinander – erlaubt sind {min} bis {max}",
+      "width": "Breite: {min}–{max} m oder leer",
+      "elevation": "Höhe: Zahl in ft oder leer"
+    },
+    "savedTitle": "{airport} RWY {ident} gespeichert",
+    "savedBody": "Landungen an diesem Platz werden mit deiner Piste neu ausgewertet.",
+    "forgotTitle": "{airport} RWY {ident} vergessen",
+    "forgotBody": "Es gelten wieder die Datenbank-Piste bzw. eine neu aus der Rollspur abgeleitete.",
+    "title": "Piste korrigieren · {airport}",
+    "titleRunway": "Piste korrigieren · {airport} RWY {ident}",
+    "now": "jetzt: {source}",
+    "intro": "Trag die Schwelle (Beginn der Landestrecke) und das Ende der Piste in Landerichtung ein, z. B. aus der Bodenkarte des Simulators. Deine Piste hat Vorrang vor OurAirports und wird für alle Landungen an diesem Platz verwendet.",
+    "ident": "Bezeichnung",
+    "threshold": "Schwelle (Dezimalgrad)",
+    "thresholdLat": "Schwelle Breite",
+    "thresholdLon": "Schwelle Länge",
+    "end": "Ende in Landerichtung (Dezimalgrad)",
+    "endLat": "Ende Breite",
+    "endLon": "Ende Länge",
+    "lat": "Breite",
+    "lon": "Länge",
+    "width": "Breite (m)",
+    "widthPlaceholder": "unbekannt",
+    "elevation": "Höhe der Schwelle (ft)",
+    "elevationPlaceholder": "Platzhöhe",
+    "check": "Länge {length} · Richtung {course} rechtweisend",
+    "checkEstimated": "Länge {length} (Mindestlänge, Ende geschätzt) · Richtung {course} rechtweisend",
+    "take": "Aus aktueller Landung übernehmen",
+    "takeTitle": "Achse und Schwelle aus der Rollspur dieser Landung",
+    "takeNone": "Diese Landung hat keinen auswertbaren Rollout",
+    "reset": "Zurücksetzen auf Datenbank",
+    "resetTitle": "Gemerkte Piste löschen – danach gilt wieder OurAirports bzw. eine neu abgeleitete Piste",
+    "cancel": "Abbrechen",
+    "saving": "Speichert …",
+    "save": "Speichern",
+    "listTitle": "Gemerkte Pisten von {airport}",
+    "listLoading": "Wird geladen …",
+    "listNone": "Keine – es gelten die Pisten aus OurAirports.",
+    "col": {
+      "runway": "Piste",
+      "source": "Quelle",
+      "landings": "Landungen",
+      "length": "Länge",
+      "changed": "Geändert",
+      "action": "Aktion"
+    },
+    "sourceUser": "von dir festgelegt",
+    "sourceDerived": "aus deiner Rollspur abgeleitet",
+    "forgetAria": "RWY {ident} vergessen",
+    "forget": "Vergessen"
+  },
+  "runwayDiagram": {
+    "aria": "Piste {ident} von oben mit Aufsetzpunkt {distance} hinter der Schwelle, {lateral}",
+    "lateralNone": "Querablage nicht messbar",
+    "tdzLabel": "Aufsetzzone {zone}",
+    "aimTitle": "Zielpunkt {aim} hinter der Schwelle (Markierung nach ICAO Annex 14)",
+    "legend": {
+      "air": "Bodenspur in der Luft (letzte {distance})",
+      "ground": "am Boden",
+      "touchdown": "Aufsetzpunkt",
+      "bounce": "Bounce",
+      "rollout": "GS unter {speed}",
+      "tdz": "Aufsetzzone ab der Schwelle",
+      "aim": "Zielpunkt {aim}",
+      "widthUnknown": "Breite unbekannt – mit {width} gezeichnet",
+      "derivedTitle": "Achse und Schwelle sind aus deiner Rollspur geschätzt, nicht vermessen",
+      "derived": "Piste aus der Rollspur abgeleitet: Achse = deine Linie, Schwelle ±{uncertainty}",
+      "derivedNoEnd": "Piste aus der Rollspur abgeleitet: Achse = deine Linie, Schwelle ±{uncertainty} · Pistenende unbekannt (gezeichnet bis zum Ende des Rollouts)",
+      "scaleExaggerated": "Längsachse maßstäblich · Querachse ×{factor} überhöht",
+      "scaleTrue": "Längsachse maßstäblich · Querachse maßstäblich"
+    }
+  },
+  "landingHistory": {
+    "unknownType": "Unbekannt",
+    "scope": {
+      "runway": "auf {runway}",
+      "thisRunway": "auf dieser Piste",
+      "type": "mit {type}",
+      "label": {
+        "runway": "gleiche Piste",
+        "type": "gleicher Typ",
+        "all": "alle"
+      },
+      "count": {
+        "one": "{scope}: {count} Landung zum Vergleich",
+        "other": "{scope}: {count} Landungen zum Vergleich"
+      },
+      "aria": "Vergleichen mit"
+    },
+    "betterPct": "besser als {pct}",
+    "betterAll": "besser als jede",
+    "peers": {
+      "one": "deiner letzten {count} Landung",
+      "other": "deiner letzten {count} Landungen"
+    },
+    "afterLine": "{better} {peers}",
+    "afterLineTitle": "Landerate gegen den Median {median} deiner Vergleichslandungen",
+    "delta": {
+      "same": "wie der Median",
+      "softer": "{value} weicher",
+      "harder": "{value} härter",
+      "longer": "{value} weiter",
+      "shorter": "{value} kürzer",
+      "higher": "{value} höher",
+      "lower": "{value} tiefer"
+    },
+    "median": "Median {value}",
+    "loading": "Einordnung wird berechnet …",
+    "kicker": "Einordnung",
+    "aria": "Einordnung gegen deine eigenen Landungen",
+    "noFact": "Kein Vergleich: Verglichen werden nur Full-Stop-Landungen mit zugeordneter Piste.",
+    "tooFew": "Noch zu wenig Landungen zum Vergleich.",
+    "tooFewWhere": "Noch zu wenig Landungen zum Vergleich {where}.",
+    "sentence": "Deine letzten {count} Landungen: Median {median} · du: {you}",
+    "sentenceWhere": "Deine letzten {count} Landungen {where}: Median {median} · du: {you}",
+    "youBetter": "{value} ({better})",
+    "tile": {
+      "rate": "Landerate",
+      "distance": "Aufsetzpunkt",
+      "stableFrom": "Stabil ab",
+      "tdzIn": "Aufsetzzone {yes}/{total} · du: drin",
+      "tdzOut": "Aufsetzzone {yes}/{total} · du: außerhalb",
+      "neverStable": "nie stabil",
+      "notAssessed": "Anflug nicht bewertet"
+    }
+  },
+  "replay": {
+    "aria": "Wiedergabe des Anflugs",
+    "back": "Eine Sekunde zurück",
+    "backTitle": "1 s zurück (←, Shift: 10 s)",
+    "pause": "Pause",
+    "play": "Wiedergabe starten",
+    "playTitle": "Wiedergabe / Pause (Leertaste)",
+    "forward": "Eine Sekunde vor",
+    "forwardTitle": "1 s vor (→, Shift: 10 s)",
+    "speed": "Wiedergabegeschwindigkeit",
+    "speedOption": "{speed}-fache Geschwindigkeit",
+    "slider": "Zeitpunkt im Anflug",
+    "sliderValue": "{clock}, {elapsed} min nach Beginn",
+    "sliderValueMarker": "{clock}, {elapsed} min nach Beginn, {marker}",
+    "jumpGroup": "Springen zu",
+    "jump": "Springen:",
+    "jumpTo": "Zu {label} springen ({clock})",
+    "marker": {
+      "threshold": "Schwelle",
+      "touchdown": "Aufsetzen",
+      "goAround": "Durchstarten",
+      "standstill": "Stillstand"
+    },
+    "gearDown": "ausgefahren",
+    "gearUp": "eingefahren",
+    "onGround": "am Boden",
+    "row": {
+      "bank": "Bank",
+      "gearFlaps": "Fahrwerk / Klappen",
+      "threshold": "Schwelle (x)",
+      "lateral": "Querablage (y)"
+    },
+    "before": "{distance} davor",
+    "past": "{distance} dahinter",
+    "valuesAria": "Werte am Cursor",
+    "noCursor": "Kein Zeitpunkt gewählt – im Diagramm zeigen oder ▶ drücken.",
+    "source": "gemessen (1 Hz, interpoliert)"
+  }
+}

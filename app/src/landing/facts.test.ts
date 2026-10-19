@@ -1,5 +1,6 @@
 import { NNBSP } from "../format";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
+import { setLanguageSetting } from "../i18n";
 import {
   APPROACH_BAND_LABEL,
   APPROACH_BAND_SHAPE,
@@ -24,6 +25,7 @@ import {
   limitText,
   measuredText,
   metarAgeNote,
+  recordedProtocolText,
   provenance,
   runwaySourceNote,
   sampleRateHz,
@@ -148,6 +150,8 @@ function data(over: Partial<LandingAnalysis> = {}): LandingDebriefData {
 /** Tests use plain spaces; the UI uses narrow no-break spaces between number and unit. */
 const N = (s: string) => s.split(NNBSP).join(" ");
 const texts = (d: LandingDebriefData) => buildHints(d).map((h) => N(h.text));
+
+beforeEach(() => setLanguageSetting("de"));
 
 describe("buildHints", () => {
   it("states the touchdown zone, centreline, threshold, stable gates, flare, wind and rollout", () => {
@@ -387,11 +391,11 @@ const goAround = (over: Partial<ApproachAnalysis> = {}) =>
 
 describe("approachKeySentence", () => {
   it("stable: established, stable from, FAF offset against the flown reference", () => {
-    expect(N(approachKeySentence(mock))).toBe("Auf der Grundlinie ab 5,0 nm, stabil ab 1 500 ft. Bei FAF 16 kt schneller als die geflogene Referenz.");
+    expect(N(approachKeySentence(mock))).toBe("Auf dem Kurs ab 5,0 nm, stabil ab 1 500 ft. Bei FAF 16 kt schneller als die geflogene Referenz.");
   });
   it("deviations: names the one main exceedance with value, duration and heights", () => {
     const a = approach({ band: "deviations", exceedances: [ex({})], stability: { ...mock.stability, stableFromFt: 750 } });
-    expect(N(approachKeySentence(a))).toBe("Auf der Grundlinie ab 5,0 nm, stabil ab 750 ft. Abweichung über 500 ft: Speed +31 kt zur Referenz für 12 s zwischen 1 000 und 760 ft.");
+    expect(N(approachKeySentence(a))).toBe("Auf dem Kurs ab 5,0 nm, stabil ab 750 ft. Abweichung über 500 ft: Speed +31 kt zur Referenz für 12 s zwischen 1 000 und 760 ft.");
   });
   it("unstable below 500 ft picks the S2 exceedance", () => {
     const a = approach({
@@ -399,7 +403,7 @@ describe("approachKeySentence", () => {
       exceedances: [ex({}), ex({ kind: "verticalSpeed", level: "s2", peak: -1450, limit: -1200, durationS: 6, startHatFt: 390, endHatFt: 370, below500: true })],
       stability: { ...mock.stability, stableFromFt: null },
     });
-    expect(N(approachKeySentence(a))).toBe("Auf der Grundlinie ab 5,0 nm, bis 50 ft nie durchgehend stabil. Instabil unter 500 ft: Sinkrate −1 450 fpm für 6 s bei 380 ft.");
+    expect(N(approachKeySentence(a))).toBe("Auf dem Kurs ab 5,0 nm, bis 50 ft nie durchgehend stabil. Instabil unter 500 ft: Sinkrate −1 450 fpm für 6 s bei 380 ft.");
   });
   it("go-around: positive and factual, after a stable or a deviating approach", () => {
     expect(N(approachKeySentence(goAround()))).toBe("Durchstarten bei 284 ft nach stabilem Anflug – richtige Entscheidung.");
@@ -411,7 +415,7 @@ describe("approachKeySentence", () => {
 
 describe("approach bands and gates", () => {
   it("maps the four bands to labels and tokens", () => {
-    expect(APPROACH_BAND_LABEL).toEqual({ stable: "stabil", deviations: "mit Abweichungen", unstable: "instabil", unstableBelow500: "instabil unter 500 ft" });
+    expect(APPROACH_BAND_LABEL).toEqual({ stable: "stabil", deviations: "mit Abweichungen", unstable: "instabil", unstableBelow500: `instabil unter 500${NNBSP}ft` });
     expect(APPROACH_BAND_VAR).toEqual({ stable: "var(--aband-stable)", deviations: "var(--aband-dev)", unstable: "var(--aband-unstable)", unstableBelow500: "var(--aband-unstable)" });
     // the shapes follow the landing band of the same meaning
     expect(APPROACH_BAND_SHAPE).toEqual({ stable: BAND_SHAPE.smooth, deviations: BAND_SHAPE.firm, unstable: BAND_SHAPE.hard, unstableBelow500: BAND_SHAPE.hard });
@@ -420,9 +424,9 @@ describe("approach bands and gates", () => {
     expect(BAND_VAR).toEqual({ smooth: "var(--band-soft)", normal: "var(--band-normal)", firm: "var(--band-firm)", hard: "var(--band-hard)" });
     expect(new Set(Object.values(BAND_SHAPE)).size).toBe(4);
   });
-  it("card line: assumption, stable from, gate marks", () => {
-    expect(N(approachCardLine(mock))).toBe("3°-Annahme · stabil ab 1 500 ft · 1000 ✓ 500 ✓");
-    const a = approach();
+  it("card line: reference (ILS or assumption), stable from, gate marks", () => {
+    expect(N(approachCardLine(mock))).toBe("3,0° (ILS) · stabil ab 1 500 ft · 1000 ✓ 500 ✓");
+    const a = approach({ reference: { ...mock.reference, glidepathSource: "assumed" } });
     a.gates[3].criteria[3] = { ...a.gates[3].criteria[3], status: "fail" };
     expect(N(approachCardLine(a))).toBe("3°-Annahme · stabil ab 1 500 ft · 1000 ✓ 500 ✗");
   });
@@ -465,7 +469,8 @@ describe("approach hints", () => {
     expect(t.some((s) => s.startsWith("Referenz-Speed ist der Median der geflogenen IAS 500 → 100 ft (128 kt)"))).toBe(true);
     expect(t).toContain("Landeklappen (Stufe 4) bei 1 505 ft gesetzt");
     expect(t).toContain("Ab 1 000 ft bis 50 ft alle messbaren Kriterien ununterbrochen erfüllt");
-    expect(approachHints(mock).every((h) => h.tone !== "warn")).toBe(true);
+    // the one warning of the clean mock: 16 kt over the flown reference at the FAF
+    expect(approachHints(mock).filter((h) => h.tone === "warn").map((h) => N(h.text))).toEqual(["Am FAF 16 kt über der Referenz (128 kt) – Speed früher reduzieren"]);
   });
   it("names late configuration, FAF offsets and exceedances", () => {
     const a = approach({ band: "deviations", exceedances: [ex({})] });
@@ -501,7 +506,8 @@ describe("VectaSim-Index with an approach analysis", () => {
     expect(landingIndex(base, mock).value).toBe(100);
     const a = approach({ stability: { ...mock.stability, stableFromFt: 750 } });
     a.gates[3].criteria[3] = { ...a.gates[3].criteria[3], status: "fail" };
-    const stable = 0.5 * 0.5 + 0.5 * (13 / 14);
+    // 9 criteria per gate (track v2: landing flaps, thrust, spoilers), one failed
+    const stable = 0.5 * 0.5 + 0.5 * (17 / 18);
     expect(stablePoints(base, a)).toBeCloseTo(stable, 6);
     // all other parts at full points (85 of 100), stable 0.714 × 15
     expect(landingIndex(base, a).value).toBe(Math.round(85 + 15 * stable));
@@ -565,28 +571,28 @@ describe("lateral guidance", () => {
   const hints = (a: ApproachAnalysis) => lateralHints(a).map((h) => [h.tone, N(h.text)]);
 
   it("on the centreline: facts line, sub-line and an ok hint, sentence unchanged", () => {
-    expect(N(lateralFactText(mock))).toBe("auf der Grundlinie · ohne Überschießen eingedreht · keine S-Kurven");
+    expect(N(lateralFactText(mock))).toBe("auf dem Kurs · ohne Überschießen eingedreht · keine S-Kurven");
     expect(N(lateralSubLine(mock))).toBe("max. +0,1 Dots · bei 500 ft 2 m rechts · Schwelle 2 m rechts");
-    expect(hints(mock)).toEqual([["ok", "Grundlinie 1 000 → 50 ft gehalten (RMS 0,05 Dots)"]]);
-    expect(N(approachKeySentence(mock))).not.toContain("rechts der Grundlinie");
+    expect(hints(mock)).toEqual([["ok", "Kurs 1 000 → 50 ft gehalten (RMS 0,05 Dots)"]]);
+    expect(N(approachKeySentence(mock))).not.toContain("rechts der verlängerten Mittellinie");
   });
 
   it("names the offset at 500 ft in the key sentence when not on the centreline", () => {
     const a = lat({ lateralBand: "slight", latAt500M: 40, locMaxDots: 0.8 });
-    expect(N(approachKeySentence(a))).toBe("Auf der Grundlinie ab 5,0 nm, stabil ab 1 500 ft, bei 500 ft 40 m rechts der Grundlinie. Bei FAF 16 kt schneller als die geflogene Referenz.");
+    expect(N(approachKeySentence(a))).toBe("Auf dem Kurs ab 5,0 nm, stabil ab 1 500 ft, bei 500 ft 40 m rechts der verlängerten Mittellinie. Bei FAF 16 kt schneller als die geflogene Referenz.");
     const b = lat({ lateralBand: "marked", latAt500M: null, locMaxDots: -1.4 });
-    expect(N(approachKeySentence(b))).toContain("stabil ab 1 500 ft, deutliche Abweichung von der Grundlinie (max. −1,4 Dots).");
+    expect(N(approachKeySentence(b))).toContain("stabil ab 1 500 ft, deutliche Ablage vom Kurs (max. −1,4 Dots).");
   });
 
   it("warns about an intercept overshoot above 0.5 dot only", () => {
-    expect(hints(lat({ interceptOvershootM: -150, interceptOvershootDots: -0.8 }))).toContainEqual(["warn", "Beim Eindrehen 150 m (0,8 Dots) über die Grundlinie nach links hinausgeschossen"]);
+    expect(hints(lat({ interceptOvershootM: -150, interceptOvershootDots: -0.8 }))).toContainEqual(["warn", "Beim Eindrehen 150 m (0,8 Dots) über den Kurs nach links hinausgeschossen"]);
     expect(hints(lat({ interceptOvershootM: 60, interceptOvershootDots: 0.4 })).some(([t]) => t === "warn")).toBe(false);
     expect(N(lateralFactText(lat({ interceptOvershootM: 60, interceptOvershootDots: 0.4 })))).toContain("beim Eindrehen 60 m (0,4 Dots) übergeschossen");
   });
 
-  it("S-turns: info from 2, warn from 3 side changes", () => {
+  it("S-turns: warn from 2 side changes", () => {
     expect(hints(lat({ lateralReversals: 1 })).length).toBe(1); // only the ok line
-    expect(hints(lat({ lateralReversals: 2 }))).toContainEqual(["info", "2 Seitenwechsel um die Grundlinie zwischen 1 000 und 100 ft (S-Kurven, Ablage über 0,3 Dots)"]);
+    expect(hints(lat({ lateralReversals: 2 }))).toContainEqual(["warn", "2 Seitenwechsel um den Kurs zwischen 1 000 und 100 ft (S-Kurven, Ablage über 0,3 Dots)"]);
     expect(hints(lat({ lateralReversals: 3 }))[0][0]).toBe("warn");
     expect(N(lateralFactText(lat({ lateralReversals: 3 })))).toContain("3 Seitenwechsel (S-Kurven)");
   });
@@ -596,7 +602,7 @@ describe("lateral guidance", () => {
     const i = a.samples.findIndex((p) => !p.onGround && p.locDots != null && p.hatFt < 500 && p.hatFt >= 50);
     expect(i).toBeGreaterThanOrEqual(0);
     a.samples[i] = { ...a.samples[i], locDots: -0.7 };
-    expect(hints(a)).toContainEqual(["warn", "Unter 500 ft bis 0,7 Dots links der Grundlinie – über 0,5 Dots"]);
+    expect(hints(a)).toContainEqual(["warn", "Unter 500 ft bis 0,7 Dots links vom Kurs – über 0,5 Dots"]);
   });
 
   it("over the threshold: info above 10 m, warn above a quarter of the runway width", () => {
@@ -609,16 +615,71 @@ describe("lateral guidance", () => {
 
   it("derived runway or no runway: not assessable, said so", () => {
     const derived = lat({ measurable: false, lateralBand: null }, { runway: { ...mock.runway!, source: "derived" } });
-    expect(hints(derived)).toEqual([["info", "Piste aus deiner Rollspur abgeleitet – Querablage zur Grundlinie nicht bewertbar"]]);
+    expect(hints(derived)).toEqual([["info", "Piste aus deiner Rollspur abgeleitet – Querablage zur verlängerten Mittellinie nicht bewertbar"]]);
     expect(N(lateralFactText(derived))).toBe("Piste aus Rollspur – nicht bewertbar");
     expect(N(lateralSubLine(derived))).toBe("Piste aus Rollspur – nicht bewertbar");
     expect(approachProvenance(derived).lateral.detail).toContain("nicht bewertbar");
-    expect(N(approachKeySentence(lat({ lateralBand: null, latAt500M: 40 }, { runway: { ...mock.runway!, source: "derived" } })))).not.toContain("Grundlinie.");
+    expect(N(approachKeySentence(lat({ lateralBand: null, latAt500M: 40 }, { runway: { ...mock.runway!, source: "derived" } })))).not.toContain("rechts der verlängerten Mittellinie");
     const none = approach({ runway: null, lateral: { ...mock.lateral!, measurable: false, lateralBand: null } });
     expect(lateralHints(none)).toEqual([]);
     expect(N(lateralFactText(none))).toBe("ohne Piste nicht messbar");
     expect(approachProvenance(none).lateral.detail).toMatch(/^Keine Piste zugeordnet/);
-    expect(approachProvenance(mock).lateral).toMatchObject({ kind: "derived" });
+    // the mock's localizer comes from the sim (track v2); a v1 track: geometric
+    expect(approachProvenance(mock).lateral).toMatchObject({ kind: "sim" });
     expect(approachProvenance(mock).lateral.detail).toContain("VectaSim-Konvention");
+    const v1 = approach({ reference: { ...mock.reference, localizerSource: "geometric" } });
+    expect(approachProvenance(v1).lateral).toMatchObject({ kind: "derived" });
+    expect(approachProvenance(v1).lateral.detail).toContain("VectaSim-Konvention");
+  });
+});
+
+describe("recorded approach data (track v2)", () => {
+  const plain = (s: string | null) => s?.split(NNBSP).join(" ") ?? null;
+  const r = {
+    tasKt: 133.4,
+    windDirTrueDeg: 250,
+    windKt: 8,
+    navFlagsRecorded: true,
+    hasLocalizer: true,
+    hasGlideSlope: true,
+    glideSlopeValid: true,
+    autopilotSeen: true,
+    ilsGsAngleDeg: 3,
+    ilsCourseDeg: 246,
+    flapPositions: 5,
+    designVs0Kt: 104,
+  };
+  it("lists TAS, the sim wind and the ILS", () => {
+    expect(plain(recordedProtocolText(r))).toBe(
+      "TAS 133 kt · Wind am Flugzeug 250° wahr / 8 kt · ILS LOC + GS (empfangen) · Gleitpfad 3,00° · Kurs 246° (Sim-Werte der letzten 3 min vor dem Aufsetzen)",
+    );
+  });
+  it("says when nothing was tuned or delivered, and is absent for old flights", () => {
+    expect(plain(recordedProtocolText({ ...r, hasLocalizer: false, hasGlideSlope: false }))).toContain("kein ILS auf NAV 1");
+    expect(plain(recordedProtocolText({ ...r, navFlagsRecorded: false, windKt: null }))).toBe("TAS 133 kt · ILS-Status nicht geliefert (Sim-Werte der letzten 3 min vor dem Aufsetzen)");
+    expect(recordedProtocolText(null)).toBeNull();
+    expect(recordedProtocolText(undefined)).toBeNull();
+  });
+});
+
+describe("English", () => {
+  beforeEach(() => setLanguageSetting("en"));
+
+  it("key sentence: band head, clauses and plural bounces", () => {
+    expect(N(keySentence(data()))).toBe("Smooth landing in the touchdown zone, 3 m right of the centreline, no bounce.");
+    const base = data().analysis;
+    const d = data({ runway: null, touchdownPoint: null, vsBand: "firm", touchdown: { ...base.touchdown, bounces: 2, touchAndGo: true } });
+    expect(N(keySentence(d))).toBe("Touch-and-go with a firm landing rate without a matched runway, with 2 bounces.");
+    expect(N(approachKeySentence(mock))).toBe("On the extended centreline from 5.0 nm, stable from 1,500 ft. At the FAF 16 kt faster than the flown reference.");
+  });
+
+  it("hints: whole English sentences with English number format, no German left", () => {
+    const texts = [...buildHints(data(), mock), ...approachHints(mock)].map((h) => N(h.text));
+    expect(texts).toContain("At the FAF 16 kt above the reference (128 kt) – reduce speed earlier");
+    expect(texts).toContain("Established on final from 5.0 nm / 1,652 ft (RWY 25C)");
+    expect(texts.some((s) => s.startsWith("Touchdown point 3 m right of the centreline"))).toBe(true);
+    for (const s of texts) expect(s).not.toMatch(/[äöüß]| der | und | bei /);
+    expect(N(windComponentsText(data().analysis))).toBe("Headwind 11 kt · Crosswind 10 kt from the left");
+    expect(indexFormulaLines().join(" ")).not.toMatch(/Gewicht|sanft/);
   });
 });

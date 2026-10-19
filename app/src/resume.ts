@@ -1,7 +1,8 @@
 // After a crash: what the "Flug fortsetzen?" toast and the logbook's "Zusammenführen" hint say.
 // Pure functions (tested in resume.test.ts); App.tsx and Logbook.tsx do the invoking.
 
-import { fmt, fmtClock, fmtDuration } from "./format";
+import { t } from "./i18n";
+import { fmt, fmtClock, fmtDuration } from "./i18n/number";
 import type { FlightRow, MergeCandidate, ResumeCandidate } from "./types";
 
 /** The toast closes after this long; no answer = the new flight stays (backend default). */
@@ -38,15 +39,13 @@ function route(dep?: string | null, arr?: string | null): string {
 export function resumeCandidate(c: ResumeCandidate | null | undefined, ctx: ResumeContext): ResumePrompt | null {
   if (!c || !c.flightId || ctx.demo || ctx.answered?.has(c.flightId)) return null;
   if (!Number.isFinite(c.lastMs) || ctx.nowMs - c.lastMs > RESUME_MAX_AGE_MS) return null;
-  const since = c.offBlockMs ? ` seit ${fmtClock(c.offBlockMs, { local: false })}` : "";
   const ago = Math.max(0, ctx.nowMs - c.lastMs);
-  const who = c.callsign ? `${c.callsign} · ` : "";
+  const flight = `${c.callsign ? `${c.callsign} · ` : ""}${route(c.dep, c.arr)}`;
+  const vars = { flight, ago: fmtDuration(ago, { seconds: false }), distance: fmt(c.distanceNm, 1, "nm") };
   return {
     id: `resume-${c.flightId}`,
-    title: "Flug fortsetzen?",
-    body:
-      `${who}${route(c.dep, c.arr)}${since}. Aufzeichnung vor ${fmtDuration(ago, { seconds: false })} abgebrochen, ` +
-      `${fmt(c.distanceNm, 1, "nm")} von hier. Ohne Antwort zählt der Rest als neuer Flug.`,
+    title: t("resume.title"),
+    body: c.offBlockMs ? t("resume.bodySince", { ...vars, since: fmtClock(c.offBlockMs, { local: false }) }) : t("resume.body", vars),
   };
 }
 
@@ -55,8 +54,12 @@ export function mergeHint(c: MergeCandidate): { text: string; detail: string } {
   const f = c.first;
   const at = f.offBlockMs ?? f.createdMs;
   return {
-    text: `${route(c.second.depIcao, c.second.arrIcao ?? c.second.plannedArr)} ist vermutlich die Fortsetzung von ${route(f.depIcao, f.arrIcao ?? f.plannedArr)} (${fmtClock(at)})`,
-    detail: `Lücke ${fmtDuration(c.gapMs, { seconds: false })} · ${fmt(c.distanceNm, 1, "nm")} Versatz`,
+    text: t("resume.merge.text", {
+      second: route(c.second.depIcao, c.second.arrIcao ?? c.second.plannedArr),
+      first: route(f.depIcao, f.arrIcao ?? f.plannedArr),
+      time: fmtClock(at),
+    }),
+    detail: t("resume.merge.detail", { gap: fmtDuration(c.gapMs, { seconds: false }), offset: fmt(c.distanceNm, 1, "nm") }),
   };
 }
 
@@ -71,11 +74,9 @@ export function mergeKey(c: MergeCandidate): string {
  */
 export function gapTitle(f: FlightRow, gapToNextMs?: number | null): string | null {
   const gap = f.integrity.gapMs ?? 0;
-  const inside = gap > 0 ? `Aufzeichnungslücke ${fmtDuration(gap, { seconds: false })}` : null;
-  if (f.state !== "interrupted") return inside ? `${inside} (fortgesetzt nach Absturz/Neustart)` : null;
+  const inside = gap > 0 ? t("resume.gap.inside", { gap: fmtDuration(gap, { seconds: false }) }) : null;
+  if (f.state !== "interrupted") return gap > 0 ? t("resume.gap.resumed", { gap: fmtDuration(gap, { seconds: false }) }) : null;
   const next =
-    gapToNextMs != null
-      ? `Nächster Flug folgt nach ${fmtDuration(gapToNextMs, { seconds: false })} – „Zusammenführen“ über dem Logbuch`
-      : "Ohne Abstellen beendet (Absturz, Neustart oder neu geladener Flug)";
-  return ["Aufzeichnung unterbrochen", next, inside].filter(Boolean).join(". ");
+    gapToNextMs != null ? t("resume.gap.nextFlight", { gap: fmtDuration(gapToNextMs, { seconds: false }) }) : t("resume.gap.noShutdown");
+  return [t("resume.gap.interrupted"), next, inside].filter(Boolean).join(". ");
 }

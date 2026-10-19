@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useThemeId } from "../themes";
-import { NNBSP, fmt, fmtNum, fmtSigned } from "../format";
+import { NNBSP, fmt, fmtNum, fmtSigned } from "../i18n/number";
+import { t as tActive, useT, type TFunction } from "../i18n";
 import { PROFILE } from "../theme";
 import { M_PER_NM, drawWidthM } from "./geometry";
 import { niceStep, ticks, useWidth } from "./chartUtils";
@@ -16,25 +17,46 @@ import type { ApproachAnalysis, ApproachProfilePoint, MarkerKind } from "./appro
  */
 
 export type ProfileRange = "final" | "tenNm" | "tod";
-export const RANGE_LABEL: Record<ProfileRange, string> = { final: "Final (1000 ft)", tenNm: "10 nm", tod: "ab TOD" };
+const RANGE_TEXT: Record<ProfileRange, () => string> = {
+  final: () => tActive("approach.profile.rangeFinal"),
+  tenNm: () => tActive("approach.profile.rangeTenNm"),
+  tod: () => tActive("approach.profile.rangeTod"),
+};
+/** Range names in the active language (a getter per key). */
+export const RANGE_LABEL: Record<ProfileRange, string> = Object.defineProperties(
+  {} as Record<ProfileRange, string>,
+  Object.fromEntries(Object.entries(RANGE_TEXT).map(([k, get]) => [k, { get, enumerable: true }])),
+);
 const RANGES: ProfileRange[] = ["final", "tenNm", "tod"];
 
 const HEIGHT = 300;
 const M = { top: 40, right: 96, bottom: 30, left: 56 };
-const LAT_H = 104;
-const LAT_M = { top: 14, bottom: 22 };
+// bottom margin leaves room for the lowest y tick and the caption below it (UX 2.5)
+const LAT_H = 116;
+const LAT_M = { top: 14, bottom: 34 };
 
-const MARKER_LABEL: Record<MarkerKind, string> = {
-  tod: "TOD",
-  tenNm: `10${NNBSP}nm`,
-  faf: "FAF",
-  gate1000: "1000",
-  gate500: "500",
-  gate50: "50",
-  threshold: "Schwelle",
-  touchdown: "Aufsetzen",
-  goAround: "Durchstarten",
-};
+function markerLabel(t: TFunction, k: MarkerKind): string {
+  switch (k) {
+    case "tod":
+      return "TOD";
+    case "tenNm":
+      return `10${NNBSP}nm`;
+    case "faf":
+      return "FAF";
+    case "gate1000":
+      return "1000";
+    case "gate500":
+      return "500";
+    case "gate50":
+      return "50";
+    case "threshold":
+      return t("approach.common.threshold");
+    case "touchdown":
+      return t("approach.common.touchdown");
+    case "goAround":
+      return t("approach.common.goAround");
+  }
+}
 const GATE_MARKERS = new Set<MarkerKind>(["gate1000", "gate500", "gate50", "tenNm", "faf"]);
 
 /** Domain of a range in trackDistM: [far, near] (far > near). */
@@ -62,6 +84,7 @@ const pathFrom = (pts: Array<[number, number]>) => pts.map(([px, py], i) => `${i
 
 export default function ApproachProfile({ a }: { a: ApproachAnalysis }) {
   useThemeId(); // colours come from the active theme
+  const t = useT();
   const [setWrap, width] = useWidth();
   const hasGate1000 = a.markers.some((m) => m.kind === "gate1000");
   const [range, setRange] = useState<ProfileRange>(hasGate1000 ? "final" : "tenNm");
@@ -102,7 +125,7 @@ export default function ApproachProfile({ a }: { a: ApproachAnalysis }) {
 
   const switcher = (
     <div className="ac-toolbar">
-      <div className="segmented" role="radiogroup" aria-label="Bereich des Anflugprofils">
+      <div className="segmented" role="radiogroup" aria-label={t("approach.profile.rangeAria")}>
         {RANGES.map((r) => (
           <button
             key={r}
@@ -110,7 +133,7 @@ export default function ApproachProfile({ a }: { a: ApproachAnalysis }) {
             aria-checked={range === r}
             className={range === r ? "active" : ""}
             onClick={() => setRange(r)}
-            title={r === "tod" && !a.markers.some((m) => m.kind === "tod") ? "Kein TOD im Track – ganzer aufgezeichneter Anflug" : undefined}
+            title={r === "tod" && !a.markers.some((m) => m.kind === "tod") ? t("approach.profile.noTod") : undefined}
           >
             {RANGE_LABEL[r]}
           </button>
@@ -123,7 +146,7 @@ export default function ApproachProfile({ a }: { a: ApproachAnalysis }) {
     return (
       <div ref={setWrap} className="ac">
         {switcher}
-        <p className="detail ac-note">Zu wenige Trackpunkte in diesem Bereich.</p>
+        <p className="detail ac-note">{t("approach.profile.tooFewInRange")}</p>
       </div>
     );
   }
@@ -162,9 +185,9 @@ export default function ApproachProfile({ a }: { a: ApproachAnalysis }) {
   type Mk = { key: string; label: string; d: number; h: number; gate: boolean; td: boolean };
   const marks: Mk[] = a.markers
     .filter((m) => m.trackDistM <= far + 1 && m.trackDistM >= near - 1)
-    .map((m, i) => ({ key: `${m.kind}${i}`, label: MARKER_LABEL[m.kind], d: m.trackDistM, h: m.hatFt, gate: GATE_MARKERS.has(m.kind), td: m.kind === "touchdown" || m.kind === "goAround" }));
+    .map((m, i) => ({ key: `${m.kind}${i}`, label: markerLabel(t, m.kind), d: m.trackDistM, h: m.hatFt, gate: GATE_MARKERS.has(m.kind), td: m.kind === "touchdown" || m.kind === "goAround" }));
   if (a.established && a.established.trackDistM <= far && a.established.trackDistM >= near) {
-    marks.push({ key: "est", label: "eingedreht", d: a.established.trackDistM, h: a.established.hatFt, gate: false, td: false });
+    marks.push({ key: "est", label: t("approach.profile.established"), d: a.established.trackDistM, h: a.established.hatFt, gate: false, td: false });
   }
   marks.sort((p, q) => q.d - p.d);
   const rows: number[] = [];
@@ -184,10 +207,10 @@ export default function ApproachProfile({ a }: { a: ApproachAnalysis }) {
   const vsTicks = ticks(vsLo, vsHi, 4);
   const axisLabel =
     a.trackDistRef === "threshold"
-      ? "Flugweg bis zur Schwelle (nm)"
+      ? t("approach.profile.axisThreshold")
       : a.trackDistRef === "touchdown"
-        ? "Flugweg bis zum Aufsetzpunkt (nm)"
-        : "Flugweg bis zum tiefsten Punkt (nm)";
+        ? t("approach.profile.axisTouchdown")
+        : t("approach.profile.axisLowest");
 
   const timeAt = (e: React.MouseEvent<SVGRectElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -201,16 +224,24 @@ export default function ApproachProfile({ a }: { a: ApproachAnalysis }) {
     <div ref={setWrap} className="ac">
       {switcher}
       <div className="profile-legend">
-        <span style={{ color: PROFILE.alt }}>━ Höhe über Aufsetzpunkt (ft)</span>
+        <span style={{ color: PROFILE.alt }}>━ {t("approach.common.heightAboveTouchdown")}</span>
         {bandPath && (
           <span className="ac-ref">
-            ┅ {fmt(ref.glidepathDeg, 0, "°")}-Pfad{ref.glidepathSource === "assumed" ? " (Annahme)" : ""} ±1{NNBSP}Dot
+            ┅{" "}
+            {ref.glidepathSource === "ils"
+              ? t("approach.profile.pathIls", { deg: fmt(ref.glidepathDeg, 1, "°") })
+              : t("approach.profile.pathAssumed", { deg: fmt(ref.glidepathDeg, 0, "°") })}
           </span>
         )}
-        <span style={{ color: PROFILE.gs }}>━ IAS (kt){vapp != null ? ` · ┅ Referenz ${fmt(vapp, 0, "kt")}${ref.vappSource === "flown" ? " (geflogen)" : ""}` : ""}</span>
+        <span style={{ color: PROFILE.gs }}>
+          ━ IAS (kt)
+          {vapp != null
+            ? ` · ┅ ${t(ref.vappSource === "flown" ? "approach.profile.iasReferenceFlown" : "approach.profile.iasReference", { vapp: fmt(vapp, 0, "kt") })}`
+            : ""}
+        </span>
         <span style={{ color: PROFILE.vs }}>━ V/S (fpm)</span>
       </div>
-      <svg width={width} height={HEIGHT} role="img" aria-label={`Anflugprofil (${RANGE_LABEL[range]}): Höhe, IAS und Sinkrate über dem Flugweg`}>
+      <svg width={width} height={HEIGHT} role="img" aria-label={t("approach.profile.ariaLabel", { range: RANGE_LABEL[range] })}>
         <defs>
           <clipPath id="ap-clip">
             <rect x={M.left} y={M.top - 2} width={plotW} height={plotH + 4} />
@@ -258,7 +289,7 @@ export default function ApproachProfile({ a }: { a: ApproachAnalysis }) {
             <g key={`c${i}`}>
               <path d={`M${x(e.trackDistM) - 4},${M.top + plotH}L${x(e.trackDistM) + 4},${M.top + plotH}L${x(e.trackDistM)},${M.top + plotH - 7}Z`} className="ac-cfg" />
               <text x={x(e.trackDistM)} y={M.top + plotH - 10} textAnchor="middle" className="pc-phase-label">
-                {e.kind === "flaps" ? `K${fmtNum(e.flapsTo)}` : e.kind === "gearDown" ? "FW↓" : "FW↑"}
+                {e.kind === "flaps" ? t("approach.profile.cfgFlaps", { n: fmtNum(e.flapsTo) }) : e.kind === "gearDown" ? t("approach.profile.cfgGearDown") : t("approach.profile.cfgGearUp")}
               </text>
             </g>
           ))}
@@ -304,6 +335,7 @@ export default function ApproachProfile({ a }: { a: ApproachAnalysis }) {
 
 /** Lateral offset (y) over the distance before the threshold (−x), strongly exaggerated. */
 function LateralStrip({ a, far, near, width }: { a: ApproachAnalysis; far: number; near: number; width: number }) {
+  const t = useT();
   const rwy = a.runway!;
   const plotW = width - M.left - M.right;
   const plotH = LAT_H - LAT_M.top - LAT_M.bottom;
@@ -333,7 +365,7 @@ function LateralStrip({ a, far, near, width }: { a: ApproachAnalysis; far: numbe
   const half = Math.max(1.5, (drawWidthM(rwy.widthM) / 2 / cap) * (plotH / 2));
 
   return (
-    <svg width={width} height={LAT_H} className="ac-lateral" role="img" aria-label="Querablage zur verlängerten Mittellinie über der Distanz zur Schwelle, stark überhöht">
+    <svg width={width} height={LAT_H} className="ac-lateral" role="img" aria-label={t("approach.profile.lateralAria")}>
       <defs>
         <clipPath id="ap-lat-clip">
           <rect x={M.left} y={LAT_M.top} width={plotW} height={plotH} />
@@ -354,7 +386,7 @@ function LateralStrip({ a, far, near, width }: { a: ApproachAnalysis; far: numbe
         </text>
       ))}
       <text x={M.left} y={LAT_H - 6} className="pc-tick">
-        Querablage (m) zur verlängerten Mittellinie RWY {rwy.ident} · ┅ ±1{NNBSP}Dot Kurs · Querachse ×{fmtNum(exaggeration, exaggeration < 10 ? 1 : 0)}
+        {t("approach.profile.lateralCaption", { rwy: rwy.ident, factor: fmtNum(exaggeration, exaggeration < 10 ? 1 : 0) })}
       </text>
     </svg>
   );
@@ -362,13 +394,20 @@ function LateralStrip({ a, far, near, width }: { a: ApproachAnalysis; far: numbe
 
 type Scales = { x: (d: number) => number; yH: (h: number) => number; yIas: (v: number) => number; yVs: (v: number) => number; plotW: number; plotH: number };
 
-const gearText = (g: number) => (g >= 95 ? "aus" : g <= 5 ? "ein" : `${fmtNum(g)}${NNBSP}%`);
+const gearText = (t: TFunction, g: number) => (g >= 95 ? t("approach.profile.gearDown") : g <= 5 ? t("approach.profile.gearUp") : `${fmtNum(g)}${NNBSP}%`);
+
+const TIP_HEAD = {
+  threshold: ["approach.profile.beforeThreshold", "approach.profile.afterThreshold"],
+  touchdown: ["approach.profile.beforeTouchdown", "approach.profile.afterTouchdown"],
+  lowest: ["approach.profile.beforeLowest", "approach.profile.afterLowest"],
+} as const;
 
 /**
  * The shared cursor in the profile: vertical line with the values at that time (interpolated
  * between the 1 Hz samples). Its own component, so a playback frame re-renders only this.
  */
 function ProfileCursor({ a, vis, scales }: { a: ApproachAnalysis; vis: ApproachProfilePoint[]; scales: Scales }) {
+  const t = useT();
   const tMs = useReplayCursor();
   const hs = sampleAt(vis, tMs);
   if (!hs) return null;
@@ -377,13 +416,21 @@ function ProfileCursor({ a, vis, scales }: { a: ApproachAnalysis; vis: ApproachP
   const tipW = 236;
   const tipLeft = tipX > M.left + plotW - tipW - 10;
   const tipRows: Array<[string, string]> = [
-    [PROFILE.alt, `Höhe ${fmt(hs.hatFt, 0, "ft")}${hs.altDevFt != null ? ` (${fmtSigned(Math.round(hs.altDevFt), 0, "ft")} zum Pfad)` : ""}`],
+    [
+      PROFILE.alt,
+      hs.altDevFt != null
+        ? t("approach.profile.tipHeightToPath", { height: fmt(hs.hatFt, 0, "ft"), dev: fmtSigned(Math.round(hs.altDevFt), 0, "ft") })
+        : t("approach.profile.tipHeight", { height: fmt(hs.hatFt, 0, "ft") }),
+    ],
     [PROFILE.gs, `IAS ${fmt(hs.iasKt, 0, "kt")}${hs.iasDevKt != null ? ` (${fmtSigned(hs.iasDevKt, 0, "kt")})` : ""} · GS ${fmt(hs.groundSpeedKt, 0, "kt")}`],
     [PROFILE.vs, `V/S ${fmtSigned(Math.round(hs.vsFpm), 0, "fpm")}`],
     ...(hs.gsDots != null || hs.locDots != null
-      ? [["var(--text-muted)", `Gleitpfad ${fmtSigned(hs.gsDots, 1)} · Kurs ${fmtSigned(hs.locDots, 1)}${NNBSP}Dots`] as [string, string]]
+      ? [["var(--text-muted)", t("approach.profile.tipGsLoc", { gs: fmtSigned(hs.gsDots, 1), loc: fmtSigned(hs.locDots, 1) })] as [string, string]]
       : []),
-    ["var(--text-muted)", `Klappen ${fmtNum(Math.round(hs.flapsIndex))} · Fahrwerk ${gearText(hs.gearPct)}${hs.onGround ? " · am Boden" : ""}`],
+    [
+      "var(--text-muted)",
+      t(hs.onGround ? "approach.profile.tipConfigGround" : "approach.profile.tipConfig", { flaps: fmtNum(Math.round(hs.flapsIndex)), gear: gearText(t, hs.gearPct) }),
+    ],
   ];
   return (
     <g pointerEvents="none" aria-hidden="true" className="replay-cursor">
@@ -394,12 +441,13 @@ function ProfileCursor({ a, vis, scales }: { a: ApproachAnalysis; vis: ApproachP
       <g transform={`translate(${tipLeft ? tipX - tipW - 8 : tipX + 8},${M.top + 4})`}>
         <rect width={tipW} height={22 + tipRows.length * 14} rx={6} className="pc-tip" />
         <text x={8} y={16} className="pc-tip-head">
-          {fmt(Math.abs(hs.trackDistM) / M_PER_NM, 2, "nm")} {hs.trackDistM >= 0 ? "vor" : "nach"}{" "}
-          {a.trackDistRef === "threshold" ? "der Schwelle" : a.trackDistRef === "touchdown" ? "dem Aufsetzpunkt" : "dem tiefsten Punkt"}
+          {t(TIP_HEAD[a.trackDistRef === "threshold" ? "threshold" : a.trackDistRef === "touchdown" ? "touchdown" : "lowest"][hs.trackDistM >= 0 ? 0 : 1], {
+            dist: fmt(Math.abs(hs.trackDistM) / M_PER_NM, 2, "nm"),
+          })}
         </text>
-        {tipRows.map(([c, t], i) => (
+        {tipRows.map(([c, row], i) => (
           <text key={i} x={8} y={31 + i * 14} className="pc-tip-text" fill={c}>
-            {t}
+            {row}
           </text>
         ))}
       </g>

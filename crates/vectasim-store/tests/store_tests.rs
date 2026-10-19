@@ -33,7 +33,45 @@ fn sample(i: u64) -> TrackSample {
         flaps_index: (i % 5) as i32,
         gear_pct: if i < 20 { 100.0 } else { 0.0 },
         fuel_total_kg: 5000.0 - i as f64 * 0.4,
+        ..Default::default()
     }
+}
+
+#[test]
+fn v2_track_of_the_mock_flight_stays_small() {
+    // a whole mock circuit at the recorder's 1 Hz, with every approach value of track v2
+    let mut f = vectasim_core::MockFlight::new();
+    let samples: Vec<TrackSample> =
+        (0..600).map(|i| TrackSample::from(&f.sample(i as f64, 1_700_000_000_000 + i * 1000))).collect();
+    assert!(samples.iter().all(|s| s.tas_kt.is_some() && s.wind_kt.is_some() && s.nav_flags.is_some()));
+    let blob = encode_track(&samples);
+    let per_sample = blob.len() as f64 / samples.len() as f64;
+    assert!(per_sample < 60.0, "v2 track too big: {per_sample:.1} bytes/sample");
+    let back = decode_track(&blob).unwrap();
+    assert_eq!(back.len(), samples.len());
+    assert_eq!(back[300].nav_flags, samples[300].nav_flags);
+    assert_eq!(back[300].flap_positions, Some(5));
+    println!("v2 track of the mock: {per_sample:.1} bytes/sample");
+
+    // what the debrief's measurement log shows for the landing
+    let td = back.windows(2).find(|w| !w[0].on_ground && w[1].on_ground && w[0].altitude_agl_ft < 100.0).map(|w| w[1].t_ms).expect("landing");
+    let r = vectasim_store::recorded_approach_data(&back, td).expect("v2 data");
+    assert_eq!((r.wind_dir_true_deg, r.wind_kt), (Some(250.0), Some(8.0)));
+    assert!(r.nav_flags_recorded && r.has_localizer && r.has_glide_slope && r.glide_slope_valid && r.autopilot_seen);
+    assert_eq!((r.ils_gs_angle_deg, r.flap_positions, r.design_vs0_kt), (Some(3.0), Some(5), Some(104.0)));
+    // a v1 track has none of it
+    let v1: Vec<TrackSample> = (0..300).map(sample).collect();
+    assert!(vectasim_store::recorded_approach_data(&v1, v1[299].t_ms).is_none());
+    // the approach analysis gets the recorded values, the ILS deviations only with the station component
+    let a = back[td_index(&back, td) - 5].to_approach_sample();
+    assert!(a.tas_kt.is_some() && a.wind_kt == Some(8.0) && a.gs_error_deg.is_some() && a.loc_cdi.is_some());
+    assert_ne!(a.nav_flags & vectasim_core::approach::nav_flags::HAS_GLIDE_SLOPE, 0);
+    assert!(a.nav_recorded && a.gs_angle_deg == Some(3.0), "{a:?}");
+    assert!(!v1[10].to_approach_sample().nav_recorded, "v1: no ILS state, not 'all off'");
+}
+
+fn td_index(track: &[TrackSample], t_ms: u64) -> usize {
+    track.iter().position(|s| s.t_ms == t_ms).unwrap()
 }
 
 #[test]
@@ -392,7 +430,8 @@ fn approach_facts_are_cached_per_flight_versioned_and_cascade() {
     assert_eq!((r.outcome.as_str(), r.touchdown_index, r.runway_ident.as_deref()), ("landed", Some(0), Some("25C")));
     assert!(r.stable_from_ft.unwrap() >= 1000.0 && r.g1000_pass == Some(true) && r.g500_pass == Some(true), "{r:?}");
     assert_eq!(r.vapp_source.as_deref(), Some("flown"));
-    assert_eq!(r.gp_source.as_deref(), Some("assumed"));
+    // track v2: the mock records its ILS 25C, which is the reference now
+    assert_eq!(r.gp_source.as_deref(), Some("ils"));
     let detail = r.detail().unwrap();
     assert_eq!(detail.band, Some(vectasim_core::approach::ApproachBand::Stable));
     assert!(detail.exceeded.is_empty());

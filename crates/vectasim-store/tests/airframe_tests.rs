@@ -297,6 +297,37 @@ fn vapp_per_airframe_is_set_cleared_validated_and_found_from_the_flight() {
 }
 
 #[test]
+fn landing_flaps_per_airframe_are_set_cleared_validated_and_found_from_the_flight() {
+    let store = Store::open_in_memory().unwrap();
+    let mut rec = FlightRecorder::new(
+        store.clone(),
+        RecorderContext { provider: "mock".into(), aircraft: Some(MockFlight::aircraft()), ..Default::default() },
+    );
+    run(&mut rec, 60.0);
+    let id = store.list_flights(1, 0).unwrap()[0].id.clone();
+    assert_eq!(store.flight_airframe_refs(&id).unwrap(), (None, None));
+
+    let edit = |v: Option<i32>| AirframeEdit { registration: "D-AVCT".into(), landing_flaps: v, ..Default::default() };
+    let a = store.upsert_airframe(&edit(Some(3)), 5).unwrap().unwrap();
+    assert_eq!(a.landing_flaps, Some(3));
+    assert_eq!(store.flight_airframe_refs(&id).unwrap(), (None, Some(3)));
+    assert_eq!(store.list_airframes(true).unwrap()[0].airframe.landing_flaps, Some(3), "the fleet list carries it");
+    // 0 is a valid stage (no flaps, e.g. a flapless type); other edits leave it alone
+    let a = store.upsert_airframe(&AirframeEdit { registration: "D-AVCT".into(), vapp_kt: Some(134.0), ..Default::default() }, 6).unwrap().unwrap();
+    assert_eq!((a.vapp_kt, a.landing_flaps), (Some(134.0), Some(3)));
+    assert_eq!(store.flight_airframe_refs(&id).unwrap(), (Some(134.0), Some(3)));
+    assert!(store.upsert_airframe(&edit(Some(11)), 7).is_err(), "beyond the handle positions any sim has");
+    assert_eq!(store.get_airframe("D-AVCT").unwrap().unwrap().landing_flaps, Some(3));
+    assert_eq!(store.upsert_airframe(&edit(Some(0)), 8).unwrap().unwrap().landing_flaps, Some(0));
+    // negative clears
+    assert_eq!(store.upsert_airframe(&edit(Some(-1)), 9).unwrap().unwrap().landing_flaps, None);
+    // merging fills the target from the source
+    store.upsert_airframe(&edit(Some(4)), 10).unwrap();
+    store.merge_airframes("D-AVCT", "D-AINA", 11).unwrap();
+    assert_eq!(store.get_airframe("D-AINA").unwrap().unwrap().landing_flaps, Some(4));
+}
+
+#[test]
 fn an_airframe_with_a_vapp_survives_the_demo_purge() {
     let store = Store::open_in_memory().unwrap();
     let mut rec = FlightRecorder::new(

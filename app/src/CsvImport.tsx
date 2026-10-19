@@ -20,85 +20,75 @@ import type {
   CsvPreview,
   CsvProfile,
 } from "./types";
-import { fmt, fmtDateTime } from "./format";
+import { fmt, fmtDateTime } from "./i18n/number";
+import { t as tGlobal, useT, type TFunction, type TKey } from "./i18n";
 import { showToast } from "./ui/Toast";
 import { usePrivacy } from "./prefs";
 
-export const PRESET_LABEL: Record<CsvPreset, string> = {
-  vectasim: "VectaSim-Logbuch (CSV)",
-  volanta_import: "Volanta-Import-CSV",
-  simtoolkitpro: "SimToolkitPro (ohne Gewähr)",
-  generic: "Eigene Zuordnung",
+/** i18n key of each preset's name. */
+export const PRESET_LABEL: Record<CsvPreset, TKey> = {
+  vectasim: "csvImport.preset.vectasim",
+  volanta_import: "csvImport.preset.volanta",
+  simtoolkitpro: "csvImport.preset.stkp",
+  generic: "csvImport.preset.generic",
 };
 const PRESET_TAG: Record<CsvPreset, string> = { vectasim: "vectasim", volanta_import: "volanta", simtoolkitpro: "stkp", generic: "csv" };
 const ENCODING_LABEL: Record<string, string> = {
   utf8: "UTF-8",
-  utf8_bom: "UTF-8 (mit BOM)",
   utf16le: "UTF-16 LE",
   utf16be: "UTF-16 BE",
   latin1: "Latin-1 / Windows-1252",
 };
-const DELIMITER_LABEL: Record<string, string> = { ",": "Komma", ";": "Semikolon", "\t": "Tabulator", "|": "senkrechter Strich" };
+const DELIMITER_LABEL: Record<string, TKey> = {
+  ",": "csvImport.delimiter.comma",
+  ";": "csvImport.delimiter.semicolon",
+  "\t": "csvImport.delimiter.tab",
+  "|": "csvImport.delimiter.pipe",
+};
 
 /** Fields in the mapping table, grouped; `*` = required. */
-const FIELD_GROUPS: { title: string; fields: [CsvField, string][] }[] = [
-  {
-    title: "Strecke",
-    fields: [
-      ["dep_icao", "Abflughafen *"],
-      ["arr_icao", "Zielflughafen *"],
-      ["distance_nm", "Distanz (nm)"],
-    ],
-  },
-  {
-    title: "Zeiten",
-    fields: [
-      ["date", "Datum"],
-      ["off_block", "Off-Block (Abfahrt)"],
-      ["takeoff", "Start (Abheben)"],
-      ["landing", "Landung (Aufsetzen)"],
-      ["on_block", "On-Block (Ankunft)"],
-      ["block_min", "Blockzeit"],
-      ["air_min", "Flugzeit"],
-    ],
-  },
-  {
-    title: "Flug und Flugzeug",
-    fields: [
-      ["callsign", "Rufzeichen"],
-      ["flight_number", "Flugnummer"],
-      ["airline", "Airline"],
-      ["aircraft_title", "Flugzeug (Name)"],
-      ["aircraft_icao", "Flugzeugtyp (ICAO)"],
-      ["registration", "Registrierung"],
-    ],
-  },
-  {
-    title: "Werte",
-    fields: [
-      ["fuel_start", "Kraftstoff Start"],
-      ["fuel_end", "Kraftstoff Ende"],
-      ["fuel_used", "Kraftstoffverbrauch"],
-      ["max_alt_ft", "Max. Höhe (ft)"],
-      ["landing_rate_fpm", "Landerate (fpm)"],
-    ],
-  },
-  {
-    title: "Eigenes",
-    fields: [
-      ["notes", "Notizen"],
-      ["tags", "Tags"],
-      ["rating", "Bewertung (1–5)"],
-    ],
-  },
+/** Fields in the mapping table, grouped (i18n keys `csvImport.group.*` / `csvImport.field.*`); required ones get " *". */
+const FIELD_GROUPS: { title: TKey; fields: CsvField[] }[] = [
+  { title: "csvImport.group.route", fields: ["dep_icao", "arr_icao", "distance_nm"] },
+  { title: "csvImport.group.times", fields: ["date", "off_block", "takeoff", "landing", "on_block", "block_min", "air_min"] },
+  { title: "csvImport.group.flight", fields: ["callsign", "flight_number", "airline", "aircraft_title", "aircraft_icao", "registration"] },
+  { title: "csvImport.group.values", fields: ["fuel_start", "fuel_end", "fuel_used", "max_alt_ft", "landing_rate_fpm"] },
+  { title: "csvImport.group.own", fields: ["notes", "tags", "rating"] },
 ];
-const DATE_FORMATS: [CsvDateFormat, string][] = [
-  ["auto", "automatisch erkennen"],
-  ["iso", "ISO (2026-10-18 14:05)"],
-  ["dmy", "TT.MM.JJJJ (18.10.2026 14:05)"],
-  ["mdy", "MM/TT/JJJJ (10/18/2026 2:05 PM)"],
-  ["epoch_s", "Unix-Zeit (Sekunden)"],
-  ["epoch_ms", "Unix-Zeit (Millisekunden)"],
+const FIELD_LABEL: Record<CsvField, TKey> = {
+  dep_icao: "csvImport.field.depIcao",
+  arr_icao: "csvImport.field.arrIcao",
+  distance_nm: "csvImport.field.distanceNm",
+  date: "csvImport.field.date",
+  off_block: "csvImport.field.offBlock",
+  takeoff: "csvImport.field.takeoff",
+  landing: "csvImport.field.landing",
+  on_block: "csvImport.field.onBlock",
+  block_min: "csvImport.field.blockMin",
+  air_min: "csvImport.field.airMin",
+  callsign: "csvImport.field.callsign",
+  flight_number: "csvImport.field.flightNumber",
+  airline: "csvImport.field.airline",
+  aircraft_title: "csvImport.field.aircraftTitle",
+  aircraft_icao: "csvImport.field.aircraftIcao",
+  registration: "csvImport.field.registration",
+  fuel_start: "csvImport.field.fuelStart",
+  fuel_end: "csvImport.field.fuelEnd",
+  fuel_used: "csvImport.field.fuelUsed",
+  max_alt_ft: "csvImport.field.maxAltFt",
+  landing_rate_fpm: "csvImport.field.landingRateFpm",
+  notes: "csvImport.field.notes",
+  tags: "csvImport.field.tags",
+  rating: "csvImport.field.rating",
+};
+const REQUIRED_FIELDS: ReadonlySet<CsvField> = new Set(["dep_icao", "arr_icao"]);
+const DATE_FORMATS: [CsvDateFormat, TKey][] = [
+  ["auto", "csvImport.dateFormat.auto"],
+  ["iso", "csvImport.dateFormat.iso"],
+  ["dmy", "csvImport.dateFormat.dmy"],
+  ["mdy", "csvImport.dateFormat.mdy"],
+  ["epoch_s", "csvImport.dateFormat.epochS"],
+  ["epoch_ms", "csvImport.dateFormat.epochMs"],
 ];
 
 type Zone = "utc" | "local";
@@ -187,7 +177,7 @@ function remembering(m: CsvColumnMapping, columns: string[], zone: Zone, dedupe:
   const named: Partial<Record<CsvField, string>> = {};
   if (hasHeader) {
     for (const g of FIELD_GROUPS) {
-      for (const [f] of g.fields) {
+      for (const f of g.fields) {
         const i = m.columns[f];
         named[f] = i != null ? (columns[i] ?? "") : "";
       }
@@ -198,17 +188,17 @@ function remembering(m: CsvColumnMapping, columns: string[], zone: Zone, dedupe:
 
 function missingRequired(m: CsvColumnMapping): string | null {
   const c = m.columns;
-  if (c.dep_icao == null) return "Ordne den Abflughafen zu.";
-  if (c.arr_icao == null) return "Ordne den Zielflughafen zu.";
-  if (c.date == null && c.off_block == null && c.on_block == null && c.takeoff == null) return "Ordne Datum oder Off-Block zu.";
+  if (c.dep_icao == null) return tGlobal("csvImport.missing.dep");
+  if (c.arr_icao == null) return tGlobal("csvImport.missing.arr");
+  if (c.date == null && c.off_block == null && c.on_block == null && c.takeoff == null) return tGlobal("csvImport.missing.date");
   return null;
 }
 
-function importSummary(r: CsvImportReport): string {
-  const parts = [`${fmt(r.added)} Flüge übernommen`];
-  if (r.skippedDuplicate) parts.push(`${fmt(r.skippedDuplicate)} schon vorhanden`);
-  if (r.skippedInvalid) parts.push(`${fmt(r.skippedInvalid)} fehlerhaft`);
-  if (r.airframesAdded) parts.push(`${fmt(r.airframesAdded)} Flugzeuge neu`);
+function importSummary(t: TFunction, r: CsvImportReport): string {
+  const parts = [t("csvImport.summary.added", { count: r.added })];
+  if (r.skippedDuplicate) parts.push(t("csvImport.summary.duplicate", { count: r.skippedDuplicate }));
+  if (r.skippedInvalid) parts.push(t("csvImport.summary.invalid", { count: r.skippedInvalid }));
+  if (r.airframesAdded) parts.push(t("csvImport.summary.airframes", { count: r.airframesAdded }));
   return parts.join(" · ");
 }
 
@@ -236,10 +226,11 @@ function trapTab(e: KeyboardEvent, root: HTMLElement | null) {
 }
 
 type Step = 1 | 2 | 3;
-const STEP_TITLE: Record<Step, string> = { 1: "Datei", 2: "Spalten zuordnen", 3: "Vorschau" };
+const STEP_TITLE: Record<Step, TKey> = { 1: "csvImport.step.file", 2: "csvImport.step.columns", 3: "csvImport.step.preview" };
 
 /** The dialog; `onClose` after import or cancel. */
 export default function CsvImportDialog({ onClose }: { onClose: () => void }) {
+  const t = useT();
   const titleId = useId();
   const ref = useRef<HTMLDivElement>(null);
   const priv = usePrivacy();
@@ -306,10 +297,10 @@ export default function CsvImportDialog({ onClose }: { onClose: () => void }) {
     let picked: string | string[] | null;
     try {
       picked = await openFileDialog({
-        title: "CSV-Datei zum Importieren wählen",
+        title: t("csvImport.pickTitle"),
         multiple: false,
         directory: false,
-        filters: [{ name: "CSV-Datei", extensions: ["csv", "txt"] }],
+        filters: [{ name: t("csvImport.fileType"), extensions: ["csv", "txt"] }],
       });
     } catch (e) {
       setError(String(e));
@@ -362,8 +353,10 @@ export default function CsvImportDialog({ onClose }: { onClose: () => void }) {
       saveRemembered(mapping.preset, remembering(mapping, profile.columns, zone, dedupe, profile.hasHeader));
       showToast({
         tone: r.warnings.length || r.skippedInvalid ? "warn" : "ok",
-        title: `CSV importiert · ${fmt(r.added)} von ${fmt(r.rows)} Zeilen`,
-        body: `${importSummary(r)}${r.warnings.length ? ` · ${r.warnings.length} Hinweise: ${r.warnings.slice(0, 2).join("; ")}` : ""}`,
+        title: t("csvImport.done.title", { added: fmt(r.added), rows: fmt(r.rows) }),
+        body: r.warnings.length
+          ? t("csvImport.done.bodyWarnings", { summary: importSummary(t, r), warnings: t("csvImport.done.warnings", { count: r.warnings.length }), list: r.warnings.slice(0, 2).join("; ") })
+          : importSummary(t, r),
         durationMs: 15_000,
       });
       onClose();
@@ -383,23 +376,23 @@ export default function CsvImportDialog({ onClose }: { onClose: () => void }) {
       return { ...m, columns };
     });
 
-  const missing = mapping ? missingRequired(mapping) : "Wähle zuerst eine Datei.";
+  const missing = mapping ? missingRequired(mapping) : t("csvImport.missing.file");
   const sample = (i: number) => profile?.sampleRows.find((r) => (r[i] ?? "").trim() !== "")?.[i] ?? "";
 
   return createPortal(
     <div className="csv-backdrop">
       <div ref={ref} className="csv-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}>
         <header className="csv-head">
-          <h2 id={titleId}>CSV importieren</h2>
-          <ol className="csv-steps" aria-label="Schritte">
+          <h2 id={titleId}>{t("csvImport.title")}</h2>
+          <ol className="csv-steps" aria-label={t("csvImport.steps")}>
             {([1, 2, 3] as Step[]).map((s) => (
               <li key={s} aria-current={s === step ? "step" : undefined} className={s === step ? "current" : s < step ? "done" : undefined}>
-                {s}. {STEP_TITLE[s]}
+                {s}. {t(STEP_TITLE[s])}
               </li>
             ))}
           </ol>
-          <button className="btn-sm" onClick={onClose} aria-label="Import schließen">
-            Schließen
+          <button className="btn-sm" onClick={onClose} aria-label={t("csvImport.close")}>
+            {t("shell.action.close")}
           </button>
         </header>
 
@@ -410,15 +403,11 @@ export default function CsvImportDialog({ onClose }: { onClose: () => void }) {
         )}
 
         {step === 1 && (
-          <section className="csv-step" aria-label="Datei wählen">
-            <p className="detail">
-              Flüge aus anderen Logbüchern übernehmen: die Import-CSV von Volanta, ein SimToolkitPro- oder VA-Export (phpVMS) oder das eigene
-              Logbuch-CSV von VectaSim. Importierte Flüge zählen für Stunden, Strecken, Flotte und Länder – Landeanalyse, Streubild und Anflug
-              bleiben leer, weil keine Aufzeichnung dabei ist.
-            </p>
+          <section className="csv-step" aria-label={t("csvImport.chooseFile")}>
+            <p className="detail">{t("csvImport.intro")}</p>
             <div className="setting-row">
               <button className="btn-primary" onClick={() => void chooseFile()} disabled={busy != null}>
-                {busy === "Lesen" ? "Liest …" : path ? "Andere Datei …" : "Datei wählen …"}
+                {busy === "Lesen" ? t("csvImport.reading") : path ? t("csvImport.otherFile") : t("csvImport.pickFile")}
               </button>
               {path && (
                 <span className="dll-path mono" title={priv.mask(path, "path")}>
@@ -430,108 +419,106 @@ export default function CsvImportDialog({ onClose }: { onClose: () => void }) {
               <>
                 <dl className="csv-facts">
                   <div>
-                    <dt>Erkannt</dt>
-                    <dd>{PRESET_LABEL[profile.detectedPreset]}</dd>
+                    <dt>{t("csvImport.facts.detected")}</dt>
+                    <dd>{t(PRESET_LABEL[profile.detectedPreset])}</dd>
                   </div>
                   <div>
-                    <dt>Trennzeichen</dt>
-                    <dd>{DELIMITER_LABEL[profile.delimiter] ?? `„${profile.delimiter}“`}</dd>
+                    <dt>{t("csvImport.facts.delimiter")}</dt>
+                    <dd>{DELIMITER_LABEL[profile.delimiter] ? t(DELIMITER_LABEL[profile.delimiter]) : t("csvImport.delimiter.custom", { char: profile.delimiter })}</dd>
                   </div>
                   <div>
-                    <dt>Kodierung</dt>
-                    <dd>{ENCODING_LABEL[profile.encoding] ?? profile.encoding}</dd>
+                    <dt>{t("csvImport.facts.encoding")}</dt>
+                    <dd>{profile.encoding === "utf8_bom" ? t("csvImport.encodingBom") : (ENCODING_LABEL[profile.encoding] ?? profile.encoding)}</dd>
                   </div>
                   <div>
-                    <dt>Zeilen</dt>
+                    <dt>{t("csvImport.facts.rows")}</dt>
                     <dd>
-                      {fmt(profile.rowCount)} {profile.hasHeader ? "(plus Kopfzeile)" : "(ohne Kopfzeile)"}
+                      {fmt(profile.rowCount)} {profile.hasHeader ? t("csvImport.facts.withHeader") : t("csvImport.facts.noHeader")}
                     </dd>
                   </div>
                 </dl>
                 <label className="csv-inline">
-                  <span>Format</span>
+                  <span>{t("csvImport.format")}</span>
                   <select value={mapping.preset} onChange={(e) => applyPreset(profile, e.target.value as CsvPreset, path ?? "")}>
                     {(Object.keys(PRESET_LABEL) as CsvPreset[]).map((p) => (
                       <option key={p} value={p}>
-                        {PRESET_LABEL[p]}
+                        {t(PRESET_LABEL[p])}
                       </option>
                     ))}
                   </select>
                 </label>
                 {mapping.preset === "simtoolkitpro" && (
-                  <div className="detail">Die Spalten von SimToolkitPro sind nicht dokumentiert – prüf die Zuordnung im nächsten Schritt.</div>
+                  <div className="detail">{t("csvImport.stkpHint")}</div>
                 )}
                 <SampleTable profile={profile} />
               </>
             )}
             <footer className="csv-foot">
               <button className="btn-sm" onClick={onClose}>
-                Abbrechen
+                {t("shell.action.cancel")}
               </button>
               <button className="btn-sm btn-primary" onClick={() => setStep(2)} disabled={!profile || profile.rowCount === 0}>
-                Weiter
+                {t("csvImport.next")}
               </button>
             </footer>
           </section>
         )}
 
         {step === 2 && profile && mapping && (
-          <section className="csv-step" aria-label="Spalten zuordnen">
-            <p className="detail">
-              Vorbelegt aus {PRESET_LABEL[mapping.preset]} und den Spaltennamen. Datum und Uhrzeit dürfen in einer Spalte stehen oder getrennt
-              (dann Datum + Off-Block-Uhrzeit). Fehlt die Ankunft, rechnet VectaSim sie aus der Blockzeit.
-            </p>
+          <section className="csv-step" aria-label={t("csvImport.step.columns")}>
+            <p className="detail">{t("csvImport.mappingIntro", { preset: t(PRESET_LABEL[mapping.preset]) })}</p>
             <div className="csv-formats">
               <label className="csv-inline">
-                <span>Datumsformat</span>
+                <span>{t("csvImport.dateFormat.label")}</span>
                 <select value={mapping.dateFormat} onChange={(e) => setMapping({ ...mapping, dateFormat: e.target.value as CsvDateFormat })}>
                   {DATE_FORMATS.map(([v, l]) => (
                     <option key={v} value={v}>
-                      {l}
+                      {t(l)}
                     </option>
                   ))}
                 </select>
               </label>
               <label className="csv-inline">
-                <span>Zeiten ohne Zeitzone</span>
+                <span>{t("csvImport.zone.label")}</span>
                 <select value={zone} onChange={(e) => setZone(e.target.value as Zone)}>
-                  <option value="utc">sind UTC</option>
-                  <option value="local">sind Ortszeit dieses PCs</option>
+                  <option value="utc">{t("csvImport.zone.utc")}</option>
+                  <option value="local">{t("csvImport.zone.local")}</option>
                 </select>
               </label>
               <label className="csv-inline">
-                <span>Gewichte in</span>
+                <span>{t("csvImport.weightUnit")}</span>
                 <select value={mapping.weightUnit} onChange={(e) => setMapping({ ...mapping, weightUnit: e.target.value as "kg" | "lb" })}>
                   <option value="kg">kg</option>
                   <option value="lb">lb</option>
                 </select>
               </label>
               <label className="csv-inline">
-                <span>Dauer als Zahl in</span>
+                <span>{t("csvImport.durationUnit.label")}</span>
                 <select value={mapping.durationUnit} onChange={(e) => setMapping({ ...mapping, durationUnit: e.target.value as "minutes" | "hours" })}>
-                  <option value="minutes">Minuten</option>
-                  <option value="hours">Stunden</option>
+                  <option value="minutes">{t("csvImport.durationUnit.minutes")}</option>
+                  <option value="hours">{t("csvImport.durationUnit.hours")}</option>
                 </select>
               </label>
             </div>
             <div className="csv-scroll">
               <table className="csv-map">
-                <caption className="sr-only">Zielfeld und Quellspalte</caption>
+                <caption className="sr-only">{t("csvImport.map.caption")}</caption>
                 <thead>
                   <tr>
-                    <th scope="col">Feld in VectaSim</th>
-                    <th scope="col">Spalte der Datei</th>
-                    <th scope="col">Beispiel</th>
+                    <th scope="col">{t("csvImport.map.field")}</th>
+                    <th scope="col">{t("csvImport.map.column")}</th>
+                    <th scope="col">{t("csvImport.map.sample")}</th>
                   </tr>
                 </thead>
                 {FIELD_GROUPS.map((g) => (
                   <tbody key={g.title}>
                     <tr className="csv-group">
                       <th scope="rowgroup" colSpan={3}>
-                        {g.title}
+                        {t(g.title)}
                       </th>
                     </tr>
-                    {g.fields.map(([f, label]) => {
+                    {g.fields.map((f) => {
+                      const label = `${t(FIELD_LABEL[f])}${REQUIRED_FIELDS.has(f) ? " *" : ""}`;
                       const id = `${titleId}-${f}`;
                       const col = mapping.columns[f];
                       return (
@@ -541,7 +528,7 @@ export default function CsvImportDialog({ onClose }: { onClose: () => void }) {
                           </th>
                           <td>
                             <select id={id} value={col ?? ""} onChange={(e) => setColumn(f, e.target.value)}>
-                              <option value="">– nicht zugeordnet –</option>
+                              <option value="">{t("csvImport.map.unmapped")}</option>
                               {profile.columns.map((c, i) => (
                                 <option key={i} value={i}>
                                   {c}
@@ -560,27 +547,27 @@ export default function CsvImportDialog({ onClose }: { onClose: () => void }) {
             {missing && <div className="detail warn-text">{missing}</div>}
             <footer className="csv-foot">
               <button className="btn-sm" onClick={() => setStep(1)}>
-                Zurück
+                {t("csvImport.back")}
               </button>
               <button className="btn-sm btn-primary" onClick={() => void loadPreview()} disabled={!!missing || busy != null}>
-                {busy === "Vorschau" ? "Liest …" : "Vorschau"}
+                {busy === "Vorschau" ? t("csvImport.reading") : t("csvImport.step.preview")}
               </button>
             </footer>
           </section>
         )}
 
         {step === 3 && preview && mapping && (
-          <section className="csv-step" aria-label="Vorschau">
+          <section className="csv-step" aria-label={t("csvImport.step.preview")}>
             <div className="csv-counts" role="status">
-              {fmt(preview.totalRows)} Zeilen · {fmt(preview.valid)} gültig
-              {preview.invalid ? ` · ${fmt(preview.invalid)} fehlerhaft (werden übersprungen)` : ""}
-              {dedupe ? ` · ${fmt(preview.duplicates)} schon im Logbuch` : ""}
+              {t("csvImport.counts.rows", { rows: fmt(preview.totalRows), valid: fmt(preview.valid) })}
+              {preview.invalid ? ` · ${t("csvImport.counts.invalid", { count: preview.invalid })}` : ""}
+              {dedupe ? ` · ${t("csvImport.counts.duplicates", { count: preview.duplicates })}` : ""}
             </div>
             <div className="csv-scroll">
               <PreviewTable rows={preview.rows} dedupe={dedupe} />
             </div>
             {preview.totalRows > preview.rows.length && (
-              <div className="detail">Gezeigt: die ersten {preview.rows.length} Zeilen. Gezählt und importiert wird die ganze Datei.</div>
+              <div className="detail">{t("csvImport.counts.shown", { count: preview.rows.length })}</div>
             )}
             <div className="csv-formats">
               <label className="check">
@@ -592,32 +579,29 @@ export default function CsvImportDialog({ onClose }: { onClose: () => void }) {
                     void loadPreview(e.target.checked);
                   }}
                 />
-                Duplikate überspringen (gleiche Strecke, Off-Block weniger als 15 min auseinander)
+                {t("csvImport.dedupe")}
               </label>
               <label className="csv-inline">
-                <span>Quelle (Tag)</span>
+                <span>{t("csvImport.sourceTag")}</span>
                 <input value={sourceTag} onChange={(e) => setSourceTag(e.target.value)} maxLength={30} list={`${titleId}-tags`} autoComplete="off" />
                 <datalist id={`${titleId}-tags`}>
-                  {[...new Set([PRESET_TAG[mapping.preset], "volanta", "stkp", path ? fileStem(path) : ""])].filter(Boolean).map((t) => (
-                    <option key={t} value={t} />
+                  {[...new Set([PRESET_TAG[mapping.preset], "volanta", "stkp", path ? fileStem(path) : ""])].filter(Boolean).map((tag) => (
+                    <option key={tag} value={tag} />
                   ))}
                 </datalist>
               </label>
             </div>
-            <div className="detail">
-              Jeder Flug bekommt die Tags „import“ und die Quelle. Eine Landerate aus der Datei steht in den Notizen – sie stammt von einem anderen
-              Messverfahren und zählt nicht für die Landestatistik.
-            </div>
+            <div className="detail">{t("csvImport.tagsHint")}</div>
             <footer className="csv-foot">
               <button className="btn-sm" onClick={() => setStep(2)}>
-                Zurück
+                {t("csvImport.back")}
               </button>
               <button
                 className="btn-sm btn-primary"
                 onClick={() => void runImport()}
                 disabled={busy != null || preview.valid - (dedupe ? preview.duplicates : 0) <= 0}
               >
-                {busy === "Import" ? "Importiert …" : `${fmt(preview.valid - (dedupe ? preview.duplicates : 0))} Flüge importieren`}
+                {busy === "Import" ? t("csvImport.importing") : t("csvImport.importButton", { count: preview.valid - (dedupe ? preview.duplicates : 0) })}
               </button>
             </footer>
           </section>
@@ -629,11 +613,12 @@ export default function CsvImportDialog({ onClose }: { onClose: () => void }) {
 }
 
 function SampleTable({ profile }: { profile: CsvProfile }) {
-  if (profile.sampleRows.length === 0) return <div className="detail">Die Datei enthält keine Datenzeilen.</div>;
+  const t = useT();
+  if (profile.sampleRows.length === 0) return <div className="detail">{t("csvImport.noRows")}</div>;
   return (
     <div className="csv-scroll csv-sample-table">
       <table className="csv-map">
-        <caption className="sr-only">Erste Zeilen der Datei</caption>
+        <caption className="sr-only">{t("csvImport.sampleCaption")}</caption>
         <thead>
           <tr>
             {profile.columns.map((c, i) => (
@@ -665,35 +650,36 @@ function minutes(v: number | null | undefined): string {
   return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}`;
 }
 
-function status(r: CsvParsedFlight, dedupe: boolean): { tone: "ok" | "warn" | "err"; text: ReactNode } {
-  if (r.error) return { tone: "err", text: `Fehler: ${r.error}` };
-  if (dedupe && r.duplicate) return { tone: "warn", text: "schon im Logbuch – wird übersprungen" };
+function status(t: TFunction, r: CsvParsedFlight, dedupe: boolean): { tone: "ok" | "warn" | "err"; text: ReactNode } {
+  if (r.error) return { tone: "err", text: t("csvImport.row.error", { error: r.error }) };
+  if (dedupe && r.duplicate) return { tone: "warn", text: t("csvImport.row.duplicate") };
   if (r.warnings.length) return { tone: "warn", text: r.warnings.join(" · ") };
-  return { tone: "ok", text: "ok" };
+  return { tone: "ok", text: t("csvImport.row.ok") };
 }
 
 function PreviewTable({ rows, dedupe }: { rows: CsvParsedFlight[]; dedupe: boolean }) {
+  const t = useT();
   return (
     <table className="csv-map csv-preview">
-      <caption className="sr-only">Vorschau der ersten Zeilen</caption>
+      <caption className="sr-only">{t("csvImport.previewCaption")}</caption>
       <thead>
         <tr>
-          <th scope="col">Zeile</th>
-          <th scope="col">Off-Block</th>
-          <th scope="col">Strecke</th>
-          <th scope="col">Flugzeug</th>
+          <th scope="col">{t("csvImport.col.line")}</th>
+          <th scope="col">{t("csvImport.col.offBlock")}</th>
+          <th scope="col">{t("csvImport.col.route")}</th>
+          <th scope="col">{t("csvImport.col.aircraft")}</th>
           <th scope="col" className="right">
-            Block
+            {t("csvImport.col.block")}
           </th>
           <th scope="col" className="right">
-            Distanz
+            {t("csvImport.col.distance")}
           </th>
-          <th scope="col">Status</th>
+          <th scope="col">{t("csvImport.col.status")}</th>
         </tr>
       </thead>
       <tbody>
         {rows.map((r) => {
-          const s = status(r, dedupe);
+          const s = status(t, r, dedupe);
           const block = r.offBlockMs != null && r.onBlockMs != null ? (r.onBlockMs - r.offBlockMs) / 60_000 : r.blockMin;
           return (
             <tr key={r.line} className={`csv-row-${s.tone}`}>
@@ -705,7 +691,7 @@ function PreviewTable({ rows, dedupe }: { rows: CsvParsedFlight[]; dedupe: boole
               <td>{[r.aircraftIcao, r.registration].filter(Boolean).join(" · ") || r.aircraftTitle || "–"}</td>
               <td className="num right">{minutes(block)}</td>
               <td className="num right">
-                {r.distanceNm != null ? `${r.distanceEstimated ? "ca. " : ""}${fmt(r.distanceNm, 0, "nm")}` : "–"}
+                {r.distanceNm != null ? (r.distanceEstimated ? t("csvImport.row.approx", { value: fmt(r.distanceNm, 0, "nm") }) : fmt(r.distanceNm, 0, "nm")) : "–"}
               </td>
               <td className={`csv-status ${s.tone}`}>{s.text}</td>
             </tr>

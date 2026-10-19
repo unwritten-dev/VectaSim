@@ -8,21 +8,23 @@ import { usePrivacy } from "../prefs";
 import AirframeImage from "./AirframeImage";
 import AirframePicker from "./AirframePicker";
 import { useAirframe } from "./hooks";
+import { useT } from "../i18n";
 
 /** Flight detail: which airframe the flight is booked onto, with "Flugzeug ändern". */
 export default function AirframeCard({ flight: f, onOpenFleet }: { flight: FlightRow; onOpenFleet?: (registration: string) => void }) {
   const a = useAirframe(f.airframeReg);
   const [picking, setPicking] = useState(false);
   const priv = usePrivacy();
+  const t = useT();
 
   const pick = (registration: string | null) => {
     setPicking(false);
     if (registration === (f.airframeReg ?? null)) return;
     invoke<boolean>("set_flight_airframe", { flightId: f.id, registration })
       .then(() =>
-        showToast({ tone: "ok", title: registration ? `Flug auf ${priv.mask(registration, "registration")} gebucht` : "Flugzeug-Zuordnung entfernt" }),
+        showToast({ tone: "ok", title: registration ? t("logbook.airframe.booked", { reg: priv.mask(registration, "registration") }) : t("logbook.airframe.unassigned") }),
       )
-      .catch((e) => showToast({ tone: "err", title: "Flugzeug nicht geändert", body: String(e) }));
+      .catch((e) => showToast({ tone: "err", title: t("logbook.airframe.changeFailed"), body: String(e) }));
   };
 
   const type = a?.icaoType || icaoFromAtcModel(f.aircraft.atcModel);
@@ -42,19 +44,19 @@ export default function AirframeCard({ flight: f, onOpenFleet }: { flight: Fligh
           </>
         ) : (
           <>
-            <strong>Kein Flugzeug zugeordnet</strong>
-            <span className="detail">Weder der Flugplan noch der Simulator lieferten eine Registrierung.</span>
+            <strong>{t("logbook.airframe.noneTitle")}</strong>
+            <span className="detail">{t("logbook.airframe.noneText")}</span>
           </>
         )}
       </div>
       <div className="af-card-actions">
         {f.airframeReg && onOpenFleet && (
-          <button className="btn-sm" onClick={() => onOpenFleet(f.airframeReg!)} title="Flugzeug in der Flotte öffnen">
-            In Flotte
+          <button className="btn-sm" onClick={() => onOpenFleet(f.airframeReg!)} title={t("logbook.airframe.openInFleetTitle")}>
+            {t("logbook.airframe.openInFleet")}
           </button>
         )}
         <button className="btn-sm" onClick={() => setPicking(!picking)} aria-expanded={picking}>
-          Flugzeug ändern
+          {t("logbook.airframe.change")}
         </button>
       </div>
       {picking && <AirframePicker current={f.airframeReg} onPick={pick} onCancel={() => setPicking(false)} />}

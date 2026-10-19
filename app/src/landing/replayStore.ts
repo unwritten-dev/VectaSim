@@ -6,6 +6,7 @@
 import { createContext, useContext, useSyncExternalStore } from "react";
 import type { ApproachAnalysis, MarkerKind } from "./approachTypes";
 import type { LandingAnalysis } from "./types";
+import { t as tr } from "../i18n";
 
 export type ReplaySpeed = 1 | 2 | 4 | 8;
 export const REPLAY_SPEEDS: ReplaySpeed[] = [1, 2, 4, 8];
@@ -314,15 +315,27 @@ export function lerpHeading(a: number, b: number, f: number): number {
 // ---------------------------------------------------------------------------------------
 // The debrief's playback span and jump targets
 
-const APPROACH_MARKER_LABEL: Partial<Record<MarkerKind, string>> = {
-  tenNm: "10 nm",
-  faf: "FAF",
-  gate1000: "1000 ft",
-  gate500: "500 ft",
-  threshold: "Schwelle",
-  touchdown: "Aufsetzen",
-  goAround: "Durchstarten",
-};
+/** Jump-target labels in the active language (read per plan, so a language switch applies). */
+function approachMarkerLabel(kind: MarkerKind): string | undefined {
+  switch (kind) {
+    case "tenNm":
+      return "10 nm";
+    case "faf":
+      return "FAF";
+    case "gate1000":
+      return "1000 ft";
+    case "gate500":
+      return "500 ft";
+    case "threshold":
+      return tr("replay.marker.threshold");
+    case "touchdown":
+      return tr("replay.marker.touchdown");
+    case "goAround":
+      return tr("replay.marker.goAround");
+    default:
+      return undefined;
+  }
+}
 
 /**
  * Range and markers of the debrief's transport bar: from the first approach sample (without
@@ -340,7 +353,7 @@ export function debriefReplayPlan(a: LandingAnalysis | null, apr: ApproachAnalys
     endMs = aprOk.samples[aprOk.samples.length - 1].tMs;
     const seen = new Set<string>();
     for (const m of aprOk.markers) {
-      const label = APPROACH_MARKER_LABEL[m.kind];
+      const label = approachMarkerLabel(m.kind);
       if (!label || seen.has(m.kind)) continue;
       // the last pass of a gate is the one the gate checks use
       const lastOfKind = [...aprOk.markers].reverse().find((x) => x.kind === m.kind)!;
@@ -355,10 +368,10 @@ export function debriefReplayPlan(a: LandingAnalysis | null, apr: ApproachAnalys
     endMs = Math.max(endMs ?? -Infinity, s[s.length - 1].tMs);
     if (!aprOk) {
       for (const g of a.gates) if (g.sample && (g.gateFt === 1000 || g.gateFt === 500)) markers.push({ key: `gate${g.gateFt}`, label: `${g.gateFt} ft`, tMs: g.sample.tMs });
-      if (a.threshold) markers.push({ key: "threshold", label: "Schwelle", tMs: a.threshold.tMs });
-      markers.push({ key: "touchdown", label: "Aufsetzen", tMs: a.touchdown.timestampMs });
+      if (a.threshold) markers.push({ key: "threshold", label: tr("replay.marker.threshold"), tMs: a.threshold.tMs });
+      markers.push({ key: "touchdown", label: tr("replay.marker.touchdown"), tMs: a.touchdown.timestampMs });
     }
-    if (a.rollout) markers.push({ key: "standstill", label: "Stillstand", tMs: s[s.length - 1].tMs });
+    if (a.rollout) markers.push({ key: "standstill", label: tr("replay.marker.standstill"), tMs: s[s.length - 1].tMs });
   }
   if (startMs == null || endMs == null || !(endMs > startMs)) return { range: null, markers: [] };
   const range = { startMs, endMs };

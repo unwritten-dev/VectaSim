@@ -1,0 +1,102 @@
+/* Logbuch → Jahr: Jahresrückblick (review/YearReview.tsx). Theme tokens only. */
+
+.review-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-4);
+}
+/* „Zeitraum“ / „Format“: a small label in front of each switch, so the two groups do not read as one bar */
+.review-group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.review-group-label {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+/* both export buttons stay together and sit on the right, also when the bar wraps */
+.review-actions {
+  display: flex;
+  gap: var(--sp-2);
+  margin-left: auto;
+}
+.review-year {
+  font-weight: 600;
+  color: var(--text);
+}
+/* the active segment visible in every theme (light themes barely tint --accent-soft) */
+.review-bar .segmented button.active:not([class*="maplibregl"]) {
+  color: var(--accent);
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.review-note {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.review-note p {
+  margin: 0;
+  line-height: 1.5;
+}
+.review-hints {
+  margin: 0;
+  padding-left: 1.1em;
+  line-height: 1.5;
+}
+.review-note strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.review-grid {
+  display: grid;
+  gap: var(--sp-3);
+  align-items: start;
+}
+.review-portrait {
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+.review-landscape {
+  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+}
+
+.review-card {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.review-card-img {
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  background: var(--bg);
+  line-height: 0;
+}
+.review-card-img svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.review-card-empty .review-card-img {
+  opacity: 0.55;
+}
+.review-card figcaption {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-2);
+}
+.review-card-title {
+  font-weight: 600;
+  color: var(--text);
+}
+.review-card figcaption .spacer {
+  flex-basis: 100%;
+  height: 0;
+}

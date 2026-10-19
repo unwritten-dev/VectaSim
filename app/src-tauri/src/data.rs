@@ -3,6 +3,7 @@
 //! other logbooks; plus the start-up error dialog of the store and the check of every path the
 //! UI hands in for writing.
 
+use crate::lang::Lang;
 use crate::manager::ProviderManager;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
@@ -24,8 +25,9 @@ pub const DB_FILE: &str = "vectasim.db";
 const AUTO_BACKUP_FIRST_CHECK: std::time::Duration = std::time::Duration::from_secs(20);
 const AUTO_BACKUP_RECHECK: std::time::Duration = std::time::Duration::from_secs(3600);
 
-fn err(e: impl std::fmt::Display) -> String {
-    e.to_string()
+/// Error text for the UI in the backend language (store errors localized, see `lang::ui_error`).
+fn err(e: impl std::fmt::Display + 'static) -> String {
+    crate::lang::ui_error(e)
 }
 
 /// `%APPDATA%\io.vectasim.app\vectasim.db`
@@ -116,11 +118,11 @@ pub async fn set_backup_dir(path: Option<String>, app: AppHandle, store: State<'
         if let Some(p) = &path {
             let dir = Path::new(p);
             if !dir.is_absolute() {
-                return Err(format!("Bitte einen vollständigen Pfad wählen: {p}"));
+                return Err(trf!("Bitte einen vollständigen Pfad wählen: {p}", "Please choose a full path: {p}"));
             }
             std::fs::create_dir_all(dir).map_err(|e| format!("{p}: {e}"))?;
             let probe = dir.join(".vectasim-write-test");
-            std::fs::write(&probe, b"ok").map_err(|e| format!("Ordner nicht beschreibbar: {p} ({e})"))?;
+            std::fs::write(&probe, b"ok").map_err(|e| trf!("Ordner nicht beschreibbar: {p} ({e})", "Folder not writable: {p} ({e})"))?;
             let _ = std::fs::remove_file(probe);
         }
         store.set_setting(SETTING_BACKUP_DIR, path.as_deref().unwrap_or("")).map_err(err)?;
@@ -150,7 +152,10 @@ fn make_backup(app: &AppHandle, store: &Store, kind: BackupKind) -> Result<Backu
         .map_err(err)?
         .into_iter()
         .find(|b| Path::new(&b.path) == path)
-        .ok_or_else(|| format!("Sicherung geschrieben, aber nicht gefunden: {}", path.display()))
+        .ok_or_else(|| {
+            let p = path.display();
+            trf!("Sicherung geschrieben, aber nicht gefunden: {p}", "Backup written but not found: {p}")
+        })
 }
 
 /// Restore from a backup: check it, save the current logbook, stage it and restart.
@@ -158,7 +163,11 @@ fn make_backup(app: &AppHandle, store: &Store, kind: BackupKind) -> Result<Backu
 #[tauri::command]
 pub async fn restore_backup(path: String, app: AppHandle, store: State<'_, Store>) -> Result<String, String> {
     if flight_running(&app) {
-        return Err("Während einer Aufzeichnung kann keine Sicherung wiederhergestellt werden. Bitte nach dem Flug.".into());
+        return Err(crate::lang::tr(
+            "Während einer Aufzeichnung kann keine Sicherung wiederhergestellt werden. Bitte nach dem Flug.",
+            "A backup cannot be restored during a recording. Please do it after the flight.",
+        )
+        .into());
     }
     let store = store.inner().clone();
     let app2 = app.clone();
@@ -234,7 +243,7 @@ pub struct WipeResult {
 #[tauri::command]
 pub async fn delete_all_data(app: AppHandle, store: State<'_, Store>) -> Result<WipeResult, String> {
     if flight_running(&app) {
-        return Err("Während einer Aufzeichnung kann das Logbuch nicht gelöscht werden.".into());
+        return Err(crate::lang::tr("Während einer Aufzeichnung kann das Logbuch nicht gelöscht werden.", "The logbook cannot be deleted during a recording.").into());
     }
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -289,28 +298,32 @@ pub fn forbidden_roots() -> Vec<PathBuf> {
 /// one of `extensions` (case-insensitive), (d) not inside one of `forbidden`. Anything else is
 /// refused with „Pfad nicht erlaubt“, so a compromised webview cannot write anywhere it likes.
 pub fn check_path(raw: &str, extensions: &[&str], forbidden: &[PathBuf]) -> Result<PathBuf, String> {
-    let deny = |why: &str| Err(format!("Pfad nicht erlaubt: {} ({why})", raw.trim()));
+    let deny = |why: &str| {
+        let p = raw.trim();
+        Err(trf!("Pfad nicht erlaubt: {p} ({why})", "Path not allowed: {p} ({why})"))
+    };
+    let tr = crate::lang::tr;
     let raw = raw.trim();
     if raw.is_empty() {
-        return deny("leer");
+        return deny(tr("leer", "empty"));
     }
     let p = PathBuf::from(raw);
     if !p.is_absolute() {
-        return deny("kein vollständiger Pfad");
+        return deny(tr("kein vollständiger Pfad", "not a full path"));
     }
     if p.components().any(|c| matches!(c, Component::ParentDir)) || raw.split(['\\', '/']).any(|part| part == "..") {
-        return deny("enthält ..");
+        return deny(tr("enthält ..", "contains .."));
     }
     let ext = p.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).unwrap_or_default();
     if !extensions.contains(&ext.as_str()) {
         let list = extensions.iter().map(|e| format!(".{e}")).collect::<Vec<_>>().join(", ");
-        return deny(&format!("erwartet {list}"));
+        return deny(&trf!("erwartet {list}", "expected {list}"));
     }
     if p.file_stem().is_none_or(|s| s.to_string_lossy().trim().is_empty()) {
-        return deny("kein Dateiname");
+        return deny(tr("kein Dateiname", "no file name"));
     }
     if forbidden.iter().any(|root| is_under(&p, root)) {
-        return deny("System- oder Programmordner");
+        return deny(tr("System- oder Programmordner", "system or program folder"));
     }
     Ok(p)
 }
@@ -333,7 +346,7 @@ fn images_dir(app: &AppHandle) -> Result<PathBuf, String> {
 pub async fn export_bundle(path: String, include_deleted: Option<bool>, app: AppHandle, store: State<'_, Store>) -> Result<ExportReport, String> {
     let target = allowed_target(&path, BUNDLE_EXTENSIONS)?;
     let store = store.inner().clone();
-    let opts = ExportOptions { include_deleted: include_deleted.unwrap_or(false), include_demo: false, app_version: app.package_info().version.to_string() };
+    let opts = ExportOptions { include_deleted: include_deleted.unwrap_or(false), include_demo: false, app_version: app.package_info().version.to_string(), lang: crate::lang::current() };
     tauri::async_runtime::spawn_blocking(move || {
         let started = std::time::Instant::now();
         let r = store.export_bundle(&target, &opts).map_err(err)?;
@@ -370,14 +383,18 @@ pub async fn import_bundle(path: String, mode: Option<String>, app: AppHandle, s
     let mode = match mode.as_deref().unwrap_or("merge") {
         "merge" => ImportMode::Merge,
         "replace" => ImportMode::Replace,
-        other => return Err(format!("unbekannter Importmodus: {other}")),
+        other => return Err(trf!("unbekannter Importmodus: {other}", "unknown import mode: {other}")),
     };
     if mode == ImportMode::Replace && flight_running(&app) {
-        return Err("Während einer Aufzeichnung kann das Logbuch nicht ersetzt werden. Bitte nach dem Flug – oder „Zusammenführen“ wählen.".into());
+        return Err(crate::lang::tr(
+            "Während einer Aufzeichnung kann das Logbuch nicht ersetzt werden. Bitte nach dem Flug – oder „Zusammenführen“ wählen.",
+            "The logbook cannot be replaced during a recording. Please do it after the flight – or choose “Merge”.",
+        )
+        .into());
     }
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let opts = ImportOptions { mode, images_dir: Some(images_dir(&app)?), backup_dir: Some(backup_dir(&app, &store)?) };
+        let opts = ImportOptions { mode, images_dir: Some(images_dir(&app)?), backup_dir: Some(backup_dir(&app, &store)?), lang: crate::lang::current() };
         let started = std::time::Instant::now();
         let r = store.import_bundle(&src, &opts).map_err(err)?;
         log::info!(
@@ -411,7 +428,8 @@ fn read_csv_file(raw: &str) -> Result<(Vec<u8>, String), String> {
     let src = check_path(raw, CSV_EXTENSIONS, &[])?;
     let shown = src.display().to_string();
     let file = std::fs::File::open(&src).map_err(|e| format!("{shown}: {e}"))?;
-    let too_big = || format!("Datei zu groß: höchstens {} MB ({shown})", CSV_MAX_BYTES / (1024 * 1024));
+    let max_mb = CSV_MAX_BYTES / (1024 * 1024);
+    let too_big = || trf!("Datei zu groß: höchstens {max_mb} MB ({shown})", "File too large: at most {max_mb} MB ({shown})");
     if file.metadata().map_err(|e| format!("{shown}: {e}"))?.len() > CSV_MAX_BYTES {
         return Err(too_big());
     }
@@ -433,7 +451,7 @@ fn coords_of(index: &AirportIndex) -> impl Fn(&str) -> Option<(f64, f64)> + '_ {
 pub async fn csv_sniff(path: String) -> Result<CsvProfile, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let (bytes, stem) = read_csv_file(&path)?;
-        Ok(csvimport::sniff_named(&bytes, Some(&stem)))
+        Ok(csvimport::sniff_named(&bytes, Some(&stem), crate::lang::current()))
     })
     .await
     .map_err(err)?
@@ -444,10 +462,11 @@ pub async fn csv_sniff(path: String) -> Result<CsvProfile, String> {
 pub async fn csv_preview(
     path: String,
     mapping: ColumnMapping,
-    options: CsvImportOptions,
+    mut options: CsvImportOptions,
     store: State<'_, Store>,
     airports: State<'_, Arc<AirportIndex>>,
 ) -> Result<CsvPreview, String> {
+    options.lang = crate::lang::current();
     let (store, airports) = (store.inner().clone(), airports.inner().clone());
     tauri::async_runtime::spawn_blocking(move || {
         let (bytes, _) = read_csv_file(&path)?;
@@ -462,11 +481,12 @@ pub async fn csv_preview(
 pub async fn csv_import(
     path: String,
     mapping: ColumnMapping,
-    options: CsvImportOptions,
+    mut options: CsvImportOptions,
     app: AppHandle,
     store: State<'_, Store>,
     airports: State<'_, Arc<AirportIndex>>,
 ) -> Result<CsvImportReport, String> {
+    options.lang = crate::lang::current();
     let (store, airports) = (store.inner().clone(), airports.inner().clone());
     tauri::async_runtime::spawn_blocking(move || {
         let (bytes, _) = read_csv_file(&path)?;
@@ -532,8 +552,11 @@ pub fn start_auto_backup(app: AppHandle, store: Store) {
 }
 
 /// What the start-up dialog says when the logbook cannot be opened.
-pub fn store_error_text(e: &StoreError, db: &Path, backups: &Path) -> String {
+pub fn store_error_text(e: &StoreError, db: &Path, backups: &Path, lang: Lang) -> String {
     let db = db.display();
+    if lang == Lang::En {
+        return store_error_text_en(e, &db.to_string(), backups);
+    }
     match e {
         StoreError::NewerSchema { found, supported } => format!(
             "Dein Logbuch stammt von einer neueren VectaSim-Version (Datenformat v{found}, diese Version kennt bis v{supported}).\n\n\
@@ -546,12 +569,36 @@ pub fn store_error_text(e: &StoreError, db: &Path, backups: &Path) -> String {
              Bitte melde den Fehler mit der Protokolldatei an den Entwickler.",
             backup.as_ref().map(|b| b.display().to_string()).unwrap_or_else(|| "keine".into())
         ),
-        StoreError::Backup(msg) => format!(
+        StoreError::Backup { .. } => format!(
             "Vor der Umstellung des Logbuchs ließ sich keine Sicherung anlegen. VectaSim verändert die Datenbank deshalb nicht.\n\n\
-             Prüfe den freien Speicherplatz und den Sicherungsordner.\n\nDatenbank: {db}\nSicherungsordner: {}\n\nFehler: {msg}",
-            backups.display()
+             Prüfe den freien Speicherplatz und den Sicherungsordner.\n\nDatenbank: {db}\nSicherungsordner: {}\n\nFehler: {}",
+            backups.display(),
+            e.message(lang)
         ),
-        other => format!("VectaSim kann das Logbuch nicht öffnen.\n\nDatenbank: {db}\n\nFehler: {other}"),
+        other => format!("VectaSim kann das Logbuch nicht öffnen.\n\nDatenbank: {db}\n\nFehler: {}", other.message(lang)),
+    }
+}
+
+fn store_error_text_en(e: &StoreError, db: &str, backups: &Path) -> String {
+    match e {
+        StoreError::NewerSchema { found, supported } => format!(
+            "Your logbook comes from a newer VectaSim version (data format v{found}, this version knows up to v{supported}).\n\n\
+             Install the current VectaSim version. The logbook was not changed.\n\nDatabase: {db}"
+        ),
+        StoreError::Migration { from, to, message, backup } => format!(
+            "The logbook could not be converted to the new data format (step v{from} → v{to}). \
+             The conversion was rolled back – your data is unchanged.\n\n\
+             Database: {db}\nBackup before the conversion: {}\n\nError: {message}\n\n\
+             Please report the error to the developer together with the log file.",
+            backup.as_ref().map(|b| b.display().to_string()).unwrap_or_else(|| "none".into())
+        ),
+        StoreError::Backup { .. } => format!(
+            "No backup could be written before converting the logbook, so VectaSim leaves the database unchanged.\n\n\
+             Check the free disk space and the backup folder.\n\nDatabase: {db}\nBackup folder: {}\n\nError: {}",
+            backups.display(),
+            e.message(Lang::En)
+        ),
+        other => format!("VectaSim cannot open the logbook.\n\nDatabase: {db}\n\nError: {}", other.message(Lang::En)),
     }
 }
 
@@ -562,7 +609,8 @@ pub fn report_store_error(app: &AppHandle, e: &StoreError, db: &Path, backups: &
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.hide();
     }
-    let text = store_error_text(e, db, backups);
+    let lang = crate::lang::current();
+    let text = store_error_text(e, db, backups, lang);
     let reveal = e.backup_path().map(Path::to_path_buf).unwrap_or_else(|| db.to_path_buf());
     let app = app.clone();
     // not on the main thread: the dialog needs the event loop, which runs once setup returns
@@ -570,9 +618,9 @@ pub fn report_store_error(app: &AppHandle, e: &StoreError, db: &Path, backups: &
         let open_folder = app
             .dialog()
             .message(text)
-            .title("VectaSim – Logbuch nicht geöffnet")
+            .title(lang.tr("VectaSim – Logbuch nicht geöffnet", "VectaSim – logbook not opened"))
             .kind(MessageDialogKind::Error)
-            .buttons(MessageDialogButtons::OkCancelCustom("Ordner öffnen".into(), "Beenden".into()))
+            .buttons(MessageDialogButtons::OkCancelCustom(lang.tr("Ordner öffnen", "Open folder").into(), lang.tr("Beenden", "Quit").into()))
             .blocking_show();
         if open_folder {
             let _ = app.opener().reveal_item_in_dir(&reveal);
@@ -640,12 +688,17 @@ mod tests {
     fn error_texts_name_database_and_backup() {
         let db = Path::new(r"C:\Users\p\AppData\Roaming\io.vectasim.app\vectasim.db");
         let dir = Path::new(r"C:\b");
-        let t = store_error_text(&StoreError::NewerSchema { found: 11, supported: 10 }, db, dir);
+        let t = store_error_text(&StoreError::NewerSchema { found: 11, supported: 10 }, db, dir, Lang::De);
         assert!(t.contains("v11") && t.contains("v10") && t.contains("vectasim.db") && t.contains("nicht verändert"), "{t}");
         let e = StoreError::Migration { from: 9, to: 10, message: "duplicate column".into(), backup: Some(PathBuf::from(r"C:\b\vectasim-pre-v9-x.db")) };
-        let t = store_error_text(&e, db, dir);
+        let t = store_error_text(&e, db, dir, Lang::De);
         assert!(t.contains("v9 → v10") && t.contains("vectasim-pre-v9-x.db") && t.contains("duplicate column"), "{t}");
-        let t = store_error_text(&StoreError::Backup("disk full".into()), db, dir);
-        assert!(t.contains(r"C:\b") && t.contains("disk full"), "{t}");
+        let e = StoreError::Backup { step: vectasim_store::BackupStep::Copy, dir: PathBuf::from(r"C:\b"), detail: "disk full".into() };
+        let t = store_error_text(&e, db, dir, Lang::De);
+        assert!(t.contains(r"C:\b") && t.contains("disk full") && t.contains("Kopie fehlgeschlagen"), "{t}");
+        let t = store_error_text(&e, db, dir, Lang::En);
+        assert!(t.starts_with("No backup could be written") && t.contains("copy failed") && t.contains("disk full"), "{t}");
+        let t = store_error_text(&StoreError::NewerSchema { found: 11, supported: 10 }, db, dir, Lang::En);
+        assert!(t.contains("newer VectaSim version") && t.contains("v11") && t.contains("vectasim.db"), "{t}");
     }
 }

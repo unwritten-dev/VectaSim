@@ -625,6 +625,13 @@ pub enum CriterionKind {
     Energy,
     /// A flap-handle change below the configuration gate (event, no value).
     FlapChange,
+    /// Flap handle index at a gate against the landing flaps (airframe setting, last handle
+    /// position or the touchdown's), index.
+    LandingFlaps,
+    /// Engine N1 (track v2) against the approach minimum, % – "thrust above idle" (FSF BN 7.1).
+    Thrust,
+    /// Deployed spoiler surface (track v2) in the final approach, % – "speedbrakes retracted" (FSF BN 7.1).
+    Spoilers,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

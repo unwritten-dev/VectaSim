@@ -253,6 +253,26 @@ export interface LandingDebriefData {
   metarObservedMs?: number | null;
   /** Threshold displacement of the matched runway end (database), m. */
   thresholdDisplacedM?: number | null;
+  /** Sim values of the final approach a track-v2 flight recorded; null for older flights. */
+  recorded?: RecordedApproachData | null;
+}
+
+/** `vectasim_store::RecordedApproachData`: last recorded values in the 3 min before the touchdown. */
+export interface RecordedApproachData {
+  tasKt: number | null;
+  windDirTrueDeg: number | null;
+  windKt: number | null;
+  /** ILS/automation bits were recorded at all. */
+  navFlagsRecorded: boolean;
+  /** Seen in any sample of the window. */
+  hasLocalizer: boolean;
+  hasGlideSlope: boolean;
+  glideSlopeValid: boolean;
+  autopilotSeen: boolean;
+  ilsGsAngleDeg: number | null;
+  ilsCourseDeg: number | null;
+  flapPositions: number | null;
+  designVs0Kt: number | null;
 }
 
 // ---- runways remembered per airport (user_runways, crates/vectasim-store/src/store.rs) ----

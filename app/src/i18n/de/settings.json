@@ -1,0 +1,522 @@
+{
+  "settings": {
+    "integrations": {
+      "title": "Integrationen",
+      "description": "Discord-Status, Windows-Benachrichtigungen und Infobereich (Tray).",
+      "discord": {
+        "enable": "Flug als Discord-Status zeigen (Rich Presence)",
+        "help": "Zeigt Route, Flugzeugtyp, Phase und Flugzeit, z. B. „EDDF → EGLL · A20N“ und „Reiseflug FL360 · noch 420 nm“. Im Streamer-Modus ohne Rufzeichen. Höchstens alle 15 s ein Update; nur der lokal laufende Discord-Client wird angesprochen.",
+        "expert": "Eigene Discord-Anwendung (Experten)",
+        "appId": "App-ID",
+        "appIdPlaceholder": "leer = VectaSim-Standard",
+        "appIdHelp": "leer = VectaSim-Anwendung (Standard, keine Einrichtung nötig) · sonst die Application ID einer eigenen Anwendung aus dem Discord Developer Portal mit Bild-Asset „vectasim“",
+        "appIdInvalid": "Die Discord-App-ID ist eine Zahl mit 17–20 Stellen (Developer Portal → Applications → Application ID).",
+        "off": "Aus · Discord zeigt nichts von VectaSim.",
+        "showing": "Verbunden · Discord zeigt: {showing}",
+        "connected": "Verbunden · Status wird gleich gesetzt",
+        "notRunning": "Discord nicht gestartet · VectaSim versucht es alle 30 s erneut.",
+        "noAppId": "Keine gültige Discord-App-ID · die eingetragene eigene App-ID ist ungültig. Feld leeren, um den VectaSim-Standard zu nutzen.",
+        "noDefaultAppId": "Discord-Status nicht verfügbar · diesem Build fehlt die VectaSim-Standard-App-ID. Eine eigene App-ID unter „Eigene Discord-Anwendung“ funktioniert trotzdem.",
+        "connecting": "Verbinde mit Discord …"
+      },
+      "notify": {
+        "title": "Benachrichtigungen",
+        "enable": "Windows-Benachrichtigungen, wenn VectaSim nicht im Vordergrund ist",
+        "kinds": "Benachrichtigen bei",
+        "landing": "Landung (Landerate, g-Last, Bounces)",
+        "saved": "Flug gespeichert",
+        "connection": "Verbindung zum Simulator verloren / wieder da",
+        "update": "Update verfügbar"
+      },
+      "test": {
+        "send": "Test senden",
+        "help": "Ohne Kennzeichen und Rufzeichen. Ein Klick auf die Benachrichtigung holt VectaSim nach vorn.",
+        "sent": "Testbenachrichtigung gesendet",
+        "sentHint": "Sie erscheint unten rechts. Siehst du nichts, prüfe Windows → Einstellungen → System → Benachrichtigungen (auch „Nicht stören“).",
+        "failed": "Keine Benachrichtigung möglich",
+        "failedHint": "Windows hat die Benachrichtigung abgelehnt – Details im Protokoll."
+      },
+      "tray": {
+        "title": "Infobereich (Tray)",
+        "enable": "Symbol im Infobereich · Minimieren versteckt das Fenster dorthin",
+        "help": "Doppelklick auf das Symbol öffnet VectaSim wieder; das Menü zeigt den Aufzeichnungsstatus, schaltet den Debug-Modus und beendet die App. Die Aufzeichnung läuft im Infobereich unverändert weiter, Beenden fragt während eines Flugs nach.",
+        "active": "Symbol im Infobereich aktiv",
+        "inactive": "Kein Symbol im Infobereich"
+      }
+    },
+    "notSaved": "Einstellung nicht gespeichert",
+    "server": {
+      "title": "Overlay & Schnittstelle",
+      "description": "Lokaler Server für OBS-Browserquellen, ein Tablet oder Handy im WLAN und eine JSON-Schnittstelle (Live-Daten zum Abrufen) für virtuelle Airlines (VAs) und eigene Tools – nur lesend, standardmäßig aus.",
+      "enable": "Lokalen Server einschalten",
+      "port": {
+        "label": "Port",
+        "detail": "Standard {port} · erlaubt {min}–{max} · speichert beim Verlassen des Felds oder mit Enter, offene Overlays verbinden sich neu",
+        "notNumber": "Der Port ist eine Zahl.",
+        "range": "Port {min}–{max}."
+      },
+      "lan": "Im Netzwerk erreichbar (mit Token)",
+      "optionsOff": "Server ist aus – Port und LAN-Zugriff gelten, sobald du ihn einschaltest.",
+      "lanHelp": "Für ein Tablet, ein Handy oder einen zweiten PC im selben Netz. Andere Geräte brauchen das Token in der URL; auf diesem PC geht es ohne. Windows fragt beim ersten Mal, ob VectaSim im privaten Netzwerk erreichbar sein darf. Nur in vertrauenswürdigen Netzen einschalten.",
+      "token": "Token",
+      "regenerate": "Neu erzeugen",
+      "noLanAddress": "Keine Netzwerkadresse gefunden – ist der PC mit einem Netz verbunden?",
+      "addresses": "Adressen",
+      "obs": "OBS {size}",
+      "obsSize": "Breite {width} · Höhe {height}",
+      "lanUrlTitle": "für andere Geräte im Netzwerk",
+      "obsHelp": "Zusätze an der URL: {scale} vergrößert die Schrift auf 150 %, {preview} zeigt Beispieldaten zum Platzieren. Im Streamer-Modus sind Kennzeichen, Rufzeichen und Airline auch hier maskiert.",
+      "copyFailed": "Kopieren nicht möglich",
+      "copied": {
+        "token": "Token kopiert",
+        "url": "{name}-URL kopiert",
+        "lanUrl": "{name}-URL fürs Netzwerk kopiert"
+      },
+      "clientsNone": "kein Overlay verbunden",
+      "clients": {
+        "one": "{count} Overlay verbunden",
+        "other": "{count} Overlays verbunden"
+      },
+      "status": {
+        "reading": "Status wird gelesen …",
+        "off": "Aus · kein Port offen.",
+        "starting": "Startet …",
+        "lan": "im Netzwerk erreichbar (mit Token)",
+        "local": "nur auf diesem PC",
+        "running": "Läuft · Port {port} · {where} · {clients}",
+        "runningSince": "Läuft seit {since} ({duration}) · Port {port} · {where} · {clients}"
+      },
+      "overlay": {
+        "hud": {
+          "label": "HUD",
+          "hint": "Phase, Höhe, Speed, V/S, Kurs, Rest, ETA"
+        },
+        "landing": {
+          "label": "Landung",
+          "hint": "20 s nach dem Aufsetzen: Landerate, g, Bounces, Band"
+        },
+        "route": {
+          "label": "Route",
+          "hint": "Route, Blockzeit, Flugzeug, Phasenleiste"
+        },
+        "index": {
+          "label": "Startseite",
+          "hint": "alle Links, API-Übersicht, OBS-Hinweise"
+        },
+        "api": {
+          "label": "JSON-Status",
+          "hint": "Schnittstelle für VAs und eigene Tools"
+        }
+      },
+      "copiedButton": "Kopiert ✓",
+      "copyAria": {
+        "token": "Token kopieren",
+        "url": "{name}-URL kopieren",
+        "lanUrl": "{name}-URL fürs Netzwerk kopieren"
+      },
+      "openAria": "{name} im Browser öffnen",
+      "obsSteps": {
+        "title": "So kommt ein Overlay in OBS:",
+        "source": "In OBS: Quellen → + → Browser.",
+        "url": "Die URL von oben kopieren und einfügen.",
+        "size": "Breite und Höhe wie angegeben eintragen (HUD 1920 × 120).",
+        "done": "Fertig – der Hintergrund ist transparent."
+      }
+    },
+    "simconnect": {
+      "title": "SimConnect einrichten",
+      "intro": "VectaSim braucht die SimConnect-Bibliothek von Microsoft. Ein Klick lädt das offizielle MSFS-SDK ({version}, {size}) direkt von Microsoft und behält nur die SimConnect.dll – passt zu MSFS 2020 und 2024.",
+      "installerHint": "Der Installer bietet diesen Download schon beim ersten Installieren an; wer ihn dort übersprungen hat, holt ihn hier nach.",
+      "eula": "Mit dem Download gelten die {link}.",
+      "eulaLink": "Lizenzbedingungen des MSFS SDK",
+      "progressLabel": "Download-Fortschritt",
+      "failed": "Download fehlgeschlagen.",
+      "downloading": "Wird heruntergeladen …",
+      "download": "SimConnect herunterladen",
+      "installed": "SimConnect eingerichtet – VectaSim verbindet sich automatisch",
+      "installedLater": "Die neue Datei gilt ab dem nächsten Verbindungsaufbau.",
+      "progress": {
+        "start": "Starte Download …",
+        "downloadOf": "Lade … {received} von {total}",
+        "downloadBytes": "Lade … {received}",
+        "download": "Lade …",
+        "verify": "Prüfe …",
+        "extract": "Entpacke …",
+        "done": "Fertig"
+      },
+      "error": {
+        "running": "Der Download läuft bereits – bitte kurz warten.",
+        "network": "Microsoft ist nicht erreichbar. Prüfe deine Internetverbindung und versuche es erneut.",
+        "corrupt": "Die Datei kam unvollständig oder verändert an. Versuche es erneut."
+      }
+    },
+    "simulator": {
+      "label": "Simulator",
+      "modeAuto": "Automatisch (MSFS zuerst, dann X-Plane)",
+      "modeTitle": "Mit welchem Simulator sich VectaSim verbindet",
+      "hostMissing": "Host fehlt",
+      "hostInvalid": "Nur Hostname oder IP, ohne Leerzeichen und Pfad",
+      "portRange": "Port {min}–{max}",
+      "savedRestart": "✓ gespeichert · verbinde neu …",
+      "savedLater": "✓ gespeichert · gilt ab dem nächsten Verbindungsaufbau",
+      "default": "Standard",
+      "xplaneHelp": "X-Plane 12.1.1 oder neuer mit eingeschalteter Web API (Standard-Port 8086). X-Plane lauscht heute nur lokal auf diesem PC; ein anderer Host funktioniert erst, wenn X-Plane das zulässt. Adresse: {endpoint}. Speichert beim Verlassen des Felds oder mit Enter.",
+      "flightActive": "Ein Flug läuft – die Änderung gilt erst nach dem Flug.",
+      "envOverride": "Für diesen Start festgelegt durch {vars}.",
+      "xplaneFold": "X-Plane-Adresse anpassen … ({endpoint})",
+      "connectTo": "Verbinden mit",
+      "hostTitle": "Rechner, auf dem X-Plane läuft – heute nur „localhost“ (dieser PC)",
+      "portTitle": "Port der X-Plane Web API (Standard 8086). Einen anderen Port stellst du in X-Plane mit dem Startparameter --web_server_port=… ein."
+    },
+    "change": "Ändern …",
+    "open": "Öffnen",
+    "openFolder": "Ordner öffnen",
+    "reset": "Zurücksetzen",
+    "folder": "Ordner",
+    "savedMark": "✓ gespeichert",
+    "about": "VectaSim {version} · Dein Logbuch liegt nur auf diesem PC – ohne Konto, ohne Cloud. Daten: Karte © OpenStreetMap-Mitwirkende, OpenFreeMap · Flughäfen OurAirports (Public Domain) · Wetter NOAA aviationweather.gov (Ersatz VATSIM) · Online-Verkehr VATSIM · IVAO · Flugpläne SimBrief (Navigraph) · Flugzeugfotos Planespotters.net ·",
+    "thirdParty": "Lizenzen Dritter",
+    "sim": {
+      "description": "VectaSim erkennt MSFS 2020/2024 und X-Plane 12 automatisch, sobald der Simulator läuft. Die Aufzeichnung startet beim Losrollen – du musst nichts starten.",
+      "demoTitle": "Ein simulierter Flug, um VectaSim ohne Simulator kennenzulernen",
+      "demoHint": "ohne Simulator ausprobieren",
+      "dll": {
+        "auto": "automatisch · {path}",
+        "autoNotFound": "automatisch · nicht gefunden",
+        "elsewhere": "Liegt die SimConnect.dll schon woanders (z. B. aus einer SDK-Installation), wähle sie mit „Datei wählen …“ aus.",
+        "pickTitle": "SimConnect.dll wählen",
+        "savedRestart": "✓ gespeichert · Verbindung wird neu aufgebaut",
+        "savedLater": "✓ gespeichert · gilt ab dem nächsten Verbindungsaufbau"
+      }
+    },
+    "planning": {
+      "title": "Flugplanung",
+      "description": "Mit deiner SimBrief-Pilot-ID lädt VectaSim deinen letzten Flugplan und vergleicht Plan und Ist.",
+      "pilotId": "SimBrief-Pilot-ID",
+      "hidden": "Im Streamer-Modus verdeckt",
+      "placeholder": "Pilot-ID (Zahl) oder Benutzername",
+      "auto": "Letzten Flugplan beim Start und beim Verbinden automatisch laden",
+      "loaded": "Flugplan geladen: {callsign} {dep} → {arr}",
+      "noPlan": "Pilot-ID hinterlegt · noch kein Flugplan geladen (Karte → Seitenpanel → Dispatch)",
+      "noId": "Keine Pilot-ID hinterlegt. Du findest sie auf simbrief.com unter Account."
+    },
+    "updates": {
+      "title": "Updates",
+      "idle": "Version {version} · noch nicht geprüft",
+      "checking": "Version {version} · suche nach Updates …",
+      "current": "Version {version} · aktuell",
+      "currentChecked": "Version {version} · aktuell (geprüft {time})",
+      "available": "Version {version} verfügbar (installiert: {installed})",
+      "downloading": "Lade Version {version} … {percent} %",
+      "ready": "Installiert – Neustart läuft",
+      "error": "Version {version} · Prüfung fehlgeschlagen: {hint}",
+      "recording": "Aufzeichnung läuft – die Installation startet VectaSim neu. Installiere das Update nach dem Flug.",
+      "install": "Version {version} installieren und neu starten",
+      "check": "Nach Updates suchen"
+    },
+    "display": {
+      "title": "Anzeige",
+      "description": "Sprache, Erscheinungsbild, Zeitbasis, Gewichtseinheit, Streamer-Modus, Landekarte, Flugzeugfotos und Online-Verkehr.",
+      "language": {
+        "label": "Sprache",
+        "system": "System",
+        "de": "Deutsch",
+        "en": "English",
+        "hint": "System = Windows-Anzeigesprache · gilt sofort"
+      },
+      "times": "Uhrzeiten",
+      "now": "jetzt {time}",
+      "weights": "Gewichte",
+      "weightsHint": "Treibstoff und Gewichte · Höhen in ft, Geschwindigkeiten in kt",
+      "privacy": {
+        "label": "Streamer-Modus",
+        "key": "Strg+Umschalt+P",
+        "help": "Blendet Kennzeichen (D-••••), Rufzeichen und Flugnummer, Airline, SimBrief-ID und deinen Windows-Benutzernamen in Pfaden aus – in der ganzen Oberfläche, auf der Landekarte und im Diagnosepaket. Gespeichert bleibt alles wie es ist; Foto-Credits bleiben sichtbar."
+      },
+      "photos": {
+        "label": "Flugzeugfotos von Planespotters.net laden",
+        "help": "Gesendet wird nur die Registrierung (z. B. D-AINA), höchstens eine Anfrage pro Sekunde; Fotos werden 7 Tage zwischengespeichert und zeigen immer Fotograf und Quelle. Bei fiktiven Registrierungen erscheint eine Typ-Silhouette."
+      },
+      "globe": {
+        "label": "Weltkarte als Globus",
+        "help": "Gilt für Karte, Track-Karte und Länder – dieselbe Wahl wie der Knopf „Globus“ auf den Karten. Beim Hineinzoomen wird der Globus von selbst zur flachen Karte."
+      },
+      "online": {
+        "hint": "wie „Verkehr“ auf der Karte · ruft den öffentlichen Feed des Netzes ab",
+        "notOn": "{name} nicht eingeschaltet",
+        "notOff": "{name} nicht ausgeschaltet"
+      }
+    },
+    "theme": {
+      "label": "Erscheinungsbild",
+      "day": "Tagesthema",
+      "hint": "Papierkarte und Arktis Studio sind helle Tagesthemen – im abgedunkelten Sim-Raum blenden sie. Das eigene Flugzeug bleibt in jedem Thema gelb."
+    },
+    "zoom": {
+      "label": "Größe",
+      "out": "Verkleinern (Strg+Minus)",
+      "in": "Vergrößern (Strg+Plus)",
+      "reset": "Zurück auf 100 % (Strg+0)",
+      "hint": "Strg+Plus/Minus, Strg+0 · gilt nur auf diesem PC"
+    },
+    "card": {
+      "pickTitle": "Ordner für Landekarten wählen",
+      "autosave": "Landekarte nach jeder Landung automatisch als PNG speichern",
+      "hideReg": "Landekarte ohne Kennzeichen (D-••••)",
+      "byPrivacy": "an durch den Streamer-Modus"
+    },
+    "keyboard": {
+      "title": "Tastatur",
+      "description": "Alle Tastenkürzel von VectaSim.",
+      "caption": "Tastenkürzel",
+      "debriefHint": "Solange die Landeauswertung offen ist, wirken nur Esc, Alt+T und der Zoom – Ansicht und Logbuch dahinter bleiben, wie sie sind.",
+      "keys": {
+        "views": "Strg+1 / 2 / 3 / 4",
+        "panel": "Strg+.",
+        "search": "Strg+F",
+        "list": "↑ / ↓, Bild↑ / Bild↓, Pos1 / Ende",
+        "enter": "Eingabetaste",
+        "delete": "Entf",
+        "arrows": "← / →, Pos1 / Ende",
+        "esc": "Esc",
+        "toast": "Alt+T",
+        "zoom": "Strg+Plus / Minus / 0",
+        "privacy": "Strg+Umschalt+P"
+      },
+      "what": {
+        "views": "Karte, Logbuch, Länder, Einstellungen",
+        "panel": "Seitenpanel der Karte ein- und ausklappen",
+        "search": "Logbuch durchsuchen (Flüge)",
+        "list": "Im Logbuch durch die Flüge blättern; ↓ im Suchfeld springt in die Liste",
+        "enter": "Landeauswertung des gewählten Flugs öffnen",
+        "delete": "Gewählten Flug in den Papierkorb legen (mit Rückfrage)",
+        "arrows": "Tabs und Auswahlgruppen wechseln; im Streubild von Landung zu Landung",
+        "esc": "Schließt das Innerste zuerst: Herkunfts-Hinweis, dann Landeauswertung; im Suchfeld leert es die Suche",
+        "toast": "Zum neuesten Hinweis (Toast) springen; Esc schließt ihn und springt zurück",
+        "zoom": "Oberfläche vergrößern, verkleinern, zurück auf 100 %",
+        "privacy": "Streamer-Modus ein- und ausschalten (Kennzeichen, Rufzeichen, IDs und Pfade ausblenden)"
+      }
+    },
+    "diag": {
+      "title": "Diagnose",
+      "description": "Für den Support – hilft, wenn ein Flug nicht erkannt wird.",
+      "copyHeader": "VectaSim-Diagnose · {time}",
+      "clipboard": "Die Zwischenablage ist gerade nicht verfügbar.",
+      "copy": "Diagnose kopieren",
+      "copied": "✓ kopiert",
+      "openLogs": "Protokoll-Ordner öffnen",
+      "showLogbook": "Logbuch im Explorer zeigen",
+      "debug": {
+        "label": "Debug-Modus",
+        "badge": "Debug-Modus aktiv · Dump läuft",
+        "badgeTitle": "Ausführliches Protokoll, Roh-Dump und Live-Rohdaten sind an. Nach der Fehlersuche wieder ausschalten.",
+        "help": "Für die Fehlersuche: ausführliches Protokoll, Roh-Dump-Aufzeichnung und Live-Rohdaten mit einem Schalter. Bleibt bis zum Ausschalten an (auch nach einem Neustart); danach gelten wieder deine vorherigen Einstellungen. Fehler nachstellen, dann „Diagnosepaket erstellen“."
+      },
+      "package": {
+        "saveTitle": "Diagnosepaket speichern",
+        "zip": "ZIP-Archiv",
+        "failed": "Diagnosepaket nicht erstellt",
+        "saved": "Paket gespeichert – an den Entwickler schicken",
+        "files": {
+          "one": "{count} Datei",
+          "other": "{count} Dateien"
+        },
+        "create": "Diagnosepaket erstellen",
+        "creating": "Erstellt …",
+        "contents": "ZIP mit Protokollen, Einstellungen, System- und Logbuch-Statistik · mit Debug-Modus zusätzlich Roh-Dumps",
+        "contentsDebug": "ZIP mit Protokollen, Einstellungen, System- und Logbuch-Statistik, Roh-Dumps (max. 200 MB) und SimConnect-Infos"
+      },
+      "dump": {
+        "saved": "Dump gespeichert",
+        "notSaved": "Kein Dump gespeichert",
+        "record": "Roh-Dump aufzeichnen (pro Simulator-Sitzung eine Datei, etwa 5–10 MB pro Stunde)",
+        "byDebug": "an durch den Debug-Modus",
+        "help": "Zeichnet alle SimConnect-Rohdaten auf, damit Fehler ohne Simulator nachgestellt werden können. Unabhängig davon hält VectaSim die letzten 30 Minuten im Speicher – „Dump jetzt speichern“ schreibt sie in eine Datei.",
+        "now": "Dump jetzt speichern",
+        "openDir": "Dump-Ordner öffnen"
+      },
+      "replay": {
+        "pickTitle": "Roh-Dump für das Replay wählen",
+        "fileType": "VectaSim-Dump",
+        "description": "Spielt einen Roh-Dump ab – für die Fehlersuche am Entwicklungsrechner.",
+        "none": "keine gewählt",
+        "speed": "Geschwindigkeit",
+        "repeat": "Endlos wiederholen",
+        "restart": "Neu starten",
+        "start": "Replay starten"
+      },
+      "raw": {
+        "title": "Live-Rohdaten",
+        "description": "Jede Simulator-Variable (SimConnect oder X-Plane) roh und umgerechnet, Ereignisse, Engine-Zustand."
+      },
+      "logLevel": {
+        "info": "Normal",
+        "debug": "Ausführlich",
+        "trace": "Alles (große Dateien)",
+        "envTitle": "Festgelegt durch RUST_LOG={value}",
+        "debugTitle": "Der Debug-Modus schreibt ausführlich; nach dem Ausschalten gilt wieder diese Stufe",
+        "title": "Wie viel VectaSim ins Protokoll schreibt",
+        "env": "festgelegt durch RUST_LOG",
+        "debugHint": "Debug-Modus: ausführlich für VectaSim"
+      },
+      "dllSource": {
+        "override": "manuell gewählt",
+        "downloaded": "von VectaSim heruntergeladen (MSFS SDK)",
+        "exeDir": "neben vectasim.exe",
+        "sdk": "MSFS SDK",
+        "searchPath": "Windows-Suchpfad"
+      },
+      "state": {
+        "idle": "keine Verbindung",
+        "connecting": "verbindet",
+        "connected": "verbunden",
+        "disconnected": "getrennt",
+        "error": "Fehler"
+      },
+      "row": {
+        "status": "Status",
+        "simVersion": "Sim-Version",
+        "frames": "Datensätze",
+        "dllNotFound": "nicht gefunden – unter Simulator mit einem Klick herunterladen oder Datei wählen",
+        "dllChosen": "DLL (gewählt)",
+        "searched": "Durchsucht",
+        "logs": "Protokolle",
+        "dump": "Roh-Dump",
+        "dumpFile": "{file} ({size} unkomprimiert)",
+        "dumpOn": "an · {dir} (Datei beginnt mit der nächsten SimConnect-Sitzung)",
+        "logLevel": "Protokollstufe",
+        "logLevelDebug": "{level} · Debug-Modus (debug für vectasim_*)",
+        "appData": "App-Daten",
+        "appVersion": "App-Version",
+        "privacy": "an · Benutzername in Pfaden ausgeblendet",
+        "message": "Meldung"
+      }
+    },
+    "data": {
+      "title": "Daten",
+      "description": "Wo dein Logbuch liegt, wie es gesichert wird und wie du es zurückholst.",
+      "airframes": {
+        "one": "{count} Flugzeug",
+        "other": "{count} Flugzeuge"
+      },
+      "blocked": "Aufzeichnung läuft – Wiederherstellen und Löschen gehen nach dem Flug.",
+      "failed": {
+        "backup": "Sicherung fehlgeschlagen",
+        "restore": "Wiederherstellung fehlgeschlagen",
+        "export": "Export fehlgeschlagen",
+        "import": "Import fehlgeschlagen",
+        "emptyTrash": "Papierkorb leeren fehlgeschlagen",
+        "wipe": "Löschen fehlgeschlagen"
+      },
+      "backupKind": {
+        "regular": "Sicherung",
+        "preMigration": "vor Umstellung",
+        "preUpdate": "vor Update",
+        "preRestore": "vor Wiederherstellung",
+        "preWipe": "vor „Alle Daten löschen“",
+        "preImport": "vor Import (Ersetzen)"
+      },
+      "summary": {
+        "updated": {
+          "one": "{count} ergänzt",
+          "other": "{count} ergänzt"
+        },
+        "images": {
+          "one": "{count} Bild",
+          "other": "{count} Bilder"
+        }
+      },
+      "db": {
+        "title": "Datenbank",
+        "location": "Speicherort",
+        "reveal": "Im Explorer zeigen",
+        "sync": "Die Datenbank liegt in {service}. Sync-Dienste können eine geöffnete Datenbank beschädigen – leg nur die Sicherungen dorthin, nicht das Logbuch selbst."
+      },
+      "backup": {
+        "title": "Sicherungen",
+        "done": "Logbuch gesichert",
+        "pickDir": "Ordner für Sicherungen wählen",
+        "dirSync": "Der Ordner liegt in {service} – so hast du deine Sicherungen auch außerhalb dieses PCs.",
+        "tip": "Tipp: Wähle einen Ordner in OneDrive, Dropbox, Google Drive oder auf einem NAS – dann liegen deine Sicherungen auch außerhalb dieses PCs.",
+        "last": "Letzte Sicherung: {date} {time}",
+        "none": "Noch keine Sicherung",
+        "schedule": "automatisch täglich, vor Updates und vor jeder Umstellung des Datenformats; die letzten 7 Tage bleiben.",
+        "now": "Jetzt sichern",
+        "running": "Sichert …"
+      },
+      "restore": {
+        "pickTitle": "Sicherung zum Wiederherstellen wählen",
+        "fileType": "VectaSim-Logbuch",
+        "running": "Sicherung wird wiederhergestellt",
+        "restarting": "VectaSim startet jetzt neu.",
+        "fromFile": "Aus Datei wiederherstellen …",
+        "button": "Wiederherstellen",
+        "confirmLabel": "Wiederherstellen bestätigen",
+        "confirm": "Logbuch durch diese Sicherung ersetzen? Dein aktueller Stand wird vorher gesichert, dann startet VectaSim neu.",
+        "confirmButton": "Ersetzen und neu starten"
+      },
+      "export": {
+        "heading": "Gesamtexport",
+        "title": "Alles exportieren",
+        "fileType": "VectaSim-Export",
+        "flightsTrash": "{flights} (davon {trash} im Papierkorb)",
+        "done": "Exportiert · {flights}, {airframes}",
+        "bodyWarnings": "{path} · {size} · {warnings} im Protokoll",
+        "button": "Alles exportieren …",
+        "running": "Exportiert …",
+        "withTrash": "Papierkorb einschließen",
+        "help": "Zum Umzug auf einen anderen PC oder zum Zusammenführen zweier PCs. Die Datei (.vectasim) enthält alle Flüge mit Tracks, die Flotte und eigene Flugzeugbilder."
+      },
+      "import": {
+        "pickTitle": "VectaSim-Export zum Importieren wählen",
+        "unreadable": "Datei nicht lesbar",
+        "replaced": "Logbuch ersetzt",
+        "done": "Import abgeschlossen",
+        "showBackup": "Sicherung zeigen",
+        "fromFile": "Aus Datei importieren …",
+        "confirmLabel": "Import bestätigen",
+        "exportedAt": "exportiert am {date} {time} mit VectaSim {version}",
+        "merge": "Zusammenführen",
+        "mergeHelp": "neue Flüge und Flugzeuge kommen dazu. Flüge, die schon da sind (gleicher Flug oder gleiche Strecke mit weniger als 15 min Abstand beim Off-Block), werden übersprungen; vorhandene Flugzeugdaten bleiben.",
+        "replace": "Ersetzen",
+        "replaceHelp": "dein Logbuch und die Flotte werden durch den Inhalt der Datei ersetzt. Vorher legt VectaSim eine Sicherung an.",
+        "replaceBlocked": "Während einer Aufzeichnung nicht möglich.",
+        "replaceButton": "Sichern und ersetzen"
+      },
+      "csv": {
+        "heading": "Import",
+        "button": "CSV importieren …",
+        "help": "Flüge aus Volanta (Import-CSV), SimToolkitPro, einem VA-Export oder dem eigenen Logbuch-CSV übernehmen – ohne Track und Landeanalyse, aber mit Stunden, Strecken, Flotte und Ländern."
+      },
+      "trash": {
+        "title": "Papierkorb",
+        "count": {
+          "one": "{count} Flug im Papierkorb",
+          "other": "{count} Flüge im Papierkorb"
+        },
+        "empty": "Der Papierkorb ist leer",
+        "retention": "nach {days} Tagen endgültig gelöscht, wiederherstellen im Logbuch → Papierkorb",
+        "confirmLabel": "Papierkorb leeren bestätigen",
+        "confirm": "Endgültig löschen?",
+        "emptyButton": "Papierkorb leeren",
+        "emptied": {
+          "one": "Papierkorb geleert · {count} Flug endgültig gelöscht",
+          "other": "Papierkorb geleert · {count} Flüge endgültig gelöscht"
+        }
+      },
+      "wipe": {
+        "title": "Alle Daten löschen",
+        "help": "Löscht alle Flüge und die Flotte. Vorher legt VectaSim eine Sicherung an; deine Einstellungen bleiben.",
+        "button": "Alle Daten löschen …",
+        "confirm": "Wirklich alle Flüge und die Flotte löschen? Eine Sicherung davon landet im Sicherungsordner.",
+        "lastConfirm": "Alle Daten löschen – letzte Bestätigung",
+        "word": "LÖSCHEN",
+        "typeWord": "Tippe {word} zur Bestätigung",
+        "running": "Löscht …",
+        "final": "Endgültig löschen",
+        "done": "Alle Daten gelöscht · {flights}",
+        "backup": "Sicherung davor: {path}"
+      }
+    }
+  }
+}

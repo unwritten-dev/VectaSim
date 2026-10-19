@@ -3,13 +3,10 @@ import ApproachDispersion from "./landing/ApproachDispersion";
 import Trends from "./landing/Trends";
 import { TabPanel, Tabs, type TabDef } from "./ui/Tabs";
 import { useStoredState } from "./live/hooks";
+import { useT } from "./i18n";
 
 type LandingsTab = "touchdowns" | "approaches" | "trends";
-const TABS: TabDef<LandingsTab>[] = [
-  { id: "touchdowns", label: "Aufsetzpunkte" },
-  { id: "approaches", label: "Anflüge" },
-  { id: "trends", label: "Verlauf" },
-];
+const TAB_IDS: LandingsTab[] = ["touchdowns", "approaches", "trends"];
 const TAB_KEY = "vectasim.landingsTab";
 const ID_BASE = "landings";
 
@@ -20,9 +17,11 @@ const ID_BASE = "landings";
 export default function Landings() {
   const [stored, setTab] = useStoredState<string>(TAB_KEY, "touchdowns");
   const tab: LandingsTab = stored === "approaches" || stored === "trends" ? stored : "touchdowns";
+  const t = useT();
+  const tabs: TabDef<LandingsTab>[] = TAB_IDS.map((id) => ({ id, label: t(`logbook.landings.${id}`) }));
   return (
     <section className="logbook landings-view">
-      <Tabs tabs={TABS} active={tab} onChange={setTab} idBase={ID_BASE} label="Landungen-Ansichten" className="landings-tabs" />
+      <Tabs tabs={tabs} active={tab} onChange={setTab} idBase={ID_BASE} label={t("logbook.landings.tabsLabel")} className="landings-tabs" />
       <TabPanel idBase={ID_BASE} id={tab}>
         {tab === "touchdowns" ? <Dispersion limit={20} /> : tab === "approaches" ? <ApproachDispersion limit={20} /> : <Trends />}
       </TabPanel>

@@ -4,6 +4,8 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { t as tGlobal, useT } from "./i18n";
+import type { TFunction } from "./i18n";
 import Panel from "./ui/Panel";
 import { showToast } from "./ui/Toast";
 import { setPref, usePrefs, type Prefs } from "./prefs";
@@ -28,35 +30,46 @@ function Status({ tone, children }: { tone: Tone; children: ReactNode }) {
   );
 }
 
-const NOTIFY_KINDS: Array<{ key: keyof Prefs; label: string }> = [
-  { key: "notifyLanding", label: "Landung (Landerate, g-Last, Bounces)" },
-  { key: "notifySaved", label: "Flug gespeichert" },
-  { key: "notifyConnection", label: "Verbindung zum Simulator verloren / wieder da" },
-  { key: "notifyUpdate", label: "Update verfügbar" },
-];
+const NOTIFY_KINDS = [
+  { key: "notifyLanding", label: "settings.integrations.notify.landing" },
+  { key: "notifySaved", label: "settings.integrations.notify.saved" },
+  { key: "notifyConnection", label: "settings.integrations.notify.connection" },
+  { key: "notifyUpdate", label: "settings.integrations.notify.update" },
+] as const satisfies ReadonlyArray<{ key: keyof Prefs; label: string }>;
 
-function discordLine(on: boolean, s: DiscordStatus | null): { tone: Tone; text: string } {
-  if (!on) return { tone: "off", text: "Aus · Discord zeigt nichts von VectaSim." };
+/**
+ * Status line of the Discord switch. `customAppId` = the stored own App-ID ("" = VectaSim
+ * default). "no_app_id" with an empty field means the build carries no default ID – a
+ * developer error, logged, and told to the user without blaming the empty field.
+ */
+export function discordLine(t: TFunction, on: boolean, s: DiscordStatus | null, customAppId = ""): { tone: Tone; text: string } {
+  if (!on) return { tone: "off", text: t("settings.integrations.discord.off") };
   switch (s?.state) {
     case "connected":
-      return { tone: "ok", text: s.showing ? `Verbunden · Discord zeigt: ${s.showing}` : "Verbunden · Status wird gleich gesetzt" };
+      return {
+        tone: "ok",
+        text: s.showing ? t("settings.integrations.discord.showing", { showing: s.showing }) : t("settings.integrations.discord.connected"),
+      };
     case "not_running":
-      return { tone: "info", text: "Discord nicht gestartet · VectaSim versucht es alle 30 s erneut." };
+      return { tone: "info", text: t("settings.integrations.discord.notRunning") };
     case "no_app_id":
-      return { tone: "warn", text: "Keine Discord-App-ID hinterlegt · trage unten die ID deiner Discord-Anwendung ein." };
+      return customAppId.trim()
+        ? { tone: "warn", text: t("settings.integrations.discord.noAppId") }
+        : { tone: "warn", text: t("settings.integrations.discord.noDefaultAppId") };
     default:
-      return { tone: "info", text: "Verbinde mit Discord …" };
+      return { tone: "info", text: t("settings.integrations.discord.connecting") };
   }
 }
 
 export default function IntegrationsPanel({ onError }: { onError?: (e: string) => void }) {
+  const t = useT();
   const prefs = usePrefs();
   const [discord, setDiscord] = useState<DiscordStatus | null>(null);
   const [appId, setAppId] = useState("");
   const [storedAppId, setStoredAppId] = useState("");
   const [trayActive, setTrayActive] = useState<boolean | null>(null);
   const [testing, setTesting] = useState(false);
-  const fail = (e: unknown) => (onError ? onError(String(e)) : showToast({ tone: "warn", title: "Einstellung nicht gespeichert", body: String(e) }));
+  const fail = (e: unknown) => (onError ? onError(String(e)) : showToast({ tone: "warn", title: tGlobal("settings.notSaved"), body: String(e) }));
 
   useEffect(() => {
     invoke<[string, string][]>("get_settings")
@@ -79,12 +92,18 @@ export default function IntegrationsPanel({ onError }: { onError?: (e: string) =
         .then((s) => alive && setDiscord(s))
         .catch(() => {});
     poll();
-    const t = window.setInterval(poll, DISCORD_POLL_MS);
+    const timer = window.setInterval(poll, DISCORD_POLL_MS);
     return () => {
       alive = false;
-      window.clearInterval(t);
+      window.clearInterval(timer);
     };
   }, []);
+
+  // no own App-ID and still "no_app_id": the build lacks the default ID – a developer error
+  const missingDefault = discord?.state === "no_app_id" && !storedAppId.trim();
+  useEffect(() => {
+    if (missingDefault) console.error("[discord] this build carries no default Discord App-ID (discord.rs DISCORD_APP_ID is empty)");
+  }, [missingDefault]);
 
   const toggle = (key: keyof Prefs, on: boolean) => void setPref(key, on).catch(fail);
 
@@ -92,7 +111,7 @@ export default function IntegrationsPanel({ onError }: { onError?: (e: string) =
     const v = appId.trim();
     if (v === storedAppId) return;
     if (v && !/^\d{15,22}$/.test(v)) {
-      fail("Die Discord-App-ID ist eine Zahl mit 17–20 Stellen (Developer Portal → Applications → Application ID).");
+      fail(t("settings.integrations.discord.appIdInvalid"));
       return;
     }
     invoke("set_setting", { key: SETTING_DISCORD_APP_ID, value: v })
@@ -116,10 +135,8 @@ export default function IntegrationsPanel({ onError }: { onError?: (e: string) =
       showToast({
         id: "notify-test",
         tone: r.shown ? "ok" : "warn",
-        title: r.shown ? "Testbenachrichtigung gesendet" : "Keine Benachrichtigung möglich",
-        body: r.shown
-          ? "Sie erscheint unten rechts. Siehst du nichts, prüfe Windows → Einstellungen → System → Benachrichtigungen (auch „Nicht stören“)."
-          : "Windows hat die Benachrichtigung abgelehnt – Details im Protokoll.",
+        title: r.shown ? t("settings.integrations.test.sent") : t("settings.integrations.test.failed"),
+        body: r.shown ? t("settings.integrations.test.sentHint") : t("settings.integrations.test.failedHint"),
         durationMs: 6000,
       });
     } catch (e) {
@@ -129,10 +146,10 @@ export default function IntegrationsPanel({ onError }: { onError?: (e: string) =
     }
   };
 
-  const d = discordLine(prefs.discordPresence, discord);
+  const d = discordLine(t, prefs.discordPresence, discord, storedAppId);
 
   return (
-    <Panel title="Integrationen" description="Discord-Status, Windows-Benachrichtigungen und Infobereich (Tray).">
+    <Panel title={t("settings.integrations.title")} description={t("settings.integrations.description")}>
       <div className="integrations">
         <section className="integrations-group" aria-labelledby="int-discord">
           <h3 id="int-discord" className="integrations-title">
@@ -140,68 +157,63 @@ export default function IntegrationsPanel({ onError }: { onError?: (e: string) =
           </h3>
           <label className="check">
             <input type="checkbox" checked={prefs.discordPresence} onChange={(e) => toggle("discordPresence", e.target.checked)} />
-            Flug als Discord-Status zeigen (Rich Presence)
+            {t("settings.integrations.discord.enable")}
           </label>
-          <div className="detail">
-            Zeigt Route, Flugzeugtyp, Phase und Flugzeit, z. B. „EDDF → EGLL · A20N“ und „Reiseflug FL360 · noch 420 nm“. Im Streamer-Modus ohne Rufzeichen.
-            Höchstens alle 15 s ein Update; nur der lokal laufende Discord-Client wird angesprochen.
-          </div>
+          <div className="detail">{t("settings.integrations.discord.help")}</div>
           <Status tone={d.tone}>{d.text}</Status>
           {prefs.discordPresence && (
-            <div className="setting-row">
-              <label htmlFor="discord-app-id">App-ID</label>
+            <details className="setting-row setting-expert">
+              <summary className="detail">{t("settings.integrations.discord.expert")}</summary>
+              <label htmlFor="discord-app-id">{t("settings.integrations.discord.appId")}</label>
               <input
                 id="discord-app-id"
                 inputMode="numeric"
                 autoComplete="off"
                 value={appId}
-                placeholder="leer = VectaSim-Standard"
+                placeholder={t("settings.integrations.discord.appIdPlaceholder")}
                 onChange={(e) => setAppId(e.target.value)}
                 onBlur={saveAppId}
                 onKeyDown={(e) => e.key === "Enter" && saveAppId()}
               />
-              <span className="detail">optional · eigene Anwendung aus dem Discord Developer Portal (Bild-Asset „vectasim“)</span>
-            </div>
+              <span className="detail">{t("settings.integrations.discord.appIdHelp")}</span>
+            </details>
           )}
         </section>
 
         <section className="integrations-group" aria-labelledby="int-notify">
           <h3 id="int-notify" className="integrations-title">
-            Benachrichtigungen
+            {t("settings.integrations.notify.title")}
           </h3>
           <label className="check">
             <input type="checkbox" checked={prefs.notifications} onChange={(e) => toggle("notifications", e.target.checked)} />
-            Windows-Benachrichtigungen, wenn VectaSim nicht im Vordergrund ist
+            {t("settings.integrations.notify.enable")}
           </label>
-          <div className="integrations-sub" aria-label="Benachrichtigen bei">
+          <div className="integrations-sub" aria-label={t("settings.integrations.notify.kinds")}>
             {NOTIFY_KINDS.map((k) => (
               <label key={k.key} className="check">
                 <input type="checkbox" checked={!!prefs[k.key]} disabled={!prefs.notifications} onChange={(e) => toggle(k.key, e.target.checked)} />
-                {k.label}
+                {t(k.label)}
               </label>
             ))}
           </div>
           <div className="setting-row">
             <button className="btn btn-sm" onClick={() => void sendTest()} disabled={testing}>
-              Test senden
+              {t("settings.integrations.test.send")}
             </button>
-            <span className="detail">Ohne Kennzeichen und Rufzeichen. Ein Klick auf die Benachrichtigung holt VectaSim nach vorn.</span>
+            <span className="detail">{t("settings.integrations.test.help")}</span>
           </div>
         </section>
 
         <section className="integrations-group" aria-labelledby="int-tray">
           <h3 id="int-tray" className="integrations-title">
-            Infobereich (Tray)
+            {t("settings.integrations.tray.title")}
           </h3>
           <label className="check">
             <input type="checkbox" checked={prefs.trayMinimize} onChange={(e) => void setTray(e.target.checked)} />
-            Symbol im Infobereich · Minimieren versteckt das Fenster dorthin
+            {t("settings.integrations.tray.enable")}
           </label>
-          <div className="detail">
-            Doppelklick auf das Symbol öffnet VectaSim wieder; das Menü zeigt den Aufzeichnungsstatus, schaltet den Debug-Modus und beendet die App. Die Aufzeichnung läuft
-            im Infobereich unverändert weiter, Beenden fragt während eines Flugs nach.
-          </div>
-          <Status tone={trayActive ? "ok" : "off"}>{trayActive ? "Symbol im Infobereich aktiv" : "Kein Symbol im Infobereich"}</Status>
+          <div className="detail">{t("settings.integrations.tray.help")}</div>
+          <Status tone={trayActive ? "ok" : "off"}>{trayActive ? t("settings.integrations.tray.active") : t("settings.integrations.tray.inactive")}</Status>
         </section>
       </div>
     </Panel>

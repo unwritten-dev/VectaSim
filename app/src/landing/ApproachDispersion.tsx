@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { NNBSP, fmt, fmtDate, fmtNum, fmtSigned } from "../format";
+import { NNBSP, fmt, fmtDate, fmtNum, fmtSigned } from "../i18n/number";
+import { useT, type TFunction } from "../i18n";
 import { usePrefs } from "../prefs";
 import ErrorNotice from "../ErrorNotice";
 import EmptyState from "../ui/EmptyState";
@@ -51,22 +52,28 @@ const LAT_ROW_H = 30;
 const LAT_TOP = 6;
 const SPARK_H = 72;
 
-const OUTCOME_LABEL: Record<ApproachFact["outcome"], string> = {
-  landed: "gelandet",
-  touch_and_go: "Touch-and-go",
-  go_around: "durchgestartet",
-};
-
-function stableText(f: ApproachFact): string | null {
-  if (f.stableFromFt != null) return `stabil ab ${fmt(f.stableFromFt, 0, "ft")}`;
-  return f.band ? "nie stabil" : null;
+function outcomeText(t: TFunction, f: ApproachFact): string {
+  if (isGoAround(f) && f.gaLowestHatFt != null) return t("approach.dispersion.goAroundAt", { height: fmt(f.gaLowestHatFt, 0, "ft") });
+  switch (f.outcome) {
+    case "landed":
+      return t("approach.dispersion.outcomeLanded");
+    case "touch_and_go":
+      return t("approach.dispersion.outcomeTouchAndGo");
+    case "go_around":
+      return t("approach.dispersion.outcomeGoAround");
+  }
 }
 
-function factLine(f: ApproachFact): string {
+function stableText(t: TFunction, f: ApproachFact): string | null {
+  if (f.stableFromFt != null) return t("approach.dispersion.stableFrom", { height: fmt(f.stableFromFt, 0, "ft") });
+  return f.band ? t("approach.dispersion.neverStable") : null;
+}
+
+const placeOf = (t: TFunction, f: ApproachFact) => [f.airportIcao, f.runwayIdent].filter(Boolean).join(" ") || t("approach.dispersion.noRunway");
+
+function factLine(t: TFunction, f: ApproachFact): string {
   const ac = [approachAircraftKey(f), f.registration].filter(Boolean).join(" ");
-  const where = [f.airportIcao, f.runwayIdent].filter(Boolean).join(" ") || "ohne Piste";
-  const outcome = isGoAround(f) && f.gaLowestHatFt != null ? `durchgestartet bei ${fmt(f.gaLowestHatFt, 0, "ft")}` : OUTCOME_LABEL[f.outcome];
-  return [where, ac, fmtDate(f.endedMs), outcome, f.band ? APPROACH_BAND_LABEL[f.band] : null, stableText(f)].filter(Boolean).join(" · ");
+  return [placeOf(t, f), ac, fmtDate(f.endedMs), outcomeText(t, f), f.band ? APPROACH_BAND_LABEL[f.band] : null, stableText(t, f)].filter(Boolean).join(" · ");
 }
 
 /**
@@ -90,6 +97,7 @@ function Mark({ x, y, r, ga, shape, fill, stroke }: { x: number; y: number; r: n
  * flight's debrief.
  */
 export default function ApproachDispersion({ limit = 20 }: { limit?: number }) {
+  const t = useT();
   const { showDemo } = usePrefs();
   const [data, setData] = useState<ApproachFactsResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -164,7 +172,7 @@ export default function ApproachDispersion({ limit = 20 }: { limit?: number }) {
   if (!data) {
     return (
       <section className="dp ad">
-        <div className="detail">Anflüge werden ausgewertet …</div>
+        <div className="detail">{t("approach.dispersion.loading")}</div>
       </section>
     );
   }
@@ -172,12 +180,11 @@ export default function ApproachDispersion({ limit = 20 }: { limit?: number }) {
     return (
       <section className="dp ad">
         <EmptyState
-          title="Noch keine ausgewerteten Anflüge"
+          title={t("approach.dispersion.emptyTitle")}
           text={
             <>
-              Sobald du einen Flug mit Landung oder Durchstart abschließt, erscheinen hier die Gate-Werte deiner Anflüge – Höhe zum Pfad, Speed zur Referenz und ab wann du
-              stabil warst.
-              {data.skipped > 0 && ` ${skippedText(data.skipped)}`}
+              {t("approach.dispersion.emptyText")}
+              {data.skipped > 0 && ` ${t("approach.dispersion.skipped", { count: data.skipped })}`}
             </>
           }
         />
@@ -219,16 +226,20 @@ export default function ApproachDispersion({ limit = 20 }: { limit?: number }) {
     const ellPath = ell ? ellipsePoints(ell, 48).map((q, i) => `${i ? "L" : "M"}${PX(q.x).toFixed(1)},${PY(q.y).toFixed(1)}`).join(" ") + " Z" : null;
     const hits = gateHits(facts, gate);
     const clipId = `ad-clip-${gate}`;
-    const tolText = `Rahmen ${fmtSigned(tol.altLoFt, 0)}/${fmtSigned(tol.altHiFt, 0, "ft")}${tol.iasLoKt != null ? `, ${fmtSigned(tol.iasLoKt, 0)}/${fmtSigned(tol.iasHiKt, 0, "kt")}` : ""}`;
+    const tolAlt = `${fmtSigned(tol.altLoFt, 0)}/${fmtSigned(tol.altHiFt, 0, "ft")}`;
+    const tolText =
+      tol.iasLoKt != null
+        ? t("approach.dispersion.toleranceIas", { alt: tolAlt, ias: `${fmtSigned(tol.iasLoKt, 0)}/${fmtSigned(tol.iasHiKt, 0, "kt")}` })
+        : t("approach.dispersion.tolerance", { alt: tolAlt });
     return (
       <figure key={gate} className="ad-panel">
         <figcaption className="ad-panel-head">
           <strong>{GATE_LABEL[gate]}</strong>
           <span className="detail num" title={tolText}>
-            {hits.total ? `${hits.inside}/${hits.total} im Rahmen` : "keine Werte"}
+            {hits.total ? t("approach.dispersion.inBox", { inside: hits.inside, total: hits.total }) : t("approach.dispersion.noValues")}
           </span>
         </figcaption>
-        <svg viewBox={`0 0 ${pw} ${ph}`} width={pw} height={ph} role="img" aria-label={`${GATE_LABEL[gate]}: ${hits.inside} von ${hits.total} Anflügen im Rahmen (${tolText})`}>
+        <svg viewBox={`0 0 ${pw} ${ph}`} width={pw} height={ph} role="img" aria-label={t("approach.dispersion.panelAria", { gate: GATE_LABEL[gate], inside: hits.inside, total: hits.total, tolerance: tolText })}>
           <defs>
             <clipPath id={clipId}>
               <rect x={P_PAD_L} y={P_TOP} width={pw - P_PAD_L - P_PAD_R} height={P_PLOT_H} />
@@ -267,7 +278,7 @@ export default function ApproachDispersion({ limit = 20 }: { limit?: number }) {
             const color = bandVar(f.band);
             return (
               <g key={k} className={`dp-pt${isNewest ? " newest" : ""}${isHover ? " hover" : ""}${out ? " out" : ""}`} {...hoverProps(f)}>
-                <title>{`${GATE_LABEL[gate]}: ${fmtSigned(p!.altDevFt, 0, "ft")} zum Pfad, ${fmtSigned(p!.iasDevKt, 0, "kt")} zur Referenz – ${factLine(f)}`}</title>
+                <title>{t("approach.dispersion.pointTitle", { gate: GATE_LABEL[gate], alt: fmtSigned(p!.altDevFt, 0, "ft"), ias: fmtSigned(p!.iasDevKt, 0, "kt"), fact: factLine(t, f) })}</title>
                 {(isNewest || isHover) && <circle cx={x} cy={y} r={isNewest ? 8.5 : 7.5} className="dp-ring" />}
                 <Mark x={x} y={y} r={isNewest ? 4.5 : 3.6} ga={isGoAround(f)} shape={shapeOf(f.band)} fill={out ? "none" : color} stroke={out ? color : undefined} />
               </g>
@@ -303,7 +314,13 @@ export default function ApproachDispersion({ limit = 20 }: { limit?: number }) {
     pen = true;
   });
 
-  const sumText = `stabil ab Ø ${fmt(summary.meanStableFromFt, 0, "ft")} · Gate 1000 ${summary.gate1000.passed}/${summary.gate1000.total} · Gate 500 ${summary.gate500.passed}/${summary.gate500.total} · Grundlinie 500 ft Ø |Ablage| ${fmt(summary.meanAbsLat500M, 0, "m")} · Go-arounds ${summary.goArounds}`;
+  const sumText = t("approach.dispersion.summary", {
+    stable: fmt(summary.meanStableFromFt, 0, "ft"),
+    g1000: `${summary.gate1000.passed}/${summary.gate1000.total}`,
+    g500: `${summary.gate500.passed}/${summary.gate500.total}`,
+    lat: fmt(summary.meanAbsLat500M, 0, "m"),
+    goArounds: summary.goArounds,
+  });
 
   const chip = (key: string, label: ReactNode, pressed: boolean, onClick: () => void, title?: string) => (
     <button key={key} className={`chip${pressed ? " active" : ""}`} aria-pressed={pressed} title={title} onClick={onClick}>
@@ -312,20 +329,20 @@ export default function ApproachDispersion({ limit = 20 }: { limit?: number }) {
   );
 
   return (
-    <section className="dp ad" aria-label="Streubild der letzten Anflüge">
+    <section className="dp ad" aria-label={t("approach.dispersion.sectionAria")}>
       {error && <ErrorNotice error={error} context="logbook" onRetry={refresh} compact />}
       {(aircraftOpts.length > 1 || airportOpts.length > 1) && (
-        <div className="chips dp-chips" role="group" aria-label="Filter">
-          {chip("all", "Alle", !active.aircraft && !active.airport, () => setFilter({ aircraft: null, airport: null }))}
+        <div className="chips dp-chips" role="group" aria-label={t("approach.dispersion.filterAria")}>
+          {chip("all", t("approach.dispersion.all"), !active.aircraft && !active.airport, () => setFilter({ aircraft: null, airport: null }))}
           {aircraftOpts.length > 1 && <span className="chip-sep" aria-hidden="true" />}
           {aircraftOpts.length > 1 &&
             aircraftOpts.map((o) =>
-              chip(`ac-${o.key}`, o.key, active.aircraft === o.key, () => setFilter((f) => ({ ...f, aircraft: f.aircraft === o.key ? null : o.key })), `Nur ${o.key} (${o.count})`),
+              chip(`ac-${o.key}`, o.key, active.aircraft === o.key, () => setFilter((f) => ({ ...f, aircraft: f.aircraft === o.key ? null : o.key })), t("approach.dispersion.only", { key: o.key, count: o.count })),
             )}
           {airportOpts.length > 1 && <span className="chip-sep" aria-hidden="true" />}
           {airportOpts.length > 1 &&
             airportOpts.map((o) =>
-              chip(`ap-${o.key}`, o.key, active.airport === o.key, () => setFilter((f) => ({ ...f, airport: f.airport === o.key ? null : o.key })), `Nur ${o.key} (${o.count})`),
+              chip(`ap-${o.key}`, o.key, active.airport === o.key, () => setFilter((f) => ({ ...f, airport: f.airport === o.key ? null : o.key })), t("approach.dispersion.only", { key: o.key, count: o.count })),
             )}
         </div>
       )}
@@ -333,18 +350,18 @@ export default function ApproachDispersion({ limit = 20 }: { limit?: number }) {
       <div className="dp-body">
         <div ref={setWrap} className="dp-chart ad-chart">
           <div className="ad-axes detail">
-            <span>↑ Höhe zum Pfad (ft, + = hoch)</span>
-            <span>→ Speed zur Referenz (kt, + = schnell)</span>
+            <span>{t("approach.dispersion.axisHeight")}</span>
+            <span>{t("approach.dispersion.axisSpeed")}</span>
           </div>
           <div className="ad-panels" style={{ gridTemplateColumns: `repeat(${cols}, ${pw}px)`, columnGap: PANEL_GAP }}>
             {SCATTER_GATES.map(panel)}
           </div>
 
           <div className="ad-section-label detail">
-            Ablage zur Mittellinie (m, + = rechts)
-            {noLateral > 0 && ` · ${noLateral} ${noLateral === 1 ? "Anflug" : "Anflüge"} ohne Wert: Querablage nicht messbar (abgeleitete Piste)`}
+            {t("approach.dispersion.lateralLabel")}
+            {noLateral > 0 && ` · ${t("approach.dispersion.lateralMissing", { count: noLateral })}`}
           </div>
-          <svg viewBox={`0 0 ${W} ${latH}`} width="100%" height={latH} role="img" aria-label="Seitliche Ablage bei 1000 und 500 ft">
+          <svg viewBox={`0 0 ${W} ${latH}`} width="100%" height={latH} role="img" aria-label={t("approach.dispersion.lateralAria")}>
             {latRows.map((row, ri) => {
               const y0 = LAT_TOP + ri * LAT_ROW_H;
               const cy = y0 + LAT_ROW_H / 2;
@@ -369,7 +386,7 @@ export default function ApproachDispersion({ limit = 20 }: { limit?: number }) {
                     const color = bandVar(f.band);
                     return (
                       <g key={k} className={`dp-pt${isNewest ? " newest" : ""}${isHover ? " hover" : ""}${out ? " out" : ""}`} {...hoverProps(f)}>
-                        <title>{`${row.label}: ${sideLabel(v)} – ${factLine(f)}`}</title>
+                        <title>{`${row.label}: ${sideLabel(v)} – ${factLine(t, f)}`}</title>
                         {(isNewest || isHover) && <circle cx={x} cy={cy} r={isNewest ? 8.5 : 7.5} className="dp-ring" />}
                         <Mark x={x} y={cy} r={isNewest ? 4.5 : 3.6} ga={isGoAround(f)} shape={shapeOf(f.band)} fill={out ? "none" : color} stroke={out ? color : undefined} />
                       </g>
@@ -385,9 +402,9 @@ export default function ApproachDispersion({ limit = 20 }: { limit?: number }) {
             ))}
           </svg>
 
-          <div className="ad-section-label detail">Stabil ab (ft), älteste links</div>
+          <div className="ad-section-label detail">{t("approach.dispersion.sparkLabel")}</div>
           {/* the drawing is aria-hidden; the points are a list with one tab stop (arrows move, Enter opens) */}
-          <svg viewBox={`0 0 ${W} ${SPARK_H}`} width="100%" height={SPARK_H} className="dp-spark" role="group" aria-label="Stabil-ab-Höhe der Anflüge, älteste links">
+          <svg viewBox={`0 0 ${W} ${SPARK_H}`} width="100%" height={SPARK_H} className="dp-spark" role="group" aria-label={t("approach.dispersion.sparkAria")}>
             <g aria-hidden="true">
             {[500, 1000].map((v) => (
               <g key={v}>
@@ -399,11 +416,11 @@ export default function ApproachDispersion({ limit = 20 }: { limit?: number }) {
             ))}
             <line x1={PAD_L} x2={W - PAD_R} y1={SY(0)} y2={SY(0)} className="ad-zero" />
             <text x={PAD_L - 6} y={SY(0) + 4} textAnchor="end" className="dp-label">
-              nie
+              {t("approach.common.never")}
             </text>
             {sparkPath && <path d={sparkPath} className="dp-spark-line" />}
             </g>
-            <g role="list" aria-label="Anflüge, älteste zuerst – Pfeiltasten wechseln, Eingabetaste öffnet die Auswertung">
+            <g role="list" aria-label={t("approach.dispersion.listAria")}>
             {chrono.map((f, i) => {
               const k = approachKey(f);
               const isNewest = f === newest;
@@ -415,12 +432,12 @@ export default function ApproachDispersion({ limit = 20 }: { limit?: number }) {
                   <g
                     className={`dp-pt${isNewest ? " newest" : ""}${k === hover ? " hover" : ""}`}
                     role="button"
-                    aria-label={`${isNewest ? "Neuester Anflug: " : ""}${factLine(f)} – Auswertung öffnen`}
+                    aria-label={t(isNewest ? "approach.dispersion.newestPointAria" : "approach.dispersion.pointAria", { fact: factLine(t, f) })}
                     {...nav.props(i, () => open(f), () => setHover(k))}
                     onBlur={() => setHover((h) => (h === k ? null : h))}
                     {...hoverProps(f)}
                   >
-                    <title>{factLine(f)}</title>
+                    <title>{factLine(t, f)}</title>
                     {(isNewest || k === hover) && <circle cx={SX(i)} cy={y} r={7.5} className="dp-ring" />}
                     <Mark x={SX(i)} y={y} r={isNewest ? 4.5 : 3.6} ga={isGoAround(f)} shape={shapeOf(f.band)} fill={never ? "none" : color} stroke={never ? color : undefined} />
                   </g>
@@ -431,51 +448,51 @@ export default function ApproachDispersion({ limit = 20 }: { limit?: number }) {
           </svg>
           {/* no live region: it changes on every mouse hover */}
           <div className="dp-hover detail">
-            {hovered ? factLine(hovered) : newest ? `Neuester: ${factLine(newest)}` : " "}
+            {hovered ? factLine(t, hovered) : newest ? t("approach.dispersion.newest", { fact: factLine(t, newest) }) : " "}
           </div>
         </div>
 
         <div className="dp-stats" aria-label={sumText}>
           <div className="tile">
-            <div className="tile-label">Stabil ab</div>
+            <div className="tile-label">{t("approach.dispersion.tileStable")}</div>
             <div className="tile-value num">
               <span className="dp-sd">Ø </span>
               {fmt(summary.meanStableFromFt, 0, "ft")}
             </div>
             <div className="detail">
-              aus {summary.stableN} Anflug{summary.stableN === 1 ? "" : "en"}
-              {summary.neverStable > 0 && ` · ${summary.neverStable}× nie stabil`}
+              {t("approach.dispersion.fromApproaches", { count: summary.stableN })}
+              {summary.neverStable > 0 && ` · ${t("approach.dispersion.neverStableCount", { count: summary.neverStable })}`}
             </div>
           </div>
           <div className="tile">
-            <div className="tile-label">Gate 1000 ft</div>
+            <div className="tile-label">{t("approach.dispersion.tileGate1000")}</div>
             <div className="tile-value num">
               {summary.gate1000.passed}/{summary.gate1000.total}
             </div>
-            <div className="detail">alle messbaren Kriterien erfüllt</div>
+            <div className="detail">{t("approach.dispersion.allCriteriaMet")}</div>
           </div>
           <div className="tile">
-            <div className="tile-label">Gate 500 ft</div>
+            <div className="tile-label">{t("approach.dispersion.tileGate500")}</div>
             <div className="tile-value num">
               {summary.gate500.passed}/{summary.gate500.total}
             </div>
-            <div className="detail">alle messbaren Kriterien erfüllt</div>
+            <div className="detail">{t("approach.dispersion.allCriteriaMet")}</div>
           </div>
           <div className="tile">
-            <div className="tile-label">Grundlinie 500{NNBSP}ft</div>
+            <div className="tile-label">{t("approach.dispersion.tileLateral500")}</div>
             <div className="tile-value num">
-              <span className="dp-sd">Ø |Ablage| </span>
+              <span className="dp-sd">{t("approach.dispersion.meanAbsOffset")}</span>
               {fmt(summary.meanAbsLat500M, 0, "m")}
             </div>
             <div className="detail">
-              aus {summary.lat500N} Anflug{summary.lat500N === 1 ? "" : "en"} mit bekannter Mittellinie
+              {t("approach.dispersion.fromApproachesKnownCentreline", { count: summary.lat500N })}
             </div>
           </div>
           <div className="tile">
-            <div className="tile-label">Go-arounds</div>
+            <div className="tile-label">{t("approach.dispersion.tileGoArounds")}</div>
             <div className="tile-value num">{summary.goArounds}</div>
             <div className="detail">
-              von {summary.count} Anflug{summary.count === 1 ? "" : "en"}
+              {t("approach.dispersion.ofApproaches", { count: summary.count })}
             </div>
           </div>
         </div>
@@ -494,46 +511,46 @@ export default function ApproachDispersion({ limit = 20 }: { limit?: number }) {
             <line x1={6} x2={6} y1={1} y2={6} />
             <circle cx={6} cy={10} r={3.2} />
           </svg>
-          Go-around
+          {t("approach.dispersion.legendGoAround")}
         </span>
         <span>
           <i className="dp-swatch ring" aria-hidden="true" />
-          neuester
+          {t("approach.dispersion.legendNewest")}
         </span>
         <span>
           <i className="dp-swatch ellipse" aria-hidden="true" />
-          Streuung 1σ
+          {t("approach.dispersion.legendSpread")}
         </span>
         <span>
           <i className="ad-swatch-tol" aria-hidden="true" />
-          Toleranz
+          {t("approach.dispersion.legendTolerance")}
         </span>
         <span className="dp-note">
-          {facts.length} Anflug{facts.length === 1 ? "" : "e"} · 1000/500{NNBSP}ft: ±1{NNBSP}Dot als Höhe · 10{NNBSP}NM: Speed aus IAS − Referenz abgeleitet
-          {data.skipped > 0 && ` · ${skippedText(data.skipped)}`}
+          {t("approach.dispersion.note", { count: facts.length })}
+          {data.skipped > 0 && ` · ${t("approach.dispersion.skipped", { count: data.skipped })}`}
         </span>
       </div>
-      {facts.length === 0 && <div className="detail">Für diesen Filter gibt es keine Anflüge.</div>}
+      {facts.length === 0 && <div className="detail">{t("approach.dispersion.noneForFilter")}</div>}
       {facts.length > 0 && (
         <details className="dp-table">
-          <summary>Als Tabelle ({facts.length})</summary>
+          <summary>{t("approach.dispersion.tableSummary", { count: facts.length })}</summary>
           <div className="dp-table-scroll">
             <table className="data-table">
-              <caption className="sr-only">Gate-Werte der letzten Anflüge, neueste zuerst</caption>
+              <caption className="sr-only">{t("approach.dispersion.tableCaption")}</caption>
               <thead>
                 <tr>
-                  <th scope="col">Datum</th>
-                  <th scope="col">Platz · Piste</th>
-                  <th scope="col">Ergebnis</th>
-                  <th scope="col">Band</th>
-                  <th scope="col">Stabil ab</th>
+                  <th scope="col">{t("approach.dispersion.colDate")}</th>
+                  <th scope="col">{t("approach.dispersion.colPlace")}</th>
+                  <th scope="col">{t("approach.dispersion.colResult")}</th>
+                  <th scope="col">{t("approach.dispersion.colBand")}</th>
+                  <th scope="col">{t("approach.dispersion.colStable")}</th>
                   {SCATTER_GATES.map((g) => (
                     <th key={g} scope="col">
                       {GATE_LABEL[g]}
                     </th>
                   ))}
                   <th scope="col">
-                    <span className="sr-only">Aktion</span>
+                    <span className="sr-only">{t("approach.dispersion.colAction")}</span>
                   </th>
                 </tr>
               </thead>
@@ -541,8 +558,8 @@ export default function ApproachDispersion({ limit = 20 }: { limit?: number }) {
                 {facts.map((f) => (
                   <tr key={approachKey(f)}>
                     <td className="num">{fmtDate(f.endedMs)}</td>
-                    <td className="num">{[f.airportIcao, f.runwayIdent].filter(Boolean).join(" ") || "ohne Piste"}</td>
-                    <td>{isGoAround(f) && f.gaLowestHatFt != null ? `durchgestartet bei ${fmt(f.gaLowestHatFt, 0, "ft")}` : OUTCOME_LABEL[f.outcome]}</td>
+                    <td className="num">{placeOf(t, f)}</td>
+                    <td>{outcomeText(t, f)}</td>
                     <td>
                       {f.band ? (
                         <>
@@ -552,7 +569,7 @@ export default function ApproachDispersion({ limit = 20 }: { limit?: number }) {
                         "–"
                       )}
                     </td>
-                    <td className="num">{f.stableFromFt != null ? fmt(f.stableFromFt, 0, "ft") : f.band ? "nie" : "–"}</td>
+                    <td className="num">{f.stableFromFt != null ? fmt(f.stableFromFt, 0, "ft") : f.band ? t("approach.common.never") : "–"}</td>
                     {SCATTER_GATES.map((g) => {
                       const p = gatePoint(f, g);
                       return (
@@ -563,7 +580,7 @@ export default function ApproachDispersion({ limit = 20 }: { limit?: number }) {
                     })}
                     <td>
                       <button className="btn-sm" onClick={() => open(f)}>
-                        Auswertung
+                        {t("approach.dispersion.open")}
                       </button>
                     </td>
                   </tr>
@@ -571,13 +588,9 @@ export default function ApproachDispersion({ limit = 20 }: { limit?: number }) {
               </tbody>
             </table>
           </div>
-          <p className="detail">Gate-Spalten: Höhe zum Pfad · Speed zur Referenz.</p>
+          <p className="detail">{t("approach.dispersion.tableNote")}</p>
         </details>
       )}
     </section>
   );
-}
-
-function skippedText(n: number): string {
-  return `${n} Flug${n === 1 ? "" : "e"} ohne auswertbaren Anflug nicht berücksichtigt.`;
 }

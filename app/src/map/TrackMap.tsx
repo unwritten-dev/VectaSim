@@ -1,15 +1,29 @@
 import { useEffect, useRef, useState } from "react";
 import * as maplibregl from "maplibre-gl";
 import type { StyleSpecification } from "maplibre-gl";
-import { loadBasemapStyle } from "./basemap";
+import { followLanguage, loadBasemapStyle } from "./basemap";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./maplibreWorker";
 import type { TouchdownReport, TrackSample } from "../types";
-import { addCurtainLayers, addTrackLayers, firstSymbolLayer, pointFeature, samplesToPoints, setCurtainVisible, setPitched, trackPoseAt } from "./common";
+import {
+  addCurtainLayers,
+  addTrackLayers,
+  applyProjection,
+  firstSymbolLayer,
+  pointFeature,
+  samplesToPoints,
+  setCurtainVisible,
+  setPitched,
+  trackPoseAt,
+  useGlobe,
+  withProjection,
+} from "./common";
 import { useReplayStore } from "../landing/replayStore";
 import { bandedTrackGeoJson, curtainGeoJson, thinPoints } from "./trackChunks";
 import { addAirportDiagramLayers } from "./airportDiagram";
 import { COLOR, TRACK_MARKER } from "../theme";
+import { useT } from "../i18n";
+import GlobeToggle from "./GlobeToggle";
 
 /** First draw of a long track: this many points at most; the full line follows once idle. */
 const QUICK_POINTS = 1500;
@@ -40,6 +54,7 @@ function cursorElement(): HTMLDivElement {
  * a click near the track sets the cursor to that moment.
  */
 export default function TrackMap({ samples, touchdowns, departure, arrival }: Props) {
+  const t = useT();
   const store = useReplayStore();
   const containerRef = useRef<HTMLDivElement>(null);
   const cursorRef = useRef<maplibregl.Marker | null>(null);
@@ -50,13 +65,17 @@ export default function TrackMap({ samples, touchdowns, departure, arrival }: Pr
   /** 3D view: pitched camera, the track as wall + ribbon at the flown altitude. */
   const [view3d, setView3d] = useState(false);
   const view3dRef = useRef(false);
+  /** Globe or flat Mercator, shared with the live map and the Länder view. */
+  const [globe] = useGlobe();
+  const globeRef = useRef(globe);
+  globeRef.current = globe;
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
     const setupMap = (container: HTMLDivElement, style: StyleSpecification | string): (() => void) => {
       const map = new maplibregl.Map({
         container,
-        style,
+        style: withProjection(style, globeRef.current, COLOR.bg),
         center: [8.57, 50.03],
         zoom: 6,
         attributionControl: { compact: true },
@@ -87,6 +106,7 @@ export default function TrackMap({ samples, touchdowns, departure, arrival }: Pr
       };
       map.on("click", (e) => clickRef.current(e));
       map.on("load", () => {
+        applyProjection(map, globeRef.current);
         addOwnLayers();
         readyRef.current = true;
         // latest props: samples may have arrived while the style was loading
@@ -103,14 +123,17 @@ export default function TrackMap({ samples, touchdowns, departure, arrival }: Pr
             readyRef.current = true;
             drawRef.current();
           });
-          map.setStyle(next, { diff: false });
+          map.setStyle(withProjection(next, globeRef.current, COLOR.bg), { diff: false });
         });
       };
       window.addEventListener("theme:changed", onTheme);
+      // basemap names follow the UI language (map/basemap.ts)
+      const offLang = followLanguage(map);
       const ro = new ResizeObserver(() => map.resize());
       ro.observe(container);
       return () => {
         window.removeEventListener("theme:changed", onTheme);
+        offLang();
         diagramOff?.();
         ro.disconnect();
         cursorRef.current?.remove();
@@ -170,6 +193,11 @@ export default function TrackMap({ samples, touchdowns, departure, arrival }: Pr
       map.jumpTo({ center: coords[0], zoom: 10 });
     }
   };
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map && readyRef.current) applyProjection(map, globe);
+  }, [globe]);
 
   const samplesRef = useRef(samples);
   samplesRef.current = samples;
@@ -245,10 +273,11 @@ export default function TrackMap({ samples, touchdowns, departure, arrival }: Pr
           className="toggle"
           onClick={toggle3d}
           aria-pressed={view3d}
-          title={view3d ? "Karte wieder flach legen" : "Karte neigen und das Höhenprofil des Tracks zeigen – drehen und neigen auch mit rechter Maustaste oder Strg + Ziehen"}
+          title={view3d ? t("map.toolbar.flatten") : t("map.toolbar.tilt")}
         >
           3D
         </button>
+        <GlobeToggle />
       </div>
     </div>
   );

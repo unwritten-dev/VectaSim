@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { NNBSP } from "../format";
+import { setLanguageSetting } from "../i18n";
 import type { TouchdownReport } from "../types";
 import type { ApproachFact } from "./approachTypes";
 import {
@@ -20,6 +21,7 @@ import {
   quota,
   scopeOpts,
   trendSeries,
+  typeKey,
   type HistLanding,
 } from "./history";
 
@@ -323,11 +325,27 @@ describe("patternSeries", () => {
 });
 
 describe("wording", () => {
+  // jsdom reports en-US: pin the reference language, the en case switches explicitly
+  beforeEach(() => setLanguageSetting("de"));
+  afterEach(() => setLanguageSetting("de"));
+
   it("phrases the comparison", () => {
     expect(betterText(0.7)).toBe(`besser als 70${NNBSP}%`);
     expect(betterText(1)).toBe("besser als jede");
     expect(betterText(null)).toBeNull();
     expect(peersPhrase(20, "runway", lf({}))).toBe("deiner letzten 20 Landungen auf EDDF 25C");
     expect(peersPhrase(5, "all", lf({}))).toBe("deiner letzten 5 Landungen");
+    expect(peersPhrase(1, "type", lf({}))).toBe("deiner letzten 1 Landung mit A20N");
+    expect(typeKey({ aircraftIcaoType: null, aircraftTitle: " " })).toBe("Unbekannt");
+  });
+
+  it("phrases the comparison in English", () => {
+    setLanguageSetting("en");
+    expect(betterText(0.7)).toBe(`better than 70${NNBSP}%`);
+    expect(betterText(1)).toBe("better than all");
+    expect(peersPhrase(20, "runway", lf({}))).toBe("your last 20 landings on EDDF 25C");
+    expect(peersPhrase(1, "type", lf({}))).toBe("your last 1 landing in the A20N");
+    expect(peersPhrase(5, "runway", lf({ runwayIdent: "" }))).toBe("your last 5 landings on this runway");
+    expect(typeKey({ aircraftIcaoType: null, aircraftTitle: null })).toBe("Unknown");
   });
 });

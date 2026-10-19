@@ -1,13 +1,15 @@
 //! „Diagnosepaket erstellen“ (Einstellungen → Diagnose): one ZIP the user sends to the developer.
 //!
 //! Always: `logs/` (every `vectasim*.log*`), `settings.json` (SimBrief ID masked), `system.json`,
-//! `db.json` (schema, counts, size, the last phase events), `README.txt`. With the Debug-Modus also
+//! `db.json` (schema, counts, size, the last phase events), `README.txt` (in the backend language;
+//! notes about skipped files in `HINWEISE.txt` / `NOTES.txt`). With the Debug-Modus also
 //! `dumps/` (newest first, at most [`DUMP_BUDGET`] bytes; the running file is flushed and the RAM
 //! ring written as a fresh `ring-*.vsdump` first) and `simconnect.json` (DLL search, connection,
 //! raw diagnostics). Nothing is uploaded – the file goes where the save dialog says.
 //! With the Streamer-Modus on, the JSON files, the logs and the notes have the Windows user
 //! name removed from their paths (`privacy::mask_user_paths`); the dumps stay as recorded.
 
+use crate::lang::Lang;
 use crate::manager::ProviderManager;
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -45,13 +47,15 @@ struct Sources {
     simconnect: Option<Value>,
     /// Streamer-Modus: user names removed from paths in JSON, logs and notes.
     mask_paths: bool,
+    /// Language of README and notes (file contents from logs/JSON stay as they are).
+    lang: Lang,
 }
 
 /// Build the package at `target_path` (from the save dialog).
 #[tauri::command]
 pub async fn create_diag_package(target_path: String, app: AppHandle) -> Result<DiagPackageInfo, String> {
     if target_path.trim().is_empty() {
-        return Err("kein Speicherort gewählt".into());
+        return Err(crate::lang::tr("kein Speicherort gewählt", "no location chosen").into());
     }
     let target = crate::data::allowed_target(&target_path, crate::data::DIAG_EXTENSIONS)?;
     tauri::async_runtime::spawn_blocking(move || {
@@ -103,12 +107,14 @@ fn collect(app: &AppHandle) -> Sources {
             "threads": std::thread::available_parallelism().map(|n| n.get()).ok(),
         },
         "simulator": { "provider": status.provider, "state": status.state, "name": status.sim_name, "version": status.sim_version },
+        // VATSIM/IVAO feeds: on/off, source URL, age of the last download, last error
+        "online": app.state::<crate::online::OnlineState>().summary().networks,
     });
     let db_path = app.path().app_data_dir().map(|d| d.join("vectasim.db")).ok();
     let db = db_json(&store, db_path.as_deref());
     let simconnect = debug.then(|| simconnect_json(&store, &manager));
 
-    Sources { log_dir: app.path().app_log_dir().ok(), dumps_dir, settings, system, db, simconnect, mask_paths }
+    Sources { log_dir: app.path().app_log_dir().ok(), dumps_dir, settings, system, db, simconnect, mask_paths, lang: crate::lang::current() }
 }
 
 /// `simbrief_user` → first two characters + `***`; anything that looks like a secret → `***`.
@@ -333,7 +339,7 @@ fn zip_now() -> DateTime {
     DateTime::from_date_and_time(n(0, 4), n(4, 6) as u8, n(6, 8) as u8, n(9, 11) as u8, n(11, 13) as u8, n(13, 15) as u8).unwrap_or_default()
 }
 
-const README: &str = "VectaSim – Diagnosepaket
+const README_DE: &str = "VectaSim – Diagnosepaket
 ========================
 
 Dieses Paket hilft dem Entwickler, einen Fehler nachzuvollziehen. Bitte als Ganzes schicken
@@ -365,6 +371,43 @@ Roh-Aufzeichnungen (dumps/) bleiben unverändert.
 Die Roh-Aufzeichnungen enthalten Flugdaten (Position, Flugzeug, Kennung) wie im Logbuch.
 ";
 
+const README_EN: &str = "VectaSim – diagnostic package
+=============================
+
+This package helps the developer to trace an error. Please send it as a whole
+(e.g. attach it to a GitHub issue or send it by mail). VectaSim uploads nothing by itself.
+
+Contents
+--------
+logs/            VectaSim's log files (vectasim.log and older parts)
+settings.json    Your settings. The SimBrief pilot ID is made unrecognisable except for the
+                 first two characters.
+system.json      App version, Windows version, WebView2 version, processor, simulator version
+db.json          Logbook statistics: schema version, number of flights/touchdowns/aircraft,
+                 file size and the latest phase changes of the last three flights.
+                 The logbook itself is NOT included.
+
+Only with the debug mode on:
+dumps/           Raw recordings of the simulator data (.vsdump), newest first, at most
+                 200 MB. They let a flight be replayed without a simulator.
+simconnect.json  Which SimConnect.dll was loaded, which paths were searched and the
+                 latest connection state.
+
+Privacy
+-------
+No passwords, keys or credentials are included – VectaSim stores none.
+File paths (e.g. C:\\Users\\<name>\\...) can show your Windows user name – except in the
+streamer mode (Settings → Display): then VectaSim replaces it in the JSON files, the logs and
+NOTES.txt with %USERPROFILE%, %LOCALAPPDATA% or %APPDATA%. The raw recordings (dumps/) stay
+unchanged.
+The raw recordings contain flight data (position, aircraft, registration) as in the logbook.
+";
+
+/// Name of the notes file in the package.
+fn notes_name(lang: Lang) -> &'static str {
+    lang.tr("HINWEISE.txt", "NOTES.txt")
+}
+
 fn write_package(target: &Path, src: &Sources) -> io::Result<DiagPackageInfo> {
     if let Some(dir) = target.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir)?;
@@ -395,7 +438,14 @@ fn write_zip<W: Write + Seek>(out: W, src: &Sources) -> io::Result<Vec<String>> 
         files.push(name.to_string());
         Ok(())
     };
-    let readme = if src.mask_paths { format!("{README}\nIn diesem Paket: Benutzername in Pfaden ausgeblendet (Streamer-Modus an).\n") } else { README.to_string() };
+    let l = src.lang;
+    let base = l.tr(README_DE, README_EN);
+    let readme = if src.mask_paths {
+        let masked = l.tr("In diesem Paket: Benutzername in Pfaden ausgeblendet (Streamer-Modus an).", "In this package: user name hidden in paths (streamer mode on).");
+        format!("{base}\n{masked}\n")
+    } else {
+        base.to_string()
+    };
     add_bytes(&mut zip, "README.txt", readme.replace('\n', "\r\n").as_bytes())?;
     let pretty = |v: &Value| {
         let mut v = v.clone();
@@ -446,15 +496,15 @@ fn write_zip<W: Write + Seek>(out: W, src: &Sources) -> io::Result<Vec<String>> 
             add_file(&mut zip, name, &p, stored, false)?;
         }
         if !skipped.is_empty() {
-            notes.push(format!("nicht aufgenommen (über 200 MB): {}", skipped.join(", ")));
+            notes.push(format!("{}: {}", l.tr("nicht aufgenommen (über 200 MB)", "not included (over 200 MB)"), skipped.join(", ")));
         }
     }
     if !notes.is_empty() {
-        zip.start_file("HINWEISE.txt", deflate).map_err(io::Error::other)?;
+        zip.start_file(notes_name(l), deflate).map_err(io::Error::other)?;
         let text = notes.join("\r\n");
         let text = if src.mask_paths { crate::privacy::mask_user_paths(&text) } else { text };
         zip.write_all(text.as_bytes())?;
-        files.push("HINWEISE.txt".into());
+        files.push(notes_name(l).into());
     }
     zip.finish().map_err(io::Error::other)?;
     Ok(files)
@@ -478,6 +528,8 @@ mod tests {
         assert_eq!(mask_setting("simbrief_user", ""), "");
         assert_eq!(mask_setting("simconnect_dll_path", r"C:\MSFS SDK\SimConnect.dll"), r"C:\MSFS SDK\SimConnect.dll");
         assert_eq!(mask_setting("some_api_key", "abc"), "***");
+        // overlay server token (server.rs → SETTING_SERVER_TOKEN)
+        assert_eq!(mask_setting(crate::server::SETTING_SERVER_TOKEN, "abc"), "***");
         assert_eq!(mask_setting("log_level", "debug"), "debug");
     }
 
@@ -523,6 +575,7 @@ mod tests {
             db: json!({ "schemaVersion": 9 }),
             simconnect: Some(json!({ "foundDll": null })),
             mask_paths: false,
+            lang: Lang::De,
         };
         let target = dir.join("out").join("VectaSim-Diagnose_test.zip");
         let info = write_package(&target, &src).unwrap();
@@ -564,6 +617,7 @@ mod tests {
             db: json!({ "path": r"C:\Users\Max\AppData\Roaming\io.vectasim.app\vectasim.db" }),
             simconnect: None,
             mask_paths: true,
+            lang: Lang::De,
         };
         let target = dir.join("pkg.zip");
         write_package(&target, &src).unwrap();
@@ -582,6 +636,34 @@ mod tests {
         assert!(db.contains(r"%APPDATA%\\io.vectasim.app"), "{db}");
         assert_eq!(log, r"db at %APPDATA%\io.vectasim.app\vectasim.db");
         assert!(readme.contains("Streamer-Modus an"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn english_package_has_english_readme_and_notes() {
+        let dir = temp_dir("en");
+        let dumps = dir.join("dumps");
+        std::fs::create_dir_all(&dumps).unwrap();
+        std::fs::write(dumps.join("big.vsdump"), vec![0u8; 16]).unwrap();
+        let src = Sources {
+            log_dir: None,
+            dumps_dir: Some(dumps),
+            settings: json!({}),
+            system: json!({}),
+            db: json!({}),
+            simconnect: None,
+            mask_paths: true,
+            lang: Lang::En,
+        };
+        let target = dir.join("pkg.zip");
+        let info = write_package(&target, &src).unwrap();
+        assert!(info.files.iter().any(|f| f == "README.txt"), "{:?}", info.files);
+        let mut zip = zip::ZipArchive::new(File::open(&target).unwrap()).unwrap();
+        let mut readme = String::new();
+        zip.by_name("README.txt").unwrap().read_to_string(&mut readme).unwrap();
+        assert!(readme.starts_with("VectaSim – diagnostic package") && readme.contains("streamer mode on"), "{readme}");
+        assert_eq!(notes_name(Lang::En), "NOTES.txt");
+        assert_eq!(notes_name(Lang::De), "HINWEISE.txt");
         std::fs::remove_dir_all(dir).unwrap();
     }
 

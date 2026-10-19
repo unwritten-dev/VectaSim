@@ -17,7 +17,9 @@
 // Brand: the footer carries the real lockup (mark + "VectaSim" outlines, ui/Logo.tsx), the
 // runway geometry shares its lateral exaggeration with the debrief (cardExaggeration).
 
-import { NNBSP, fmt, fmtDateTime, fmtNum, fmtWind, maskRegistration, maskTitle } from "../format";
+import { maskRegistration, maskTitle } from "../format";
+import { useT, type TFunction } from "../i18n";
+import { NNBSP, fmt, fmtDateTime, fmtNum, fmtWind } from "../i18n/number";
 import { activeTheme, themeVars } from "../themes";
 import { LogoLockup, lockupWidth } from "../ui/Logo";
 import { providerLabel } from "../status";
@@ -184,6 +186,8 @@ function runwayTopLayout(a: LandingAnalysis, panelH: number) {
 }
 
 export default function LandingCard({ data: d, colors: t, approach, fontCss, hideReg = false }: Props) {
+  // `t` is the card theme here; texts follow the UI language (exportCard renders without a provider pin)
+  const tr = useT();
   const line = approach && approach.outcome.kind !== "goAround" ? approachCardLine(approach) : null;
   const rwyH = line ? RWY_H - APPROACH_LINE_H : RWY_H;
   const profY = line ? PROF_Y - APPROACH_LINE_H : PROF_Y;
@@ -196,7 +200,7 @@ export default function LandingCard({ data: d, colors: t, approach, fontCss, hid
   const icao = rwy?.airport ?? d.airport?.ident ?? null;
 
   const aircraft = f?.aircraft;
-  const rawType = aircraft?.title || aircraft?.atcType || "Unbekanntes Flugzeug";
+  const rawType = aircraft?.title || aircraft?.atcType || tr("landingCard.unknownAircraft");
   const rawReg = f?.airframeReg || aircraft?.atcId || null;
   const reg = rawReg && hideReg ? maskRegistration(rawReg) : rawReg;
   // the sim title often carries livery and registration ("A320neo Lufthansa D-AINA")
@@ -213,7 +217,7 @@ export default function LandingCard({ data: d, colors: t, approach, fontCss, hid
   const derived = isDerivedRunway(rwy);
 
   return (
-    <svg xmlns="http://www.w3.org/2000/svg" width={CARD_W} height={CARD_H} viewBox={`0 0 ${CARD_W} ${CARD_H}`} role="img" aria-label={`Landekarte ${icao ?? ""} ${rwy ? `RWY ${rwy.ident}` : ""}`.trim()}>
+    <svg xmlns="http://www.w3.org/2000/svg" width={CARD_W} height={CARD_H} viewBox={`0 0 ${CARD_W} ${CARD_H}`} role="img" aria-label={tr("landingCard.aria", { where: `${icao ?? ""} ${rwy ? `RWY ${rwy.ident}` : ""}`.trim() }).trim()}>
       {fontCss && (
         <defs>
           <style>{fontCss}</style>
@@ -224,7 +228,7 @@ export default function LandingCard({ data: d, colors: t, approach, fontCss, hid
 
       {/* head */}
       <text x={PAD} y={92} fill={t.text} fontSize={40} fontWeight={650} style={sans}>
-        {icao ?? "Landung"}
+        {icao ?? tr("landingCard.landing")}
         {rwy && (
           <tspan fill={t.text} fontWeight={550}>
             {"  "}RWY {rwy.ident}
@@ -245,36 +249,40 @@ export default function LandingCard({ data: d, colors: t, approach, fontCss, hid
       <Tile
         i={0}
         t={t}
-        label="Landerate"
+        label={tr("landingCard.rate")}
         value={fmt(td.landingRateFpm, 0)}
         unit="fpm"
         source={src.rate.kind}
         band={a.vsBand}
-        sub={`${BAND_LABEL[a.vsBand]} · ${td.landingRateSource === "sim" ? "Sim-Wert" : "gemessen"}`}
+        sub={`${BAND_LABEL[a.vsBand]} · ${td.landingRateSource === "sim" ? tr("landingCard.simValue") : tr("landingCard.measured")}`}
       />
-      <Tile i={1} t={t} label="g-Spitze" value={fmt(td.peakG, 2)} unit="g" source={src.g.kind} band={a.gBand} sub={`${BAND_LABEL[a.gBand]} · ${td.bounces ? `${td.bounces} ${td.bounces === 1 ? "Bounce" : "Bounces"}` : "ohne Bounce"}`} />
+      <Tile i={1} t={t} label={tr("landingCard.gPeak")} value={fmt(td.peakG, 2)} unit="g" source={src.g.kind} band={a.gBand} sub={`${BAND_LABEL[a.gBand]} · ${td.bounces ? tr("count.bounces", { count: td.bounces }) : tr("facts.key.noBounce")}`} />
       <Tile
         i={2}
         t={t}
-        label="Ab Schwelle"
+        label={tr("landingCard.fromThreshold")}
         value={tp ? fmt(tp.distanceM, 0) : "–"}
         unit={uncertainty != null && uncertainty > 0 ? `± ${fmtNum(uncertainty, 0)}${NNBSP}m` : "m"}
         source="derived"
-        sub={zone ? (derived ? `${zone} · Piste abgeleitet` : zone) : "keine Piste zugeordnet"}
+        sub={zone ? (derived ? tr("landingCard.derivedSuffix", { zone }) : zone) : tr("landingCard.noRunway")}
         subColor={tp ? (tp.inTdz ? t.ok : t.warn) : undefined}
       />
       <Tile
         i={3}
         t={t}
-        label="Mittellinie"
+        label={tr("landingCard.centreline")}
         value={lateral == null ? "–" : fmtNum(lateral, 0)}
-        unit={lateral == null ? undefined : lateral < 0.5 ? "m" : `m ${tp!.lateralM > 0 ? "R" : "L"}`}
+        unit={lateral == null ? undefined : lateral < 0.5 ? "m" : `m ${tp!.lateralM > 0 ? tr("landingCard.right") : tr("landingCard.left")}`}
         source="derived"
         sub={
           tp && !measurable
-            ? "nicht messbar · Piste aus der Rollspur"
+            ? tr("landingCard.notMeasurable")
             : tp
-              ? `${sideLabel(tp.lateralM)}${rwy ? (rwy.widthM != null ? ` · Piste ${fmt(rwy.widthM, 0, "m")} breit` : " · Breite unbekannt") : ""}`
+              ? rwy
+                ? rwy.widthM != null
+                  ? tr("landingCard.width", { side: sideLabel(tp.lateralM), width: fmt(rwy.widthM, 0, "m") })
+                  : tr("landingCard.widthUnknown", { side: sideLabel(tp.lateralM) })
+                : sideLabel(tp.lateralM)
               : "–"
         }
       />
@@ -282,23 +290,26 @@ export default function LandingCard({ data: d, colors: t, approach, fontCss, hid
       {/* runway from above */}
       <rect x={PAD} y={RWY_Y} width={INNER} height={rwyH} rx={px(t.radius, 3)} fill={t.surface1} stroke={t.border} />
       <text x={PAD + 16} y={RWY_Y + 24} fill={t.textMuted} fontSize={13} fontWeight={550} letterSpacing={t.labelLs} style={sans}>
-        {rwy ? `PISTE ${rwy.ident} VON OBEN${derived ? " · ABGELEITET" : runwaySourceOf(rwy) === "user" ? " · VON DIR FESTGELEGT" : ""}` : "AUFSETZPUNKT"}
+        {rwy
+          ? tr(derived ? "landingCard.runwayTopDerived" : runwaySourceOf(rwy) === "user" ? "landingCard.runwayTopUser" : "landingCard.runwayTop", { ident: rwy.ident })
+          : tr("landingCard.touchdownPoint")}
       </text>
       {rwy && tp ? (
-        <RunwayTop d={d} t={t} panelH={rwyH} />
+        <RunwayTop d={d} t={t} tr={tr} panelH={rwyH} />
       ) : (
         <text x={CARD_W / 2} y={RWY_Y + rwyH / 2 + 6} textAnchor="middle" fill={t.textMuted} fontSize={18} style={sans}>
-          Keine Piste zugeordnet – Aufsetzpunkt und Mittellinie entfallen
+          {tr("landingCard.noRunwayPanel")}
         </text>
       )}
 
       {/* approach profile, last nm */}
       <rect x={PAD} y={profY} width={INNER} height={PROF_H} rx={px(t.radius, 3)} fill={t.surface1} stroke={t.border} />
-      <MiniProfile d={d} t={t} profY={profY} />
+      <MiniProfile d={d} t={t} tr={tr} profY={profY} />
       {line && (
         <text x={PAD + 16} y={profY + PROF_H + 15} fill={t.textMuted} fontSize={14} style={num}>
           <tspan fill={t.textMuted} fontWeight={550} letterSpacing={t.labelLs} style={sans}>
-            ANFLUG{"  "}
+            {tr("landingCard.approach")}
+            {"  "}
           </tspan>
           {line}
         </text>
@@ -307,7 +318,7 @@ export default function LandingCard({ data: d, colors: t, approach, fontCss, hid
       {/* footer */}
       <line x1={PAD} x2={CARD_W - PAD} y1={FOOT_Y - 24} y2={FOOT_Y - 24} stroke={t.border} />
       <text x={PAD} y={FOOT_Y} fill={t.textMuted} fontSize={16} style={sans}>
-        {windLine(d)}
+        {windLine(d, tr)}
       </text>
       {/* brand lockup (docs/brand/README.md): mark + "VectaSim" outlines, baseline on the footer line */}
       <g>
@@ -318,15 +329,15 @@ export default function LandingCard({ data: d, colors: t, approach, fontCss, hid
   );
 }
 
-function windLine(d: LandingDebriefData): string {
+function windLine(d: LandingDebriefData, tr: TFunction): string {
   const w = d.analysis.wind;
   const metar = d.metar;
-  if (!metar && !w) return d.metarNote ? `Wind: ${d.metarNote}` : "Wind: keine METAR";
-  const head = metar ? `METAR ${metar.station}${metar.time ? ` ${metar.time}` : ""}` : "Wind";
+  if (!metar && !w) return d.metarNote ? tr("landingCard.windNote", { note: d.metarNote }) : tr("landingCard.windNoMetar");
+  const head = metar ? `METAR ${metar.station}${metar.time ? ` ${metar.time}` : ""}` : tr("landingCard.wind");
   const parts = [head];
   if (metar?.wind) parts.push(fmtWind(metar.wind));
-  if (w && w.headwindKt != null) parts.push(windComponentsText(d.analysis) + (w.relativeToRunway ? "" : " (zum Steuerkurs)"));
-  if (metar && !d.metarAtLanding) parts.push("aktuelles Wetter");
+  if (w && w.headwindKt != null) parts.push(w.relativeToRunway ? windComponentsText(d.analysis) : tr("landingCard.toHeading", { text: windComponentsText(d.analysis) }));
+  if (metar && !d.metarAtLanding) parts.push(tr("landingCard.currentWeather"));
   const age = metarAgeNote(d);
   if (age) parts.push(age.replace(/^METAR /, ""));
   return parts.join(" · ");
@@ -388,7 +399,7 @@ function Tile({
 }
 
 /** Runway top view: same geometry as RunwayDiagram (runwayLayout/pathOf), fixed size. */
-function RunwayTop({ d, t, panelH }: { d: LandingDebriefData; t: CardTheme; panelH: number }) {
+function RunwayTop({ d, t, tr, panelH }: { d: LandingDebriefData; t: CardTheme; tr: TFunction; panelH: number }) {
   const a = d.analysis;
   const rwy = a.runway!;
   const tp = a.touchdownPoint!;
@@ -436,7 +447,7 @@ function RunwayTop({ d, t, panelH }: { d: LandingDebriefData; t: CardTheme; pane
         <rect x={rx0} y={ry0} width={rx1 - rx0} height={rwyH} fill={t.surface3} stroke={t.textFaint} />
         <rect x={tdzX0} y={ry0 - 3} width={Math.max(1, tdzX1 - tdzX0)} height={rwyH + 6} fill={t.ok} fillOpacity={0.1} stroke={t.ok} strokeOpacity={0.4} />
         <text x={(tdzX0 + tdzX1) / 2} y={ry0 - 9} textAnchor="middle" fill={t.ok} fontSize={13} style={sans}>
-          Aufsetzzone {zoneText(tp, rwy)} · Zielpunkt {fmt(tp.aimingPointM, 0, "m")}
+          {tr("landingCard.zone", { zone: zoneText(tp, rwy), aim: fmt(tp.aimingPointM, 0, "m") })}
         </text>
         {[cy - rwyH * 0.36, cy + rwyH * 0.22].map((y) => (
           <rect key={y} x={aimX} y={y} width={Math.max(3, 45 * L.xScale)} height={rwyH * 0.14} fill={t.text} fillOpacity={0.85} />
@@ -504,9 +515,11 @@ function RunwayTop({ d, t, panelH }: { d: LandingDebriefData; t: CardTheme; pane
       {/* legend, top right of the panel */}
       <g transform={`translate(${INNER - 16},-2)`} fontSize={12} style={sans}>
         <text x={0} y={0} textAnchor="end" fill={t.textMuted}>
-          <tspan fill={t.accent}>━</tspan> in der Luft{SEP}
-          <tspan fill={t.ownAircraft}>┅</tspan> am Boden{a.rollout ? `${SEP}■ GS < ${fmtNum(a.config.rolloutEndKt)}${NNBSP}kt` : ""}
-          {L.exaggeration > 1.05 ? `${SEP}Querachse ×${fmtNum(L.exaggeration, L.exaggeration < 10 ? 1 : 0)} überhöht` : ""}
+          <tspan fill={t.accent}>━</tspan> {tr("landingCard.inAir")}
+          {SEP}
+          <tspan fill={t.ownAircraft}>┅</tspan> {tr("landingCard.onGround")}
+          {a.rollout ? `${SEP}■ GS < ${fmtNum(a.config.rolloutEndKt)}${NNBSP}kt` : ""}
+          {L.exaggeration > 1.05 ? `${SEP}${tr("landingCard.exaggerated", { factor: fmtNum(L.exaggeration, L.exaggeration < 10 ? 1 : 0) })}` : ""}
         </text>
       </g>
     </g>
@@ -514,7 +527,7 @@ function RunwayTop({ d, t, panelH }: { d: LandingDebriefData; t: CardTheme; pane
 }
 
 /** Height over the last nm against the reference glidepath (3° by default). */
-function MiniProfile({ d, t, profY: PROF_Y }: { d: LandingDebriefData; t: CardTheme; profY: number }) {
+function MiniProfile({ d, t, tr, profY: PROF_Y }: { d: LandingDebriefData; t: CardTheme; tr: TFunction; profY: number }) {
   const a = d.analysis;
   const sans = { fontFamily: t.fontSans };
   const numF = { fontFamily: t.fontNum };
@@ -539,21 +552,21 @@ function MiniProfile({ d, t, profY: PROF_Y }: { d: LandingDebriefData; t: CardTh
   const head = (
     <g style={sans}>
       <text x={PAD + 16} y={PROF_Y + 30} fill={t.textMuted} fontSize={13} fontWeight={550} letterSpacing={t.labelLs}>
-        ANFLUG · LETZTE 1{NNBSP}NM
+        {tr("landingCard.profileTitle", { nm: `1${NNBSP}NM` })}
       </text>
       {withRunway && (
         <text x={PAD + 16} y={PROF_Y + 54} fill={t.text} fontSize={14}>
-          <tspan fill={t.textMuted}>┅</tspan> {fmtNum(gp, 0)}°-Referenz ±{degNum(tol)}° (1{NNBSP}Dot)
+          <tspan fill={t.textMuted}>┅</tspan> {tr("landingCard.reference", { angle: `${fmtNum(gp, 0)}°`, tol: degNum(tol) })}
         </text>
       )}
       {a.threshold && (
         <text x={PAD + 16} y={PROF_Y + 76} fill={t.text} fontSize={14} style={numF}>
-          Schwelle {fmt(a.threshold.heightFt, 0, "ft")} · {fmt(a.threshold.iasKt, 0, "kt")}
+          {tr("landingCard.threshold", { height: fmt(a.threshold.heightFt, 0, "ft"), ias: fmt(a.threshold.iasKt, 0, "kt") })}
         </text>
       )}
       {a.flare && (
         <text x={PAD + 16} y={PROF_Y + 98} fill={t.textMuted} fontSize={14} style={numF}>
-          Abfangen ab {fmt(a.flare.startHatFt, 0, "ft")}
+          {tr("landingCard.flare", { ft: fmt(a.flare.startHatFt, 0, "ft") })}
         </text>
       )}
     </g>
@@ -563,7 +576,7 @@ function MiniProfile({ d, t, profY: PROF_Y }: { d: LandingDebriefData; t: CardTh
       <g>
         {head}
         <text x={(x0 + x1) / 2} y={PROF_Y + PROF_H / 2 + 5} textAnchor="middle" fill={t.textMuted} fontSize={15} style={sans}>
-          Zu wenige Trackpunkte für ein Anflugprofil
+          {tr("landingCard.tooFewPoints")}
         </text>
       </g>
     );
@@ -607,14 +620,14 @@ function MiniProfile({ d, t, profY: PROF_Y }: { d: LandingDebriefData; t: CardTh
         <g>
           <line x1={x(0)} x2={x(0)} y1={y0} y2={y1} stroke={t.textMuted} />
           <text x={x(0) - 4} y={y1 + 14} textAnchor="end" fill={t.textMuted} fontSize={12} style={sans}>
-            Schwelle
+            {tr("landingCard.thresholdShort")}
           </text>
         </g>
       )}
       <path d={`M${x(tdDist) - 5},${y1 - 9}L${x(tdDist) + 5},${y1 - 9}L${x(tdDist)},${y1 - 1}Z`} fill={bandColor(t, a.vsBand)} />
       {/* the touchdown sits at the right edge: label it above the plot, left of the mark */}
       <text x={x(tdDist) - 8} y={y0 + 6} textAnchor="end" fill={t.text} fontSize={12} stroke={t.surface1} strokeWidth={3} paintOrder="stroke" style={sans}>
-        Aufsetzen
+        {tr("landingCard.touchdown")}
       </text>
       <line x1={x(tdDist)} x2={x(tdDist)} y1={y0} y2={y1 - 9} stroke={t.textFaint} strokeDasharray="2 3" />
       <text x={x0 + 4} y={y0 + 6} fill={t.textMuted} fontSize={12} stroke={t.surface1} strokeWidth={3} paintOrder="stroke" style={numF}>

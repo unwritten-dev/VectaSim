@@ -1,0 +1,25 @@
+[package]
+name = "vectasim-server"
+description = "Local HTTP/WebSocket server: OBS overlays, second screen and a read-only JSON API"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+vectasim-core = { path = "../vectasim-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }
+# HTTP + WebSocket (MIT): hyper 1 / tower 0.5 / tokio are already in the tree through tauri and reqwest
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "ws", "query", "json"] }
+tokio = { version = "1", features = ["rt", "net", "time", "sync", "macros"] }
+# own accept loop (header-read timeout via the tokio timer, connection limit); all already in the tree through axum
+hyper = { version = "1", features = ["http1", "server"] }
+hyper-util = { version = "0.1", features = ["tokio", "server", "service"] }
+tower = { version = "0.5", default-features = false, features = ["util"] }
+# random token for the LAN mode (already in the tree)
+getrandom = "0.3"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "net", "time", "sync", "macros", "io-util"] }

@@ -3,13 +3,15 @@
 // and is left out of every mean / quota – never counted as a failure.
 
 import type { ApproachBand, ApproachFact } from "./approachTypes";
-import { APPROACH_BAND_SHAPE, type BandShape } from "./facts";
+import { t } from "../i18n";
+import { APPROACH_BAND_LABEL, APPROACH_BAND_SHAPE, type BandShape } from "./facts";
 import { isDerivedSource } from "./types";
 
 /** The four gates drawn as scatter panels, high to low. */
 export type ScatterGate = "tenNm" | "faf" | "ft1000" | "ft500";
 export const SCATTER_GATES: ScatterGate[] = ["tenNm", "faf", "ft1000", "ft500"];
 
+/** Gate names: language-neutral (units and ICAO abbreviations). */
 export const GATE_LABEL: Record<ScatterGate, string> = {
   tenNm: "10 NM",
   faf: "FAF",
@@ -37,7 +39,7 @@ export const GATE_TOLERANCE: Record<ScatterGate, Tolerance> = {
   ft500: { altLoFt: -50, altHiFt: 50, iasLoKt: -5, iasHiKt: 20 },
 };
 
-/** EASA/D4S band tokens (05 §7.1) – never violet/magenta; same mapping as APPROACH_BAND_VAR in facts.ts. */
+/** EASA/D4S band tokens – never violet/magenta; same mapping as APPROACH_BAND_VAR in facts.ts. */
 export const APPROACH_BAND_VAR: Record<ApproachBand, string> = {
   stable: "var(--aband-stable)",
   deviations: "var(--aband-dev)",
@@ -46,12 +48,8 @@ export const APPROACH_BAND_VAR: Record<ApproachBand, string> = {
 };
 /** Marker shape per band (facts.ts APPROACH_BAND_SHAPE); an approach without band is a circle. */
 export const shapeOf = (b: ApproachBand | null | undefined): BandShape => (b ? APPROACH_BAND_SHAPE[b] : "circle");
-export const APPROACH_BAND_LABEL: Record<ApproachBand, string> = {
-  stable: "stabil",
-  deviations: "mit Abweichungen",
-  unstable: "instabil",
-  unstableBelow500: "instabil unter 500 ft",
-};
+/** Band names: the ones of facts.ts (same texts, active language). */
+export { APPROACH_BAND_LABEL };
 export const APPROACH_BANDS: ApproachBand[] = ["stable", "deviations", "unstable", "unstableBelow500"];
 /** Colour of an approach without band (never below 1000 ft). */
 export const NO_BAND_VAR = "var(--text-muted)";
@@ -183,9 +181,9 @@ export function gateHits(facts: ApproachFact[], gate: ScatterGate): { inside: nu
 
 // ---- filter (same behaviour as dispersionStats, typed for ApproachFact) ----
 
-/** Filter key of the aircraft: ICAO type, else the title, else "Unbekannt". */
+/** Filter key of the aircraft: ICAO type, else the title, else "Unbekannt" / "Unknown". */
 export function approachAircraftKey(f: Pick<ApproachFact, "aircraftIcaoType" | "aircraftTitle">): string {
-  return f.aircraftIcaoType?.trim() || f.aircraftTitle?.trim() || "Unbekannt";
+  return f.aircraftIcaoType?.trim() || f.aircraftTitle?.trim() || t("approach.stats.unknownAircraft");
 }
 
 export interface ApproachFilter {

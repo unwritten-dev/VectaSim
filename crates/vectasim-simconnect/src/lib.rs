@@ -1,5 +1,6 @@
 //! SimConnect provider: connects to MSFS 2020/2024 (P3D/FSX share the API),
-//! registers three data definitions (fast / slow / static), subscribes to the
+//! registers five data definitions (fast / slow / static / approach 1 Hz / design
+//! speeds once), subscribes to the
 //! system events a tracker cares about, and pushes `ProviderEvent`s.
 //!
 //! Runs on a dedicated thread because SimConnect clients are not thread-safe.
@@ -32,8 +33,8 @@ pub mod watchdog;
 
 use api::{LiveApi, SimApi};
 use decode::{DispatchKind, raw_f64, raw_str256};
-use decoder::{DefKind, EVT_AIRCRAFT_LOADED, IDX_STATIC, REQ_STATE_SIM, SYSTEM_EVENTS, def_key, event_name};
-pub use decoder::{Decoder, FAST_VARS, SLOW_VARS, STATIC_VARS};
+use decoder::{DefKind, EVT_AIRCRAFT_LOADED, IDX_DESIGN, IDX_STATIC, REQ_STATE_SIM, SYSTEM_EVENTS, def_key, event_name};
+pub use decoder::{APPROACH_VARS, DESIGN_VARS, Decoder, FAST_VARS, SLOW_VARS, STATIC_VARS};
 use ffi::{SimConnectLib, datatype, recv_id};
 pub use replay::{ReplayConfig, ReplayProvider};
 use std::collections::VecDeque;
@@ -569,6 +570,7 @@ impl<A: SimApi> Session<A> {
                     self.record(now, w, Body::Filename { id, path: path.clone() });
                     if eid == EVT_AIRCRAFT_LOADED {
                         self.request_def(IDX_STATIC);
+                        self.request_def(IDX_DESIGN);
                     }
                     let events = self.decoder.on_filename(eid, path, w);
                     send_all(events)?;

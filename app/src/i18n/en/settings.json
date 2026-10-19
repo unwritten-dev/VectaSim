@@ -1,0 +1,522 @@
+{
+  "settings": {
+    "integrations": {
+      "title": "Integrations",
+      "description": "Discord status, Windows notifications and the notification area (tray).",
+      "discord": {
+        "enable": "Show flight as Discord status (Rich Presence)",
+        "help": "Shows route, aircraft type, phase and flight time, e.g. “EDDF → EGLL · A20N” and “Cruise FL360 · 420 nm to go”. No callsign in streamer mode. At most one update every 15 s; only the locally running Discord client is contacted.",
+        "expert": "Custom Discord application (experts)",
+        "appId": "App ID",
+        "appIdPlaceholder": "empty = VectaSim default",
+        "appIdHelp": "empty = VectaSim application (default, no setup needed) · otherwise the Application ID of your own application from the Discord Developer Portal with an image asset “vectasim”",
+        "appIdInvalid": "The Discord app ID is a number with 17–20 digits (Developer Portal → Applications → Application ID).",
+        "off": "Off · Discord shows nothing from VectaSim.",
+        "showing": "Connected · Discord shows: {showing}",
+        "connected": "Connected · status is set in a moment",
+        "notRunning": "Discord not running · VectaSim retries every 30 s.",
+        "noAppId": "No valid Discord app ID · the custom app ID entered is invalid. Clear the field to use the VectaSim default.",
+        "noDefaultAppId": "Discord status not available · this build lacks the VectaSim default app ID. A custom app ID under “Custom Discord application” still works.",
+        "connecting": "Connecting to Discord …"
+      },
+      "notify": {
+        "title": "Notifications",
+        "enable": "Windows notifications when VectaSim is not in the foreground",
+        "kinds": "Notify on",
+        "landing": "Landing (landing rate, g-load, bounces)",
+        "saved": "Flight saved",
+        "connection": "Connection to the simulator lost / back",
+        "update": "Update available"
+      },
+      "test": {
+        "send": "Send test",
+        "help": "Without registration and callsign. Clicking the notification brings VectaSim to the front.",
+        "sent": "Test notification sent",
+        "sentHint": "It appears at the bottom right. If you see nothing, check Windows → Settings → System → Notifications (including “Do not disturb”).",
+        "failed": "Notifications not possible",
+        "failedHint": "Windows rejected the notification – details in the log."
+      },
+      "tray": {
+        "title": "Notification area (tray)",
+        "enable": "Icon in the notification area · minimizing hides the window there",
+        "help": "Double-clicking the icon opens VectaSim again; the menu shows the recording status, toggles debug mode and quits the app. Recording continues unchanged in the notification area; quitting asks for confirmation during a flight.",
+        "active": "Notification area icon active",
+        "inactive": "No notification area icon"
+      }
+    },
+    "notSaved": "Setting not saved",
+    "server": {
+      "title": "Overlay & API",
+      "description": "Local server for OBS browser sources, a tablet or phone on your Wi-Fi and a JSON API (live data to fetch) for virtual airlines (VAs) and your own tools – read-only, off by default.",
+      "enable": "Turn on local server",
+      "port": {
+        "label": "Port",
+        "detail": "Default {port} · allowed {min}–{max} · saves when you leave the field or press Enter, open overlays reconnect",
+        "notNumber": "The port must be a number.",
+        "range": "Port {min}–{max}."
+      },
+      "lan": "Reachable on the network (with token)",
+      "optionsOff": "The server is off – port and LAN access take effect once you switch it on.",
+      "lanHelp": "For a tablet, a phone or a second PC on the same network. Other devices need the token in the URL; on this PC it works without. The first time, Windows asks whether VectaSim may be reachable on the private network. Only turn this on in trusted networks.",
+      "token": "Token",
+      "regenerate": "Regenerate",
+      "noLanAddress": "No network address found – is the PC connected to a network?",
+      "addresses": "Addresses",
+      "obs": "OBS {size}",
+      "obsSize": "width {width} · height {height}",
+      "lanUrlTitle": "for other devices on the network",
+      "obsHelp": "URL extras: {scale} enlarges the text to 150 %, {preview} shows sample data for positioning. In streamer mode, registration, callsign and airline are masked here too.",
+      "copyFailed": "Could not copy",
+      "copied": {
+        "token": "Token copied",
+        "url": "{name} URL copied",
+        "lanUrl": "{name} network URL copied"
+      },
+      "clientsNone": "no overlay connected",
+      "clients": {
+        "one": "{count} overlay connected",
+        "other": "{count} overlays connected"
+      },
+      "status": {
+        "reading": "Reading status …",
+        "off": "Off · no port open.",
+        "starting": "Starting …",
+        "lan": "reachable on the network (with token)",
+        "local": "this PC only",
+        "running": "Running · port {port} · {where} · {clients}",
+        "runningSince": "Running since {since} ({duration}) · port {port} · {where} · {clients}"
+      },
+      "overlay": {
+        "hud": {
+          "label": "HUD",
+          "hint": "Phase, altitude, speed, V/S, heading, remaining, ETA"
+        },
+        "landing": {
+          "label": "Landing",
+          "hint": "20 s after touchdown: landing rate, g, bounces, band"
+        },
+        "route": {
+          "label": "Route",
+          "hint": "Route, block time, aircraft, phase bar"
+        },
+        "index": {
+          "label": "Start page",
+          "hint": "all links, API overview, OBS tips"
+        },
+        "api": {
+          "label": "JSON status",
+          "hint": "API for VAs and your own tools"
+        }
+      },
+      "copiedButton": "Copied ✓",
+      "copyAria": {
+        "token": "Copy token",
+        "url": "Copy {name} URL",
+        "lanUrl": "Copy {name} network URL"
+      },
+      "openAria": "Open {name} in the browser",
+      "obsSteps": {
+        "title": "Adding an overlay to OBS:",
+        "source": "In OBS: Sources → + → Browser.",
+        "url": "Copy the URL above and paste it.",
+        "size": "Enter width and height as given (HUD 1920 × 120).",
+        "done": "Done – the background is transparent."
+      }
+    },
+    "simconnect": {
+      "title": "Set up SimConnect",
+      "intro": "VectaSim needs Microsoft's SimConnect library. One click downloads the official MSFS SDK ({version}, {size}) directly from Microsoft and keeps only SimConnect.dll – works with MSFS 2020 and 2024.",
+      "installerHint": "The installer already offers this download during the first install; if you skipped it there, you can catch up here.",
+      "eula": "The download is subject to the {link}.",
+      "eulaLink": "MSFS SDK license terms",
+      "progressLabel": "Download progress",
+      "failed": "Download failed.",
+      "downloading": "Downloading …",
+      "download": "Download SimConnect",
+      "installed": "SimConnect set up – VectaSim connects automatically",
+      "installedLater": "The new file applies from the next connection.",
+      "progress": {
+        "start": "Starting download …",
+        "downloadOf": "Downloading … {received} of {total}",
+        "downloadBytes": "Downloading … {received}",
+        "download": "Downloading …",
+        "verify": "Verifying …",
+        "extract": "Extracting …",
+        "done": "Done"
+      },
+      "error": {
+        "running": "The download is already running – please wait a moment.",
+        "network": "Microsoft is not reachable. Check your internet connection and try again.",
+        "corrupt": "The file arrived incomplete or modified. Try again."
+      }
+    },
+    "simulator": {
+      "label": "Simulator",
+      "modeAuto": "Automatic (MSFS first, then X-Plane)",
+      "modeTitle": "Which simulator VectaSim connects to",
+      "hostMissing": "Host missing",
+      "hostInvalid": "Host name or IP only, without spaces or path",
+      "portRange": "Port {min}–{max}",
+      "savedRestart": "✓ saved · reconnecting …",
+      "savedLater": "✓ saved · applies the next time the connection starts",
+      "default": "Default",
+      "xplaneHelp": "X-Plane 12.1.1 or newer with the Web API enabled (default port 8086). Today X-Plane only listens locally on this PC; another host only works once X-Plane allows it. Address: {endpoint}. Saves when you leave the field or press Enter.",
+      "flightActive": "A flight is in progress – the change applies after the flight.",
+      "envOverride": "Set for this run by {vars}.",
+      "xplaneFold": "Adjust X-Plane address … ({endpoint})",
+      "connectTo": "Connect to",
+      "hostTitle": "Computer X-Plane runs on – for now only “localhost” (this PC)",
+      "portTitle": "Port of the X-Plane Web API (default 8086). To use another port, start X-Plane with --web_server_port=…"
+    },
+    "change": "Change …",
+    "open": "Open",
+    "openFolder": "Open folder",
+    "reset": "Reset",
+    "folder": "Folder",
+    "savedMark": "✓ saved",
+    "about": "VectaSim {version} · Your logbook lives only on this PC – no account, no cloud. Data: map © OpenStreetMap contributors, OpenFreeMap · airports OurAirports (public domain) · weather NOAA aviationweather.gov (fallback VATSIM) · online traffic VATSIM · IVAO · flight plans SimBrief (Navigraph) · aircraft photos Planespotters.net ·",
+    "thirdParty": "Third-party licenses",
+    "sim": {
+      "description": "VectaSim detects MSFS 2020/2024 and X-Plane 12 automatically as soon as the simulator is running. Recording starts when you taxi – you don't need to start anything.",
+      "demoTitle": "A simulated flight to get to know VectaSim without a simulator",
+      "demoHint": "try it without a simulator",
+      "dll": {
+        "auto": "automatic · {path}",
+        "autoNotFound": "automatic · not found",
+        "elsewhere": "If SimConnect.dll is already somewhere else (e.g. from an SDK installation), pick it with “Choose file …”.",
+        "pickTitle": "Choose SimConnect.dll",
+        "savedRestart": "✓ saved · reconnecting",
+        "savedLater": "✓ saved · applies from the next connection"
+      }
+    },
+    "planning": {
+      "title": "Flight planning",
+      "description": "With your SimBrief pilot ID, VectaSim loads your latest flight plan and compares plan and actual.",
+      "pilotId": "SimBrief pilot ID",
+      "hidden": "Hidden in streamer mode",
+      "placeholder": "Pilot ID (number) or username",
+      "auto": "Load the latest flight plan automatically at start and when connecting",
+      "loaded": "Flight plan loaded: {callsign} {dep} → {arr}",
+      "noPlan": "Pilot ID set · no flight plan loaded yet (Map → side panel → Dispatch)",
+      "noId": "No pilot ID set. You can find it on simbrief.com under Account."
+    },
+    "updates": {
+      "title": "Updates",
+      "idle": "Version {version} · not checked yet",
+      "checking": "Version {version} · checking for updates …",
+      "current": "Version {version} · up to date",
+      "currentChecked": "Version {version} · up to date (checked {time})",
+      "available": "Version {version} available (installed: {installed})",
+      "downloading": "Downloading version {version} … {percent} %",
+      "ready": "Installed – restarting",
+      "error": "Version {version} · check failed: {hint}",
+      "recording": "Recording in progress – installing restarts VectaSim. Install the update after the flight.",
+      "install": "Install version {version} and restart",
+      "check": "Check for updates"
+    },
+    "display": {
+      "title": "Display",
+      "description": "Language, appearance, time base, weight unit, streamer mode, landing card, aircraft photos and online traffic.",
+      "language": {
+        "label": "Language",
+        "system": "System",
+        "de": "Deutsch",
+        "en": "English",
+        "hint": "System = Windows display language · applies immediately"
+      },
+      "times": "Times",
+      "now": "now {time}",
+      "weights": "Weights",
+      "weightsHint": "Fuel and weights · altitudes in ft, speeds in kt",
+      "privacy": {
+        "label": "Streamer mode",
+        "key": "Ctrl+Shift+P",
+        "help": "Hides registrations (D-••••), callsign and flight number, airline, SimBrief ID and your Windows user name in paths – across the whole interface, on the landing card and in the diagnostics package. Everything stays stored as it is; photo credits remain visible."
+      },
+      "photos": {
+        "label": "Load aircraft photos from Planespotters.net",
+        "help": "Only the registration is sent (e.g. D-AINA), at most one request per second; photos are cached for 7 days and always show the photographer and source. Fictional registrations show a type silhouette."
+      },
+      "globe": {
+        "label": "World map as a globe",
+        "help": "Applies to the map, the track map and Countries – the same choice as the “Globe” button on the maps. Zooming in turns the globe into the flat map by itself."
+      },
+      "online": {
+        "hint": "like “Traffic” on the map · fetches the network's public feed",
+        "notOn": "{name} not turned on",
+        "notOff": "{name} not turned off"
+      }
+    },
+    "theme": {
+      "label": "Appearance",
+      "day": "Day theme",
+      "hint": "Paper Chart and Arctic Studio are bright day themes – they glare in a darkened sim room. Your own aircraft stays yellow in every theme."
+    },
+    "zoom": {
+      "label": "Size",
+      "out": "Zoom out (Ctrl+Minus)",
+      "in": "Zoom in (Ctrl+Plus)",
+      "reset": "Back to 100 % (Ctrl+0)",
+      "hint": "Ctrl+Plus/Minus, Ctrl+0 · applies to this PC only"
+    },
+    "card": {
+      "pickTitle": "Choose a folder for landing cards",
+      "autosave": "Save the landing card as PNG automatically after every landing",
+      "hideReg": "Landing card without registration (D-••••)",
+      "byPrivacy": "on because of streamer mode"
+    },
+    "keyboard": {
+      "title": "Keyboard",
+      "description": "All of VectaSim's keyboard shortcuts.",
+      "caption": "Keyboard shortcuts",
+      "debriefHint": "While the landing debrief is open, only Esc, Alt+T and zoom work – the view and logbook behind it stay as they are.",
+      "keys": {
+        "views": "Ctrl+1 / 2 / 3 / 4",
+        "panel": "Ctrl+.",
+        "search": "Ctrl+F",
+        "list": "↑ / ↓, Page Up / Page Down, Home / End",
+        "enter": "Enter",
+        "delete": "Del",
+        "arrows": "← / →, Home / End",
+        "esc": "Esc",
+        "toast": "Alt+T",
+        "zoom": "Ctrl+Plus / Minus / 0",
+        "privacy": "Ctrl+Shift+P"
+      },
+      "what": {
+        "views": "Map, Logbook, Countries, Settings",
+        "panel": "Collapse and expand the map's side panel",
+        "search": "Search the logbook (flights)",
+        "list": "Scroll through the flights in the logbook; ↓ in the search field jumps into the list",
+        "enter": "Open the landing debrief of the selected flight",
+        "delete": "Move the selected flight to the trash (with confirmation)",
+        "arrows": "Switch tabs and option groups; in the dispersion chart, from landing to landing",
+        "esc": "Closes the innermost first: source note, then landing debrief; in the search field it clears the search",
+        "toast": "Jump to the newest notice (toast); Esc closes it and jumps back",
+        "zoom": "Enlarge, shrink, back to 100 %",
+        "privacy": "Turn streamer mode on and off (hide registrations, callsigns, IDs and paths)"
+      }
+    },
+    "diag": {
+      "title": "Diagnostics",
+      "description": "For support – helps when a flight is not detected.",
+      "copyHeader": "VectaSim diagnostics · {time}",
+      "clipboard": "The clipboard is not available right now.",
+      "copy": "Copy diagnostics",
+      "copied": "✓ copied",
+      "openLogs": "Open log folder",
+      "showLogbook": "Show logbook in Explorer",
+      "debug": {
+        "label": "Debug mode",
+        "badge": "Debug mode on · dump running",
+        "badgeTitle": "Verbose log, raw dump and live raw data are on. Turn them off again after troubleshooting.",
+        "help": "For troubleshooting: verbose log, raw dump recording and live raw data with one switch. Stays on until you turn it off (also after a restart); then your previous settings apply again. Reproduce the problem, then “Create diagnostics package”."
+      },
+      "package": {
+        "saveTitle": "Save diagnostics package",
+        "zip": "ZIP archive",
+        "failed": "Diagnostics package not created",
+        "saved": "Package saved – send it to the developer",
+        "files": {
+          "one": "{count} file",
+          "other": "{count} files"
+        },
+        "create": "Create diagnostics package",
+        "creating": "Creating …",
+        "contents": "ZIP with logs, settings, system and logbook statistics · with debug mode also raw dumps",
+        "contentsDebug": "ZIP with logs, settings, system and logbook statistics, raw dumps (max. 200 MB) and SimConnect info"
+      },
+      "dump": {
+        "saved": "Dump saved",
+        "notSaved": "No dump saved",
+        "record": "Record raw dump (one file per simulator session, about 5–10 MB per hour)",
+        "byDebug": "on because of debug mode",
+        "help": "Records all SimConnect raw data so problems can be reproduced without a simulator. Regardless of this, VectaSim keeps the last 30 minutes in memory – “Save dump now” writes them to a file.",
+        "now": "Save dump now",
+        "openDir": "Open dump folder"
+      },
+      "replay": {
+        "pickTitle": "Choose a raw dump for the replay",
+        "fileType": "VectaSim dump",
+        "description": "Plays back a raw dump – for troubleshooting on the development machine.",
+        "none": "none chosen",
+        "speed": "Speed",
+        "repeat": "Repeat endlessly",
+        "restart": "Restart",
+        "start": "Start replay"
+      },
+      "raw": {
+        "title": "Live raw data",
+        "description": "Every simulator variable (SimConnect or X-Plane) raw and converted, events, engine state."
+      },
+      "logLevel": {
+        "info": "Normal",
+        "debug": "Verbose",
+        "trace": "Everything (large files)",
+        "envTitle": "Set by RUST_LOG={value}",
+        "debugTitle": "Debug mode logs verbosely; after turning it off, this level applies again",
+        "title": "How much VectaSim writes to the log",
+        "env": "set by RUST_LOG",
+        "debugHint": "Debug mode: verbose for VectaSim"
+      },
+      "dllSource": {
+        "override": "chosen manually",
+        "downloaded": "downloaded by VectaSim (MSFS SDK)",
+        "exeDir": "next to vectasim.exe",
+        "sdk": "MSFS SDK",
+        "searchPath": "Windows search path"
+      },
+      "state": {
+        "idle": "not connected",
+        "connecting": "connecting",
+        "connected": "connected",
+        "disconnected": "disconnected",
+        "error": "error"
+      },
+      "row": {
+        "status": "Status",
+        "simVersion": "Sim version",
+        "frames": "Records",
+        "dllNotFound": "not found – download it with one click under Simulator or choose the file",
+        "dllChosen": "DLL (chosen)",
+        "searched": "Searched",
+        "logs": "Logs",
+        "dump": "Raw dump",
+        "dumpFile": "{file} ({size} uncompressed)",
+        "dumpOn": "on · {dir} (file starts with the next SimConnect session)",
+        "logLevel": "Log level",
+        "logLevelDebug": "{level} · debug mode (debug for vectasim_*)",
+        "appData": "App data",
+        "appVersion": "App version",
+        "privacy": "on · user name hidden in paths",
+        "message": "Message"
+      }
+    },
+    "data": {
+      "title": "Data",
+      "description": "Where your logbook lives, how it is backed up and how you get it back.",
+      "airframes": {
+        "one": "{count} aircraft",
+        "other": "{count} aircraft"
+      },
+      "blocked": "Recording in progress – restore and delete are possible after the flight.",
+      "failed": {
+        "backup": "Backup failed",
+        "restore": "Restore failed",
+        "export": "Export failed",
+        "import": "Import failed",
+        "emptyTrash": "Emptying the trash failed",
+        "wipe": "Delete failed"
+      },
+      "backupKind": {
+        "regular": "Backup",
+        "preMigration": "before migration",
+        "preUpdate": "before update",
+        "preRestore": "before restore",
+        "preWipe": "before “Delete all data”",
+        "preImport": "before import (replace)"
+      },
+      "summary": {
+        "updated": {
+          "one": "{count} updated",
+          "other": "{count} updated"
+        },
+        "images": {
+          "one": "{count} image",
+          "other": "{count} images"
+        }
+      },
+      "db": {
+        "title": "Database",
+        "location": "Location",
+        "reveal": "Show in Explorer",
+        "sync": "The database is in {service}. Sync services can damage an open database – put only the backups there, not the logbook itself."
+      },
+      "backup": {
+        "title": "Backups",
+        "done": "Logbook backed up",
+        "pickDir": "Choose a folder for backups",
+        "dirSync": "The folder is in {service} – so your backups also exist outside this PC.",
+        "tip": "Tip: choose a folder in OneDrive, Dropbox, Google Drive or on a NAS – then your backups also exist outside this PC.",
+        "last": "Last backup: {date} {time}",
+        "none": "No backup yet",
+        "schedule": "automatically every day, before updates and before every data format migration; the last 7 days are kept.",
+        "now": "Back up now",
+        "running": "Backing up …"
+      },
+      "restore": {
+        "pickTitle": "Choose a backup to restore",
+        "fileType": "VectaSim logbook",
+        "running": "Restoring backup",
+        "restarting": "VectaSim is restarting now.",
+        "fromFile": "Restore from file …",
+        "button": "Restore",
+        "confirmLabel": "Confirm restore",
+        "confirm": "Replace the logbook with this backup? Your current state is backed up first, then VectaSim restarts.",
+        "confirmButton": "Replace and restart"
+      },
+      "export": {
+        "heading": "Full export",
+        "title": "Export everything",
+        "fileType": "VectaSim export",
+        "flightsTrash": "{flights} ({trash} of them in the trash)",
+        "done": "Exported · {flights}, {airframes}",
+        "bodyWarnings": "{path} · {size} · {warnings} in the log",
+        "button": "Export everything …",
+        "running": "Exporting …",
+        "withTrash": "Include trash",
+        "help": "To move to another PC or to merge two PCs. The file (.vectasim) contains all flights with tracks, the fleet and your own aircraft images."
+      },
+      "import": {
+        "pickTitle": "Choose a VectaSim export to import",
+        "unreadable": "File not readable",
+        "replaced": "Logbook replaced",
+        "done": "Import complete",
+        "showBackup": "Show backup",
+        "fromFile": "Import from file …",
+        "confirmLabel": "Confirm import",
+        "exportedAt": "exported on {date} {time} with VectaSim {version}",
+        "merge": "Merge",
+        "mergeHelp": "new flights and aircraft are added. Flights that already exist (same flight or same route less than 15 min apart at off-block) are skipped; existing aircraft data stays.",
+        "replace": "Replace",
+        "replaceHelp": "your logbook and fleet are replaced by the file's content. VectaSim creates a backup first.",
+        "replaceBlocked": "Not possible during a recording.",
+        "replaceButton": "Back up and replace"
+      },
+      "csv": {
+        "heading": "Import",
+        "button": "Import CSV …",
+        "help": "Bring over flights from Volanta (import CSV), SimToolkitPro, a VA export or your own logbook CSV – without track and landing analysis, but with hours, routes, fleet and countries."
+      },
+      "trash": {
+        "title": "Trash",
+        "count": {
+          "one": "{count} flight in the trash",
+          "other": "{count} flights in the trash"
+        },
+        "empty": "The trash is empty",
+        "retention": "permanently deleted after {days} days, restore in Logbook → Trash",
+        "confirmLabel": "Confirm emptying the trash",
+        "confirm": "Delete permanently?",
+        "emptyButton": "Empty trash",
+        "emptied": {
+          "one": "Trash emptied · {count} flight permanently deleted",
+          "other": "Trash emptied · {count} flights permanently deleted"
+        }
+      },
+      "wipe": {
+        "title": "Delete all data",
+        "help": "Deletes all flights and the fleet. VectaSim creates a backup first; your settings stay.",
+        "button": "Delete all data …",
+        "confirm": "Really delete all flights and the fleet? A backup of them goes to the backup folder.",
+        "lastConfirm": "Delete all data – final confirmation",
+        "word": "DELETE",
+        "typeWord": "Type {word} to confirm",
+        "running": "Deleting …",
+        "final": "Delete permanently",
+        "done": "All data deleted · {flights}",
+        "backup": "Backup before: {path}"
+      }
+    }
+  }
+}

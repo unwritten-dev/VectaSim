@@ -11,6 +11,7 @@
 //! Discord needs an application id with uploaded art assets (key `vectasim`): the built-in
 //! [`DISCORD_APP_ID`], or the user's own one from setting `discord_app_id`.
 
+use crate::lang::Lang;
 use crate::manager::{ProviderManager, StatusSnapshot};
 use discord_rich_presence::activity::{Activity, Assets, Timestamps};
 use discord_rich_presence::{DiscordIpc, DiscordIpcClient};
@@ -25,10 +26,11 @@ use vectasim_store::{PlannedFlight, Store};
 pub const SETTING_DISCORD: &str = "discord_presence";
 /// The user's own Discord application id (Developer Portal → Applications); empty = built-in.
 pub const SETTING_DISCORD_APP_ID: &str = "discord_app_id";
-/// TODO(release): id of the VectaSim application in the Discord Developer Portal, with an art
-/// asset named `vectasim` uploaded under Rich Presence → Art Assets. Empty until it exists:
-/// presence then only works with an id the user enters (setting `discord_app_id`).
-pub const DISCORD_APP_ID: &str = "";
+/// Id of the VectaSim application in the Discord Developer Portal (art asset `vectasim` under
+/// Rich Presence → Art Assets). A public identifier, not a secret: it only tells the user's own
+/// Discord client which application name and images to show. Setting `discord_app_id`
+/// overrides it for people who run their own application.
+pub const DISCORD_APP_ID: &str = "1561395013965844671";
 /// Art asset key shown next to the activity.
 const ASSET_KEY: &str = "vectasim";
 
@@ -89,6 +91,8 @@ pub struct PresenceInput {
     pub privacy: bool,
     /// "Gelandet · −155 fpm" while this is set.
     pub landed_fpm: Option<f64>,
+    /// Language of the texts (backend language).
+    pub lang: Lang,
 }
 
 fn is_demo(provider: &str) -> bool {
@@ -99,10 +103,11 @@ fn level(ft: f64) -> String {
     if ft >= 10_000.0 { format!("FL{:03.0}", (ft / 100.0).round()) } else { format!("{:.0} ft", (ft / 100.0).round() * 100.0) }
 }
 
-/// Signed with a real minus sign, like the UI.
-fn fpm(v: f64) -> String {
+/// Signed like the UI: real minus sign in German, hyphen in English.
+fn fpm(lang: Lang, v: f64) -> String {
     let n = v.round();
-    if n < 0.0 { format!("\u{2212}{:.0} fpm", -n) } else { format!("{n:.0} fpm") }
+    let minus = lang.tr("\u{2212}", "-");
+    if n < 0.0 { format!("{minus}{:.0} fpm", -n) } else { format!("{n:.0} fpm") }
 }
 
 fn route(i: &PresenceInput) -> String {
@@ -115,7 +120,7 @@ fn route(i: &PresenceInput) -> String {
     }
     parts.push(match i.arr.as_deref() {
         Some(arr) => format!("{dep} \u{2192} {arr}"),
-        None => format!("ab {dep}"),
+        None => format!("{} {dep}", i.lang.tr("ab", "from")),
     });
     if let Some(t) = i.aircraft_type.as_deref().filter(|t| !t.is_empty()) {
         parts.push(t.to_owned());
@@ -129,41 +134,55 @@ fn phase_text(i: &PresenceInput) -> String {
         Some(a) => format!("{what} {a}"),
         None => what.to_owned(),
     };
-    let to_go = i.to_go_nm.filter(|d| *d >= 1.0).map(|d| format!(" · noch {d:.0} nm")).unwrap_or_default();
+    let l = i.lang;
+    let to_go = i
+        .to_go_nm
+        .filter(|d| *d >= 1.0)
+        .map(|d| match l {
+            Lang::De => format!(" · noch {d:.0} nm"),
+            Lang::En => format!(" · {d:.0} nm to go"),
+        })
+        .unwrap_or_default();
     let alt = i.altitude_ft.map(|a| format!(" {}", level(a))).unwrap_or_default();
+    // German: descriptive phrases as before; English: the UI's (English) phase names
     match i.phase {
-        FlightPhase::Preflight => "Vorbereitung am Gate".into(),
+        FlightPhase::Preflight => l.tr("Vorbereitung am Gate", "Preflight at the gate").into(),
         FlightPhase::Pushback => "Pushback".into(),
-        FlightPhase::TaxiOut => "Rollen zum Start".into(),
-        FlightPhase::Takeoff => "Start".into(),
-        FlightPhase::Climb => format!("Steigflug{alt}"),
-        FlightPhase::Cruise => format!("Reiseflug{alt}{to_go}"),
-        FlightPhase::Descent => format!("Sinkflug{alt}{to_go}"),
-        FlightPhase::Approach | FlightPhase::Final => at("Anflug"),
-        FlightPhase::Landing => at("Landung"),
-        FlightPhase::TaxiIn => at("Rollen zum Gate"),
-        FlightPhase::Shutdown => at("Am Gate"),
+        FlightPhase::TaxiOut => l.tr("Rollen zum Start", "Taxi out").into(),
+        FlightPhase::Takeoff => l.tr("Start", "Takeoff").into(),
+        FlightPhase::Climb => format!("{}{alt}", l.tr("Steigflug", "Climb")),
+        FlightPhase::Cruise => format!("{}{alt}{to_go}", l.tr("Reiseflug", "Cruise")),
+        FlightPhase::Descent => format!("{}{alt}{to_go}", l.tr("Sinkflug", "Descent")),
+        FlightPhase::Approach | FlightPhase::Final => at(l.tr("Anflug", "Approach")),
+        FlightPhase::Landing => at(l.tr("Landung", "Landing")),
+        FlightPhase::TaxiIn => at(l.tr("Rollen zum Gate", "Taxi in")),
+        FlightPhase::Shutdown => at(l.tr("Am Gate", "At the gate")),
     }
 }
 
 /// The activity for the current state (pure; see the module doc).
 pub fn presence_for(i: &PresenceInput) -> Presence {
     let demo = is_demo(&i.provider);
+    let l = i.lang;
     if let Some(v) = i.landed_fpm {
         let details = if demo { "Demo".to_owned() } else { route(i) };
-        return Presence { details, state: format!("Gelandet · {}", fpm(v)), start_ms: None };
+        return Presence { details, state: format!("{} · {}", l.tr("Gelandet", "Landed"), fpm(l, v)), start_ms: None };
     }
     if i.flight_state == FlightState::Active {
         return if demo {
-            Presence { details: "Demo".into(), state: format!("Demo-Flug · {}", phase_text(i)), start_ms: i.off_block_ms }
+            Presence { details: "Demo".into(), state: format!("{} · {}", l.tr("Demo-Flug", "Demo flight"), phase_text(i)), start_ms: i.off_block_ms }
         } else {
             Presence { details: route(i), state: phase_text(i), start_ms: i.off_block_ms }
         };
     }
     if demo {
-        return Presence { details: "Demo".into(), state: "Demo-Flug bereit".into(), start_ms: None };
+        return Presence { details: "Demo".into(), state: l.tr("Demo-Flug bereit", "Demo flight ready").into(), start_ms: None };
     }
-    let state = if i.connection == "connected" { "Bereit – Aufzeichnung startet mit Off-Block" } else { "Bereit – wartet auf MSFS" };
+    let state = if i.connection == "connected" {
+        l.tr("Bereit – Aufzeichnung startet mit Off-Block", "Ready – recording starts at off-block")
+    } else {
+        l.tr("Bereit – wartet auf MSFS", "Ready – waiting for MSFS")
+    };
     Presence { details: "VectaSim".into(), state: state.into(), start_ms: None }
 }
 
@@ -209,6 +228,7 @@ pub fn input_from(snap: &StatusSnapshot, plan: Option<&PlannedFlight>, airports:
         to_go_nm,
         privacy,
         landed_fpm: None,
+        lang: crate::lang::current(),
     }
 }
 
@@ -361,6 +381,7 @@ mod tests {
             to_go_nm: Some(420.4),
             privacy: false,
             landed_fpm: None,
+            lang: Lang::De,
         }
     }
 
@@ -370,6 +391,16 @@ mod tests {
         assert_eq!(p.details, "DLH4YA · EDDF → EGLL · A20N");
         assert_eq!(p.state, "Reiseflug FL360 · noch 420 nm");
         assert_eq!(p.start_ms, Some(1_700_000_000_000));
+    }
+
+    #[test]
+    fn english_texts() {
+        let en = |i: PresenceInput| presence_for(&PresenceInput { lang: Lang::En, ..i });
+        assert_eq!(en(cruise()).state, "Cruise FL360 · 420 nm to go");
+        assert_eq!(en(PresenceInput { phase: FlightPhase::TaxiIn, ..cruise() }).state, "Taxi in EGLL");
+        assert_eq!(en(PresenceInput { landed_fpm: Some(-155.4), ..cruise() }).state, "Landed · -155 fpm");
+        assert_eq!(en(PresenceInput { connection: "connecting".into(), ..Default::default() }).state, "Ready – waiting for MSFS");
+        assert_eq!(en(PresenceInput { arr: None, ..cruise() }).details, "DLH4YA · from EDDF · A20N");
     }
 
     #[test]

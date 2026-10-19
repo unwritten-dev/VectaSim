@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { approxMB, downloadErrorText, fmtMB, progressFraction, progressText } from "./SimConnectDownload";
+import { setLanguageSetting } from "./i18n";
+
+beforeEach(() => setLanguageSetting("de"));
 
 const ZIP = 113_306_986;
 

@@ -38,6 +38,33 @@ export interface Telemetry {
   slew: boolean;
   lights: Lights;
   transponderCode: number;
+  // approach data (track v2, SimConnect APPROACH 1 Hz / DESIGN once); absent = not delivered
+  windDirTrueDeg?: number;
+  windKt?: number;
+  navHasLocalizer?: boolean;
+  navHasGlideSlope?: boolean;
+  navGsFlag?: boolean;
+  /** Only while the station has a glideslope. */
+  navGsErrorDeg?: number;
+  navGsAngleDeg?: number;
+  /** Raw needle ±127, only while the station has a localizer. */
+  navCdi?: number;
+  navRadialErrorDeg?: number;
+  navLocCourseDeg?: number;
+  autopilotMaster?: boolean;
+  autopilotApproachHold?: boolean;
+  autopilotGlideslopeHold?: boolean;
+  autothrottleActive?: boolean;
+  n1Pct?: number;
+  throttleLeverPct?: number;
+  spoilersHandlePct?: number;
+  spoilersArmed?: boolean;
+  spoilersPct?: number;
+  alphaDeg?: number;
+  flapPositions?: number;
+  designVs0Kt?: number;
+  designVs1Kt?: number;
+  designVcKt?: number;
 }
 
 export interface AircraftInfo {
@@ -180,6 +207,24 @@ export interface TrackSample {
   flapsIndex: number;
   gearPct: number;
   fuelTotalKg: number;
+  // track v2 (absent in older tracks)
+  tasKt?: number;
+  headingMagDeg?: number;
+  windDirTrueDeg?: number;
+  windKt?: number;
+  gsErrorDeg?: number;
+  locCdi?: number;
+  locErrorDeg?: number;
+  ilsGsAngleDeg?: number;
+  ilsCourseDeg?: number;
+  navFlags?: number;
+  n1Pct?: number;
+  spoilersPct?: number;
+  spoilersHandlePct?: number;
+  alphaDeg?: number;
+  flapPositions?: number;
+  designVs0Kt?: number;
+  designVs1Kt?: number;
 }
 
 export interface FlightRow {
@@ -372,7 +417,12 @@ export interface Ofp {
 
 // ---- online networks & weather (crates/vectasim-online, app/src-tauri/src/online.rs) ----
 
+/** Online network of a pilot, controller or feed. */
+export type Network = "vatsim" | "ivao";
+
 export interface Pilot {
+  network: Network;
+  /** VATSIM CID or IVAO VID – unique only together with `network`. */
   cid: number;
   callsign: string;
   latitude: number;
@@ -386,11 +436,34 @@ export interface Pilot {
   arrival: string;
   route: string;
   flightRules: string;
+  /** IVAO only. */
+  onGround?: boolean;
+  /** Real name, VATSIM only and only from `online_pilot` (the map's bulk query drops it). */
+  name?: string;
+  /** Session start, ISO 8601 UTC (VATSIM `logon_time`, IVAO `createdAt`). */
+  logonTime?: string;
+  /** Filed cruise level as written: "36000" (VATSIM), "F340" / "A045" / "VFR" (IVAO). */
+  plannedAltitude?: string;
+  /** Flight-plan remarks ("PBN/A1B1 REG/DAINA"), only from `online_pilot`. */
+  remarks?: string;
+  /** Model in words when the feed has it (IVAO "A320neo"). */
+  aircraftModel?: string;
+}
+
+/** `traffic_photo`: Planespotters photo of an online-traffic aircraft (session cache, not the logbook). */
+export interface TrafficPhoto {
+  registration: string;
+  status: "found" | "none" | "off" | "error";
+  url: string | null;
+  thumbUrl: string | null;
+  photographer: string | null;
+  link: string | null;
 }
 
 export type Facility = "fss" | "del" | "gnd" | "twr" | "app" | "ctr" | "atis";
 
 export interface Controller {
+  network: Network;
   cid: number;
   callsign: string;
   frequency: string;
@@ -406,8 +479,11 @@ export interface LocatedController extends Controller {
   longitude: number;
 }
 
-export interface OnlineSummary {
-  network: "vatsim";
+/** One network's feed (app/src-tauri/src/online.rs NetworkStatus). */
+export interface NetworkStatus {
+  network: Network;
+  /** "VATSIM" / "IVAO". */
+  label: string;
   enabled: boolean;
   pilots: number;
   controllers: number;
@@ -415,9 +491,31 @@ export interface OnlineSummary {
   prefiles: number;
   updateTimestamp?: string | null;
   fetchedMs?: number | null;
+  /** URL of the last download. */
+  source?: string | null;
+  /** Seconds since the last successful download. */
+  ageS?: number | null;
   lastError?: string | null;
   consecutiveErrors: number;
   nextPollS: number;
+}
+
+/** Totals over the enabled networks (shape of the former VATSIM-only status) plus `networks`. */
+export interface OnlineSummary {
+  network: "off" | Network | "both";
+  enabled: boolean;
+  pilots: number;
+  controllers: number;
+  atis: number;
+  prefiles: number;
+  updateTimestamp?: string | null;
+  fetchedMs?: number | null;
+  /** First error among the enabled networks, prefixed with its name ("IVAO: …"). */
+  lastError?: string | null;
+  consecutiveErrors: number;
+  nextPollS: number;
+  /** Optional for summaries from older builds / tests. */
+  networks?: NetworkStatus[];
 }
 
 export interface OnlineView {
@@ -472,6 +570,8 @@ export interface Airframe {
   imageFetchedMs?: number | null;
   /** Pilot's approach speed for this airframe, KIAS; the approach and landing assessment use it as reference. */
   vappKt?: number | null;
+  /** Pilot's landing flap handle index (e.g. 3 = CONF 3 on an A320); null = the last handle position. */
+  landingFlaps?: number | null;
   createdMs: number;
   updatedMs: number;
 }
@@ -497,6 +597,8 @@ export interface AirframeEdit {
   notes?: string | null;
   /** Vapp in kt; 0 clears it, omitted leaves it unchanged. */
   vappKt?: number | null;
+  /** Landing flap handle index 0…10; −1 clears it, omitted leaves it unchanged. */
+  landingFlaps?: number | null;
 }
 
 /** One evaluated landing for the dispersion view (landing_facts_recent, app/src-tauri/src/landing.rs). */

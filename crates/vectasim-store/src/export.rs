@@ -5,12 +5,14 @@
 //! the formats are small and fixed, and a full XML/CSV dependency would cost
 //! more than these few hundred lines.
 //!
-//! - CSV: one row per track sample, RFC 4180 quoting, `.` decimals.
+//! - CSV: one row per track sample, RFC 4180 quoting, `.` decimals. TAS and the sim
+//!   wind (track v2) are the last three columns, empty where not recorded.
 //! - GPX 1.1: one `trkseg`, elevation in metres, ISO-8601 UTC times, speed (m/s)
-//!   and course in the Garmin TrackPointExtension v2 that most tools read.
+//!   and course in the Garmin TrackPointExtension v2 that most tools read; TAS and
+//!   wind, where recorded, in a `vectasim:` extension next to it.
 //! - KML 2.2: the path as `gx:Track` with `altitudeMode` absolute (so Google
 //!   Earth replays it in 3-D with time), plus placemarks for departure,
-//!   arrival and every touchdown.
+//!   arrival and every touchdown; TAS and wind as `gx:SimpleArrayData` when recorded.
 //! - JSON: the full `FlightDetail` plus the decoded track.
 
 use crate::store::{FlightDetail, FlightRow, Store};
@@ -64,7 +66,18 @@ pub fn export_flight(format: ExportFormat, detail: &FlightDetail, samples: &[Tra
 // ---- CSV -------------------------------------------------------------------------------
 
 const TRACK_CSV_HEADER: &str = "time_utc,t_ms,latitude,longitude,altitude_msl_ft,altitude_agl_ft,ground_speed_kt,ias_kt,\
-vertical_speed_fpm,heading_true_deg,pitch_deg,bank_deg,g_force,on_ground,flaps_index,gear_pct,fuel_total_kg";
+vertical_speed_fpm,heading_true_deg,pitch_deg,bank_deg,g_force,on_ground,flaps_index,gear_pct,fuel_total_kg,\
+tas_kt,wind_dir_true_deg,wind_kt";
+
+/// An optional value with `digits` decimals, or nothing (empty CSV cell / empty element).
+fn opt_num(v: Option<f64>, digits: usize) -> String {
+    v.filter(|x| x.is_finite()).map_or_else(String::new, |x| format!("{x:.digits$}"))
+}
+
+/// The track has TAS or wind somewhere (track v2).
+fn has_air_data(samples: &[TrackSample]) -> bool {
+    samples.iter().any(|s| s.tas_kt.is_some() || s.wind_kt.is_some() || s.wind_dir_true_deg.is_some())
+}
 
 pub fn export_csv(samples: &[TrackSample]) -> String {
     let mut out = String::with_capacity(64 + samples.len() * 140);
@@ -73,7 +86,7 @@ pub fn export_csv(samples: &[TrackSample]) -> String {
     for s in samples {
         let _ = write!(
             out,
-            "{},{},{:.7},{:.7},{:.1},{:.1},{:.1},{:.1},{:.0},{:.2},{:.2},{:.2},{:.3},{},{},{:.0},{:.1}\r\n",
+            "{},{},{:.7},{:.7},{:.1},{:.1},{:.1},{:.1},{:.0},{:.2},{:.2},{:.2},{:.3},{},{},{:.0},{:.1},{},{},{}\r\n",
             iso_utc(s.t_ms),
             s.t_ms,
             s.latitude,
@@ -91,6 +104,9 @@ pub fn export_csv(samples: &[TrackSample]) -> String {
             s.flaps_index,
             s.gear_pct,
             s.fuel_total_kg,
+            opt_num(s.tas_kt, 1),
+            opt_num(s.wind_dir_true_deg, 0),
+            opt_num(s.wind_kt, 1),
         );
     }
     out
@@ -259,7 +275,7 @@ pub fn export_gpx(flight: &FlightRow, samples: &[TrackSample]) -> String {
     let name = xml_escape(&flight_title(flight));
     let mut out = String::with_capacity(512 + samples.len() * 260);
     out.push_str(r#"<?xml version="1.0" encoding="UTF-8"?>
-<gpx version="1.1" creator="VectaSim" xmlns="http://www.topografix.com/GPX/1/1" xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v2" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">
+<gpx version="1.1" creator="VectaSim" xmlns="http://www.topografix.com/GPX/1/1" xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v2" xmlns:vectasim="urn:vectasim:gpx:1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">
 "#);
     let _ = writeln!(out, "  <metadata>\n    <name>{name}</name>");
     if let Some(t) = flight.off_block_ms.or(samples.first().map(|s| s.t_ms)) {
@@ -272,11 +288,19 @@ pub fn export_gpx(flight: &FlightRow, samples: &[TrackSample]) -> String {
     }
     out.push_str("    <type>flight</type>\n    <trkseg>\n");
     for s in samples {
+        // TAS and sim wind (track v2): only the values that were recorded
+        let mut air = String::new();
+        for (tag, v, digits) in [("tasKt", s.tas_kt, 1), ("windDirTrueDeg", s.wind_dir_true_deg, 0), ("windKt", s.wind_kt, 1)] {
+            let v = opt_num(v, digits);
+            if !v.is_empty() {
+                let _ = write!(air, "<vectasim:{tag}>{v}</vectasim:{tag}>");
+            }
+        }
         let _ = writeln!(
             out,
             "      <trkpt lat=\"{:.7}\" lon=\"{:.7}\"><ele>{:.1}</ele><time>{}</time>\
 <extensions><gpxtpx:TrackPointExtension><gpxtpx:speed>{:.2}</gpxtpx:speed><gpxtpx:course>{:.1}</gpxtpx:course>\
-</gpxtpx:TrackPointExtension></extensions></trkpt>\n",
+</gpxtpx:TrackPointExtension>{air}</extensions></trkpt>\n",
             s.latitude,
             s.longitude,
             s.altitude_msl_ft * FT_TO_M,
@@ -309,6 +333,17 @@ pub fn export_kml(flight: &FlightRow, samples: &[TrackSample], touchdowns: &[Tou
   <Style id="touchdown"><IconStyle><color>ff3c4ce7</color><Icon><href>http://maps.google.com/mapfiles/kml/shapes/target.png</href></Icon></IconStyle></Style>
 "#,
     );
+    let air = has_air_data(samples);
+    if air {
+        out.push_str(
+            r#"  <Schema id="air" name="air">
+    <gx:SimpleArrayField name="tas_kt" type="float"><displayName>TAS (kt)</displayName></gx:SimpleArrayField>
+    <gx:SimpleArrayField name="wind_dir_true_deg" type="float"><displayName>Wind aus (° wahr)</displayName></gx:SimpleArrayField>
+    <gx:SimpleArrayField name="wind_kt" type="float"><displayName>Wind (kt)</displayName></gx:SimpleArrayField>
+  </Schema>
+"#,
+        );
+    }
 
     let dep = flight.dep_lat.zip(flight.dep_lon).or(samples.first().map(|s| (s.latitude, s.longitude)));
     if let Some((lat, lon)) = dep {
@@ -326,6 +361,27 @@ pub fn export_kml(flight: &FlightRow, samples: &[TrackSample], touchdowns: &[Tou
     for s in samples {
         // KML tilt is positive nose-up, roll positive right-wing-down.
         let _ = writeln!(out, "      <gx:angles>{:.1} {:.1} {:.1}</gx:angles>", s.heading_true_deg.rem_euclid(360.0), s.pitch_deg, s.bank_deg);
+    }
+    if air {
+        // one value per <when>; an empty <gx:value/> where the sample has none
+        out.push_str("      <ExtendedData>\n        <SchemaData schemaUrl=\"#air\">\n");
+        type Get = fn(&TrackSample) -> (Option<f64>, usize);
+        let fields: [(&str, Get); 3] =
+            [("tas_kt", |s| (s.tas_kt, 1)), ("wind_dir_true_deg", |s| (s.wind_dir_true_deg, 0)), ("wind_kt", |s| (s.wind_kt, 1))];
+        for (name, get) in fields {
+            let _ = writeln!(out, "          <gx:SimpleArrayData name=\"{name}\">");
+            for s in samples {
+                let (v, digits) = get(s);
+                let v = opt_num(v, digits);
+                if v.is_empty() {
+                    out.push_str("            <gx:value/>\n");
+                } else {
+                    let _ = writeln!(out, "            <gx:value>{v}</gx:value>");
+                }
+            }
+            out.push_str("          </gx:SimpleArrayData>\n");
+        }
+        out.push_str("        </SchemaData>\n      </ExtendedData>\n");
     }
     out.push_str("    </gx:Track>\n  </Placemark>\n");
 

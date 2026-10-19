@@ -9,6 +9,7 @@ pub mod approach;
 pub mod clock;
 pub mod diag;
 pub mod flight;
+pub mod lang;
 pub mod landing;
 pub mod mock;
 pub mod phase;
@@ -16,6 +17,7 @@ pub mod telemetry;
 pub mod touchdown;
 
 pub use clock::MonoClock;
+pub use lang::Lang;
 pub use flight::{CandidateDebug, FlightDebug, FlightEvent, FlightSession, FlightState, FlightSummary, IntegrityFlags};
 pub use mock::{MockFlight, MockProvider, MockVariant};
 pub use phase::{FlightPhase, PhaseEngine, PhaseTransition, SkipReason};
@@ -47,7 +49,9 @@ pub enum ProviderEvent {
     Disconnected { reason: String },
     Error { message: String },
     Aircraft(AircraftInfo),
-    Telemetry(Telemetry),
+    /// Boxed: a sample is ~440 B with the track-v2 options, the other variants are a few
+    /// words; one allocation per sample (10–60 Hz) is negligible next to the clone it moves.
+    Telemetry(Box<Telemetry>),
     Sim(SimEvent),
 }
 

@@ -23,10 +23,37 @@ pub enum SimbriefError {
     NoUser,
     #[error("SimBrief rejected the request (HTTP {status}): {body}")]
     Rejected { status: u16, body: String },
+    /// Without the request URL: it carries `userid=` / `username=` (shown in the UI).
     #[error("network: {0}")]
-    Network(#[from] reqwest::Error),
+    Network(reqwest::Error),
     #[error("could not parse OFP: {0}")]
     Parse(String),
+    #[error("SimBrief response larger than {limit} bytes")]
+    TooLarge { limit: usize },
+}
+
+impl From<reqwest::Error> for SimbriefError {
+    fn from(e: reqwest::Error) -> Self {
+        SimbriefError::Network(e.without_url())
+    }
+}
+
+/// Largest OFP accepted (a long-haul OFP with navlog is well under 2 MB).
+const MAX_OFP_BYTES: usize = 8 * 1024 * 1024;
+
+/// The body, read chunk by chunk up to `limit` bytes.
+async fn read_limited(mut resp: reqwest::Response, limit: usize) -> Result<Vec<u8>, SimbriefError> {
+    if resp.content_length().is_some_and(|n| n > limit as u64) {
+        return Err(SimbriefError::TooLarge { limit });
+    }
+    let mut out = Vec::new();
+    while let Some(chunk) = resp.chunk().await? {
+        if out.len() + chunk.len() > limit {
+            return Err(SimbriefError::TooLarge { limit });
+        }
+        out.extend_from_slice(&chunk);
+    }
+    Ok(out)
 }
 
 /// Which identifier the user gave us. SimBrief accepts both; usernames are
@@ -57,11 +84,16 @@ impl User {
 
 /// Fetch the user's most recent OFP.
 pub async fn fetch_latest(user: &User) -> Result<Ofp, SimbriefError> {
-    let client = reqwest::Client::builder().user_agent(USER_AGENT).timeout(Duration::from_secs(20)).build()?;
+    let client = reqwest::Client::builder()
+        .user_agent(USER_AGENT)
+        .https_only(true)
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(20))
+        .build()?;
     let (key, value) = user.query();
     let resp = client.get(FETCHER_URL).query(&[(key, value), ("json", "v2")]).send().await?;
     let status = resp.status();
-    let body = resp.text().await?;
+    let body = String::from_utf8_lossy(&read_limited(resp, MAX_OFP_BYTES).await?).into_owned();
     if !status.is_success() {
         return Err(SimbriefError::Rejected { status: status.as_u16(), body: body.chars().take(300).collect() });
     }
@@ -88,5 +120,15 @@ mod tests {
         assert_eq!(User::parse(" 123456 "), Some(User::PilotId("123456".into())));
         assert_eq!(User::parse("janedoe"), Some(User::Username("janedoe".into())));
         assert_eq!(User::parse("  "), None);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn network_errors_do_not_carry_the_pilot_id() {
+        // refused before any connection (plain HTTP with `https_only`), but with the URL attached
+        let client = reqwest::Client::builder().https_only(true).build().unwrap();
+        let e = client.get("http://127.0.0.1:9/api/xml.fetcher.php?userid=987654").send().await.unwrap_err();
+        assert!(e.to_string().contains("987654") || e.url().is_some());
+        let msg = SimbriefError::from(e).to_string();
+        assert!(!msg.contains("987654") && !msg.contains("userid"), "{msg}");
     }
 }

@@ -1,0 +1,403 @@
+{
+ "_comment": "Invented but format-true X-Plane 12 Web API traffic (developer.x-plane.com/article/x-plane-web-api/): capabilities, dataref lookup, update pushes (first complete, then deltas). Regenerate the ids together with the tests.",
+ "capabilities": {
+  "api": {
+   "versions": [
+    "v1",
+    "v2"
+   ]
+  },
+  "x-plane": {
+   "version": "12.1.4"
+  }
+ },
+ "datarefs": [
+  {
+   "id": 100000,
+   "name": "sim/flightmodel/position/latitude",
+   "value_type": "double"
+  },
+  {
+   "id": 100037,
+   "name": "sim/flightmodel/position/longitude",
+   "value_type": "double"
+  },
+  {
+   "id": 100074,
+   "name": "sim/flightmodel/position/elevation",
+   "value_type": "double"
+  },
+  {
+   "id": 100111,
+   "name": "sim/flightmodel/position/y_agl",
+   "value_type": "float"
+  },
+  {
+   "id": 100148,
+   "name": "sim/flightmodel/position/indicated_airspeed",
+   "value_type": "float"
+  },
+  {
+   "id": 100185,
+   "name": "sim/flightmodel/position/true_airspeed",
+   "value_type": "float"
+  },
+  {
+   "id": 100222,
+   "name": "sim/flightmodel/position/groundspeed",
+   "value_type": "float"
+  },
+  {
+   "id": 100259,
+   "name": "sim/flightmodel/position/vh_ind_fpm",
+   "value_type": "float"
+  },
+  {
+   "id": 100296,
+   "name": "sim/flightmodel/position/mag_psi",
+   "value_type": "float"
+  },
+  {
+   "id": 100333,
+   "name": "sim/flightmodel/position/psi",
+   "value_type": "float"
+  },
+  {
+   "id": 100370,
+   "name": "sim/flightmodel/position/theta",
+   "value_type": "float"
+  },
+  {
+   "id": 100407,
+   "name": "sim/flightmodel/position/phi",
+   "value_type": "float"
+  },
+  {
+   "id": 100444,
+   "name": "sim/flightmodel/forces/g_nrml",
+   "value_type": "float"
+  },
+  {
+   "id": 100481,
+   "name": "sim/flightmodel/failures/onground_any",
+   "value_type": "int"
+  },
+  {
+   "id": 100518,
+   "name": "sim/flightmodel2/gear/deploy_ratio",
+   "value_type": "float_array"
+  },
+  {
+   "id": 100555,
+   "name": "sim/flightmodel2/controls/flap_handle_deploy_ratio",
+   "value_type": "float"
+  },
+  {
+   "id": 100592,
+   "name": "sim/aircraft/controls/acf_flap_detents",
+   "value_type": "int"
+  },
+  {
+   "id": 100629,
+   "name": "sim/cockpit2/controls/parking_brake_ratio",
+   "value_type": "float"
+  },
+  {
+   "id": 100666,
+   "name": "sim/flightmodel/weight/m_fuel_total",
+   "value_type": "float"
+  },
+  {
+   "id": 100703,
+   "name": "sim/flightmodel/weight/m_total",
+   "value_type": "float"
+  },
+  {
+   "id": 100740,
+   "name": "sim/aircraft/engine/acf_num_engines",
+   "value_type": "int"
+  },
+  {
+   "id": 100777,
+   "name": "sim/flightmodel/engine/ENGN_running",
+   "value_type": "int_array"
+  },
+  {
+   "id": 100814,
+   "name": "sim/cockpit/radios/transponder_code",
+   "value_type": "int"
+  },
+  {
+   "id": 100851,
+   "name": "sim/time/zulu_time_sec",
+   "value_type": "float"
+  },
+  {
+   "id": 100888,
+   "name": "sim/time/paused",
+   "value_type": "int"
+  },
+  {
+   "id": 100925,
+   "name": "sim/time/sim_speed",
+   "value_type": "int"
+  },
+  {
+   "id": 100962,
+   "name": "sim/time/ground_speed",
+   "value_type": "int"
+  },
+  {
+   "id": 100999,
+   "name": "sim/cockpit2/switches/beacon_on",
+   "value_type": "int"
+  },
+  {
+   "id": 101036,
+   "name": "sim/cockpit2/switches/navigation_lights_on",
+   "value_type": "int"
+  },
+  {
+   "id": 101073,
+   "name": "sim/cockpit2/switches/strobe_lights_on",
+   "value_type": "int"
+  },
+  {
+   "id": 101110,
+   "name": "sim/cockpit2/switches/landing_lights_on",
+   "value_type": "int"
+  },
+  {
+   "id": 101147,
+   "name": "sim/cockpit2/switches/taxi_light_on",
+   "value_type": "int"
+  },
+  {
+   "id": 101184,
+   "name": "sim/weather/aircraft/wind_speed_msc",
+   "value_type": "float"
+  },
+  {
+   "id": 101221,
+   "name": "sim/weather/aircraft/wind_direction_degt",
+   "value_type": "float"
+  },
+  {
+   "id": 101258,
+   "name": "sim/flightmodel/position/alpha",
+   "value_type": "float"
+  },
+  {
+   "id": 101295,
+   "name": "sim/flightmodel/engine/ENGN_N1_",
+   "value_type": "float_array"
+  },
+  {
+   "id": 101332,
+   "name": "sim/cockpit2/engine/actuators/throttle_ratio_all",
+   "value_type": "float"
+  },
+  {
+   "id": 101369,
+   "name": "sim/cockpit2/controls/speedbrake_ratio",
+   "value_type": "float"
+  },
+  {
+   "id": 101406,
+   "name": "sim/cockpit2/autopilot/servos_on",
+   "value_type": "int"
+  },
+  {
+   "id": 101443,
+   "name": "sim/aircraft/view/acf_Vso",
+   "value_type": "float"
+  },
+  {
+   "id": 101480,
+   "name": "sim/aircraft/view/acf_Vs",
+   "value_type": "float"
+  },
+  {
+   "id": 101517,
+   "name": "sim/flightmodel2/misc/has_crashed",
+   "value_type": "int"
+  },
+  {
+   "id": 101554,
+   "name": "sim/time/local_date_days",
+   "value_type": "int"
+  },
+  {
+   "id": 101591,
+   "name": "sim/aircraft/view/acf_ICAO",
+   "value_type": "data"
+  },
+  {
+   "id": 101628,
+   "name": "sim/aircraft/view/acf_tailnum",
+   "value_type": "data"
+  },
+  {
+   "id": 101665,
+   "name": "sim/aircraft/view/acf_ui_name",
+   "value_type": "data"
+  },
+  {
+   "id": 101702,
+   "name": "sim/aircraft/view/acf_descrip",
+   "value_type": "data"
+  },
+  {
+   "id": 101739,
+   "name": "sim/aircraft/view/acf_relative_path",
+   "value_type": "data"
+  }
+ ],
+ "updates": [
+  {
+   "type": "dataref_update_values",
+   "data": {
+    "100000": 50.03791234567,
+    "100037": 8.56221234567,
+    "100074": 111.25,
+    "100111": 0.92,
+    "100148": 0.0,
+    "100185": 0.0,
+    "100222": 0.0,
+    "100259": 0.0,
+    "100296": 248.4,
+    "100333": 251.2,
+    "100370": 2.1,
+    "100407": -0.3,
+    "100444": 1.0,
+    "100481": 1,
+    "100518": [
+     1,
+     1,
+     1,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "100555": 0.0,
+    "100592": 3,
+    "100629": 1.0,
+    "100666": 144.5,
+    "100703": 1043.2,
+    "100740": 1,
+    "100777": [
+     1,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "100814": 1200,
+    "100851": 43200.5,
+    "100888": 0,
+    "100925": 1,
+    "100962": 1,
+    "100999": 1,
+    "101036": 1,
+    "101073": 0,
+    "101110": 0,
+    "101147": 1,
+    "101184": 5.144444,
+    "101221": 270.0,
+    "101258": 0.0,
+    "101295": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "101332": 0.0,
+    "101369": 0.0,
+    "101406": 0,
+    "101443": 40.0,
+    "101480": 48.0,
+    "101517": 0,
+    "101554": 290,
+    "101591": "QzE3MgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+    "101628": "TjE3MlNQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+    "101665": "Q2Vzc25hIDE3MiBTUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    "101702": "Q2Vzc25hIDE3MlNQIFNreWhhd2sAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    "101739": "QWlyY3JhZnQvTGFtaW5hciBSZXNlYXJjaC9DZXNzbmEgMTcyIFNQL0Nlc3NuYV8xNzJTUC5hY2YAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+   }
+  },
+  {
+   "type": "dataref_update_values",
+   "data": {
+    "100222": 5.0,
+    "100851": 43200.6,
+    "100629": 0.0
+   }
+  },
+  {
+   "type": "dataref_update_values",
+   "data": {
+    "100111": 304.8,
+    "100481": 0,
+    "100259": -650.5,
+    "100555": 0.6667,
+    "100148": 72.0,
+    "100185": 38.0,
+    "101369": -0.5,
+    "100888": 1,
+    "101295": [
+     55.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "101332": 0.42
+   }
+  },
+  {
+   "type": "dataref_update_values",
+   "data": {
+    "100888": 0,
+    "100000": 50.04
+   }
+  }
+ ]
+}

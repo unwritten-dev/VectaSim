@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { AirframeEdit, AirframeRow, FlightRow } from "./types";
-import { fmt, fmtDate, fmtDuration } from "./format";
+import { fmt, fmtDate, fmtDuration } from "./i18n/number";
+import { useT } from "./i18n";
 import ErrorNotice from "./ErrorNotice";
 import { setPref, usePrefs, usePrivacy } from "./prefs";
 import Stat from "./ui/Stat";
@@ -10,7 +11,7 @@ import EmptyState from "./ui/EmptyState";
 import { showToast } from "./ui/Toast";
 import AirframeImage from "./airframes/AirframeImage";
 import AirframePicker from "./airframes/AirframePicker";
-import { VAPP_MAX_KT, VAPP_MIN_KT, airframeName, matchesAirframe, normalizeRegistration, parseVapp, shownAirframeName } from "./airframes/airframe";
+import { LANDING_FLAPS_MAX, VAPP_MAX_KT, VAPP_MIN_KT, airframeName, matchesAirframe, normalizeRegistration, parseLandingFlaps, parseVapp, shownAirframeName } from "./airframes/airframe";
 import { useAirframes } from "./airframes/hooks";
 import { navigate } from "./airframes/navigation";
 
@@ -27,6 +28,7 @@ interface Props {
 
 /** Fleet: one entry per airframe (registration) with photo, hours and landings; detail on the right. */
 export default function Fleet({ focus }: Props) {
+  const t = useT();
   const { showDemo } = usePrefs();
   const priv = usePrivacy();
   const { rows, error, refresh } = useAirframes(showDemo);
@@ -52,7 +54,7 @@ export default function Fleet({ focus }: Props) {
   const add = () => {
     const reg = normalizeRegistration(newReg);
     if (!reg) {
-      showToast({ tone: "warn", title: "Keine gültige Registrierung", body: "3–8 Zeichen: Buchstaben, Ziffern, Bindestrich – z. B. D-AINA." });
+      showToast({ tone: "warn", title: t("logbook.fleet.invalidReg"), body: t("logbook.fleet.invalidRegBody") });
       return;
     }
     invoke("upsert_airframe", { edit: { registration: reg } satisfies AirframeEdit })
@@ -61,7 +63,7 @@ export default function Fleet({ focus }: Props) {
         setNewReg("");
         setSelected(reg);
       })
-      .catch((e) => showToast({ tone: "err", title: "Flugzeug nicht angelegt", body: String(e) }));
+      .catch((e) => showToast({ tone: "err", title: t("logbook.fleet.addFailed"), body: String(e) }));
   };
 
   if (rows && rows.length === 0 && !adding) {
@@ -70,9 +72,9 @@ export default function Fleet({ focus }: Props) {
         {error && <ErrorNotice error={error} context="logbook" onRetry={refresh} />}
         <EmptyState
           icon={PLANE_ICON}
-          title="Noch keine Flugzeuge"
-          text="Jede Registrierung wird zu einem Flugzeug – aus dem SimBrief-Flugplan oder dem Simulator. Du kannst auch selbst eins anlegen."
-          actions={<button onClick={() => setAdding(true)}>Flugzeug hinzufügen</button>}
+          title={t("logbook.fleet.emptyTitle")}
+          text={t("logbook.fleet.emptyText")}
+          actions={<button onClick={() => setAdding(true)}>{t("logbook.fleet.add")}</button>}
         />
       </section>
     );
@@ -85,19 +87,19 @@ export default function Fleet({ focus }: Props) {
         <input
           type="search"
           className="logbook-search"
-          placeholder="Suche: Registrierung, Name, Typ, Airline"
-          aria-label="Flotte durchsuchen"
+          placeholder={t("logbook.fleet.searchPlaceholder")}
+          aria-label={t("logbook.fleet.searchLabel")}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
         <div className="spacer" />
         {adding ? (
-          <span className="af-add" role="group" aria-label="Flugzeug hinzufügen">
+          <span className="af-add" role="group" aria-label={t("logbook.fleet.add")}>
             <input
               autoFocus
               value={newReg}
-              placeholder="Registrierung, z. B. D-AINA"
-              aria-label="Registrierung"
+              placeholder={t("logbook.fleet.regPlaceholder")}
+              aria-label={t("logbook.fleet.reg")}
               onChange={(e) => setNewReg(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") add();
@@ -105,12 +107,12 @@ export default function Fleet({ focus }: Props) {
               }}
             />
             <button className="btn-primary" onClick={add}>
-              Anlegen
+              {t("logbook.fleet.create")}
             </button>
-            <button onClick={() => setAdding(false)}>Abbrechen</button>
+            <button onClick={() => setAdding(false)}>{t("logbook.fleet.cancel")}</button>
           </span>
         ) : (
-          <button onClick={() => setAdding(true)}>Flugzeug hinzufügen</button>
+          <button onClick={() => setAdding(true)}>{t("logbook.fleet.add")}</button>
         )}
       </div>
 
@@ -119,22 +121,22 @@ export default function Fleet({ focus }: Props) {
           <div className="master-head detail num" aria-live="polite">
             {rows ? (
               <>
-                {fmt(shown.length)} Flugzeug{shown.length === 1 ? "" : "e"}
+                {t("logbook.fleet.count", { count: shown.length })}
                 {demoOnly > 0 && (
                   <>
                     {" "}
-                    · {demoOnly} nur aus Demo-Flügen ausgeblendet{" "}
+                    · {t("logbook.fleet.demoOnlyHidden", { count: demoOnly })}{" "}
                     <button className="link-btn" onClick={() => setPref("showDemo", true).catch(() => {})}>
-                      zeigen
+                      {t("logbook.fleet.show")}
                     </button>
                   </>
                 )}
               </>
             ) : (
-              "Flotte wird geladen …"
+              t("logbook.fleet.loading")
             )}
           </div>
-          <div className="flight-list" role="listbox" aria-label="Flugzeuge">
+          <div className="flight-list" role="listbox" aria-label={t("logbook.fleet.listLabel")}>
             {shown.map((r) => {
               const sel = r.registration === selected;
               const name = airframeName(r);
@@ -168,24 +170,22 @@ export default function Fleet({ focus }: Props) {
                       </span>
                     </div>
                     <div className="fi-line2 detail num">
-                      <span>
-                        {fmt(r.flights)} Flug{r.flights === 1 ? "" : "e"}
-                      </span>
-                      <span>{fmtDuration(r.blockTimeMs, { seconds: false })} Block</span>
-                      <span>{fmt(r.landings)} Ldg.</span>
-                      <span className="af-avg" title="Ø Landerate">Ø {fmt(r.avgLandingVsFpm, 0, "fpm")}</span>
+                      <span>{t("count.flights", { count: r.flights })}</span>
+                      <span>{t("logbook.fleet.block", { duration: fmtDuration(r.blockTimeMs, { seconds: false }) })}</span>
+                      <span>{t("logbook.fleet.landings", { count: r.landings })}</span>
+                      <span className="af-avg" title={t("logbook.fleet.avgTitle")}>Ø {fmt(r.avgLandingVsFpm, 0, "fpm")}</span>
                       <span className="spacer" />
-                      <span className="af-last">{r.lastFlownMs ? fmtDate(r.lastFlownMs) : "nie geflogen"}</span>
+                      <span className="af-last">{r.lastFlownMs ? fmtDate(r.lastFlownMs) : t("logbook.fleet.neverFlown")}</span>
                     </div>
                   </div>
                 </div>
               );
             })}
-            {rows && shown.length === 0 && <EmptyState compact title="Keine Treffer" text="Ändere die Suche." />}
+            {rows && shown.length === 0 && <EmptyState compact title={t("logbook.fleet.noMatchTitle")} text={t("logbook.fleet.noMatchText")} />}
           </div>
         </div>
         <div className="detail-pane">
-          {current ? <AirframeDetail key={current.registration} row={current} onSelect={setSelected} /> : <div className="detail-loading detail">Wähle ein Flugzeug.</div>}
+          {current ? <AirframeDetail key={current.registration} row={current} onSelect={setSelected} /> : <div className="detail-loading detail">{t("logbook.fleet.pick")}</div>}
         </div>
       </div>
     </section>
@@ -194,6 +194,7 @@ export default function Fleet({ focus }: Props) {
 
 function AirframeDetail({ row: a, onSelect }: { row: AirframeRow; onSelect: (reg: string | null) => void }) {
   const priv = usePrivacy();
+  const t = useT();
   /** The registration as shown (D-•••• in the Streamer-Modus). */
   const reg = priv.mask(a.registration, "registration");
   const initial = () => ({
@@ -202,6 +203,7 @@ function AirframeDetail({ row: a, onSelect }: { row: AirframeRow; onSelect: (reg
     airline: a.airline ?? "",
     notes: a.notes ?? "",
     vappKt: a.vappKt != null ? String(Math.round(a.vappKt)) : "",
+    landingFlaps: a.landingFlaps != null ? String(a.landingFlaps) : "",
   });
   const [form, setForm] = useState(initial);
   const [flights, setFlights] = useState<FlightRow[] | null>(null);
@@ -221,14 +223,21 @@ function AirframeDetail({ row: a, onSelect }: { row: AirframeRow; onSelect: (reg
   const save = () => {
     const vapp = parseVapp(form.vappKt);
     if (vapp === undefined) {
-      showToast({ tone: "warn", title: "Vapp nicht gespeichert", body: `Bitte eine Geschwindigkeit zwischen ${VAPP_MIN_KT} und ${VAPP_MAX_KT} kt eintragen – oder das Feld leeren.` });
+      showToast({ tone: "warn", title: t("logbook.fleet.vappInvalid"), body: t("logbook.fleet.vappInvalidBody", { min: VAPP_MIN_KT, max: VAPP_MAX_KT }) });
+      return;
+    }
+    const flaps = parseLandingFlaps(form.landingFlaps);
+    if (flaps === undefined) {
+      showToast({ tone: "warn", title: t("logbook.fleet.flapsInvalid"), body: t("logbook.fleet.flapsInvalidBody", { max: LANDING_FLAPS_MAX }) });
       return;
     }
     const { customName, icaoType, airline, notes } = form;
-    // 0 clears the stored Vapp (the backend's convention)
-    invoke("upsert_airframe", { edit: { registration: a.registration, customName, icaoType, airline, notes, vappKt: vapp ?? 0 } satisfies AirframeEdit })
-      .then(() => showToast({ tone: "ok", title: `${reg} gespeichert` }))
-      .catch((e) => showToast({ tone: "err", title: "Nicht gespeichert", body: String(e) }));
+    // 0 clears the stored Vapp, −1 the landing flaps (the backend's conventions)
+    invoke("upsert_airframe", {
+      edit: { registration: a.registration, customName, icaoType, airline, notes, vappKt: vapp ?? 0, landingFlaps: flaps ?? -1 } satisfies AirframeEdit,
+    })
+      .then(() => showToast({ tone: "ok", title: t("logbook.fleet.saved", { reg }) }))
+      .catch((e) => showToast({ tone: "err", title: t("logbook.fleet.saveFailed"), body: String(e) }));
   };
 
   const refreshPhoto = () => {
@@ -237,20 +246,20 @@ function AirframeDetail({ row: a, onSelect }: { row: AirframeRow; onSelect: (reg
       .then((r) =>
         showToast(
           r?.imageSource === "planespotters"
-            ? { tone: "ok", title: "Foto aktualisiert", body: r.imageCredit ? `© ${r.imageCredit} · Planespotters.net` : undefined }
-            : { tone: "info", title: "Kein Foto gefunden", body: `Planespotters.net kennt kein Foto von ${reg}.` },
+            ? { tone: "ok", title: t("logbook.fleet.photoUpdated"), body: r.imageCredit ? `© ${r.imageCredit} · Planespotters.net` : undefined }
+            : { tone: "info", title: t("logbook.fleet.noPhoto"), body: t("logbook.fleet.noPhotoBody", { reg }) },
         ),
       )
-      .catch((e) => showToast({ tone: "err", title: "Foto nicht geladen", body: String(e) }))
+      .catch((e) => showToast({ tone: "err", title: t("logbook.fleet.photoFailed"), body: String(e) }))
       .finally(() => setBusy(false));
   };
 
   const pickImage = async () => {
-    const path = await open({ multiple: false, directory: false, filters: [{ name: "Bilder", extensions: ["jpg", "jpeg", "png", "webp", "gif"] }] });
+    const path = await open({ multiple: false, directory: false, filters: [{ name: t("logbook.fleet.images"), extensions: ["jpg", "jpeg", "png", "webp", "gif"] }] });
     if (typeof path !== "string") return;
     invoke("set_airframe_image", { registration: a.registration, path })
-      .then(() => showToast({ tone: "ok", title: "Bild übernommen" }))
-      .catch((e) => showToast({ tone: "err", title: "Bild nicht übernommen", body: String(e) }));
+      .then(() => showToast({ tone: "ok", title: t("logbook.fleet.imageSet") }))
+      .catch((e) => showToast({ tone: "err", title: t("logbook.fleet.imageFailed"), body: String(e) }));
   };
 
   const merge = (into: string | null) => {
@@ -259,18 +268,18 @@ function AirframeDetail({ row: a, onSelect }: { row: AirframeRow; onSelect: (reg
     invoke<{ registration: string }>("merge_airframes", { from: a.registration, into })
       .then((r) => {
         onSelect(r.registration);
-        showToast({ tone: "ok", title: `${reg} mit ${priv.mask(r.registration, "registration")} zusammengeführt`, body: `${a.totalFlights} Flüge umgebucht.` });
+        showToast({ tone: "ok", title: t("logbook.fleet.merged", { reg, into: priv.mask(r.registration, "registration") }), body: t("logbook.fleet.mergedBody", { count: a.totalFlights }) });
       })
-      .catch((e) => showToast({ tone: "err", title: "Nicht zusammengeführt", body: String(e) }));
+      .catch((e) => showToast({ tone: "err", title: t("logbook.fleet.mergeFailed"), body: String(e) }));
   };
 
   const remove = () =>
     invoke("delete_airframe", { registration: a.registration })
       .then(() => {
         onSelect(null);
-        showToast({ tone: "ok", title: `${reg} entfernt`, body: "Die Flüge bleiben im Logbuch, ohne Flugzeug-Zuordnung." });
+        showToast({ tone: "ok", title: t("logbook.fleet.removed", { reg }), body: t("logbook.fleet.removedBody") });
       })
-      .catch((e) => showToast({ tone: "err", title: "Nicht entfernt", body: String(e) }));
+      .catch((e) => showToast({ tone: "err", title: t("logbook.fleet.removeFailed"), body: String(e) }));
 
   const field = (key: keyof typeof form, label: string, props: React.InputHTMLAttributes<HTMLInputElement> = {}) => (
     <label className="af-field">
@@ -280,108 +289,114 @@ function AirframeDetail({ row: a, onSelect }: { row: AirframeRow; onSelect: (reg
   );
 
   return (
-    <article className="flight-detail af-detail" aria-label={`Flugzeug ${reg}`}>
+    <article className="flight-detail af-detail" aria-label={t("logbook.fleet.ariaLabel", { reg })}>
       <header className="detail-head">
         <div className="detail-title">
           <h2 className="num">{reg}</h2>
           <div className="detail">
-            {[airframeName(a) !== a.registration ? shownAirframeName(a, priv.on) : null, a.icaoType, priv.mask(a.airline, "airline")].filter(Boolean).join(" · ") || "Typ unbekannt"}
+            {[airframeName(a) !== a.registration ? shownAirframeName(a, priv.on) : null, a.icaoType, priv.mask(a.airline, "airline")].filter(Boolean).join(" · ") || t("logbook.fleet.typeUnknown")}
           </div>
         </div>
         <div className="detail-actions">
-          <button onClick={refreshPhoto} disabled={busy} title={airframePhotos ? "Foto bei Planespotters.net neu suchen" : "Planespotters-Fotos sind in den Einstellungen aus – manuell trotzdem suchen"}>
-            {busy ? "Sucht …" : "Foto aktualisieren"}
+          <button onClick={refreshPhoto} disabled={busy} title={airframePhotos ? t("logbook.fleet.photoSearchTitle") : t("logbook.fleet.photoSearchOffTitle")}>
+            {busy ? t("logbook.fleet.searching") : t("logbook.fleet.refreshPhoto")}
           </button>
-          <button onClick={pickImage}>Bild wählen …</button>
+          <button onClick={pickImage}>{t("logbook.fleet.pickImage")}</button>
         </div>
       </header>
 
       <AirframeImage airframe={a} size="large" credit />
 
       <div className="stat-grid detail-grid">
-        <Stat size="sm" label="Flüge" value={fmt(a.flights)} sub={a.totalFlights !== a.flights ? `${a.totalFlights} mit Demo` : undefined} />
-        <Stat size="sm" label="Blockzeit" value={fmtDuration(a.blockTimeMs, { seconds: false })} />
-        <Stat size="sm" label="Luftzeit" title="Abheben bis Aufsetzen" value={fmtDuration(a.flightTimeMs, { seconds: false })} />
-        <Stat size="sm" label="Distanz" value={fmt(a.distanceNm, 0)} unit="nm" />
-        <Stat size="sm" label="Landungen" value={fmt(a.landings)} />
-        <Stat size="sm" label="Ø Landerate" value={fmt(a.avgLandingVsFpm, 0)} unit="fpm" />
-        <Stat size="sm" label="Zuletzt" value={a.lastFlownMs ? fmtDate(a.lastFlownMs) : "–"} />
+        <Stat size="sm" label={t("logbook.fleet.statFlights")} value={fmt(a.flights)} sub={a.totalFlights !== a.flights ? t("logbook.fleet.withDemo", { count: a.totalFlights }) : undefined} />
+        <Stat size="sm" label={t("logbook.fleet.statBlock")} value={fmtDuration(a.blockTimeMs, { seconds: false })} />
+        <Stat size="sm" label={t("logbook.fleet.statAir")} title={t("logbook.fleet.statAirTitle")} value={fmtDuration(a.flightTimeMs, { seconds: false })} />
+        <Stat size="sm" label={t("logbook.fleet.statDistance")} value={fmt(a.distanceNm, 0)} unit="nm" />
+        <Stat size="sm" label={t("logbook.fleet.statLandings")} value={fmt(a.landings)} />
+        <Stat size="sm" label={t("logbook.fleet.statAvgRate")} value={fmt(a.avgLandingVsFpm, 0)} unit="fpm" />
+        <Stat size="sm" label={t("logbook.fleet.statLast")} value={a.lastFlownMs ? fmtDate(a.lastFlownMs) : "–"} />
       </div>
 
       <div className="detail-section">
-        <h3>Angaben</h3>
+        <h3>{t("logbook.fleet.details")}</h3>
         <div className="af-form">
-          {field("customName", "Eigener Name", { placeholder: "z. B. „Kranich“" })}
-          {field("icaoType", "ICAO-Typ", { placeholder: "z. B. A20N", maxLength: 4, className: "mono" })}
-          {field("airline", "Airline", { placeholder: "z. B. DLH oder Lufthansa", ...(priv.on ? { type: "password", autoComplete: "off", title: "Im Streamer-Modus verdeckt" } : {}) })}
-          {field("vappKt", "Vapp (kt) – für die Anflugbewertung", {
-            placeholder: "leer = geflogener Wert",
+          {field("customName", t("logbook.fleet.customName"), { placeholder: t("logbook.fleet.customNamePlaceholder") })}
+          {field("icaoType", t("logbook.fleet.icaoType"), { placeholder: t("logbook.fleet.icaoTypePlaceholder"), maxLength: 4, className: "mono" })}
+          {field("airline", t("logbook.fleet.airline"), { placeholder: t("logbook.fleet.airlinePlaceholder"), ...(priv.on ? { type: "password", autoComplete: "off", title: t("logbook.fleet.streamerHidden") } : {}) })}
+          {field("vappKt", t("logbook.fleet.vapp"), {
+            placeholder: t("logbook.fleet.vappPlaceholder"),
             inputMode: "numeric",
             className: "num",
-            title: "Anfluggeschwindigkeit dieses Flugzeugs. Leer: VectaSim nimmt den Median der geflogenen IAS als Referenz.",
+            title: t("logbook.fleet.vappTitle"),
+          })}
+          {field("landingFlaps", t("logbook.fleet.flaps"), {
+            placeholder: t("logbook.fleet.flapsPlaceholder"),
+            inputMode: "numeric",
+            className: "num",
+            title: t("logbook.fleet.flapsTitle"),
           })}
           <label className="af-field af-notes">
-            <span className="stat-label">Notizen</span>
+            <span className="stat-label">{t("logbook.fleet.notes")}</span>
             <textarea rows={3} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
           </label>
         </div>
-        {a.title && <div className="detail">Simulator-Titel: {a.title}</div>}
+        {a.title && <div className="detail">{t("logbook.fleet.simTitle", { title: a.title })}</div>}
         <div className="af-form-actions">
           <button className="btn-primary" onClick={save} disabled={!dirty}>
-            Speichern
+            {t("logbook.fleet.save")}
           </button>
-          {dirty && <button onClick={() => setForm(initial())}>Verwerfen</button>}
+          {dirty && <button onClick={() => setForm(initial())}>{t("logbook.fleet.discard")}</button>}
           <span className="spacer" />
-          <button className="btn-sm" onClick={() => setMerging(!merging)} aria-expanded={merging} title="Alle Flüge auf ein anderes Flugzeug umbuchen und dieses entfernen">
-            Zusammenführen …
+          <button className="btn-sm" onClick={() => setMerging(!merging)} aria-expanded={merging} title={t("logbook.fleet.mergeTitle")}>
+            {t("logbook.fleet.merge")}
           </button>
           {confirmDelete ? (
-            <span className="confirm-delete" role="group" aria-label="Entfernen bestätigen">
-              <span className="detail">Flugzeug entfernen?</span>
+            <span className="confirm-delete" role="group" aria-label={t("logbook.fleet.confirmRemoveLabel")}>
+              <span className="detail">{t("logbook.fleet.confirmRemove")}</span>
               <button className="btn-sm danger" onClick={remove} autoFocus>
-                Ja
+                {t("logbook.fleet.yes")}
               </button>
               <button className="btn-sm" onClick={() => setConfirmDelete(false)}>
-                Nein
+                {t("logbook.fleet.no")}
               </button>
             </span>
           ) : (
             <button className="btn-sm danger" onClick={() => setConfirmDelete(true)}>
-              Entfernen
+              {t("logbook.fleet.remove")}
             </button>
           )}
         </div>
         {merging && (
           <div className="af-merge">
-            <div className="detail">Flüge von {reg} umbuchen auf:</div>
+            <div className="detail">{t("logbook.fleet.mergeInto", { reg })}</div>
             <AirframePicker current={a.registration} onPick={merge} onCancel={() => setMerging(false)} />
           </div>
         )}
       </div>
 
       <div className="detail-section">
-        <h3>Flüge mit {reg}</h3>
+        <h3>{t("logbook.fleet.flightsWith", { reg })}</h3>
         {flights === null ? (
-          <div className="detail">Lädt …</div>
+          <div className="detail">{t("logbook.fleet.loadingShort")}</div>
         ) : flights.length === 0 ? (
-          <div className="detail">Noch keine Flüge mit diesem Flugzeug. Im Logbuch kannst du Flüge über „Flugzeug ändern“ zuordnen.</div>
+          <div className="detail">{t("logbook.fleet.noFlights")}</div>
         ) : (
           <table className="mini-table af-flights">
             <thead>
               <tr>
-                <th>Datum</th>
-                <th>Route</th>
-                <th className="right">Block</th>
-                <th className="right">Landerate</th>
+                <th>{t("logbook.fleet.colDate")}</th>
+                <th>{t("logbook.fleet.colRoute")}</th>
+                <th className="right">{t("logbook.fleet.colBlock")}</th>
+                <th className="right">{t("logbook.fleet.colRate")}</th>
               </tr>
             </thead>
             <tbody>
               {flights.map((f) => (
-                <tr key={f.id} className="clickable" onClick={() => navigate({ kind: "flight", id: f.id })} title="Im Logbuch öffnen">
+                <tr key={f.id} className="clickable" onClick={() => navigate({ kind: "flight", id: f.id })} title={t("logbook.fleet.openInLogbook")}>
                   <td className="num">{fmtDate(f.offBlockMs ?? f.createdMs)}</td>
                   <td className="num">
                     {f.depIcao ?? "····"} → {f.arrIcao ?? "····"}
-                    {f.provider === "mock" && <span className="badge badge-demo badge-inline">Demo</span>}
+                    {f.provider === "mock" && <span className="badge badge-demo badge-inline">{t("logbook.detail.demo")}</span>}
                   </td>
                   <td className="num right">{f.onBlockMs && f.offBlockMs ? fmtDuration(f.onBlockMs - f.offBlockMs, { seconds: false }) : "–"}</td>
                   <td className={`num right${(f.landingVsFpm ?? 0) <= -600 ? " warn-text" : ""}`}>{fmt(f.landingVsFpm, 0, "fpm")}</td>

@@ -1,7 +1,7 @@
 use std::time::Duration;
 use vectasim_online::metar::{decode, observation_ms, parse_noaa_json, parse_vatsim_text};
-use vectasim_online::vatsim::backoff_delay;
-use vectasim_online::{Facility, FlightCategory, Metar, MetarClient, VatsimFeed, parse_vatsim_json};
+use vectasim_online::feed::backoff_delay;
+use vectasim_online::{Facility, FlightCategory, Metar, MetarClient, Network, OnlineFeed, parse_ivao_json, parse_vatsim_json};
 
 const VATSIM_DATA: &str = include_str!("fixtures/vatsim-data.json");
 const NOAA_METAR: &str = include_str!("fixtures/noaa-metar.json");
@@ -19,6 +19,17 @@ fn parses_vatsim_pilots_controllers_prefiles() {
     assert_eq!((dlh.departure.as_str(), dlh.arrival.as_str()), ("EDDF", "LEPA"));
     assert_eq!(dlh.heading_deg, 251);
     assert!(dlh.route.starts_with("ANEKI1L"));
+    // detail fields for the traffic card
+    assert_eq!(dlh.name, "Pilot One EDDF");
+    assert_eq!(dlh.logon_time, "2026-10-17T11:58:01.0000000Z");
+    assert_eq!(dlh.planned_altitude, "36000");
+    assert_eq!(dlh.remarks, "PBN/A1B1C1D1 /v/");
+    // the bulk (map) form drops name and remarks, keeps the rest
+    let lean = dlh.clone().lean();
+    assert_eq!((lean.name.as_str(), lean.remarks.as_str()), ("", ""));
+    assert_eq!((lean.callsign.as_str(), lean.planned_altitude.as_str()), ("DLH4AB", "36000"));
+    let json = serde_json::to_value(&lean).unwrap();
+    assert!(json.get("name").is_none() && json.get("remarks").is_none());
 
     // no flight plan → empty strings, not a parse error
     let vfr = snap.pilot(1400002).unwrap();
@@ -64,7 +75,7 @@ fn bbox_and_nearest_queries() {
 
 #[test]
 fn feed_snapshot_updates_status() {
-    let feed = VatsimFeed::new();
+    let feed = OnlineFeed::vatsim();
     assert!(!feed.is_enabled());
     assert!(feed.pilots_in_bbox(-180.0, -90.0, 180.0, 90.0, 10).is_empty());
     feed.set_snapshot(parse_vatsim_json(VATSIM_DATA.as_bytes()).unwrap());
@@ -173,6 +184,21 @@ fn decoder_edge_cases() {
     assert_eq!(FlightCategory::from_conditions(None, None), FlightCategory::Unknown);
 }
 
+#[test]
+fn decoder_survives_non_ascii_tokens() {
+    // multi-byte characters right at the byte positions the decoder looks at (4 for the
+    // visibility, 3 after the cloud prefix, 3 in the wind group) – no slice panic
+    let m = decode("EDDF 171220Z abcÄ 12Ä4 BKNÄ12 OVC0Ä OVC1€ abÄcdKT xyÄ1KT 25012KT 9999 BKN030 14/06 Q1013 äöü€ 𝄞𝄞");
+    assert_eq!(m.station, "EDDF");
+    assert_eq!(m.wind.as_ref().unwrap().speed_kt, 12);
+    assert_eq!(m.visibility_m, Some(10_000));
+    assert_eq!(m.ceiling_ft, Some(3000));
+    assert_eq!(m.qnh_hpa, Some(1013));
+    for raw in ["Ä", "ÄÄÄÄ", "EDDF ÄÄÄÄÄÄZ", "EDDF 1Ä", "EDDF VVÄ", "EDDF ÄÄKT", "EDDF 1ÄVÄ1", "EDDF Ä/Ä", "EDDF ÄSM"] {
+        let _ = decode(raw);
+    }
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn metar_cache_serves_without_network() {
     let client = MetarClient::new();
@@ -183,4 +209,110 @@ async fn metar_cache_serves_without_network() {
     assert_eq!(got.len(), 1);
     assert_eq!(got[0].station, "EDDF");
     assert_eq!(client.get("EDDF").await.unwrap().unwrap().qnh_hpa, Some(1013));
+}
+
+/// Shortened Whazzup v2 file in the live structure (2026-10-18) with invented callsigns and ids.
+const IVAO_DATA: &str = include_str!("fixtures/ivao-whazzup.json");
+
+#[test]
+fn parses_ivao_pilots_and_atc() {
+    let snap = parse_ivao_json(IVAO_DATA.as_bytes()).unwrap();
+    assert_eq!(snap.network, Network::Ivao);
+    assert_eq!(snap.update_timestamp, "2026-10-18T14:45:28.259225639Z");
+    // the pilot without lastTrack has no position yet and is skipped
+    let calls: Vec<&str> = snap.pilots.iter().map(|p| p.callsign.as_str()).collect();
+    assert_eq!(calls, ["TST101", "DTEST", "TST3"]);
+    assert!(snap.pilots.iter().all(|p| p.network == Network::Ivao));
+
+    let a = snap.pilot(900101).unwrap();
+    assert_eq!((a.departure.as_str(), a.arrival.as_str(), a.aircraft_short.as_str()), ("EDDF", "LEPA", "A20N"));
+    assert_eq!((a.altitude_ft, a.ground_speed_kt, a.heading_deg), (34012, 452, 211));
+    assert_eq!(a.transponder, "2301");
+    assert_eq!(a.flight_rules, "I");
+    assert_eq!(a.on_ground, Some(false));
+    assert_eq!((a.planned_altitude.as_str(), a.remarks.as_str(), a.aircraft_model.as_str()), ("F340", "TEST", "A320neo"));
+    assert_eq!(a.logon_time, "2026-10-18T10:00:00.000Z");
+    // IVAO publishes no names
+    assert_eq!(a.name, "");
+
+    // no flight plan → empty strings; onGround passes through
+    let vfr = snap.pilot(900102).unwrap();
+    assert_eq!(vfr.aircraft_short, "");
+    assert_eq!(vfr.transponder, "7000");
+    assert_eq!(vfr.on_ground, Some(true));
+
+    // nulls everywhere: type from flightPlan.aircraft.icaoCode, no transponder
+    let pac = snap.pilot(900103).unwrap();
+    assert_eq!(pac.aircraft_short, "B789");
+    assert_eq!(pac.transponder, "");
+    assert_eq!(pac.route, "");
+
+    // frequency 0 dropped, position from the callsign suffix when null, DEP counts as APP
+    let atc: Vec<(&str, &str, Facility)> = snap.controllers.iter().map(|c| (c.callsign.as_str(), c.frequency.as_str(), c.facility)).collect();
+    assert_eq!(
+        atc,
+        [
+            ("EDDF_TWR", "119.900", Facility::Twr),
+            ("EDDF_N_APP", "120.805", Facility::App),
+            ("EDGG_CTR", "127.500", Facility::Ctr),
+            ("EDDM_GND", "121.775", Facility::Gnd),
+            ("EDDM_DEP", "129.000", Facility::App),
+        ]
+    );
+    let twr = &snap.controllers[0];
+    assert_eq!(twr.network, Network::Ivao);
+    assert_eq!(twr.atis_code.as_deref(), Some("K"));
+    // the voice-room line is not ATIS text
+    assert_eq!(twr.text_atis, ["Frankfurt Information KILO recorded at 1420z", "RWY 25C IN USE"]);
+    assert!(snap.controllers[1].text_atis.is_empty());
+    // centre stations get no ATIS letter
+    assert_eq!(snap.controllers[2].atis_code, None);
+    assert_eq!(snap.controllers[2].station_prefix(), "EDGG");
+    assert!(snap.prefiles.is_empty());
+}
+
+#[test]
+fn rejects_garbage_but_tolerates_empty_ivao_file() {
+    assert!(parse_ivao_json(b"<html>maintenance</html>").is_err());
+    let empty = parse_ivao_json(br#"{"updatedAt":null,"clients":null}"#).unwrap();
+    assert!(empty.pilots.is_empty() && empty.controllers.is_empty());
+}
+
+#[test]
+fn ivao_feed_and_merged_queries() {
+    let ivao = OnlineFeed::ivao();
+    assert_eq!(ivao.status().network, Network::Ivao);
+    ivao.set_snapshot(parse_ivao_json(IVAO_DATA.as_bytes()).unwrap());
+    let st = ivao.status();
+    assert_eq!((st.pilots, st.controllers, st.atis, st.prefiles), (3, 5, 0, 0));
+    ivao.stop();
+    assert_eq!(ivao.status().network, Network::Ivao);
+    assert!(ivao.snapshot().is_none());
+
+    // both networks in one query: VATSIM's DLH4AB and IVAO's TST101 sit at Frankfurt
+    let v = parse_vatsim_json(VATSIM_DATA.as_bytes()).unwrap();
+    let i = parse_ivao_json(IVAO_DATA.as_bytes()).unwrap();
+    let both = vectasim_online::pilots_in_bbox(v.pilots.iter().chain(i.pilots.iter()), 8.0, 49.5, 9.5, 50.5, 50);
+    let tagged: Vec<(Network, &str)> = both.iter().map(|p| (p.network, p.callsign.as_str())).collect();
+    assert!(tagged.contains(&(Network::Vatsim, "DLH4AB")));
+    assert!(tagged.contains(&(Network::Ivao, "TST101")));
+    let near = vectasim_online::nearest_pilots(v.pilots.iter().chain(i.pilots.iter()), 50.0455, 8.5421, 1);
+    assert_eq!((near[0].pilot.network, near[0].pilot.callsign.as_str()), (Network::Ivao, "DTEST"));
+
+    // the network goes to the webview as "vatsim" / "ivao"
+    assert_eq!(serde_json::to_value(&i.pilots[0]).unwrap()["network"], "ivao");
+    assert_eq!(serde_json::to_value(&v.controllers[0]).unwrap()["network"], "vatsim");
+    assert_eq!(serde_json::to_value(ivao.status()).unwrap()["network"], "ivao");
+    assert_eq!(Network::from_id("IVAO"), Some(Network::Ivao));
+}
+
+/// Manual check against a real download: `VECTASIM_IVAO_FILE=whazzup.json cargo test -p vectasim-online -- --ignored`.
+#[test]
+#[ignore]
+fn parses_live_ivao_file() {
+    let Ok(path) = std::env::var("VECTASIM_IVAO_FILE") else { return };
+    let snap = parse_ivao_json(&std::fs::read(path).unwrap()).unwrap();
+    let positioned = snap.pilots.iter().filter(|p| p.latitude != 0.0 || p.longitude != 0.0).count();
+    println!("{} pilots ({positioned} with position), {} controllers, updated {}", snap.pilots.len(), snap.controllers.len(), snap.update_timestamp);
+    assert!(!snap.pilots.is_empty());
 }

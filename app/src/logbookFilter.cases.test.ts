@@ -1,9 +1,14 @@
 // Edge cases of the logbook search and quick filters (logbookFilter.ts) beyond
 // logbookFilter.test.ts: fallbacks, unusual rows, purity.
 
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { setLanguageSetting } from "./i18n";
 import { callsignOf, filterFlights, matchesQuery, matchesQuick, moveSelection, searchText } from "./logbookFilter";
 import type { FlightRow } from "./types";
+
+// the search matches the displayed (German) date
+beforeAll(() => setLanguageSetting("de"));
+afterAll(() => setLanguageSetting("system"));
 
 const integrity = { pausedMs: 0, pauseCount: 0, slewDetected: false, timeAccelerationDetected: false, maxSimRate: 1, crashed: false, fuelIncreasedAirborne: false };
 

@@ -12,9 +12,11 @@ import { showToast } from "../ui/Toast";
 import { userMessage } from "../errors";
 import { navigate } from "../airframes/navigation";
 import { usePrefs } from "../prefs";
+import GlobeToggle from "../map/GlobeToggle";
 import { isDemoRow } from "../totals";
 import { COLOR } from "../theme";
-import { fmt, fmtDate } from "../format";
+import { useLanguage, useT, type Language, type TFunction } from "../i18n";
+import { fmt, fmtDate } from "../i18n/number";
 import type { FlightRow } from "../types";
 import {
   CONTINENTS,
@@ -22,9 +24,11 @@ import {
   buildRows,
   continentLabel,
   continentProgress,
+  countryName,
   exportFileName,
   filterRows,
   landingsLabel,
+  otherCountryName,
   progressLabel,
   progressOf,
   visitSummary,
@@ -52,11 +56,7 @@ function loadStatic(): Promise<StaticData> {
   return staticData;
 }
 
-const VISIT_FILTERS: Array<{ id: VisitFilter; label: string }> = [
-  { id: "all", label: "Alle" },
-  { id: "visited", label: "Besucht" },
-  { id: "open", label: "Offen" },
-];
+const VISIT_FILTERS: VisitFilter[] = ["all", "visited", "open"];
 
 const PINS_KEY = "vectasim.countries.pins";
 function readPins(): boolean {
@@ -76,6 +76,8 @@ const MAX_FLIGHTS = 50;
  * and search; a country lists its flights, each one opens in the logbook.
  */
 export default function Countries() {
+  const t = useT();
+  const lang = useLanguage();
   const { showDemo } = usePrefs();
   const [stat, setStat] = useState<StaticData | null>(null);
   const [data, setData] = useState<VisitedCountries | null>(null);
@@ -124,7 +126,7 @@ export default function Countries() {
 
   const countryMap = useMemo(() => new Map((stat?.countries ?? []).map((c) => [c.iso2, c])), [stat]);
   const visitMap = useMemo(() => new Map((data?.countries ?? []).map((v) => [v.iso2, v])), [data]);
-  const rows = useMemo(() => buildRows(stat?.countries ?? [], data?.countries ?? []), [stat, data]);
+  const rows = useMemo(() => buildRows(stat?.countries ?? [], data?.countries ?? [], lang), [stat, data, lang]);
   const shown = useMemo(() => filterRows(rows, filter), [rows, filter]);
   const progress = useMemo(() => progressOf(rows), [rows]);
   const perContinent = useMemo(() => continentProgress(rows), [rows]);
@@ -145,15 +147,15 @@ export default function Countries() {
     if (!map) return;
     setExporting(true);
     try {
-      const path = await save({ defaultPath: exportFileName(), filters: [{ name: "PNG-Bild", extensions: ["png"] }] });
+      const path = await save({ defaultPath: exportFileName(new Date(), lang), filters: [{ name: t("countries.export.pngFilter"), extensions: ["png"] }] });
       if (!path) return;
-      const blob = await renderMapPng(map, `${progressLabel(progress)} Länder besucht · ${landingsLabel(summary.landings)}`);
+      const blob = await renderMapPng(map, t("countries.export.line", { progress: progressLabel(progress), landings: landingsLabel(summary.landings, lang) }), t, lang);
       const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
       await invoke("save_image", { path, bytes });
-      showToast({ tone: "ok", title: "Länderkarte gespeichert", body: path, durationMs: 3000 });
+      showToast({ tone: "ok", title: t("countries.export.saved"), body: path, durationMs: 3000 });
     } catch (e) {
       const m = userMessage(e, "export");
-      showToast({ id: "countries-export", tone: "err", title: `Länderkarte nicht gespeichert: ${m.title}`, body: `${m.hint}${m.detail ? ` (${m.detail.slice(0, 160)})` : ""}` });
+      showToast({ id: "countries-export", tone: "err", title: t("countries.export.failed", { reason: m.title }), body: `${m.hint}${m.detail ? ` (${m.detail.slice(0, 160)})` : ""}` });
     } finally {
       setExporting(false);
     }
@@ -178,28 +180,28 @@ export default function Countries() {
         />
         <div className="country-legend" aria-hidden="true">
           <span>
-            <i className="swatch swatch-visited" /> Besucht (Landung)
+            <i className="swatch swatch-visited" /> {t("countries.legend.visited")}
           </span>
           <span>
-            <i className="swatch swatch-open" /> Noch nicht besucht
+            <i className="swatch swatch-open" /> {t("countries.legend.open")}
           </span>
           {showPins && (
             <span>
-              <i className="swatch swatch-pin" /> Ankunftsflughafen
+              <i className="swatch swatch-pin" /> {t("countries.legend.pin")}
             </span>
           )}
         </div>
         {empty && (
           <div className="countries-empty">
             <EmptyState
-              title="Noch kein Land durch eine Landung besucht"
+              title={t("countries.empty.title")}
               text={
                 <>
-                  Deine erste Landung färbt die Karte. Es zählt nur der Ankunftsflughafen abgeschlossener Flüge.
+                  {t("countries.empty.text")}
                   {demoSkipped > 0 && (
                     <>
                       <br />
-                      {demoSkipped} Demo-Landung{demoSkipped === 1 ? "" : "en"} nicht mitgezählt (Einstellungen → Anzeige → Demo-Flüge einbeziehen).
+                      {t("countries.empty.demoSkipped", { count: demoSkipped })}
                     </>
                   )}
                 </>
@@ -209,41 +211,41 @@ export default function Countries() {
         )}
       </div>
 
-      <aside className="countries-panel" aria-label="Länderliste">
+      <aside className="countries-panel" aria-label={t("countries.panel")}>
         {error && <ErrorNotice error={error} context="logbook" onRetry={refresh} />}
         <div className="countries-progress">
           <div className="countries-progress-head">
             <span className="countries-count num">{stat && data ? progressLabel(scope ?? progress) : "–"}</span>
-            <span className="detail">{scope ? `Länder in ${continentLabel(filter.continent!)}` : "Länder besucht"}</span>
+            <span className="detail">{scope ? t("countries.inContinent", { continent: continentLabel(filter.continent!, lang) }) : t("countries.visitedCount")}</span>
             <div className="spacer" />
-            <button className="btn-sm" onClick={exportPng} disabled={exporting || !stat} title="Karte als PNG speichern">
-              Als Bild speichern
+            <button className="btn-sm" onClick={exportPng} disabled={exporting || !stat} title={t("countries.saveImageHint")}>
+              {t("countries.saveImage")}
             </button>
           </div>
           <div
             className="countries-bar"
             role="progressbar"
-            aria-label="Besuchte Länder"
+            aria-label={t("countries.progressLabel")}
             aria-valuemin={0}
             aria-valuemax={(scope ?? progress).total}
             aria-valuenow={(scope ?? progress).visited}
-            aria-valuetext={`${(scope ?? progress).visited} von ${(scope ?? progress).total} Ländern besucht`}
+            aria-valuetext={t("countries.progressText", { visited: (scope ?? progress).visited, total: (scope ?? progress).total })}
           >
             <div className="countries-bar-fill" style={{ width: `${(scope ?? progress).percent}%` }} />
           </div>
           <div className="detail">
             {summary.landings > 0
-              ? `${landingsLabel(summary.landings)} · zuletzt ${countryMap.get(summary.lastIso ?? "")?.nameDe ?? summary.lastIso} am ${fmtDate(summary.lastMs)}`
-              : "Gezählt wird jede Landung am Ankunftsflughafen eines abgeschlossenen Flugs."}
-            {demoSkipped > 0 && !empty && ` · ${demoSkipped} Demo-Landung${demoSkipped === 1 ? "" : "en"} nicht mitgezählt`}
+              ? t("countries.summary", { landings: landingsLabel(summary.landings, lang), country: lastName(countryMap.get(summary.lastIso ?? ""), summary.lastIso, lang), date: fmtDate(summary.lastMs, { lang }) })
+              : t("countries.summaryNone")}
+            {demoSkipped > 0 && !empty && ` · ${t("countries.demoSkipped", { count: demoSkipped })}`}
           </div>
         </div>
 
-        <div className="chips" role="group" aria-label="Kontinent">
+        <div className="chips" role="group" aria-label={t("countries.continentGroup")}>
           <button className={`chip${filter.continent == null ? " active" : ""}`} aria-pressed={filter.continent == null} onClick={() => setFilter({ ...filter, continent: null })}>
-            Alle
+            {t("countries.filter.all")}
           </button>
-          {CONTINENTS.map(({ code, label }) => {
+          {CONTINENTS.map(({ code }) => {
             const p = perContinent.get(code);
             return (
               <button
@@ -252,7 +254,7 @@ export default function Countries() {
                 aria-pressed={filter.continent === code}
                 onClick={() => setFilter({ ...filter, continent: filter.continent === code ? null : (code as ContinentCode) })}
               >
-                {label} <span className="num detail">{p ? progressLabel(p) : ""}</span>
+                {continentLabel(code, lang)} <span className="num detail">{p ? progressLabel(p) : ""}</span>
               </button>
             );
           })}
@@ -262,56 +264,59 @@ export default function Countries() {
           <input
             type="search"
             className="countries-search"
-            placeholder="Land suchen (Name oder ISO-Code)"
-            aria-label="Land suchen"
+            placeholder={t("countries.searchPlaceholder")}
+            aria-label={t("countries.searchLabel")}
             value={filter.query}
             onChange={(e) => setFilter({ ...filter, query: e.target.value })}
           />
-          <div className="chips" role="group" aria-label="Besucht oder offen">
+          <div className="chips" role="group" aria-label={t("countries.visitGroup")}>
             {VISIT_FILTERS.map((v) => (
-              <button key={v.id} className={`chip${filter.visit === v.id ? " active" : ""}`} aria-pressed={filter.visit === v.id} onClick={() => setFilter({ ...filter, visit: v.id })}>
-                {v.label}
+              <button key={v} className={`chip${filter.visit === v ? " active" : ""}`} aria-pressed={filter.visit === v} onClick={() => setFilter({ ...filter, visit: v })}>
+                {t(`countries.filter.${v}`)}
               </button>
             ))}
           </div>
           <label className="countries-pins">
-            <input type="checkbox" checked={showPins} onChange={(e) => togglePins(e.target.checked)} /> Flughäfen
+            <input type="checkbox" checked={showPins} onChange={(e) => togglePins(e.target.checked)} /> {t("countries.airports")}
           </label>
+          {/* the same Globus button as on the maps */}
+          <GlobeToggle className="chip" />
         </div>
 
         {sel && (
           <div className="country-detail" aria-live="polite">
             <div className="country-detail-head">
-              <strong>{sel.nameDe}</strong>
+              <strong>{countryName(sel, lang)}</strong>
               <span className="detail">
-                {sel.nameEn} · {continentLabel(sel.continent)}
+                {otherCountryName(sel, lang)} · {continentLabel(sel.continent, lang)}
               </span>
               <div className="spacer" />
-              <button className="btn-sm btn-ghost" onClick={() => setSelected(null)} aria-label="Auswahl aufheben">
+              <button className="btn-sm btn-ghost" onClick={() => setSelected(null)} aria-label={t("countries.clearSelection")}>
                 ×
               </button>
             </div>
             {selVisit ? (
               <>
                 <div className="country-yes">
-                  ✓ {landingsLabel(selVisit.landings)} · erste {fmtDate(selVisit.firstMs)} · letzte {fmtDate(selVisit.lastMs)}
+                  {t("countries.visitLine", { landings: landingsLabel(selVisit.landings, lang), first: fmtDate(selVisit.firstMs, { lang }), last: fmtDate(selVisit.lastMs, { lang }) })}
                 </div>
                 <div className="detail">
-                  Flughäfen:{" "}
-                  {selVisit.airports
-                    .map((icao) => {
-                      const a = data?.airports.find((x) => x.ident === icao);
-                      return a ? `${icao} (${fmt(a.landings)}×)` : icao;
-                    })
-                    .join(", ")}
+                  {t("countries.airportsLine", {
+                    list: selVisit.airports
+                      .map((icao) => {
+                        const a = data?.airports.find((x) => x.ident === icao);
+                        return a ? `${icao} (${fmt(a.landings, 0, "", lang)}×)` : icao;
+                      })
+                      .join(", "),
+                  })}
                 </div>
                 <ul className="country-flights">
                   {selVisit.flightIds.slice(0, MAX_FLIGHTS).map((id) => {
                     const f = flights.get(id);
                     return (
                       <li key={id}>
-                        <button className="btn-ghost country-flight" onClick={() => navigate({ kind: "flight", id })} title="Im Logbuch öffnen">
-                          <span className="num">{fmtDate(f?.landingMs ?? f?.onBlockMs ?? f?.createdMs)}</span>
+                        <button className="btn-ghost country-flight" onClick={() => navigate({ kind: "flight", id })} title={t("countries.openInLogbook")}>
+                          <span className="num">{fmtDate(f?.landingMs ?? f?.onBlockMs ?? f?.createdMs, { lang })}</span>
                           <span className="mono">
                             {f?.depIcao ?? "?"} → {f?.arrIcao ?? "?"}
                           </span>
@@ -321,27 +326,32 @@ export default function Countries() {
                     );
                   })}
                 </ul>
-                {selVisit.flightIds.length > MAX_FLIGHTS && <div className="detail">… und {selVisit.flightIds.length - MAX_FLIGHTS} weitere im Logbuch</div>}
+                {selVisit.flightIds.length > MAX_FLIGHTS && <div className="detail">{t("countries.moreFlights", { n: selVisit.flightIds.length - MAX_FLIGHTS })}</div>}
               </>
             ) : (
-              <div className="detail">– Noch keine Landung in diesem Land.</div>
+              <div className="detail">{t("countries.notVisited")}</div>
             )}
           </div>
         )}
 
         <div className="countries-list-wrap">
-          {stat ? <CountryList rows={shown} selected={selected} onSelect={setSelected} /> : !error && <div className="detail">Länder werden geladen …</div>}
+          {stat ? <CountryList rows={shown} selected={selected} onSelect={setSelected} /> : !error && <div className="detail">{t("countries.loading")}</div>}
         </div>
       </aside>
     </section>
   );
 }
 
+/** Name of the most recently visited country, or its code when the list does not know it. */
+function lastName(c: Country | undefined, iso: string | null, lang: Language): string {
+  return c ? countryName(c, lang) : (iso ?? "");
+}
+
 /**
  * The map canvas (preserveDrawingBuffer) with a footer: title, progress, date and the map
  * credits. Device pixels, so the export is as sharp as the screen.
  */
-async function renderMapPng(map: maplibregl.Map, line: string): Promise<Blob> {
+async function renderMapPng(map: maplibregl.Map, line: string, t: TFunction, lang: Language): Promise<Blob> {
   await new Promise<void>((resolve) => {
     map.once("render", () => resolve());
     map.triggerRepaint();
@@ -353,7 +363,7 @@ async function renderMapPng(map: maplibregl.Map, line: string): Promise<Blob> {
   canvas.width = src.width;
   canvas.height = src.height + footer;
   const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("Canvas nicht verfügbar");
+  if (!ctx) throw new Error(t("countries.export.noCanvas"));
   ctx.fillStyle = COLOR.bg;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.drawImage(src, 0, 0);
@@ -363,14 +373,15 @@ async function renderMapPng(map: maplibregl.Map, line: string): Promise<Blob> {
   ctx.textBaseline = "middle";
   ctx.fillStyle = COLOR.text;
   ctx.font = `600 ${Math.round(15 * scale)}px ${font}`;
-  ctx.fillText("VectaSim · Länder", pad, mid);
-  const titleW = ctx.measureText("VectaSim · Länder").width;
+  const title = t("countries.export.title");
+  ctx.fillText(title, pad, mid);
+  const titleW = ctx.measureText(title).width;
   ctx.fillStyle = COLOR.accent;
   ctx.font = `500 ${Math.round(14 * scale)}px ${font}`;
   ctx.fillText(line, pad * 2 + titleW, mid);
   ctx.fillStyle = COLOR.textMuted;
   ctx.font = `${Math.round(11 * scale)}px ${font}`;
   ctx.textAlign = "right";
-  ctx.fillText(`${fmtDate(Date.now())} · © OpenStreetMap · OpenFreeMap · Natural Earth`, canvas.width - pad, mid);
-  return new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("PNG konnte nicht erzeugt werden"))), "image/png"));
+  ctx.fillText(`${fmtDate(Date.now(), { lang })} · © OpenStreetMap · OpenFreeMap · Natural Earth`, canvas.width - pad, mid);
+  return new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error(t("countries.export.noPng")))), "image/png"));
 }

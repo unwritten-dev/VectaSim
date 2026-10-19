@@ -9,6 +9,7 @@ authors.workspace = true
 [dependencies]
 vectasim-core = { path = "../vectasim-core" }
 vectasim-dump = { path = "../vectasim-dump" }
+vectasim-xplane = { path = "../vectasim-xplane" }
 log = { workspace = true }
 libloading = "0.8"
 serde_json = { workspace = true }

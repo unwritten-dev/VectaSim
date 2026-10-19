@@ -1,0 +1,247 @@
+/* Flight card for a selected online-traffic aircraft (TrafficCard.tsx). It reuses the glass
+   card of the Bereit / Nach-dem-Flug cards (.after-flight in App.css) but floats at the map's
+   right edge below the zoom/compass controls, so it never covers those centred cards. */
+
+.after-flight.traffic-card {
+  left: auto;
+  right: 10px;
+  top: 128px;
+  bottom: auto;
+  transform: none;
+  /* at most ~45 % of the map: on a 1024 px window the aircraft and route stay visible beside it */
+  width: min(340px, 45%, calc(100% - 20px));
+  min-width: min(260px, calc(100% - 20px));
+  max-height: calc(100% - 128px - var(--hud-clearance, 112px) - var(--sp-2));
+  overflow-y: auto;
+  border-top-color: var(--accent);
+  gap: var(--sp-2);
+}
+.traffic-card.traffic-gone {
+  border-top-color: var(--text-muted);
+}
+
+.traffic-net-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: var(--r-pill);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-strong);
+  letter-spacing: 0.06em;
+  background: var(--surface-2);
+  color: var(--text-muted);
+}
+/* IVAO aircraft carry the accent outline on the map; the badge says the same */
+.traffic-net-badge.net-ivao {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.traffic-gone-note {
+  font-size: var(--fs-sm);
+  color: var(--warn);
+}
+
+.traffic-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.traffic-callsign {
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-strong);
+  letter-spacing: 0.02em;
+}
+.traffic-type {
+  margin-top: -4px;
+}
+.traffic-actions {
+  flex-wrap: wrap;
+}
+@media (max-height: 720px) {
+  .after-flight.traffic-card {
+    gap: 6px;
+    padding: var(--sp-2) var(--sp-3);
+  }
+  .traffic-photo-frame {
+    max-height: min(140px, 20vh);
+  }
+}
+
+.traffic-photo {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.traffic-photo-frame {
+  width: 100%;
+  aspect-ratio: 3 / 2;
+  /* smaller photo on short windows, so values come into view without scrolling */
+  max-height: min(200px, 22vh);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  background: var(--surface-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.traffic-photo-frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+/* no photo: the type's silhouette, big and in the accent colour */
+.traffic-photo-frame .af-silhouette {
+  width: 42%;
+  height: 42%;
+  fill: var(--accent);
+  opacity: 0.85;
+}
+.traffic-photo figcaption {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: baseline;
+  flex-wrap: wrap;
+  font-size: var(--fs-xs);
+}
+.traffic-reg {
+  color: var(--text);
+}
+
+.traffic-route {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.traffic-apt {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.traffic-apt-role {
+  width: 30px;
+  flex: none;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+.traffic-apt-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.traffic-values {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-1) var(--sp-3);
+  margin: 0;
+}
+.traffic-values > div {
+  min-width: 0;
+}
+.traffic-values .traffic-wide {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: var(--sp-2);
+  align-items: baseline;
+}
+.traffic-values dt {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+.traffic-values .traffic-wide dt {
+  width: 72px;
+  flex: none;
+}
+.traffic-values dd {
+  margin: 0;
+}
+.traffic-trend {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+.traffic-trend.trend-climb,
+.traffic-trend.trend-descent {
+  color: var(--accent);
+}
+
+.traffic-more summary {
+  cursor: pointer;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+.traffic-more p {
+  margin: 4px 0 0;
+  font-size: var(--fs-xs);
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+/* Dispatch panel: a line of the online list selects that aircraft on the map. Two fixed lines
+   (callsign · type · altitude / route · distance · network) and a chevron, so every row has the
+   same height and reads as clickable. */
+.online-list li.online-pick {
+  cursor: pointer;
+  border-radius: var(--r-sm);
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "cs type alt go"
+    "sub sub sub go";
+  column-gap: 6px;
+  row-gap: 0;
+  align-items: baseline;
+  padding: 2px 4px;
+  margin: 0 -4px;
+}
+.online-pick-cs {
+  grid-area: cs;
+}
+.online-pick-type {
+  grid-area: type;
+}
+.online-pick-alt {
+  grid-area: alt;
+}
+.online-pick-go {
+  grid-area: go;
+  align-self: center;
+  color: var(--text-muted);
+  font-size: var(--fs-lg);
+  line-height: 1;
+}
+.online-pick-sub {
+  grid-area: sub;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.online-list li.online-pick:hover {
+  background: var(--surface-2);
+}
+.online-list li.online-pick:hover .online-pick-cs {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.online-list li.online-pick:hover .online-pick-go {
+  color: var(--accent);
+}
+.online-list li.online-pick:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* abbreviations (GS, HDG, SQK, IFR/VFR) carry a tooltip; the dotted line says so */
+.traffic-card abbr[title] {
+  text-decoration: underline dotted;
+  text-decoration-color: color-mix(in srgb, currentColor 50%, transparent);
+  text-underline-offset: 2px;
+  cursor: help;
+}

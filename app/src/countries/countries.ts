@@ -1,5 +1,9 @@
 // "Länder" view: types of the backend commands (countries.rs) and the pure list logic –
 // rows per country, continent filter, search, progress. Tests: countries.test.ts.
+// Country names come from the backend list in German and English (countries.csv →
+// nameDe/nameEn); the shown one follows the UI language (countryName).
+
+import { LOCALE, getLanguage, tIn, type Language } from "../i18n";
 
 export type ContinentCode = "AF" | "AN" | "AS" | "EU" | "NA" | "OC" | "SA";
 
@@ -38,17 +42,19 @@ export interface VisitedCountries {
   total: number;
 }
 
-export const CONTINENTS: Array<{ code: ContinentCode; label: string }> = [
-  { code: "EU", label: "Europa" },
-  { code: "AS", label: "Asien" },
-  { code: "AF", label: "Afrika" },
-  { code: "NA", label: "Nordamerika" },
-  { code: "SA", label: "Südamerika" },
-  { code: "OC", label: "Ozeanien" },
-  { code: "AN", label: "Antarktis" },
-];
+/** Chip order of the continent filter. */
+export const CONTINENTS: Array<{ code: ContinentCode }> = [{ code: "EU" }, { code: "AS" }, { code: "AF" }, { code: "NA" }, { code: "SA" }, { code: "OC" }, { code: "AN" }];
 
-export const continentLabel = (c: string): string => CONTINENTS.find((x) => x.code === c)?.label ?? c;
+const isContinent = (c: string): c is ContinentCode => CONTINENTS.some((x) => x.code === c);
+
+/** "Europa" / "Europe"; unknown codes as they are. */
+export const continentLabel = (c: string, lang: Language = getLanguage()): string => (isContinent(c) ? tIn(lang, `countries.continent.${c}`) : c);
+
+/** The country's name in the UI language (English falls back to German when the list has none). */
+export const countryName = (c: Pick<Country, "nameDe" | "nameEn">, lang: Language = getLanguage()): string => (lang === "en" ? c.nameEn || c.nameDe : c.nameDe);
+
+/** The name in the other language (secondary line, search hint). */
+export const otherCountryName = (c: Pick<Country, "nameDe" | "nameEn">, lang: Language = getLanguage()): string => (lang === "en" ? c.nameDe : c.nameEn);
 
 export interface CountryRow {
   country: Country;
@@ -56,12 +62,12 @@ export interface CountryRow {
   visit: CountryVisit | null;
 }
 
-/** One row per listed country, sorted by German name; visits for unknown codes are dropped. */
-export function buildRows(countries: Country[], visits: CountryVisit[]): CountryRow[] {
+/** One row per listed country, sorted by the name in `lang` (German by default); visits for unknown codes are dropped. */
+export function buildRows(countries: Country[], visits: CountryVisit[], lang: Language = "de"): CountryRow[] {
   const byIso = new Map(visits.map((v) => [v.iso2, v]));
   return countries
     .map((country) => ({ country, visit: byIso.get(country.iso2) ?? null }))
-    .sort((a, b) => a.country.nameDe.localeCompare(b.country.nameDe, "de"));
+    .sort((a, b) => countryName(a.country, lang).localeCompare(countryName(b.country, lang), LOCALE[lang]));
 }
 
 export type VisitFilter = "all" | "visited" | "open";
@@ -138,14 +144,14 @@ export function visitSummary(visits: CountryVisit[]): { landings: number; lastMs
   return { landings, lastMs, lastIso };
 }
 
-/** "VectaSim_Laender_2026-10-18.png" (local date). */
-export function exportFileName(now: Date = new Date()): string {
+/** "VectaSim_Laender_2026-10-18.png" / "VectaSim_Countries_2026-10-18.png" (local date). */
+export function exportFileName(now: Date = new Date(), lang: Language = getLanguage()): string {
   const p = (n: number) => String(n).padStart(2, "0");
-  return `VectaSim_Laender_${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}.png`;
+  return `VectaSim_${tIn(lang, "countries.export.fileStem")}_${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}.png`;
 }
 
-/** "1 Landung" / "3 Landungen" */
-export const landingsLabel = (n: number): string => `${n} ${n === 1 ? "Landung" : "Landungen"}`;
+/** "1 Landung" / "3 Landungen" ("1 landing" / "3 landings"). */
+export const landingsLabel = (n: number, lang: Language = getLanguage()): string => tIn(lang, "count.landings", { count: n });
 
 /** Bounding box [[w, s], [e, n]] of a (Multi)Polygon; null for anything else. */
 export function geometryBounds(g: GeoJSON.Geometry | null | undefined): [[number, number], [number, number]] | null {
@@ -163,4 +169,14 @@ export function geometryBounds(g: GeoJSON.Geometry | null | undefined): [[number
       n = Math.max(n, y);
     }
   return Number.isFinite(w) ? [[w, s], [e, n]] : null;
+}
+
+/**
+ * Globe zoom at which the sphere fills ~90 % of the smaller side of the map (MapLibre draws
+ * the globe ≈ 512·2^z/π px wide), so it neither floats small in black nor gets cropped.
+ */
+export function globeZoomFor(width: number, height: number): number {
+  const side = Math.min(width, height);
+  if (!(side > 0)) return 1.9;
+  return Math.min(3, Math.max(1, Math.log2((0.9 * side * Math.PI) / 512)));
 }

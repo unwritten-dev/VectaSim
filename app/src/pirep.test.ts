@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { setLanguageSetting } from "./i18n";
 import {
   ON_TIME_THRESHOLD_MIN,
   PIREP_SCHEMA,
@@ -17,6 +18,10 @@ import {
   punctuality,
 } from "./pirep";
 import type { FlightDetail, FlightRow, FlightSummary, IntegrityFlags, Ofp, TouchdownReport, TrackSample } from "./types";
+
+// texts are checked in German (the reference); the English PIREP has its own test below
+beforeAll(() => setLanguageSetting("de"));
+afterAll(() => setLanguageSetting("system"));
 
 /** Compare against typographic output with plain spaces / "-". */
 const NARROW = new RegExp(`[${String.fromCharCode(0x202f, 0xa0)}]`, "g");
@@ -465,6 +470,50 @@ describe("buildPirep", () => {
     expect(json.integrity).toMatchObject({ clean: false, issues: ["Slew"], slew: true });
     expect(text).toContain("Anflug / Appr        nie stabil");
     expect(text).toContain("Integrität           Slew");
+  });
+
+  it("writes the text in English for an English UI", () => {
+    const { json, text } = buildPirep(detail(), ofp(), { stableFromFt: 1500, band: "stable" }, { appVersion: "0.4.0", track, lang: "en" });
+    expect(text).toBe(
+      [
+        "PIREP DLH4YA",
+        "Callsign             DLH4YA",
+        "Flight no.           DLH4YA",
+        "DEP / ARR            EDDF - LIRF (ALTN LIRN)",
+        "Date                 16 Oct 2026 (UTC)",
+        "OUT / OFF / ON / IN  08:04z / 08:16z / 09:56z / 10:08z",
+        "STD / STA            08:00z / 10:00z",
+        "Block / Air          2:04 / 1:40 (plan 2:00 / 1:35)",
+        "Taxi out / in        12 / 12 min",
+        "Distance             612 nm (plan 620 nm)",
+        "Max. Alt             36020 ft (plan FL360)",
+        "Fuel Start / End     8300 / 2700 kg (Block 5600 kg)",
+        "Trip Fuel            5260 kg (plan 5300 kg)",
+        "Landing rate         -142 fpm | max. 1.32 g | Bounces 0",
+        "Approach             stable from 1500 ft",
+        "Punctuality          on time (+8 min On-block)",
+        "Integrity            OK",
+        "Sim                  MSFS 2024",
+        "Aircraft             A20N - A320neo Lufthansa",
+        "Reg.                 D-AINA",
+        "-- VectaSim 0.4.0 (pirep/v1)",
+        "",
+      ].join("\n"),
+    );
+    // the JSON keys and values stay language-neutral
+    expect(json.punctuality.status).toBe("onTime");
+    const lb = buildPirep(detail({ integrity: { ...clean, slewDetected: true } }), null, null, { weightUnit: "lb", lang: "en" });
+    expect(lb.text).toContain("Trip Fuel            approx. ");
+    expect(lb.json.integrity.issues).toEqual(["Slew"]);
+  });
+
+  it("labels plan against actual in English", () => {
+    const p = planVsActual(actualFromRow(row({}), track), planFromRow(row({})), ofp(), "en");
+    expect(p.byKey.block?.label).toBe("Block time");
+    expect(p.byKey.tripFuel?.note).toBe("Takeoff to landing (from the track)");
+    expect(p.headline?.label).toBe("on time");
+    expect(fmtPunctuality(punctuality(-3, "in", "en"), "en")).toBe("on time (-3 min)");
+    expect(integrityIssues({ ...clean, pauseCount: 2, pausedMs: 90_000 }, "en").map(plain)).toEqual(["2× paused (1 min 30 s)"]);
   });
 
   it("names the file after route and date", () => {

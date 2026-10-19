@@ -3,8 +3,9 @@
 //! Settings: `notifications` (master switch, default on) and one per kind – `notify_landing`,
 //! `notify_saved`, `notify_connection`, `notify_update` (each default on). A notification is
 //! shown only while the main window is not focused (minimised, in the tray, behind the sim):
-//! with the window in front the in-app toast says the same. Texts are German and never carry a
-//! registration or callsign, so they are safe in the Streamer-Modus as well.
+//! with the window in front the in-app toast says the same. Texts follow the backend language
+//! (`lang`, German or English) and never carry a registration or callsign, so they are safe in
+//! the Streamer-Modus as well.
 //!
 //! A click on the toast brings the window back ([`on_click_focus`]); Windows reports that only
 //! while the toast is on screen, not from the Action Center (plugin limitation). In a dev build
@@ -15,6 +16,7 @@
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager, Runtime};
+use crate::lang::{self, Lang};
 use tauri_plugin_notification::NotificationExt;
 use vectasim_store::Store;
 
@@ -106,19 +108,21 @@ pub fn on_click_focus<R: Runtime>(app: &AppHandle<R>) {
     });
 }
 
-/// "Gelandet · −155 fpm", plus g-load and bounces.
-pub fn landing_text(rate_fpm: f64, peak_g: f64, bounces: u32, touch_and_go: bool) -> (String, String) {
+/// "Gelandet · −155 fpm" / "Landed · -155 fpm", plus g-load and bounces.
+pub fn landing_text(lang: Lang, rate_fpm: f64, peak_g: f64, bounces: u32, touch_and_go: bool) -> (String, String) {
     let n = rate_fpm.round();
-    let rate = if n < 0.0 { format!("\u{2212}{:.0} fpm", -n) } else { format!("{n:.0} fpm") };
-    let what = if touch_and_go { "Touch-and-go" } else { "Gelandet" };
+    // real minus in German, ASCII hyphen in English (like i18n/number.ts)
+    let minus = lang.tr("\u{2212}", "-");
+    let rate = if n < 0.0 { format!("{minus}{:.0} fpm", -n) } else { format!("{n:.0} fpm") };
+    let what = if touch_and_go { "Touch-and-go" } else { lang.tr("Gelandet", "Landed") };
     let bounce = match bounces {
-        0 => "keine Bounces".to_owned(),
+        0 => lang.tr("keine Bounces", "no bounces").to_owned(),
         1 => "1 Bounce".to_owned(),
         n => format!("{n} Bounces"),
     };
-    // German decimal comma, like the UI
-    let g = format!("{peak_g:.2}").replace('.', ",");
-    (format!("{what} · {rate}"), format!("g-Last {g} · {bounce}"))
+    // decimal comma in German, point in English, like the UI
+    let g = lang.decimal(peak_g, 2);
+    (format!("{what} · {rate}"), format!("{} {g} · {bounce}", lang.tr("g-Last", "g-load")))
 }
 
 #[derive(Serialize)]
@@ -131,14 +135,15 @@ pub struct NotifyResult {
 /// the backend's own notifications; returns whether one was shown.
 #[tauri::command]
 pub fn notify(kind: String, title: String, body: String, app: AppHandle) -> Result<NotifyResult, String> {
-    let kind = Kind::parse(&kind).ok_or_else(|| format!("unbekannte Benachrichtigung: {kind}"))?;
+    let kind = Kind::parse(&kind).ok_or_else(|| trf!("unbekannte Benachrichtigung: {kind}", "unknown notification: {kind}"))?;
     Ok(NotifyResult { shown: send(&app, kind, &title, &body) })
 }
 
 /// „Test senden“ in Einstellungen → Integrationen.
 #[tauri::command]
 pub fn notify_test(app: AppHandle) -> NotifyResult {
-    NotifyResult { shown: send(&app, Kind::Test, "VectaSim", "So sehen Benachrichtigungen aus – etwa nach der Landung.") }
+    let body = lang::tr("So sehen Benachrichtigungen aus – etwa nach der Landung.", "This is what notifications look like – after a landing, for example.");
+    NotifyResult { shown: send(&app, Kind::Test, "VectaSim", body) }
 }
 
 #[cfg(test)]
@@ -159,10 +164,13 @@ mod tests {
     }
 
     #[test]
-    fn landing_text_is_german_and_signed() {
-        let (t, b) = landing_text(-155.4, 1.234, 0, false);
+    fn landing_text_in_both_languages() {
+        let (t, b) = landing_text(Lang::De, -155.4, 1.234, 0, false);
         assert_eq!(t, "Gelandet · −155 fpm");
         assert_eq!(b, "g-Last 1,23 · keine Bounces");
-        assert_eq!(landing_text(-80.0, 1.1, 2, true).0, "Touch-and-go · −80 fpm");
+        assert_eq!(landing_text(Lang::De, -80.0, 1.1, 2, true).0, "Touch-and-go · −80 fpm");
+        let (t, b) = landing_text(Lang::En, -155.4, 1.234, 1, false);
+        assert_eq!(t, "Landed · -155 fpm");
+        assert_eq!(b, "g-load 1.23 · 1 Bounce");
     }
 }

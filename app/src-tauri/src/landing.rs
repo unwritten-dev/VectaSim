@@ -36,7 +36,7 @@ use vectasim_data::{Airport, AirportIndex, Runway};
 use vectasim_online::Metar;
 use vectasim_store::store::{LandingFactCache, RecentLanding};
 use vectasim_store::{
-    FlightRow, RunwayRefinement, Store, TrackSample, UserRunway, UserRunwayEdit, UserRunwaySource, icao_from_atc_model, normalize_registration,
+    FlightRow, RecordedApproachData, RunwayRefinement, Store, TrackSample, UserRunway, UserRunwayEdit, UserRunwaySource, icao_from_atc_model, normalize_registration,
     resolve_registration,
 };
 
@@ -70,6 +70,9 @@ pub struct LandingDebrief {
     pub metar_observed_ms: Option<u64>,
     /// Threshold displacement of the matched runway end from the database, m (None = none).
     pub threshold_displaced_m: Option<f64>,
+    /// Sim values of the final approach a v2 track recorded (TAS, sim wind, ILS); None for
+    /// flights recorded before track v2.
+    pub recorded: Option<RecordedApproachData>,
 }
 
 pub(crate) fn to_sample(s: &TrackSample) -> LandingSample {
@@ -349,14 +352,15 @@ fn neighbour_note(airports: &AirportIndex, m: &Metar, a: &Airport) -> Option<Str
     })
 }
 
-/// What the logbook knows about the aircraft of a flight: the Vapp the pilot entered for the
-/// airframe it is booked onto (fleet). Without one the analyses fall back to the flown median.
+/// What the logbook knows about the aircraft of a flight: the Vapp and the landing flaps the
+/// pilot entered for the airframe it is booked onto (fleet). Without them the analyses fall
+/// back to the flown median / the last flap handle position.
 pub(crate) fn aircraft_ref(store: &Store, flight_id: &str) -> AircraftRef {
-    let vapp_kt = store.flight_vapp_kt(flight_id).unwrap_or_else(|e| {
-        log::warn!("airframe Vapp of flight {flight_id}: {e}");
-        None
+    let (vapp_kt, landing_flaps_index) = store.flight_airframe_refs(flight_id).unwrap_or_else(|e| {
+        log::warn!("airframe references of flight {flight_id}: {e}");
+        (None, None)
     });
-    AircraftRef { vapp_kt, ..Default::default() }
+    AircraftRef { vapp_kt, landing_flaps_index, ..Default::default() }
 }
 
 /// Landing debrief for one touchdown of a flight (default: the last one).
@@ -396,6 +400,7 @@ pub async fn landing_analysis(
         }
     }
     let samples: Vec<LandingSample> = track.iter().map(to_sample).collect();
+    let recorded = vectasim_store::recorded_approach_data(&track, td.timestamp_ms);
 
     let cfg = LandingConfig::default();
     // database → remembered → derived; learning only from finished, non-demo flights
@@ -477,6 +482,7 @@ pub async fn landing_analysis(
         metar_note,
         metar_observed_ms,
         threshold_displaced_m,
+        recorded,
     })
 }
 
@@ -486,7 +492,7 @@ pub async fn landing_analysis(
 /// changes so old rows are recomputed.
 /// 2: touchdown zone from the threshold, displaced thresholds.
 /// 3: remembered and track-derived runways (fields without coordinates), geometry source.
-const LANDING_FACTS_VERSION: u32 = 3;
+pub(crate) const LANDING_FACTS_VERSION: u32 = 3;
 const FACTS_DEFAULT_LIMIT: u32 = 20;
 const FACTS_MAX_LIMIT: u32 = 200;
 /// Landings looked at to find `limit` with a runway (unmatched ones are skipped).
@@ -535,7 +541,7 @@ pub struct LandingFactsResult {
 /// Runway match and touchdown point of one touchdown – the same resolution and analysis as
 /// `landing_analysis` (the touchdown point needs neither track nor wind; the track is only
 /// decoded when the database has no runway, to derive one).
-fn compute_fact(store: &Store, airports: &AirportIndex, flight: &FlightRow, touchdowns: &[TouchdownReport], index: usize) -> LandingFactCache {
+pub(crate) fn compute_fact(store: &Store, airports: &AirportIndex, flight: &FlightRow, touchdowns: &[TouchdownReport], index: usize) -> LandingFactCache {
     let none = LandingFactCache { version: LANDING_FACTS_VERSION, ..Default::default() };
     let load = || store.get_track(&flight.id).ok().flatten().unwrap_or_default().iter().map(to_sample).collect();
     let remember = (!is_demo(flight.provider.as_deref())).then_some(flight.id.as_str());

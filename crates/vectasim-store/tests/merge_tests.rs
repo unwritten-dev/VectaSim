@@ -82,12 +82,12 @@ fn record(store: &Store, leg: &Leg) -> String {
         let t = tele(ts, pos(i), lon, leg.alt);
         let mut events = Vec::new();
         if i == 5 {
-            events.push(FlightEvent::PhaseChanged(PhaseTransition {
+            events.push(FlightEvent::PhaseChanged(Box::new(PhaseTransition {
                 from: FlightPhase::Climb,
                 to: FlightPhase::Cruise,
                 timestamp_ms: ts,
                 telemetry: t.clone(),
-            }));
+            })));
         }
         if leg.landing && i == leg.secs - 10 {
             s.landing_ms = Some(ts);
@@ -201,17 +201,17 @@ fn merge_refuses_what_is_not_one_flight() {
     let a = record(&store, &first_leg());
     let far = record(&store, &second_leg(5 * MIN, 8.0));
     let err = store.merge_flights(&a, &far).unwrap_err();
-    assert!(matches!(&err, StoreError::Invalid(m) if m.contains("nm auseinander")), "{err}");
+    assert!(matches!(&err, StoreError::Invalid(m) if m.to_string().contains("nm auseinander")), "{err}");
     assert!(store.list_merge_candidates().unwrap().is_empty());
 
     let store = Store::open_in_memory().unwrap();
     let a = record(&store, &first_leg());
     let late = record(&store, &second_leg(75 * MIN, 0.5));
     let err = store.merge_flights(&a, &late).unwrap_err();
-    assert!(matches!(&err, StoreError::Invalid(m) if m.contains("60 min")), "{err}");
+    assert!(matches!(&err, StoreError::Invalid(m) if m.to_string().contains("60 min")), "{err}");
     // the wrong way round: the first flight must be the interrupted one
     let err = store.merge_flights(&late, &a).unwrap_err();
-    assert!(matches!(&err, StoreError::Invalid(m) if m.contains("unterbrochen")), "{err}");
+    assert!(matches!(&err, StoreError::Invalid(m) if m.to_string().contains("unterbrochen")), "{err}");
     assert!(store.merge_flights(&a, &a).is_err());
     assert!(store.merge_flights(&a, "nope").is_err());
     // nothing changed

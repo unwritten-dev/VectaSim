@@ -10,7 +10,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use crate::{OnlineError, USER_AGENT};
+use crate::OnlineError;
 
 const NOAA_URL: &str = "https://aviationweather.gov/api/data/metar";
 const VATSIM_METAR_URL: &str = "https://metar.vatsim.net/metar.php";
@@ -101,7 +101,8 @@ fn parse_wind(tok: &str) -> Option<Wind> {
     if body.len() < 5 {
         return None;
     }
-    let (dir, rest) = body.split_at(3);
+    // checked: byte 3 may fall inside a multi-byte character
+    let (dir, rest) = body.split_at_checked(3)?;
     let direction_deg = match dir {
         "VRB" => None,
         d if all_digits(d) => Some(d.parse::<u16>().ok()?),
@@ -221,18 +222,22 @@ pub fn decode(raw: &str) -> Metar {
             }
             continue;
         }
-        if m.visibility_m.is_none() && tok.len() >= 4 && all_digits(&tok[..4]) && (tok.len() == 4 || tok[4..].bytes().all(|b| b.is_ascii_uppercase())) {
+        // `get`: a non-ASCII token ("abcÄ") has no char boundary at byte 4 – no slice panic
+        if let Some(head) = tok.get(..4)
+            && m.visibility_m.is_none()
+            && all_digits(head)
+            && tok[4..].bytes().all(|b| b.is_ascii_uppercase())
+        {
             // "9999" means 10 km or more; a direction suffix ("4000NE") is the minimum visibility
-            let v: u32 = tok[..4].parse().unwrap_or(0);
+            let v: u32 = head.parse().unwrap_or(0);
             m.visibility_m = Some(if v == 9999 { 10_000 } else { v });
             continue;
         }
         let layer = ["BKN", "OVC", "VV"].iter().find_map(|p| tok.strip_prefix(p));
-        if let Some(rest) = layer
-            && rest.len() >= 3
-            && all_digits(&rest[..3])
+        if let Some(height) = layer.and_then(|rest| rest.get(..3))
+            && all_digits(height)
         {
-            let base = rest[..3].parse::<u32>().unwrap_or(0) * 100;
+            let base = height.parse::<u32>().unwrap_or(0) * 100;
             m.ceiling_ft = Some(m.ceiling_ft.map_or(base, |c| c.min(base)));
             continue;
         }
@@ -393,11 +398,7 @@ fn normalize(icao: &str) -> Option<String> {
 
 impl MetarClient {
     pub fn new() -> Self {
-        let client = reqwest::Client::builder()
-            .user_agent(USER_AGENT)
-            .timeout(Duration::from_secs(15))
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
+        let client = crate::client(Duration::from_secs(15));
         Self { client, cache: Mutex::new(HashMap::new()), requests: Mutex::new(VecDeque::new()) }
     }
 
@@ -489,7 +490,7 @@ impl MetarClient {
         if !resp.status().is_success() {
             return Err(OnlineError::Http { status: resp.status().as_u16(), url: NOAA_URL.into() });
         }
-        parse_noaa_json(&resp.text().await?)
+        parse_noaa_json(&String::from_utf8_lossy(&crate::read_limited(resp, crate::MAX_SMALL_BYTES).await?))
     }
 
     async fn fetch_vatsim(&self, ids: &str) -> Result<Vec<Metar>, OnlineError> {
@@ -500,6 +501,6 @@ impl MetarClient {
         if !resp.status().is_success() {
             return Err(OnlineError::Http { status: resp.status().as_u16(), url: VATSIM_METAR_URL.into() });
         }
-        Ok(parse_vatsim_text(&resp.text().await?))
+        Ok(parse_vatsim_text(&String::from_utf8_lossy(&crate::read_limited(resp, crate::MAX_SMALL_BYTES).await?)))
     }
 }

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Ofp } from "./types";
-import { fmt, fmtClock, fmtDateTime, fmtDuration, fmtWeight, fmtWeightNum } from "./format";
+import { fmt, fmtClock, fmtDateTime, fmtDuration, fmtWeight, fmtWeightNum } from "./i18n/number";
+import { useT } from "./i18n";
 import { usePrefs, usePrivacy } from "./prefs";
 import ErrorNotice from "./ErrorNotice";
 import Stat from "./ui/Stat";
@@ -18,6 +19,7 @@ const clockS = (s: number | undefined) => (s ? fmtClock(s * 1000) : "–");
 
 /** SimBrief flight plan (side panel → Flugplan): load the latest OFP for the saved pilot id. */
 export default function Dispatch({ ofp, onOfp }: Props) {
+  const t = useT();
   const { weightUnit } = usePrefs();
   const priv = usePrivacy();
   const [user, setUser] = useState("");
@@ -45,7 +47,7 @@ export default function Dispatch({ ofp, onOfp }: Props) {
         onOfp(o);
         setSavedUser(user.trim() || savedUser);
         setEditing(false);
-        showToast({ tone: "ok", title: "Flugplan geladen", body: `${priv.mask(o.callsign, "callsign")} · ${o.originIcao} → ${o.destinationIcao} · ${o.aircraftIcao}` });
+        showToast({ tone: "ok", title: t("shell.ofp.loaded"), body: `${priv.mask(o.callsign, "callsign")} · ${o.originIcao} → ${o.destinationIcao} · ${o.aircraftIcao}` });
       })
       .catch((e) => setError(String(e)))
       .finally(() => setBusy(false));
@@ -62,9 +64,9 @@ export default function Dispatch({ ofp, onOfp }: Props) {
       {showInput ? (
         <input
           className="sb-user"
-          placeholder="SimBrief-Pilot-ID oder Benutzername"
-          aria-label="SimBrief-Pilot-ID oder Benutzername"
-          title="Deine Pilot-ID findest du auf simbrief.com unter Account. Sie wird gespeichert."
+          placeholder={t("dispatch.user.placeholder")}
+          aria-label={t("dispatch.user.placeholder")}
+          title={t("dispatch.user.title")}
           // Streamer-Modus: the SimBrief ID stays editable but unreadable
           type={priv.on ? "password" : "text"}
           autoComplete="off"
@@ -77,12 +79,12 @@ export default function Dispatch({ ofp, onOfp }: Props) {
         <span className="detail">
           SimBrief: <strong className="num">{savedUser}</strong>{" "}
           <button className="link-btn" onClick={() => setEditing(true)}>
-            ändern
+            {t("dispatch.user.change")}
           </button>
         </span>
       )}
-      <button className="btn-primary" onClick={load} disabled={busy || (!user.trim() && !savedUser)} aria-busy={busy} title={!user.trim() && !savedUser ? "Erst SimBrief-Pilot-ID eintragen" : undefined}>
-        {busy ? "Lädt …" : ofp ? "Neu laden" : "Flugplan laden"}
+      <button className="btn-primary" onClick={load} disabled={busy || (!user.trim() && !savedUser)} aria-busy={busy} title={!user.trim() && !savedUser ? t("dispatch.user.missing") : undefined}>
+        {busy ? t("shell.online.loading") : ofp ? t("dispatch.reload") : t("dispatch.load")}
       </button>
     </div>
   );
@@ -93,11 +95,11 @@ export default function Dispatch({ ofp, onOfp }: Props) {
       {!ofp ? (
         <EmptyState
           compact
-          title="Kein Flugplan geladen"
+          title={t("dispatch.empty.title")}
           text={
             <>
-              Lade deinen letzten SimBrief-Flugplan, um Route, Restdistanz, ETA und Plan-gegen-Ist zu sehen.
-              {!savedUser && " Deine Pilot-ID findest du auf simbrief.com → Account."}
+              {t("dispatch.empty.text")}
+              {!savedUser && ` ${t("dispatch.empty.idHint")}`}
             </>
           }
           actions={userForm}
@@ -118,18 +120,29 @@ export default function Dispatch({ ofp, onOfp }: Props) {
           </div>
           {userForm}
           <div className="stat-grid cols-2">
-            <Stat size="sm" label="Abflug" value={`${ofp.originIcao}${ofp.originRunway ? ` RWY ${ofp.originRunway}` : ""}`} sub={ofp.originName} />
-            <Stat size="sm" label="Ankunft" value={`${ofp.destinationIcao}${ofp.destinationRunway ? ` RWY ${ofp.destinationRunway}` : ""}`} sub={ofp.destinationName} />
-            <Stat size="sm" label="Ausweichflughafen" value={ofp.alternateIcao || "–"} sub={ofp.alternateName} />
-            <Stat size="sm" label="Reiseflughöhe" value={`FL${Math.round(ofp.cruiseAltitudeFt / 100)}`} sub={`CI ${ofp.costIndex} · ${fmt(ofp.routeDistanceNm, 0, "nm")}`} />
-            <Stat size="sm" label="Off-Block / On-Block (Plan)" value={`${clockS(ofp.times.schedOutS)} / ${clockS(ofp.times.schedInS)}`} />
-            <Stat size="sm" label="Blockzeit / Luftzeit" value={fmtDuration(ofp.times.blockS * 1000)} sub={`Luftzeit ${fmtDuration(ofp.times.enrouteS * 1000)}`} />
-            <Stat size="sm" label="Treibstoff Rampe" value={fmtWeightNum(ofp.fuel.planRampKg)} unit={weightUnit} sub={`Trip ${fmtWeight(ofp.fuel.tripKg)} · Landung ${fmtWeight(ofp.fuel.planLandingKg)}`} />
+            <Stat size="sm" label={t("dispatch.stat.departure")} value={`${ofp.originIcao}${ofp.originRunway ? ` RWY ${ofp.originRunway}` : ""}`} sub={ofp.originName} />
+            <Stat size="sm" label={t("dispatch.stat.arrival")} value={`${ofp.destinationIcao}${ofp.destinationRunway ? ` RWY ${ofp.destinationRunway}` : ""}`} sub={ofp.destinationName} />
+            <Stat size="sm" label={t("dispatch.stat.alternate")} value={ofp.alternateIcao || "–"} sub={ofp.alternateName} />
+            <Stat size="sm" label={t("dispatch.stat.cruise")} value={`FL${Math.round(ofp.cruiseAltitudeFt / 100)}`} sub={`CI ${ofp.costIndex} · ${fmt(ofp.routeDistanceNm, 0, "nm")}`} />
+            <Stat size="sm" label={t("dispatch.stat.blockTimes")} value={`${clockS(ofp.times.schedOutS)} / ${clockS(ofp.times.schedInS)}`} />
             <Stat
               size="sm"
-              label="Taxi out / in (Plan)"
+              label={t("dispatch.stat.blockAir")}
+              value={fmtDuration(ofp.times.blockS * 1000)}
+              sub={t("dispatch.stat.airTime", { time: fmtDuration(ofp.times.enrouteS * 1000) })}
+            />
+            <Stat
+              size="sm"
+              label={t("dispatch.stat.rampFuel")}
+              value={fmtWeightNum(ofp.fuel.planRampKg)}
+              unit={weightUnit}
+              sub={t("dispatch.stat.fuelSub", { trip: fmtWeight(ofp.fuel.tripKg), landing: fmtWeight(ofp.fuel.planLandingKg) })}
+            />
+            <Stat
+              size="sm"
+              label={t("dispatch.stat.taxi")}
               value={`${ofp.times.taxiOutS ? Math.round(ofp.times.taxiOutS / 60) : "–"} / ${ofp.times.taxiInS ? Math.round(ofp.times.taxiInS / 60) : "–"} min`}
-              sub={ofp.fuel.taxiKg ? `Taxi-Treibstoff ${fmtWeight(ofp.fuel.taxiKg)}` : undefined}
+              sub={ofp.fuel.taxiKg ? t("dispatch.stat.taxiFuel", { fuel: fmtWeight(ofp.fuel.taxiKg) }) : undefined}
             />
             <Stat
               size="sm"
@@ -141,15 +154,15 @@ export default function Dispatch({ ofp, onOfp }: Props) {
             <Stat size="sm" label="TOW"value={fmtWeightNum(ofp.weights.estTowKg)} unit={weightUnit} sub={`ZFW ${fmtWeight(ofp.weights.estZfwKg)} · ${ofp.passengers} PAX`} />
           </div>
           <div className="side-group">
-            <div className="side-group-title">Route</div>
+            <div className="side-group-title">{t("dispatch.route")}</div>
             <div className="route-string mono">{ofp.route}</div>
           </div>
           <div className="detail">
-            AIRAC {ofp.airac} · erstellt {fmtDateTime(ofp.generatedAtS * 1000)} · {ofp.navlog.length} Wegpunkte
+            {t("dispatch.footer", { airac: ofp.airac, created: fmtDateTime(ofp.generatedAtS * 1000), waypoints: t("dispatch.waypoints", { count: ofp.navlog.length }) })}
           </div>
           <div>
             <button className="btn-sm danger" onClick={clear}>
-              Flugplan entfernen
+              {t("dispatch.remove")}
             </button>
           </div>
         </>

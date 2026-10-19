@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useT } from "../i18n";
 
 interface Props {
   label: ReactNode;
@@ -15,11 +16,12 @@ interface Props {
 
 /** Labelled value with a small muted unit; warnings never colour-only. */
 export default function Stat({ label, value, unit, sub, warn, size = "md", className, title }: Props) {
+  const t = useT();
   const empty = value === "–" || value == null;
   return (
     <div className={`stat stat-${size}${warn ? " warn" : ""}${className ? ` ${className}` : ""}`} title={warn ?? title}>
       <div className="stat-label">{label}</div>
-      <div className="stat-value num" aria-label={empty ? "kein Wert" : undefined}>
+      <div className="stat-value num" aria-label={empty ? t("shell.stat.noValue") : undefined}>
         {warn && (
           <span className="warn-icon" aria-hidden="true">
             !
@@ -28,7 +30,7 @@ export default function Stat({ label, value, unit, sub, warn, size = "md", class
         {empty ? "–" : value}
         {!empty && unit && <span className={`unit${/^[°×%]/.test(unit) ? " tight" : ""}`}>{unit}</span>}
       </div>
-      {warn && <span className="sr-only">Warnung: {warn}</span>}
+      {warn && <span className="sr-only">{t("shell.stat.warning", { text: warn })}</span>}
       {sub != null && sub !== "" && <div className="stat-sub num">{sub}</div>}
     </div>
   );
@@ -36,6 +38,7 @@ export default function Stat({ label, value, unit, sub, warn, size = "md", class
 
 /** Compact key/value list for secondary data (Systeme, Diagnose). */
 export function KV({ rows }: { rows: Array<[ReactNode, ReactNode, (string | null)?]> }) {
+  const t = useT();
   return (
     <dl className="kv">
       {rows.map(([k, v, warn], i) => (
@@ -48,7 +51,7 @@ export function KV({ rows }: { rows: Array<[ReactNode, ReactNode, (string | null
               </span>
             )}
             {v}
-            {warn && <span className="sr-only"> Warnung: {warn}</span>}
+            {warn && <span className="sr-only"> {t("shell.stat.warning", { text: warn })}</span>}
           </dd>
         </div>
       ))}

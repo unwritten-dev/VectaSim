@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { DEMO_LABEL, WAITING_SHORT, WAITING_TEXT, isRealSimError, isSimMissing, recordingStatus } from "./status";
+import { beforeEach, describe, expect, it } from "vitest";
+import { setLanguageSetting } from "./i18n";
+import { demoLabel, waitingShort, waitingText, isRealSimError, providerLabel, isSimMissing, recordingStatus } from "./status";
 import type { FlightSummary, StatusSnapshot } from "./types";
+
+beforeEach(() => setLanguageSetting("de"));
 
 const snap = (s: Partial<StatusSnapshot>): StatusSnapshot => ({ provider: "simconnect", state: "idle", detail: "", frames: 0, ...s }) as StatusSnapshot;
 const flight = (state: FlightSummary["state"], offBlockMs = Date.UTC(2026, 9, 17, 13, 57)): FlightSummary =>
@@ -12,8 +15,8 @@ describe("recordingStatus", () => {
       const r = recordingStatus(s, null);
       expect(r.kind).toBe("waiting");
       expect(r.label).toBe("Warte auf Simulator");
-      expect(r.text).toBe("Warte auf MSFS – Aufzeichnung startet beim Losrollen");
-      expect(r.text).toBe(WAITING_TEXT);
+      expect(r.text).toBe("Warte auf Simulator – Aufzeichnung startet beim Losrollen");
+      expect(r.text).toBe(waitingText());
       expect(r.error).toBe(false);
     }
   });
@@ -74,8 +77,8 @@ describe("recordingStatus", () => {
   });
 
   it("one demo name, a short pill text for the Bereit card", () => {
-    expect(DEMO_LABEL).toBe("Demo-Flug");
-    expect(WAITING_SHORT).toBe("Warte auf MSFS");
+    expect(demoLabel()).toBe("Demo-Flug");
+    expect(waitingShort()).toBe("Warte auf Simulator");
     expect(recordingStatus(snap({ provider: "mock", state: "connected" }), null).hint).toMatch(/Demo-Flug beenden/);
   });
 
@@ -83,5 +86,30 @@ describe("recordingStatus", () => {
     const states = ["idle", "connecting", "connected", "disconnected", "error"] as const;
     const all = states.flatMap((st) => [recordingStatus(snap({ state: st }), null), recordingStatus(snap({ state: st }), flight("active"))]);
     for (const r of all) expect(`${r.label} ${r.text}`).not.toMatch(/Getrennt|Verbinde|Fehler|Kein aktiver Flug/);
+  });
+});
+
+describe("recordingStatus in English", () => {
+  it("labels, pill texts and hints follow the language", () => {
+    setLanguageSetting("en");
+    expect(recordingStatus(snap({ state: "idle" }), null).text).toBe("Waiting for simulator – recording starts when you taxi");
+    expect(recordingStatus(snap({ state: "connected" }), flight("active")).text).toBe("Recording · since 13:57z");
+    expect(recordingStatus(snap({ state: "connected", simName: "MSFS" }), null).hint).toBe("Connected to MSFS. Recording starts automatically as soon as you taxi.");
+    expect(demoLabel()).toBe("Demo flight");
+    expect(providerLabel("mock")).toBe("Demo flight");
+    expect(providerLabel("simconnect")).toBe("MSFS 2020/2024");
+  });
+});
+
+describe("X-Plane", () => {
+  it("waiting for X-Plane names X-Plane, and the label is generic", () => {
+    const r = recordingStatus(
+      snap({ provider: "xplane", state: "disconnected", detail: "sim not reachable (X-Plane Web API localhost:8086: refused); retry in 5s" }),
+      null,
+    );
+    expect(r.kind).toBe("waiting");
+    expect(r.text).toBe(waitingText());
+    expect(r.hint).toMatch(/^X-Plane läuft noch nicht/);
+    expect(r.error).toBe(false);
   });
 });

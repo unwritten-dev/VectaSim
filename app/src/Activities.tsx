@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { Airport, FlightRow } from "./types";
-import { fmt } from "./format";
+import { fmt } from "./i18n/number";
+import { useT } from "./i18n";
 import ErrorNotice from "./ErrorNotice";
 import { usePrefs } from "./prefs";
 import { countedFlights } from "./totals";
@@ -22,6 +23,7 @@ export default function Activities() {
   const [demoHidden, setDemoHidden] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const { showDemo } = usePrefs();
+  const t = useT();
 
   const refresh = useCallback(async () => {
     let all: FlightRow[];
@@ -76,11 +78,11 @@ export default function Activities() {
       {error && <ErrorNotice error={error} context="logbook" onRetry={refresh} />}
       <div className="totals totals-compact">
         <div className="tile">
-          <div className="tile-label">Besuchte Flughäfen</div>
+          <div className="tile-label">{t("logbook.activities.airports")}</div>
           <div className="tile-value num">{visited ? fmt(visited.length) : "–"}</div>
         </div>
         <div className="tile">
-          <div className="tile-label">Länder</div>
+          <div className="tile-label">{t("logbook.activities.countries")}</div>
           <div className="tile-value num">{visited ? fmt(countries.length) : "–"}</div>
           <div className="detail">{countries.join(" · ")}</div>
         </div>
@@ -88,25 +90,25 @@ export default function Activities() {
       <table className="flights">
         <thead>
           <tr>
-            <th>ICAO</th>
-            <th>Name</th>
-            <th>Land</th>
-            <th className="num right">Abflüge</th>
-            <th className="num right">Ankünfte</th>
+            <th>{t("logbook.activities.colIcao")}</th>
+            <th>{t("logbook.activities.colName")}</th>
+            <th>{t("logbook.activities.colCountry")}</th>
+            <th className="num right">{t("logbook.activities.colDepartures")}</th>
+            <th className="num right">{t("logbook.activities.colArrivals")}</th>
           </tr>
         </thead>
         <tbody>
           {visited === null && !error && (
             <tr className="empty-row">
               <td colSpan={5} className="detail">
-                Aktivitäten werden geladen …
+                {t("logbook.activities.loading")}
               </td>
             </tr>
           )}
           {visited?.length === 0 && (
             <tr className="empty-row">
               <td colSpan={5} className="detail">
-                Jeder Flughafen, an dem du startest oder landest, erscheint hier.
+                {t("logbook.activities.empty")}
               </td>
             </tr>
           )}
@@ -123,7 +125,7 @@ export default function Activities() {
       </table>
       {demoHidden > 0 && (
         <div className="detail">
-          {demoHidden} Demo-Flug{demoHidden === 1 ? "" : "e"} nicht mitgezählt (Einstellungen → Anzeige → Demo-Flüge einbeziehen).
+          {t("logbook.activities.demoHidden", { count: demoHidden })}
         </div>
       )}
     </section>

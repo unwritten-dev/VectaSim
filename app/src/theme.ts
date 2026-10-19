@@ -133,7 +133,7 @@ export const CATEGORY_COLOR = { ...current.category };
 export const DIAGRAM = { ...current.diagram };
 export const TRACK_MARKER = { ...current.trackMarker };
 export const PROFILE = { ...current.profile };
-/** Other (online) traffic: darker yellow, so it never competes with the own aircraft. */
+/** Other (online) traffic: muted blue-grey, the cool opposite of the own aircraft yellow. */
 export let TRAFFIC = current.traffic;
 
 function refresh() {

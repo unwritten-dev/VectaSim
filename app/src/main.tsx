@@ -6,12 +6,15 @@ import "@fontsource-variable/geist/index.css";
 import "@fontsource-variable/geist-mono/index.css";
 import App from "./App";
 import { initTheme } from "./prefs";
+import { I18nProvider } from "./i18n";
 
 // theme tokens before the first paint (cached choice, else Signal; the stored one arrives with loadPrefs)
 initTheme();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    <App />
+    <I18nProvider>
+      <App />
+    </I18nProvider>
   </React.StrictMode>,
 );

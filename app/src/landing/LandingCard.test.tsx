@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { NNBSP } from "../format";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
+import { setLanguageSetting } from "../i18n";
 import LandingCard, { CARD_H, CARD_W, themeCardColors } from "./LandingCard";
 import { autoCardFileName, cardFileName } from "./exportCard";
 import mockJson from "./fixtures/approach-mock.json";
@@ -124,6 +125,8 @@ function data(over: Partial<LandingAnalysis> = {}, rest: Partial<LandingDebriefD
   return { flight, touchdownCount: 1, analysis, metarAtLanding: true, ...rest };
 }
 
+beforeEach(() => setLanguageSetting("de"));
+
 describe("cardFileName", () => {
   it("suggests VectaSim_<ICAO>_<RWY>_<UTC date>.png", () => {
     expect(cardFileName(data())).toBe("VectaSim_EDFE_26_2026-10-17.png");
@@ -219,9 +222,23 @@ describe("LandingCard", () => {
   it("adds the approach line under the profile when an analysis is given", () => {
     const approach = mockJson as unknown as ApproachAnalysis;
     const html = renderToStaticMarkup(<LandingCard data={data()} colors={colors} approach={approach} />).split(NNBSP).join(" ");
-    expect(html).toContain("3°-Annahme · stabil ab 1 500 ft · 1000 ✓ 500 ✓");
+    expect(html).toContain("3,0° (ILS) · stabil ab 1 500 ft · 1000 ✓ 500 ✓");
     expect(html).not.toContain("var(--");
     const without = renderToStaticMarkup(<LandingCard data={data()} colors={colors} />);
     expect(without).not.toContain("Annahme");
+    expect(without).not.toContain("(ILS)");
+  });
+});
+
+describe("LandingCard in English (UI language)", () => {
+  beforeEach(() => setLanguageSetting("en"));
+  const colors = themeCardColors();
+  it("draws the card texts and numbers in English", () => {
+    const approach = mockJson as unknown as ApproachAnalysis;
+    const html = renderToStaticMarkup(<LandingCard data={data()} colors={colors} approach={approach} />).split(NNBSP).join(" ");
+    for (const s of ["Landing rate", "Peak g", "From threshold", "Centreline", "APPROACH · LAST 1 NM", "Touchdown zone", "aiming point", "stable from 1,500 ft"]) expect(html).toContain(s);
+    expect(html).toMatch(/Smooth landing in the touchdown zone/);
+    expect(html).not.toMatch(/Landerate|Mittellinie|Aufsetzzone|Schwelle|Abfangen|stabil ab/);
+    expect(html.replace(/<[^>]*>/g, " ")).not.toMatch(/\d,\d{1,2}(?!\d)/); // no decimal comma in the texts
   });
 });

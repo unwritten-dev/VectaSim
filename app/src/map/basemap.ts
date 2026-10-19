@@ -8,8 +8,9 @@
 // best effort; refreshed in the background on the next start). Offline without a cache
 // the raw dark style URL is used unpatched, exactly as before.
 
-import type { LayerSpecification, StyleSpecification } from "maplibre-gl";
+import type { ExpressionSpecification, LayerSpecification, StyleSpecification } from "maplibre-gl";
 import { activeTheme, type ThemeDef } from "../themes";
+import { getLanguage, subscribeLanguage, type Language } from "../i18n/lang";
 
 export const BASEMAP_URL = "https://tiles.openfreemap.org/styles/dark";
 const CACHE_KEY = "vectasim.basemap.raw.v1";
@@ -93,18 +94,65 @@ export function graticule(stepDeg = 1): GeoJSON.FeatureCollection {
   return { type: "FeatureCollection", features };
 }
 
+/**
+ * Place, water and country names in the UI language: the OSM name in that
+ * language, else the Latin transliteration, else the local name – instead of the style's
+ * "latin + local script" pair ("EGYPT مصر"). OpenMapTiles carries both `name:de` and the older
+ * `name_de`.
+ */
+export function labelTextField(lang: Language): ExpressionSpecification {
+  return ["coalesce", ["get", `name:${lang}`], ["get", `name_${lang}`], ["get", "name:latin"], ["get", "name"]];
+}
+
+/** Basemap label layer: a vector-tile symbol layer whose text comes from a name field (not our GeoJSON layers). */
+export function isNameLabelLayer(layer: { type: string; layout?: unknown; "source-layer"?: string }): boolean {
+  if (layer.type !== "symbol" || !layer["source-layer"]) return false;
+  const field = (layer.layout as Layout | undefined)?.["text-field"];
+  return field != null && JSON.stringify(field).includes("name");
+}
+
+/** Interface of maplibregl.Map this needs (keeps the helper testable without WebGL). */
+export interface LabelTarget {
+  getStyle(): { layers?: Array<{ id: string; type: string; layout?: unknown; "source-layer"?: string }> } | undefined;
+  setLayoutProperty(id: string, name: string, value: unknown): unknown;
+}
+
+/** Switches the basemap labels of a running map to `lang` (language changed in Einstellungen). */
+export function localizeLabels(map: LabelTarget, lang: Language = getLanguage()) {
+  const field = labelTextField(lang);
+  for (const layer of map.getStyle()?.layers ?? []) if (isNameLabelLayer(layer)) map.setLayoutProperty(layer.id, "text-field", field);
+}
+
+/**
+ * Keeps a map's basemap labels in the UI language: re-labels on every language change.
+ * Returns the unsubscribe. A style still loading is skipped – the next style comes patched.
+ */
+export function followLanguage(map: LabelTarget): () => void {
+  return subscribeLanguage(() => {
+    try {
+      localizeLabels(map);
+    } catch {
+      /* style not loaded yet: loadBasemapStyle() patches the next one in the new language */
+    }
+  });
+}
+
 /** Applies a theme's patch table to the raw style (pure; returns a new object, unknown layers untouched). */
-export function patchBasemapStyle(style: StyleSpecification, t: ThemeDef = activeTheme()): StyleSpecification {
+export function patchBasemapStyle(style: StyleSpecification, t: ThemeDef = activeTheme(), lang: Language = getLanguage()): StyleSpecification {
   const table = patchTable(t);
+  const field = labelTextField(lang);
   const layers: LayerSpecification[] = style.layers.map((layer) => {
+    const named = isNameLabelLayer(layer as Parameters<typeof isNameLabelLayer>[0]);
     const p = patchFor(table, layer.id);
-    if (!p) return layer;
+    if (!p && !named) return layer;
+    if (!p) return { ...layer, layout: { ...(layer as { layout?: Layout }).layout, "text-field": field } } as LayerSpecification;
     const next = { ...layer } as LayerSpecification & { paint?: Paint; layout?: Layout; minzoom?: number };
     if (p.paint) next.paint = { ...(layer as { paint?: Paint }).paint, ...p.paint };
     const layout: Layout = { ...(layer as { layout?: Layout }).layout };
     if (p.layout) Object.assign(layout, p.layout);
     if (p.hidden) layout.visibility = "none";
-    if (p.layout || p.hidden) next.layout = layout;
+    if (named) layout["text-field"] = field;
+    if (p.layout || p.hidden || named) next.layout = layout;
     if (p.minzoom != null) next.minzoom = Math.max(p.minzoom, layer.minzoom ?? 0);
     return next as LayerSpecification;
   });

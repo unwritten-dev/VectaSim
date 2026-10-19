@@ -42,6 +42,26 @@ pub enum PhotoError {
     Parse(String),
     #[error("Planespotters: {0}")]
     Api(String),
+    #[error("Planespotters response larger than {limit} bytes")]
+    TooLarge { limit: usize },
+}
+
+/// Largest API answer accepted (a photo list is a few KiB).
+const MAX_BODY_BYTES: usize = 2 * 1024 * 1024;
+
+/// The (decompressed) body, read chunk by chunk up to `limit` bytes.
+async fn read_limited(mut resp: reqwest::Response, limit: usize) -> Result<Vec<u8>, PhotoError> {
+    if resp.content_length().is_some_and(|n| n > limit as u64) {
+        return Err(PhotoError::TooLarge { limit });
+    }
+    let mut out = Vec::new();
+    while let Some(chunk) = resp.chunk().await? {
+        if out.len() + chunk.len() > limit {
+            return Err(PhotoError::TooLarge { limit });
+        }
+        out.extend_from_slice(&chunk);
+    }
+    Ok(out)
 }
 
 /// The photo we show for an airframe.
@@ -131,7 +151,13 @@ impl Default for PhotoClient {
 
 impl PhotoClient {
     pub fn new(base: &str) -> Self {
-        let http = reqwest::Client::builder().user_agent(USER_AGENT).timeout(TIMEOUT).build().unwrap_or_default();
+        let http = reqwest::Client::builder()
+            .user_agent(USER_AGENT)
+            .https_only(true)
+            .connect_timeout(Duration::from_secs(10))
+            .timeout(TIMEOUT)
+            .build()
+            .unwrap_or_default();
         Self { http, base: base.trim_end_matches('/').to_string(), last_request: Mutex::new(None) }
     }
 
@@ -163,7 +189,7 @@ impl PhotoClient {
         if !status.is_success() {
             return Err(PhotoError::Http { status: status.as_u16() });
         }
-        parse_photos(&resp.text().await?)
+        parse_photos(&String::from_utf8_lossy(&read_limited(resp, MAX_BODY_BYTES).await?))
     }
 }
 

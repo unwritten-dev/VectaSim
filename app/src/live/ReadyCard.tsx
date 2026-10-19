@@ -3,8 +3,9 @@ import { airframeName, shownAirframeName } from "../airframes/airframe";
 import { useAirframes } from "../airframes/hooks";
 import { usePrefs, usePrivacy } from "../prefs";
 import type { RecStatus } from "../status";
-import { DEMO_LABEL, providerLabel } from "../status";
+import { demoLabel, providerLabel } from "../status";
 import type { AircraftInfo, Ofp, StatusSnapshot } from "../types";
+import { useT } from "../i18n";
 
 interface Props {
   rec: RecStatus;
@@ -23,6 +24,7 @@ interface Props {
  * recording will start by itself. Disappears once the flight is active.
  */
 export default function ReadyCard({ rec, status, ofp, aircraft, onOpenDispatch, onTryDemo, onDismiss }: Props) {
+  const t = useT();
   const { showDemo } = usePrefs();
   const priv = usePrivacy();
   const { rows } = useAirframes(showDemo);
@@ -34,61 +36,61 @@ export default function ReadyCard({ rec, status, ofp, aircraft, onOpenDispatch, 
 
   const sim =
     rec.kind === "ready" || rec.kind === "recording"
-      ? `${status?.simName ?? providerLabel(status?.provider)}${status?.simVersion ? ` ${status.simVersion}` : ""} verbunden`
+      ? t("live.ready.simConnected", { sim: `${status?.simName ?? providerLabel(status?.provider)}${status?.simVersion ? ` ${status.simVersion}` : ""}` })
       : rec.kind === "demo"
-        ? "Demo-Flug · simulierte Daten"
+        ? t("live.ready.demo")
         : // the kicker already says "Warte auf Simulator"
-          "MSFS noch nicht verbunden";
+          t("live.ready.simNotConnected");
   const known = aircraft ? { registration: aircraft.atcId, airline: aircraft.atcAirline, callsign: ofp?.callsign } : {};
   const aircraftText = aircraft ? [priv.title(aircraft.title, known), priv.mask(aircraft.atcId, "registration")].filter(Boolean).join(" · ") : null;
 
   return (
-    <section className={`after-flight ready-card ready-${rec.kind}`} aria-label="Bereit">
+    <section className={`after-flight ready-card ready-${rec.kind}`} aria-label={t("live.ready.aria")}>
       <div className="after-head">
         <span className={`dot dot-${rec.error ? "error" : rec.kind}`} aria-hidden="true" />
         <span className="kicker">{rec.label}</span>
         <span className="spacer" />
-        <button className="btn-ghost after-close" onClick={onDismiss} aria-label="Karte ausblenden" title="Ausblenden">
+        <button className="btn-ghost after-close" onClick={onDismiss} aria-label={t("live.card.hide")} title={t("live.card.hideTitle")}>
           <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
             <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
           </svg>
         </button>
       </div>
       <dl className="ready-rows">
-        <dt>Simulator</dt>
+        <dt>{t("live.ready.simulator")}</dt>
         <dd>
           <span>{sim}</span>
           {rec.kind === "waiting" && onTryDemo && (
-            <button className="link-btn" onClick={onTryDemo} title="Ohne Simulator ausprobieren – ein simulierter Flug">
-              {DEMO_LABEL} starten
+            <button className="link-btn" onClick={onTryDemo} title={t("live.ready.tryDemoTitle")}>
+              {t("live.ready.startDemo", { demo: demoLabel() })}
             </button>
           )}
         </dd>
-        <dt>Flugplan</dt>
+        <dt>{t("live.ready.flightPlan")}</dt>
         <dd>
           {ofp ? (
             <span className="num">
               {priv.mask(ofp.callsign, "callsign")} · {ofp.originIcao} → {ofp.destinationIcao}
             </span>
           ) : (
-            <span className="detail">kein SimBrief-Flugplan</span>
+            <span className="detail">{t("live.ready.noOfp")}</span>
           )}
           <button className="link-btn" onClick={onOpenDispatch}>
-            {ofp ? "Dispatch" : "laden"}
+            {ofp ? t("live.ready.dispatch") : t("live.ready.loadOfp")}
           </button>
         </dd>
-        <dt>Flugzeug</dt>
+        <dt>{t("live.ready.aircraft")}</dt>
         <dd>
           {aircraftText ? (
             <span>{aircraftText}</span>
           ) : last ? (
             <span>
-              <span className="detail">zuletzt </span>
+              <span className="detail">{t("live.ready.lastFlown")} </span>
               <strong className="num">{priv.mask(last.registration, "registration")}</strong>
               {airframeName(last) !== last.registration && <span className="detail"> · {shownAirframeName(last, priv.on)}</span>}
             </span>
           ) : (
-            <span className="detail">wird beim Verbinden erkannt</span>
+            <span className="detail">{t("live.ready.aircraftDetected")}</span>
           )}
         </dd>
       </dl>

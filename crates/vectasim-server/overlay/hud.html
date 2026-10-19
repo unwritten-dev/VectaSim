@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title data-t="title.hud">VectaSim HUD</title>
+<link rel="stylesheet" href="/overlay/overlay.css">
+</head>
+<body data-page="hud">
+<div class="hud" role="group" aria-label="Flugdaten" data-t-aria="aria.hud">
+  <div class="tile tile-phase"><span class="label" data-t="label.phase">Phase</span><span class="value" data-f="phase">–</span><span class="sub" data-f="phase-sub"></span></div>
+  <div class="tile"><span class="label" data-t="label.alt">Höhe</span><span class="value num" data-f="alt">–</span><span class="sub num" data-f="alt-sub"></span></div>
+  <div class="tile"><span class="label" data-t="label.gs">Geschwindigkeit</span><span class="value num" data-f="gs">–</span><span class="sub num" data-f="gs-sub"></span></div>
+  <div class="tile"><span class="label">V/S</span><span class="value num" data-f="vs">–</span><span class="sub" data-t="sub.vs">Vertikalgeschwindigkeit</span></div>
+  <div class="tile"><span class="label" data-t="label.hdg">Kurs</span><span class="value num" data-f="hdg">–</span><span class="sub num" data-f="hdg-sub"></span></div>
+  <div class="tile"><span class="label" data-t="label.rest">Rest</span><span class="value num" data-f="rest">–</span><span class="sub" data-f="rest-sub"></span></div>
+  <div class="tile"><span class="label">ETA</span><span class="value num" data-f="eta">–</span><span class="sub num" data-f="eta-sub"></span></div>
+</div>
+<div class="conn" data-f="conn" data-t="conn.down">VectaSim getrennt · verbinde neu …</div>
+<script src="/overlay/overlay.js"></script>
+</body>
+</html>

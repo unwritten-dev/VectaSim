@@ -7,10 +7,22 @@
 //! the track every 15 s so a crash loses at most 15 s of path; `merge` resumes or joins
 //! a flight a crash cut in two.
 
+/// `ltr!(lang, "Flug {id} …", "Flight {id} …", args…)` – `format!` in the given language
+/// (import warnings and other texts that reach the user; the store has no global language).
+macro_rules! ltr {
+    ($lang:expr, $de:literal, $en:literal $(, $a:expr)* $(,)?) => {
+        match $lang {
+            vectasim_core::Lang::De => format!($de $(, $a)*),
+            vectasim_core::Lang::En => format!($en $(, $a)*),
+        }
+    };
+}
+
 pub mod airframe;
 pub mod backup;
 pub mod bundle;
 pub mod csvimport;
+pub mod error;
 pub mod export;
 pub mod merge;
 pub mod recorder;
@@ -23,6 +35,7 @@ pub use airframe::{
     Airframe, AirframeEdit, AirframePhoto, AirframeRow, VAPP_MAX_KT, VAPP_MIN_KT, icao_from_atc_model, normalize_registration, resolve_registration,
 };
 pub use csvimport::{ColumnMapping, CsvField, CsvImportOptions, CsvImportReport, CsvPreset, CsvPreview, CsvProfile, ParsedFlight};
+pub use error::{BackupStep, Field, Invalid};
 pub use export::ExportFormat;
 pub use merge::{MergeCandidate, MergeReport, ResumeCandidate};
 pub use recorder::{FlightRecorder, LiveTrack, PlannedSlot, RecorderContext};
@@ -30,7 +43,7 @@ pub use store::{
     APPROACH_FACTS_VERSION, ApproachFactDetail, ApproachFactRow, DeletedFlight, FlightCounts, FlightDetail, FlightRow, FlightUserEdit, MetarSlot, PhaseEventRow, PlannedFlight,
     NOTES_MAX_CHARS, RecentApproaches, RunwayRefinement, SCHEMA_VERSION, Store, TAG_MAX_CHARS, TAGS_MAX, TRASH_RETENTION_DAYS, TagCount, Totals, UserRunway, UserRunwayEdit, UserRunwaySource, normalize_tags,
 };
-pub use track::{TrackSample, decode_track, encode_track};
+pub use track::{RecordedApproachData, TrackSample, decode_track, encode_track, recorded_approach_data};
 
 /// Names the airport a position belongs to. Implemented by the app over the
 /// embedded OurAirports index; kept as a trait so the store does not depend on it.
@@ -48,8 +61,9 @@ pub enum StoreError {
     Io(#[from] std::io::Error),
     #[error("json: {0}")]
     Json(#[from] serde_json::Error),
+    /// A refusal the user can meet, with a stable code and German `Display` ([`error`]).
     #[error("{0}")]
-    Invalid(String),
+    Invalid(Invalid),
     /// The file was written by a newer VectaSim (downgrade); it is left untouched.
     #[error("database schema v{found} is newer than this version supports (v{supported})")]
     NewerSchema { found: i64, supported: i64 },
@@ -57,8 +71,8 @@ pub enum StoreError {
     #[error("migration v{from} -> v{to} failed (rolled back): {message}")]
     Migration { from: i64, to: i64, message: String, backup: Option<std::path::PathBuf> },
     /// A safety copy could not be written (nothing was changed).
-    #[error("backup failed: {0}")]
-    Backup(String),
+    #[error("backup failed: {} ({}): {}", .step.label(vectasim_core::Lang::De), .dir.display(), .detail)]
+    Backup { step: BackupStep, dir: std::path::PathBuf, detail: String },
 }
 
 impl StoreError {
@@ -68,6 +82,12 @@ impl StoreError {
             StoreError::Migration { backup, .. } => backup.as_deref(),
             _ => None,
         }
+    }
+}
+
+impl From<Invalid> for StoreError {
+    fn from(i: Invalid) -> Self {
+        StoreError::Invalid(i)
     }
 }
 

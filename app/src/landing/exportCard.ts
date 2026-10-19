@@ -1,6 +1,7 @@
 // Touchdown Card export: LandingCard (SVG) → PNG at 2× (2400×1350), saved via the dialog
 // plugin + `save_image` command, copied to the clipboard, or saved automatically after a
-// landing into the card folder (`card_autosave`, `get_card_dir`; autoSaveCard). With the
+// landing into the card folder (`card_autosave`, `get_card_dir`; autoSaveCard – together with
+// the approach card of that landing, exportApproachCard.ts). With the
 // Streamer-Modus or „Landekarte ohne Kennzeichen“ the registration is masked (D-••••).
 
 import { createElement } from "react";
@@ -11,6 +12,7 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { join } from "@tauri-apps/api/path";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { getPrefs } from "../prefs";
+import { t } from "../i18n";
 import { showToast } from "../ui/Toast";
 import { userMessage } from "../errors";
 import LandingCard, { CARD_H, CARD_W, readCardTheme, type CardTheme } from "./LandingCard";
@@ -18,6 +20,7 @@ import { cardFontCss } from "./cardFonts";
 import type { ApproachAnalysis } from "./approachTypes";
 import type { LandingDebriefData } from "./types";
 import type { CardDirInfo } from "../types";
+import { autoApproachCardFileName, renderApproachCardPng } from "./exportApproachCard";
 
 const SCALE = 2;
 
@@ -68,7 +71,7 @@ export function renderCardSvg(
   try {
     flushSync(() => root.render(createElement(LandingCard, { data: d, colors, approach, fontCss, hideReg })));
     const svg = host.querySelector("svg");
-    if (!svg) throw new Error("Landekarte konnte nicht gezeichnet werden");
+    if (!svg) throw new Error(t("landingCard.export.notDrawn"));
     return new XMLSerializer().serializeToString(svg);
   } finally {
     root.unmount();
@@ -79,17 +82,13 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error("Landekarte konnte nicht als Bild geladen werden"));
+    img.onerror = () => reject(new Error(t("landingCard.export.notLoaded")));
     img.src = src;
   });
 }
 
-/** PNG of the card, 2400×1350. */
-export async function renderCardPng(d: LandingDebriefData, approach: ApproachAnalysis | null = null): Promise<Blob> {
-  const colors = readCardTheme();
-  // fonts first (cached after the first export); without them the system fallback renders
-  const fontCss = await cardFontCss(colors.fontSans, colors.fontNum).catch(() => "");
-  const svg = renderCardSvg(d, colors, approach, fontCss || null);
+/** A 1200×675 card SVG as PNG at 2× (2400×1350); shared with the approach card. */
+export async function rasterizeCardSvg(svg: string): Promise<Blob> {
   // data: URL (not blob:) so the canvas is never tainted in WebView2
   const img = await loadImage(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`);
   // embedded fonts are decoded with the image; decode() makes sure before drawing
@@ -98,24 +97,32 @@ export async function renderCardPng(d: LandingDebriefData, approach: ApproachAna
   canvas.width = CARD_W * SCALE;
   canvas.height = CARD_H * SCALE;
   const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("Canvas nicht verfügbar");
+  if (!ctx) throw new Error(t("landingCard.export.noCanvas"));
   ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-  return new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("PNG konnte nicht erzeugt werden"))), "image/png"));
+  return new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error(t("landingCard.export.noPng")))), "image/png"));
+}
+
+/** PNG of the card, 2400×1350. */
+export async function renderCardPng(d: LandingDebriefData, approach: ApproachAnalysis | null = null): Promise<Blob> {
+  const colors = readCardTheme();
+  // fonts first (cached after the first export); without them the system fallback renders
+  const fontCss = await cardFontCss(colors.fontSans, colors.fontNum).catch(() => "");
+  return rasterizeCardSvg(renderCardSvg(d, colors, approach, fontCss || null));
 }
 
 /** Save dialog, then write the PNG via `save_image`. Returns the path or null (cancelled). */
 export async function saveCardPng(d: LandingDebriefData, approach: ApproachAnalysis | null = null): Promise<string | null> {
   try {
-    const path = await save({ defaultPath: cardFileName(d), filters: [{ name: "PNG-Bild", extensions: ["png"] }] });
+    const path = await save({ defaultPath: cardFileName(d), filters: [{ name: t("landingCard.export.pngFilter"), extensions: ["png"] }] });
     if (!path) return null;
     const blob = await renderCardPng(d, approach);
     const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
     await invoke("save_image", { path, bytes });
-    showToast({ tone: "ok", title: "Landekarte gespeichert", body: path, durationMs: 3000 });
+    showToast({ tone: "ok", title: t("landingCard.export.saved"), body: path, durationMs: 3000 });
     return path;
   } catch (e) {
     const m = userMessage(e, "export");
-    showToast({ id: "card-export", tone: "err", title: `Landekarte nicht gespeichert: ${m.title}`, body: `${m.hint}${m.detail ? ` (${m.detail.slice(0, 160)})` : ""}` });
+    showToast({ id: "card-export", tone: "err", title: t("landingCard.export.notSaved", { title: m.title }), body: `${m.hint}${m.detail ? ` (${m.detail.slice(0, 160)})` : ""}` });
     return null;
   }
 }
@@ -123,13 +130,13 @@ export async function saveCardPng(d: LandingDebriefData, approach: ApproachAnaly
 /** Copy the PNG to the clipboard. */
 export async function copyCardPng(d: LandingDebriefData, approach: ApproachAnalysis | null = null): Promise<boolean> {
   try {
-    if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") throw new Error("Die Zwischenablage unterstützt hier keine Bilder");
+    if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") throw new Error(t("landingCard.export.noClipboardImages"));
     // the promise keeps the click's user activation while the PNG renders
     await navigator.clipboard.write([new ClipboardItem({ "image/png": renderCardPng(d, approach) })]);
-    showToast({ tone: "ok", title: "Landekarte in die Zwischenablage kopiert", durationMs: 2500 });
+    showToast({ tone: "ok", title: t("landingCard.export.copied"), durationMs: 2500 });
     return true;
   } catch (e) {
-    showToast({ id: "card-copy", tone: "err", title: "Landekarte nicht kopiert", body: e instanceof Error ? e.message : String(e) });
+    showToast({ id: "card-copy", tone: "err", title: t("landingCard.export.notCopied"), body: e instanceof Error ? e.message : String(e) });
     return false;
   }
 }
@@ -156,21 +163,34 @@ export async function autoSaveCard(flightId: string): Promise<string | null> {
       invoke<CardDirInfo>("get_card_dir", { create: true }),
     ]);
     const path = await join(dir.dir, autoCardFileName(d));
-    const blob = await renderCardPng(d, landedApproach(approaches));
+    const approach = landedApproach(approaches);
+    const blob = await renderCardPng(d, approach);
     const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
     await invoke("save_image", { path, bytes });
+    // the approach card of the same landing next to it (best effort: the landing card counts)
+    let approachName: string | null = null;
+    if (approach) {
+      try {
+        approachName = autoApproachCardFileName(approach);
+        const apPath = await join(dir.dir, approachName);
+        const apBlob = await renderApproachCardPng(approach, d.flight);
+        await invoke("save_image", { path: apPath, bytes: Array.from(new Uint8Array(await apBlob.arrayBuffer())) });
+      } catch {
+        approachName = null;
+      }
+    }
     showToast({
       id: "card-autosave",
       tone: "ok",
-      title: "Landekarte gespeichert",
-      body: autoCardFileName(d),
+      title: approachName ? t("landingCard.export.bothSaved") : t("landingCard.export.saved"),
+      body: [autoCardFileName(d), approachName].filter(Boolean).join(" · "),
       durationMs: 4000,
-      actions: [{ label: "Ordner öffnen", onClick: () => void revealItemInDir(path).catch(() => {}) }],
+      actions: [{ label: t("landingCard.export.openFolder"), onClick: () => void revealItemInDir(path).catch(() => {}) }],
     });
     return path;
   } catch (e) {
     const m = userMessage(e, "export");
-    showToast({ id: "card-autosave", tone: "warn", title: `Landekarte nicht automatisch gespeichert: ${m.title}`, body: m.hint, durationMs: 8000 });
+    showToast({ id: "card-autosave", tone: "warn", title: t("landingCard.export.notAutoSaved", { title: m.title }), body: m.hint, durationMs: 8000 });
     return null;
   }
 }

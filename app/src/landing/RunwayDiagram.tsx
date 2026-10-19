@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { NNBSP, fmt, fmtNum } from "../format";
+import { NNBSP, fmt, fmtNum } from "../i18n/number";
+import { useT } from "../i18n";
 import { BAND_VAR, isDerivedRunway, lateralMeasurable, touchdownDistanceText, zoneText } from "./facts";
 import { cardExaggeration, designatorPx, showDesignator } from "./LandingCard";
 import { TRACK_BEFORE_M, drawWidthM, pathOf, runwayLayout, sideLabel, type XY } from "./geometry";
@@ -15,6 +16,7 @@ import type { ApproachPoint, LandingAnalysis } from "./types";
  * exaggeration is the landing card's (cardExaggeration), so both pictures match.
  */
 export default function RunwayDiagram({ analysis: a }: { analysis: LandingAnalysis }) {
+  const t = useT();
   const [wrap, setWrap] = useState<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(900);
   useEffect(() => {
@@ -97,7 +99,7 @@ export default function RunwayDiagram({ analysis: a }: { analysis: LandingAnalys
           store.setCursor(timeAt(e));
         }}
         role="img"
-        aria-label={`Piste ${rwy.ident} von oben mit Aufsetzpunkt ${touchdownDistanceText(tp)} hinter der Schwelle, ${lateralMeasurable(tp) ? sideLabel(tp.lateralM) : "Querablage nicht messbar"}`}>
+        aria-label={t("runwayDiagram.aria", { ident: rwy.ident, distance: touchdownDistanceText(tp), lateral: lateralMeasurable(tp) ? sideLabel(tp.lateralM) : t("runwayDiagram.lateralNone") })}>
         <defs>
           <clipPath id="rd-clip">
             <rect x={0} y={0} width={width} height={L.heightPx} />
@@ -112,11 +114,11 @@ export default function RunwayDiagram({ analysis: a }: { analysis: LandingAnalys
           {/* touchdown zone */}
           <rect x={tdzX0} y={ry0 - 3} width={Math.max(1, tdzX1 - tdzX0)} height={rwyH + 6} className="rd-tdz" />
           <text x={(tdzX0 + tdzX1) / 2} y={ry0 - 8} textAnchor="middle" className="rd-label rd-tdz-label">
-            Aufsetzzone {zoneText(tp, rwy)}
+            {t("runwayDiagram.tdzLabel", { zone: zoneText(tp, rwy) })}
           </text>
           {/* aiming-point marking: two bars beside the centreline (named in the legend, labels below are taken) */}
           <g className="rd-aim">
-            <title>Zielpunkt {fmt(tp.aimingPointM, 0, "m")} hinter der Schwelle (Markierung nach ICAO Annex 14)</title>
+            <title>{t("runwayDiagram.aimTitle", { aim: fmt(tp.aimingPointM, 0, "m") })}</title>
             {[-1, 1].map((s) => (
               <rect key={s} x={aimX} y={s < 0 ? cy - rwyH * 0.36 : cy + rwyH * 0.22} width={aimLen} height={rwyH * 0.14} className="rd-marking" />
             ))}
@@ -195,39 +197,42 @@ export default function RunwayDiagram({ analysis: a }: { analysis: LandingAnalys
       </svg>
       <div className="rd-legend">
         <span>
-          <i className="lg-line lg-air" /> Bodenspur in der Luft (letzte {fmt(before, 0, "m")})
+          <i className="lg-line lg-air" /> {t("runwayDiagram.legend.air", { distance: fmt(before, 0, "m") })}
         </span>
         <span>
-          <i className="lg-line lg-ground" /> am Boden
+          <i className="lg-line lg-ground" /> {t("runwayDiagram.legend.ground")}
         </span>
         <span>
-          <i className="lg-dot" style={{ background: tdColor }} /> Aufsetzpunkt
+          <i className="lg-dot" style={{ background: tdColor }} /> {t("runwayDiagram.legend.touchdown")}
         </span>
         {a.bouncePoints.length > 0 && (
           <span>
-            <i className="lg-dot lg-bounce" /> Bounce
+            <i className="lg-dot lg-bounce" /> {t("runwayDiagram.legend.bounce")}
           </span>
         )}
         {rolloutXY && (
           <span>
-            <i className="lg-square" /> GS unter {fmt(a.config.rolloutEndKt, 0, "kt")}
+            <i className="lg-square" /> {t("runwayDiagram.legend.rollout", { speed: fmt(a.config.rolloutEndKt, 0, "kt") })}
           </span>
         )}
         <span>
-          <i className="lg-box" /> Aufsetzzone ab der Schwelle
+          <i className="lg-box" /> {t("runwayDiagram.legend.tdz")}
         </span>
         <span>
-          <i className="lg-aim" /> Zielpunkt {fmt(tp.aimingPointM, 0, "m")}
+          <i className="lg-aim" /> {t("runwayDiagram.legend.aim", { aim: fmt(tp.aimingPointM, 0, "m") })}
         </span>
-        {rwy.widthM == null && <span>Breite unbekannt – mit {fmt(drawWidthM(null), 0, "m")} gezeichnet</span>}
+        {rwy.widthM == null && <span>{t("runwayDiagram.legend.widthUnknown", { width: fmt(drawWidthM(null), 0, "m") })}</span>}
         {isDerivedRunway(rwy) && (
-          <span title="Achse und Schwelle sind aus deiner Rollspur geschätzt, nicht vermessen">
-            Piste aus der Rollspur abgeleitet: Achse = deine Linie, Schwelle ±{fmt(tp.distanceUncertaintyM ?? rwy.alongUncertaintyM ?? 50, 0, "m")}
-            {rwy.lengthEstimated ? " · Pistenende unbekannt (gezeichnet bis zum Ende des Rollouts)" : ""}
+          <span title={t("runwayDiagram.legend.derivedTitle")}>
+            {t(rwy.lengthEstimated ? "runwayDiagram.legend.derivedNoEnd" : "runwayDiagram.legend.derived", {
+              uncertainty: fmt(tp.distanceUncertaintyM ?? rwy.alongUncertaintyM ?? 50, 0, "m"),
+            })}
           </span>
         )}
         <span className="rd-scale">
-          Längsachse maßstäblich{exaggerated ? ` · Querachse ×${fmtNum(L.exaggeration, L.exaggeration < 10 ? 1 : 0)} überhöht` : " · Querachse maßstäblich"}
+          {exaggerated
+            ? t("runwayDiagram.legend.scaleExaggerated", { factor: fmtNum(L.exaggeration, L.exaggeration < 10 ? 1 : 0) })
+            : t("runwayDiagram.legend.scaleTrue")}
         </span>
       </div>
     </div>

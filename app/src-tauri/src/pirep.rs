@@ -10,12 +10,16 @@ const SCHEMA: &str = "pirep/v1";
 /// The document as it will be written: valid JSON, an object with `"schema": "pirep/v1"`.
 fn validate(json: &str) -> Result<String, String> {
     if json.len() > MAX_PIREP_BYTES {
-        return Err(format!("PIREP zu groß ({} kB)", json.len() / 1024));
+        let kb = json.len() / 1024;
+        return Err(trf!("PIREP zu groß ({kb} kB)", "PIREP too large ({kb} kB)"));
     }
-    let v: serde_json::Value = serde_json::from_str(json).map_err(|e| format!("PIREP ist kein gültiges JSON: {e}"))?;
+    let v: serde_json::Value = serde_json::from_str(json).map_err(|e| trf!("PIREP ist kein gültiges JSON: {e}", "PIREP is not valid JSON: {e}"))?;
     match v.get("schema").and_then(|s| s.as_str()) {
         Some(SCHEMA) => {}
-        other => return Err(format!("PIREP-Schema {} nicht unterstützt (erwartet {SCHEMA})", other.unwrap_or("fehlt"))),
+        other => {
+            let found = other.unwrap_or(crate::lang::tr("fehlt", "missing"));
+            return Err(trf!("PIREP-Schema {found} nicht unterstützt (erwartet {SCHEMA})", "PIREP schema {found} not supported (expected {SCHEMA})"));
+        }
     }
     // written as the UI formatted it (key order kept), with one trailing newline
     let mut out = json.trim_end().to_owned();

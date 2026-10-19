@@ -3,10 +3,12 @@ import * as maplibregl from "maplibre-gl";
 import type { StyleSpecification } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "../map/maplibreWorker";
-import { loadBasemapStyle } from "../map/basemap";
+import { followLanguage, loadBasemapStyle } from "../map/basemap";
+import { applyProjection, useGlobe, withProjection } from "../map/common";
 import { COLOR } from "../theme";
-import { fmtDate } from "../format";
-import { geometryBounds, landingsLabel, type Country, type CountryVisit, type VisitedAirport } from "./countries.ts";
+import { t as tGlobal, useLanguage, useT } from "../i18n";
+import { fmtDate } from "../i18n/number";
+import { countryName, geometryBounds, globeZoomFor, landingsLabel, type Country, type CountryVisit, type VisitedAirport } from "./countries.ts";
 
 interface Props {
   outlines: GeoJSON.FeatureCollection | null;
@@ -28,6 +30,15 @@ interface Hover {
 
 const SRC = "countries";
 const PINS = "visited-airports";
+/** Start view; the globe needs a closer zoom than the flat map to fill the column. */
+const START_CENTER: [number, number] = [12, 28];
+const START_ZOOM_GLOBE = 1.9;
+const START_ZOOM_FLAT = 1.4;
+/** Inhabited world for the flat map (Antarctica left out, like the start view). */
+const WORLD_BOUNDS: [[number, number], [number, number]] = [
+  [-170, -56],
+  [180, 75],
+];
 
 /** Below the first label layer of the basemap, so place names stay on top of the fills. */
 function firstSymbolLayer(map: maplibregl.Map): string | undefined {
@@ -36,7 +47,7 @@ function firstSymbolLayer(map: maplibregl.Map): string | undefined {
 
 function addOwnLayers(map: maplibregl.Map, outlines: GeoJSON.FeatureCollection) {
   const before = firstSymbolLayer(map);
-  map.addSource(SRC, { type: "geojson", data: outlines, promoteId: "iso2", attribution: "Grenzen: Natural Earth" });
+  map.addSource(SRC, { type: "geojson", data: outlines, promoteId: "iso2", attribution: tGlobal("countries.map.attribution") });
   type Expr = maplibregl.ExpressionSpecification;
   const visited: Expr = ["boolean", ["feature-state", "visited"], false];
   const hover: Expr = ["boolean", ["feature-state", "hover"], false];
@@ -114,10 +125,16 @@ function addOwnLayers(map: maplibregl.Map, outlines: GeoJSON.FeatureCollection) 
  * airports as pins (small states have no outline at this scale). Zoom 1–6.
  */
 export default function CountryMap({ outlines, countries, visits, airports, showPins, selected, onSelect, mapRef }: Props) {
+  const t = useT();
+  const lang = useLanguage();
   const containerRef = useRef<HTMLDivElement>(null);
   const readyRef = useRef(false);
   const hoverRef = useRef<string | null>(null);
   const [hover, setHover] = useState<Hover | null>(null);
+  /** Globe (default) or flat world map: the same choice as the live and track maps. */
+  const [globe] = useGlobe();
+  const globeRef = useRef(globe);
+  globeRef.current = globe;
 
   // latest props for the map callbacks (registered once)
   const propsRef = useRef({ outlines, visits, airports, showPins, selected, onSelect });
@@ -152,9 +169,10 @@ export default function CountryMap({ outlines, countries, visits, airports, show
     const setupMap = (container: HTMLDivElement, style: StyleSpecification | string): (() => void) => {
       const map = new maplibregl.Map({
         container,
-        style,
-        center: [12, 28],
-        zoom: 1.4,
+        style: withProjection(style, globeRef.current, COLOR.bg),
+        center: START_CENTER,
+        // the globe shows one hemisphere: a bit closer, so it fills the column like the flat map
+        zoom: globeRef.current ? globeZoomFor(container.clientWidth, container.clientHeight) : START_ZOOM_FLAT,
         minZoom: 1,
         maxZoom: 6,
         dragRotate: false,
@@ -167,6 +185,7 @@ export default function CountryMap({ outlines, countries, visits, airports, show
       map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
       mapRef.current = map;
       map.on("load", () => {
+        applyProjection(map, globeRef.current);
         readyRef.current = true;
         syncRef.current();
       });
@@ -200,14 +219,17 @@ export default function CountryMap({ outlines, countries, visits, airports, show
             readyRef.current = true;
             syncRef.current();
           });
-          map.setStyle(next, { diff: false });
+          map.setStyle(withProjection(next, globeRef.current, COLOR.bg), { diff: false });
         });
       };
       window.addEventListener("theme:changed", onTheme);
+      // basemap names follow the UI language (map/basemap.ts)
+      const offLang = followLanguage(map);
       const ro = new ResizeObserver(() => map.resize());
       ro.observe(container);
       return () => {
         window.removeEventListener("theme:changed", onTheme);
+        offLang();
         ro.disconnect();
         map.remove();
         mapRef.current = null;
@@ -227,6 +249,23 @@ export default function CountryMap({ outlines, countries, visits, airports, show
   }, [mapRef]);
 
   useEffect(() => syncRef.current(), [outlines, visits, airports, showPins, selected]);
+
+  // globe switched (here or on another map): the start zooms differ per projection, so the camera
+  // follows – flat → globe back to the first-load view, globe → flat the whole world fitted
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !readyRef.current) return;
+    applyProjection(map, globe);
+    const canvas = map.getCanvas();
+    if (canvas.clientWidth === 0 || canvas.clientHeight === 0) {
+      // hidden (another view is open): no animation, just the start view of the new projection
+      map.jumpTo({ center: START_CENTER, zoom: globe ? START_ZOOM_GLOBE : START_ZOOM_FLAT });
+    } else if (globe) {
+      map.easeTo({ center: START_CENTER, zoom: globeZoomFor(canvas.clientWidth, canvas.clientHeight), duration: 500 });
+    } else {
+      map.fitBounds(WORLD_BOUNDS, { padding: 12, duration: 500 });
+    }
+  }, [globe, mapRef]);
 
   // a selection from the list brings the country into view
   useEffect(() => {
@@ -258,8 +297,8 @@ export default function CountryMap({ outlines, countries, visits, airports, show
       <div ref={containerRef} className="map country-map" aria-hidden="true" />
       {hover && hc && (
         <div className="country-tooltip" style={{ left: hover.x + 14, top: hover.y + 14 }} role="presentation">
-          <strong>{hc.nameDe}</strong>
-          <span className={hv ? "country-yes" : "detail"}>{hv ? `✓ ${landingsLabel(hv.landings)} · zuletzt ${fmtDate(hv.lastMs)}` : "– noch nicht besucht"}</span>
+          <strong>{countryName(hc, lang)}</strong>
+          <span className={hv ? "country-yes" : "detail"}>{hv ? t("countries.tooltip.visited", { landings: landingsLabel(hv.landings, lang), date: fmtDate(hv.lastMs, { lang }) }) : t("countries.tooltip.open")}</span>
         </div>
       )}
     </div>

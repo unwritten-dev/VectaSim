@@ -79,9 +79,16 @@ pub struct ApproachSample {
     pub gs_error_deg: Option<f64>,
     #[serde(default)]
     pub loc_cdi: Option<f64>,
+    /// Published glideslope angle of the tuned ILS (`NAV RAW GLIDE SLOPE`), °.
+    #[serde(default)]
+    pub gs_angle_deg: Option<f64>,
     /// See [`nav_flags`].
     #[serde(default)]
     pub nav_flags: u8,
+    /// The sim delivered the ILS/automation state for this sample (track v2): `nav_flags` = 0
+    /// then means "all off", not "not recorded".
+    #[serde(default)]
+    pub nav_recorded: bool,
     #[serde(default)]
     pub n1_pct: Option<f64>,
     #[serde(default)]
@@ -132,6 +139,9 @@ pub struct AircraftRef {
     pub flap_positions: Option<i32>,
     /// Pilot's Vapp for this type/airframe, KIAS.
     pub vapp_kt: Option<f64>,
+    /// Pilot's landing flap handle index for this airframe (fleet); wins over `flap_positions`.
+    #[serde(default)]
+    pub landing_flaps_index: Option<i32>,
 }
 
 /// Thresholds. Defaults: EASA/D4S levels for the continuous checks, FSF values at the gates.
@@ -270,6 +280,60 @@ pub struct ApproachConfig {
     pub profile_after_touchdown_s: f64,
     /// Statistics need at least this many samples.
     pub min_stat_samples: usize,
+
+    // ---- track v2 (stage 2); serde defaults for configs serialised before ----
+    /// The sim's ILS is the reference when it was received over at least this share of the
+    /// samples (glideslope: valid 1000 → 200 ft; localizer: present 1000 → 50 ft).
+    #[serde(default = "d_ils_min_share")]
+    pub ils_min_share: f64,
+    /// `NAV CDI` ±127 = this many localizer dots (EFIS scale: full scale = 2 dots ≈ ±105 m at
+    /// the threshold, ICAO Annex 10 course sector).
+    #[serde(default = "d_loc_full_scale_dots")]
+    pub loc_full_scale_dots: f64,
+    /// Sim ILS and geometry are compared by the median |difference| over the window: above
+    /// this a hint (check the runway coordinates) …
+    #[serde(default = "d_ils_mismatch_dots")]
+    pub ils_mismatch_dots: f64,
+    /// … above these the sim's ILS does not belong to this runway (other ILS tuned) and the
+    /// geometry is used (glideslope ±1° to the geometry).
+    #[serde(default = "d_ils_reject_gs_deg")]
+    pub ils_reject_gs_deg: f64,
+    #[serde(default = "d_ils_reject_loc_dots")]
+    pub ils_reject_loc_dots: f64,
+    /// Wind in the final 1000 → 50 ft (sim wind at the aircraft), hints only (VectaSim
+    /// convention): tailwind and crosswind of the median, shear = vector change 1000 ft →
+    /// threshold (FSF ALAR BN 5.4 for the concept).
+    #[serde(default = "d_wind_tailwind_kt")]
+    pub wind_tailwind_kt: f64,
+    #[serde(default = "d_wind_crosswind_kt")]
+    pub wind_crosswind_kt: f64,
+    #[serde(default = "d_wind_shear_kt")]
+    pub wind_shear_kt: f64,
+    /// Thrust above idle (FSF BN 7.1 "not below the minimum approach power"): N1 at least
+    /// this below the configuration gate, for `thrust_duration_s`, down to `thrust_floor_ft`
+    /// (the retard before the touchdown does not count). VectaSim convention for the value.
+    #[serde(default = "d_thrust_min_n1")]
+    pub thrust_min_n1_pct: f64,
+    #[serde(default = "d_thrust_duration")]
+    pub thrust_duration_s: f64,
+    #[serde(default = "d_thrust_floor")]
+    pub thrust_floor_ft: f64,
+    /// N1 counts as recorded only when it exceeded this somewhere in the approach (piston
+    /// aircraft deliver 0 throughout).
+    #[serde(default = "d_n1_valid_min")]
+    pub n1_valid_min_pct: f64,
+    /// Spoilers retracted in the final (FSF BN 7.1): deployed surface at most this, %.
+    #[serde(default = "d_spoilers_max")]
+    pub spoilers_max_pct: f64,
+    /// Energy band 10 nm → 1000 ft (VectaSim convention): "high" when the excess reached
+    /// this, "low" when the deficit reached `energy_band_low_ft`.
+    #[serde(default = "d_energy_band_high")]
+    pub energy_band_high_ft: f64,
+    #[serde(default = "d_energy_band_low")]
+    pub energy_band_low_ft: f64,
+    /// Last step of the Vapp cascade: this × `DESIGN SPEED VS0` (1.3 × VS0 ≈ Vref, CS 25.125).
+    #[serde(default = "d_vapp_vs0_factor")]
+    pub vapp_vs0_factor: f64,
 }
 
 impl Default for ApproachConfig {
@@ -355,8 +419,73 @@ impl Default for ApproachConfig {
             profile_sparse_s: 5.0,
             profile_after_touchdown_s: 10.0,
             min_stat_samples: 5,
+            ils_min_share: d_ils_min_share(),
+            loc_full_scale_dots: d_loc_full_scale_dots(),
+            ils_mismatch_dots: d_ils_mismatch_dots(),
+            ils_reject_gs_deg: d_ils_reject_gs_deg(),
+            ils_reject_loc_dots: d_ils_reject_loc_dots(),
+            wind_tailwind_kt: d_wind_tailwind_kt(),
+            wind_crosswind_kt: d_wind_crosswind_kt(),
+            wind_shear_kt: d_wind_shear_kt(),
+            thrust_min_n1_pct: d_thrust_min_n1(),
+            thrust_duration_s: d_thrust_duration(),
+            thrust_floor_ft: d_thrust_floor(),
+            n1_valid_min_pct: d_n1_valid_min(),
+            spoilers_max_pct: d_spoilers_max(),
+            energy_band_high_ft: d_energy_band_high(),
+            energy_band_low_ft: d_energy_band_low(),
+            vapp_vs0_factor: d_vapp_vs0_factor(),
         }
     }
+}
+
+fn d_ils_min_share() -> f64 {
+    0.6
+}
+fn d_loc_full_scale_dots() -> f64 {
+    2.0
+}
+fn d_ils_mismatch_dots() -> f64 {
+    0.5
+}
+fn d_ils_reject_gs_deg() -> f64 {
+    1.0
+}
+fn d_ils_reject_loc_dots() -> f64 {
+    1.5
+}
+fn d_wind_tailwind_kt() -> f64 {
+    5.0
+}
+fn d_wind_crosswind_kt() -> f64 {
+    15.0
+}
+fn d_wind_shear_kt() -> f64 {
+    15.0
+}
+fn d_thrust_min_n1() -> f64 {
+    40.0
+}
+fn d_thrust_duration() -> f64 {
+    5.0
+}
+fn d_thrust_floor() -> f64 {
+    50.0
+}
+fn d_n1_valid_min() -> f64 {
+    10.0
+}
+fn d_spoilers_max() -> f64 {
+    2.0
+}
+fn d_energy_band_high() -> f64 {
+    500.0
+}
+fn d_energy_band_low() -> f64 {
+    300.0
+}
+fn d_vapp_vs0_factor() -> f64 {
+    1.3
 }
 
 // serde defaults of the lateral thresholds (configs serialised before they existed)
@@ -443,6 +572,20 @@ pub enum TrackDistRef {
 pub enum GlidepathSource {
     /// `ApproachConfig::glidepath_deg` (3°), no procedure data.
     Assumed,
+    /// The sim's ILS (track v2): angle from `NAV RAW GLIDE SLOPE`, deviation from `NAV GLIDE
+    /// SLOPE ERROR` (glideslope received over ≥ `ils_min_share`, plausible to the geometry).
+    Ils,
+}
+
+/// Where the localizer dots of the criteria come from.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LocalizerSource {
+    /// From position and runway coordinates (virtual antenna beyond the far end).
+    #[default]
+    Geometric,
+    /// The sim's `NAV CDI` (track v2), localizer present over ≥ `ils_min_share`.
+    Ils,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -452,6 +595,8 @@ pub enum VappSource {
     User,
     /// Median IAS 500 → 100 ft of this approach: judges consistency, not the absolute value.
     Flown,
+    /// `vapp_vs0_factor` × `DESIGN SPEED VS0` (assumption, only without a flown median).
+    Design,
     /// No reference: speed criteria are not measurable.
     Unavailable,
 }
@@ -459,6 +604,8 @@ pub enum VappSource {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum LandingFlapsSource {
+    /// The pilot's landing flaps of the airframe (`AircraftRef::landing_flaps_index`).
+    User,
     /// Last handle position (`AircraftRef::flap_positions` − 1).
     AircraftPositions,
     /// Flap index at the touchdown.
@@ -470,8 +617,11 @@ pub enum LandingFlapsSource {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ApproachReference {
+    /// The ILS angle with `glidepath_source` = Ils, else the assumed 3°.
     pub glidepath_deg: f64,
     pub glidepath_source: GlidepathSource,
+    #[serde(default)]
+    pub localizer_source: LocalizerSource,
     pub tch_ft: f64,
     /// Reference speed (KIAS) the speed criteria use; None = not measurable.
     pub vapp_kt: Option<f64>,
@@ -576,6 +726,11 @@ pub struct ApproachGateSample {
     pub alt_dev_ft: Option<f64>,
     pub ias_dev_kt: Option<f64>,
     pub energy_dev_ft: Option<f64>,
+    /// Track v2 (None: not recorded / N1 never above `n1_valid_min_pct`).
+    #[serde(default)]
+    pub n1_pct: Option<f64>,
+    #[serde(default)]
+    pub spoilers_pct: Option<f64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -727,9 +882,19 @@ pub struct EnergyPoint {
     pub speed_ft: f64,
 }
 
+/// Energy 10 nm → 1000 ft against `energy_band_high_ft` / `energy_band_low_ft`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum EnergyBand {
+    Good,
+    High,
+    Low,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EnergyStats {
+    /// Recorded: the sim's TAS (and its TAS/IAS ratio for the reference); derived: ISA.
     pub tas_source: TasSource,
     pub at_ten_nm: Option<EnergyPoint>,
     pub at_faf: Option<EnergyPoint>,
@@ -737,6 +902,63 @@ pub struct EnergyStats {
     /// Largest excess from 10 nm to the end of the approach.
     pub max_excess_ft: Option<f64>,
     pub max_excess_hat_ft: Option<f64>,
+    /// Largest excess / deficit from 10 nm (or the assessment start) to 1000 ft, and the band.
+    #[serde(default)]
+    pub band_max_ft: Option<f64>,
+    #[serde(default)]
+    pub band_min_ft: Option<f64>,
+    #[serde(default)]
+    pub band: Option<EnergyBand>,
+}
+
+/// The sim's ILS against the geometry (track v2). Both are always computed; `*_used` says
+/// which one the criteria took. Dots as everywhere (+ = above / right).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct IlsStats {
+    /// Share of the samples 1000 → 200 ft with a valid glideslope / 1000 → 50 ft with a localizer.
+    pub gs_share: Option<f64>,
+    pub loc_share: Option<f64>,
+    /// Published glideslope angle (median of the valid samples), °.
+    pub gs_angle_deg: Option<f64>,
+    pub gs_used: bool,
+    pub loc_used: bool,
+    /// Received over enough samples, but implausible to the runway (other ILS tuned).
+    pub gs_rejected: bool,
+    pub loc_rejected: bool,
+    /// Median |sim − geometric| over the window, dots.
+    pub gs_diff_dots: Option<f64>,
+    pub loc_diff_dots: Option<f64>,
+    /// RMS of both sources over the window (glideslope 1000 → 200 ft, localizer 1000 → 50 ft).
+    pub gs_rms_sim_dots: Option<f64>,
+    pub gs_rms_geo_dots: Option<f64>,
+    pub loc_rms_sim_dots: Option<f64>,
+    pub loc_rms_geo_dots: Option<f64>,
+    /// A difference above `ils_mismatch_dots`: check the runway coordinates.
+    pub mismatch: bool,
+}
+
+/// The sim's wind at the aircraft in the final 1000 → 50 ft (track v2).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct WindStats {
+    pub samples: usize,
+    /// Direction (true, from) of the mean wind vector and the median speed.
+    pub dir_true_deg: Option<f64>,
+    pub speed_kt: Option<f64>,
+    /// Medians relative to the runway (+ = headwind / from the right); None without runway.
+    pub headwind_kt: Option<f64>,
+    pub crosswind_kt: Option<f64>,
+    /// Range of the wind speed (max − min) – gustiness.
+    pub gust_spread_kt: Option<f64>,
+    /// Wind at the top (≈ 1000 ft) and over the threshold (≈ 50 ft), and the vector change.
+    pub top_dir_true_deg: Option<f64>,
+    pub top_kt: Option<f64>,
+    pub bottom_dir_true_deg: Option<f64>,
+    pub bottom_kt: Option<f64>,
+    pub shear_kt: Option<f64>,
+    /// Headwind change top → bottom (+ = more headwind near the ground).
+    pub headwind_change_kt: Option<f64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -769,12 +991,21 @@ pub struct GoAround {
     pub min_ias_kt: f64,
 }
 
-/// Autopilot/autothrust (track v2 only; always None for v1 tracks).
+/// Autopilot/autothrust (track v2 only; always None for v1 tracks). Informative only, never a criterion.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct AutomationStats {
+    /// HAT of the first sample after the last one with the autopilot on (None: never on, or on to the end).
     pub autopilot_off_hat_ft: Option<f64>,
     pub autothrust_off_hat_ft: Option<f64>,
+    pub autopilot_used: bool,
+    pub autothrust_used: bool,
+    /// Still engaged at the last airborne sample (autoland / go-around flown by the AP).
+    pub autopilot_at_end: bool,
+    pub autothrust_at_end: bool,
+    /// APPR / G/S mode seen.
+    pub approach_mode: bool,
+    pub glideslope_mode: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -836,6 +1067,21 @@ pub struct ApproachProfilePoint {
     /// From the wind at the aircraft (track v2): + = headwind / from the right.
     pub headwind_kt: Option<f64>,
     pub crosswind_kt: Option<f64>,
+    /// Both sources of the deviations (`gs_dots` / `loc_dots` are the one the criteria use, see
+    /// `ApproachReference::glidepath_source` / `localizer_source`). Sim: only while received.
+    #[serde(default)]
+    pub gs_dots_sim: Option<f64>,
+    #[serde(default)]
+    pub gs_dots_geo: Option<f64>,
+    #[serde(default)]
+    pub loc_dots_sim: Option<f64>,
+    #[serde(default)]
+    pub loc_dots_geo: Option<f64>,
+    /// Track v2: N1 (None when never above `n1_valid_min_pct`), deployed spoilers, %.
+    #[serde(default)]
+    pub n1_pct: Option<f64>,
+    #[serde(default)]
+    pub spoilers_pct: Option<f64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -863,6 +1109,12 @@ pub struct ApproachAnalysis {
     #[serde(default)]
     pub lateral: LateralStats,
     pub energy: Option<EnergyStats>,
+    /// Sim ILS vs geometry (None: no ILS state recorded – v1 track or no runway).
+    #[serde(default)]
+    pub ils: Option<IlsStats>,
+    /// Sim wind 1000 → 50 ft (None: not recorded).
+    #[serde(default)]
+    pub wind: Option<WindStats>,
     pub go_around: Option<GoAround>,
     pub automation: Option<AutomationStats>,
     pub config_events: Vec<ConfigEvent>,
@@ -880,6 +1132,15 @@ pub struct ApproachAnalysis {
 pub fn tas_from_ias(ias_kt: f64, altitude_ft: f64) -> f64 {
     let sigma = (1.0 - 6.875_6e-6 * altitude_ft.clamp(-2000.0, 36_000.0)).powf(4.255_9);
     ias_kt / sigma.max(0.05).sqrt()
+}
+
+/// TAS of the reference speed `v` (KIAS) where the aircraft flies at `ias_kt`: with a recorded
+/// TAS the sim's TAS/IAS ratio (its air density), else ISA from the altitude.
+fn ref_tas_kt(v: f64, tas_kt: Option<f64>, ias_kt: f64, altitude_ft: f64) -> f64 {
+    match tas_kt {
+        Some(t) if ias_kt > 30.0 && t > 0.0 => v * t / ias_kt,
+        _ => tas_from_ias(v, altitude_ft),
+    }
 }
 
 fn energy_ft(tas_kt: f64) -> f64 {
@@ -1239,6 +1500,8 @@ impl Pts {
             alt_dev_ft: opt_lerp(a.alt_dev_ft, b.alt_dev_ft, f),
             ias_dev_kt: opt_lerp(a.ias_dev_kt, b.ias_dev_kt, f),
             energy_dev_ft: opt_lerp(a.energy_dev_ft, b.energy_dev_ft, f),
+            n1_pct: opt_lerp(a.n1_pct, b.n1_pct, f),
+            spoilers_pct: opt_lerp(a.spoilers_pct, b.spoilers_pct, f),
         }
     }
 
@@ -1321,6 +1584,25 @@ fn specs(cfg: &ApproachConfig) -> Vec<Spec> {
             floor_ft: cfg.window_bottom_ft,
             ceil_ft: f64::INFINITY,
         },
+        // track v2 only (no values = never counted): thrust above idle, spoilers retracted
+        Spec {
+            kind: CriterionKind::Thrust,
+            s1: (Some(cfg.thrust_min_n1_pct), None),
+            s2: None,
+            dur1: cfg.thrust_duration_s.max(m),
+            dur2: cfg.thrust_duration_s.max(m),
+            floor_ft: cfg.thrust_floor_ft.max(cfg.window_bottom_ft),
+            ceil_ft: cfg.config_gate_ft,
+        },
+        Spec {
+            kind: CriterionKind::Spoilers,
+            s1: (None, Some(cfg.spoilers_max_pct)),
+            s2: None,
+            dur1: m,
+            dur2: m,
+            floor_ft: cfg.window_bottom_ft,
+            ceil_ft: cfg.config_gate_ft,
+        },
     ]
 }
 
@@ -1334,6 +1616,8 @@ fn measure(kind: CriterionKind, pts: &[ApproachProfilePoint], l: usize) -> Optio
         CriterionKind::Glidepath => p.gs_dots,
         CriterionKind::Localizer => p.loc_dots,
         CriterionKind::Bank => Some(p.bank_deg.abs()),
+        CriterionKind::Thrust => p.n1_pct,
+        CriterionKind::Spoilers => p.spoilers_pct,
         _ => None,
     }
 }
@@ -1613,20 +1897,28 @@ fn analyze_attempt(inp: &Input, a: &ApproachAttempt, lower: usize, index: usize)
         .map(|l| track[p0 + l].ias_kt)
         .collect();
     let flown_vapp = if vapp_samples.len() >= 3 { median(vapp_samples) } else { None };
-    let (vapp, vapp_source) = match (inp.aircraft.vapp_kt, flown_vapp) {
-        (Some(v), _) => (Some(v), VappSource::User),
-        (None, Some(v)) => (Some(v), VappSource::Flown),
-        (None, None) => (None, VappSource::Unavailable),
+    // cascade: the pilot's Vapp (airframe) → the flown median → VS0 × 1.3 (assumption).
+    // SimBrief's OFP carries no approach speed, so there is no OFP step.
+    let design_vapp = inp.aircraft.vs0_kt.filter(|v| *v > 0.0).map(|v| v * cfg.vapp_vs0_factor);
+    let (vapp, vapp_source) = match (inp.aircraft.vapp_kt, flown_vapp, design_vapp) {
+        (Some(v), _, _) => (Some(v), VappSource::User),
+        (None, Some(v), _) => (Some(v), VappSource::Flown),
+        (None, None, Some(v)) => (Some(v), VappSource::Design),
+        (None, None, None) => (None, VappSource::Unavailable),
     };
-    let vapp_plausible = vapp.zip(inp.aircraft.vs0_kt).map(|(v, s)| v >= cfg.vapp_min_vs0 * s && v <= cfg.vapp_max_vs0 * s);
-    let (landing_flaps_index, landing_flaps_source) = match (inp.aircraft.flap_positions, landed) {
-        (Some(np), _) if np > 0 => (Some(np - 1), LandingFlapsSource::AircraftPositions),
-        (_, true) => (Some(track[end].flaps_index), LandingFlapsSource::Touchdown),
+    // the design value is VS0-based itself: the plausibility check says nothing about it
+    let vapp_plausible =
+        vapp.zip(inp.aircraft.vs0_kt).filter(|_| vapp_source != VappSource::Design).map(|(v, s)| v >= cfg.vapp_min_vs0 * s && v <= cfg.vapp_max_vs0 * s);
+    let (landing_flaps_index, landing_flaps_source) = match (inp.aircraft.landing_flaps_index, inp.aircraft.flap_positions, landed) {
+        (Some(lf), _, _) if lf >= 0 => (Some(lf), LandingFlapsSource::User),
+        (_, Some(np), _) if np > 0 => (Some(np - 1), LandingFlapsSource::AircraftPositions),
+        (_, _, true) => (Some(track[end].flaps_index), LandingFlapsSource::Touchdown),
         _ => (None, LandingFlapsSource::Unknown),
     };
-    let reference = ApproachReference {
+    let mut reference = ApproachReference {
         glidepath_deg: cfg.glidepath_deg,
         glidepath_source: GlidepathSource::Assumed,
+        localizer_source: LocalizerSource::Geometric,
         tch_ft: cfg.tch_ft,
         vapp_kt: vapp,
         vapp_source,
@@ -1664,29 +1956,124 @@ fn analyze_attempt(inp: &Input, a: &ApproachAttempt, lower: usize, index: usize)
         })
         .collect();
 
+    // ---- ILS (track v2) against the geometry: both computed, the sim's used when received
+    // over enough samples and plausible to the runway ----
+    let in_appr = |l: usize| l <= air_end && !track[p0 + l].on_ground;
+    const GS_OK: u8 = nav_flags::HAS_GLIDE_SLOPE | nav_flags::GLIDE_SLOPE_VALID;
+    let gs_sim: Vec<Option<f64>> = (0..n)
+        .map(|l| {
+            let s = &track[p0 + l];
+            s.gs_error_deg.filter(|_| in_appr(l) && s.nav_flags & GS_OK == GS_OK).map(|e| e / cfg.gs_dot_deg)
+        })
+        .collect();
+    // NAV CDI: needle right (+) = aircraft left of the course
+    let loc_sim: Vec<Option<f64>> = (0..n)
+        .map(|l| {
+            let s = &track[p0 + l];
+            s.loc_cdi.filter(|_| in_appr(l) && s.nav_flags & nav_flags::HAS_LOCALIZER != 0).map(|c| -c / 127.0 * cfg.loc_full_scale_dots)
+        })
+        .collect();
+    let nav_recorded = (p0..=pend).any(|i| track[i].nav_recorded);
+    let gs_win: Vec<usize> = (0..=air_end).filter(|&l| in_appr(l) && hat[l] <= cfg.window_top_ft && hat[l] >= cfg.gs_floor_ft).collect();
+    let loc_win: Vec<usize> = (0..=air_end).filter(|&l| in_appr(l) && hat[l] <= cfg.window_top_ft && hat[l] >= cfg.window_bottom_ft).collect();
+    let share = |win: &[usize], v: &[Option<f64>]| {
+        (nav_recorded && win.len() >= cfg.min_stat_samples).then(|| win.iter().filter(|&&l| v[l].is_some()).count() as f64 / win.len() as f64)
+    };
+    let (gs_share, loc_share) = (share(&gs_win, &gs_sim), share(&loc_win, &loc_sim));
+    let ils_angle = median(gs_win.iter().filter(|&&l| gs_sim[l].is_some()).filter_map(|&l| track[p0 + l].gs_angle_deg).filter(|a| (1.5..=7.0).contains(a)).collect());
+    let med_diff = |win: &[usize], a: &[Option<f64>], b: &[Option<f64>]| {
+        let v: Vec<f64> = win.iter().filter_map(|&l| a[l].zip(b[l]).map(|(x, y)| (x - y).abs())).collect();
+        if v.len() >= cfg.min_stat_samples { median(v) } else { None }
+    };
+    let win_rms = |win: &[usize], v: &[Option<f64>]| {
+        let x: Vec<f64> = win.iter().filter_map(|&l| v[l]).collect();
+        if x.len() >= cfg.min_stat_samples { rms(&x) } else { None }
+    };
+    // geometric glidepath angle seen from the aiming point of a path with `ref_deg`
+    let geo_gp = |ref_deg: f64| -> Vec<Option<f64>> {
+        let gpip_x = cfg.tch_ft * M_PER_FT / ref_deg.to_radians().tan();
+        (0..n)
+            .map(|l| match xy[l] {
+                Some((x, _)) if frame.is_some() && in_appr(l) && on_final[l] && x <= 0.0 && gpip_x - x >= 0.25 * M_PER_NM => {
+                    Some((hat[l] * M_PER_FT).atan2(gpip_x - x).to_degrees())
+                }
+                _ => None,
+            })
+            .collect()
+    };
+    let to_dots = |ang: &[Option<f64>], r: f64| -> Vec<Option<f64>> { ang.iter().map(|a| a.map(|a| (a - r) / cfg.gs_dot_deg)).collect() };
+    let gs_cand = frame.is_some() && gs_share.is_some_and(|s| s >= cfg.ils_min_share) && ils_angle.is_some();
+    let mut gp_ref = if gs_cand { ils_angle.unwrap_or(cfg.glidepath_deg) } else { cfg.glidepath_deg };
+    let mut gp_ang = geo_gp(gp_ref);
+    let mut gs_geo = to_dots(&gp_ang, gp_ref);
+    let gs_used = gs_cand && med_diff(&gs_win, &gs_sim, &gs_geo).is_some_and(|d| d * cfg.gs_dot_deg <= cfg.ils_reject_gs_deg);
+    if gs_cand && !gs_used {
+        gp_ref = cfg.glidepath_deg;
+        gp_ang = geo_gp(gp_ref);
+        gs_geo = to_dots(&gp_ang, gp_ref);
+    }
+    let mut loc_ang: Vec<Option<f64>> = vec![None; n];
+    let mut loc_geo: Vec<Option<f64>> = vec![None; n];
+    if let Some(f) = frame {
+        let ant = f.length_m + cfg.loc_antenna_beyond_end_m;
+        let dot = cfg.loc_dot_m_at_threshold.atan2(ant).to_degrees();
+        for l in 0..n {
+            if let Some((x, y)) = xy[l]
+                && in_appr(l)
+                && on_final[l]
+                && x < ant
+            {
+                let ang = y.atan2(ant - x).to_degrees();
+                loc_ang[l] = Some(ang);
+                loc_geo[l] = Some(ang / dot);
+            }
+        }
+    }
+    let loc_cand = frame.is_some() && loc_share.is_some_and(|s| s >= cfg.ils_min_share);
+    let loc_diff = med_diff(&loc_win, &loc_sim, &loc_geo);
+    let loc_used = loc_cand && loc_diff.is_some_and(|d| d <= cfg.ils_reject_loc_dots);
+    let gs_diff = med_diff(&gs_win, &gs_sim, &gs_geo);
+    let ils = (nav_recorded && frame.is_some()).then(|| IlsStats {
+        gs_share,
+        loc_share,
+        gs_angle_deg: ils_angle,
+        gs_used,
+        loc_used,
+        gs_rejected: gs_cand && !gs_used,
+        loc_rejected: loc_cand && !loc_used,
+        gs_diff_dots: gs_diff,
+        loc_diff_dots: loc_diff,
+        gs_rms_sim_dots: win_rms(&gs_win, &gs_sim),
+        gs_rms_geo_dots: win_rms(&gs_win, &gs_geo),
+        loc_rms_sim_dots: win_rms(&loc_win, &loc_sim),
+        loc_rms_geo_dots: win_rms(&loc_win, &loc_geo),
+        mismatch: gs_diff.is_some_and(|d| d > cfg.ils_mismatch_dots) || loc_diff.is_some_and(|d| d > cfg.ils_mismatch_dots),
+    });
+    if gs_used {
+        reference.glidepath_deg = gp_ref;
+        reference.glidepath_source = GlidepathSource::Ils;
+    }
+    if loc_used {
+        reference.localizer_source = LocalizerSource::Ils;
+    }
+    let n1_valid = (p0..=pend).any(|i| track[i].n1_pct.is_some_and(|v| v > cfg.n1_valid_min_pct));
+
     // per-point values
-    let tan_gp = cfg.glidepath_deg.to_radians().tan();
-    let gpip_x = cfg.tch_ft * M_PER_FT / tan_gp;
+    let tan_gp = gp_ref.to_radians().tan();
     let recorded_tas = (p0..=pend).any(|i| track[i].tas_kt.is_some());
     let mut pts: Vec<ApproachProfilePoint> = Vec::with_capacity(n);
     for l in 0..n {
         let s = &track[p0 + l];
         let h = hat[l];
         let in_approach = l <= air_end && !s.on_ground;
-        let (mut gp, mut gp_dev, mut loc_angle, mut loc_dots, mut ref_hat) = (None, None, None, None, None);
-        if let (Some(f), Some((x, y)), true) = (frame, xy[l], in_approach) {
-            if on_final[l] && x <= 0.0 && gpip_x - x >= 0.25 * M_PER_NM {
-                let ang = (h * M_PER_FT).atan2(gpip_x - x).to_degrees();
-                gp = Some(ang);
-                gp_dev = Some(ang - cfg.glidepath_deg);
-            }
-            let ant = f.length_m + cfg.loc_antenna_beyond_end_m;
-            if on_final[l] && x < ant {
-                let ang = y.atan2(ant - x).to_degrees();
-                let dot = cfg.loc_dot_m_at_threshold.atan2(ant).to_degrees();
-                loc_angle = Some(ang);
-                loc_dots = Some(ang / dot);
-            }
+        let gp = gp_ang[l];
+        // the criteria's source; the sim's values only on the final, like the geometry's
+        let gs_dots = if gs_used { gs_sim[l].filter(|_| on_final[l]) } else { gs_geo[l] };
+        let gp_dev = if gs_used { gs_dots.map(|d| d * cfg.gs_dot_deg) } else { gp.map(|a| a - gp_ref) };
+        let loc_dots = if loc_used { loc_sim[l].filter(|_| on_final[l]) } else { loc_geo[l] };
+        let loc_angle = loc_ang[l];
+        let mut ref_hat = None;
+        if let (Some(_), Some((x, _)), true) = (frame, xy[l], in_approach) {
             let d = if on_final[l] && x < 0.0 { -x } else { track_dist[l] };
             if d >= 0.0 {
                 ref_hat = Some(cfg.tch_ft + d * tan_gp / M_PER_FT);
@@ -1695,7 +2082,7 @@ fn analyze_attempt(inp: &Input, a: &ApproachAttempt, lower: usize, index: usize)
         let tas = s.tas_kt.unwrap_or_else(|| tas_from_ias(s.ias_kt, s.altitude_msl_ft));
         let alt_dev = ref_hat.map(|r| h - r);
         let ias_dev = vapp.filter(|_| in_approach).map(|v| s.ias_kt - v);
-        let energy_dev = alt_dev.zip(vapp).map(|(dh, v)| dh + energy_ft(tas) - energy_ft(tas_from_ias(v, s.altitude_msl_ft)));
+        let energy_dev = alt_dev.zip(vapp).map(|(dh, v)| dh + energy_ft(tas) - energy_ft(ref_tas_kt(v, s.tas_kt, s.ias_kt, s.altitude_msl_ft)));
         let wind = match (frame, s.wind_dir_true_deg, s.wind_kt) {
             (Some(f), Some(d), Some(w)) => {
                 let r = (d - f.heading_deg).to_radians();
@@ -1724,7 +2111,7 @@ fn analyze_attempt(inp: &Input, a: &ApproachAttempt, lower: usize, index: usize)
             on_final: on_final[l],
             glidepath_deg: gp,
             glidepath_dev_deg: gp_dev,
-            gs_dots: gp_dev.map(|d| d / cfg.gs_dot_deg),
+            gs_dots,
             loc_angle_deg: loc_angle,
             loc_dots,
             ref_hat_ft: ref_hat,
@@ -1733,6 +2120,12 @@ fn analyze_attempt(inp: &Input, a: &ApproachAttempt, lower: usize, index: usize)
             energy_dev_ft: energy_dev,
             headwind_kt: wind.map(|w| w.0),
             crosswind_kt: wind.map(|w| w.1),
+            gs_dots_sim: gs_sim[l],
+            gs_dots_geo: gs_geo[l],
+            loc_dots_sim: loc_sim[l],
+            loc_dots_geo: loc_geo[l],
+            n1_pct: s.n1_pct.filter(|_| n1_valid),
+            spoilers_pct: s.spoilers_pct,
         });
     }
     let p = Pts { pts, air_end };
@@ -1759,10 +2152,14 @@ fn analyze_attempt(inp: &Input, a: &ApproachAttempt, lower: usize, index: usize)
     let g50 = p.crossing(assess_l, 50.0, by_hat).map(|(j, f)| p.interp(j, f));
     let established_at = |t: u64| established_l.is_some_and(|k| pts[k].t_ms <= t);
 
+    // landing flaps known (airframe, last handle position, touchdown): that stage; else only "≥ 1"
     let flaps_criterion = |s: &ApproachGateSample| match landing_flaps_index {
-        Some(lf) => criterion(CriterionKind::Flaps, Some(s.flaps_index as f64), Some(lf as f64), None, Some(lf as f64)),
+        Some(lf) => criterion(CriterionKind::LandingFlaps, Some(s.flaps_index as f64), Some(lf as f64), None, Some(lf as f64)),
         None => criterion(CriterionKind::Flaps, Some(s.flaps_index as f64), Some(1.0), None, None),
     };
+    // thrust / spoilers only for approaches that recorded them (track v2); a gap = not measured
+    let has_n1 = pts.iter().any(|q| q.n1_pct.is_some());
+    let has_spoilers = pts.iter().any(|q| q.spoilers_pct.is_some());
     let mut gates = Vec::new();
     {
         let criteria = ten.as_ref().map_or_else(Vec::new, |s| {
@@ -1773,7 +2170,7 @@ fn analyze_attempt(inp: &Input, a: &ApproachAttempt, lower: usize, index: usize)
                     s.alt_dev_ft.filter(|_| est),
                     Some(-cfg.ten_nm_alt_tolerance_ft),
                     Some(cfg.ten_nm_alt_tolerance_ft),
-                    Some(cfg.glidepath_deg),
+                    Some(gp_ref),
                 ),
                 criterion(CriterionKind::SpeedLimit, Some(s.ias_kt), None, Some(cfg.ten_nm_max_ias_kt), None),
                 criterion(CriterionKind::Energy, s.energy_dev_ft.filter(|_| est), None, Some(cfg.ten_nm_max_energy_ft), vapp),
@@ -1786,7 +2183,7 @@ fn analyze_attempt(inp: &Input, a: &ApproachAttempt, lower: usize, index: usize)
             vec![
                 criterion(CriterionKind::Gear, Some(s.gear_pct), Some(cfg.gear_down_pct), None, None),
                 criterion(CriterionKind::Flaps, Some(s.flaps_index as f64), Some(1.0), None, None),
-                criterion(CriterionKind::AltitudeDeviation, s.alt_dev_ft, Some(-cfg.faf_alt_tolerance_ft), Some(cfg.faf_alt_tolerance_ft), Some(cfg.glidepath_deg)),
+                criterion(CriterionKind::AltitudeDeviation, s.alt_dev_ft, Some(-cfg.faf_alt_tolerance_ft), Some(cfg.faf_alt_tolerance_ft), Some(gp_ref)),
                 criterion(CriterionKind::Speed, s.ias_dev_kt, Some(-cfg.faf_speed_below_kt), Some(cfg.faf_speed_above_kt), vapp),
             ]
         });
@@ -1794,15 +2191,22 @@ fn analyze_attempt(inp: &Input, a: &ApproachAttempt, lower: usize, index: usize)
     }
     for (kind, g) in [(GateKind::Ft1000, &g1000), (GateKind::Ft500, &g500)] {
         let criteria = g.as_ref().map_or_else(Vec::new, |s| {
-            vec![
+            let mut c = vec![
                 criterion(CriterionKind::Gear, Some(s.gear_pct), Some(cfg.gear_down_pct), None, None),
                 flaps_criterion(s),
                 criterion(CriterionKind::VerticalSpeed, Some(s.vs_fpm), Some(-cfg.gate_max_vs_fpm), Some(cfg.gate_max_vs_fpm), None),
                 criterion(CriterionKind::Speed, s.ias_dev_kt, Some(-cfg.gate_speed_below_kt), Some(cfg.gate_speed_above_kt), vapp),
-                criterion(CriterionKind::Glidepath, s.gs_dots, Some(-cfg.gate_dots), Some(cfg.gate_dots), Some(cfg.glidepath_deg)),
+                criterion(CriterionKind::Glidepath, s.gs_dots, Some(-cfg.gate_dots), Some(cfg.gate_dots), Some(gp_ref)),
                 criterion(CriterionKind::Localizer, s.loc_dots, Some(-cfg.gate_dots), Some(cfg.gate_dots), None),
                 criterion(CriterionKind::Bank, Some(s.bank_deg.abs()), None, Some(cfg.gate_max_bank_deg), None),
-            ]
+            ];
+            if has_n1 {
+                c.push(criterion(CriterionKind::Thrust, s.n1_pct, Some(cfg.thrust_min_n1_pct), None, None));
+            }
+            if has_spoilers {
+                c.push(criterion(CriterionKind::Spoilers, s.spoilers_pct, None, Some(cfg.spoilers_max_pct), None));
+            }
+            c
         });
         gates.push(ApproachGate { kind, reached: g.is_some(), faf_reason: None, criteria, sample: g.clone() });
     }
@@ -1932,11 +2336,36 @@ fn analyze_attempt(inp: &Input, a: &ApproachAttempt, lower: usize, index: usize)
         let split = |s: &ApproachGateSample| {
             let (Some(h), Some(v)) = (s.alt_dev_ft, vapp) else { return None };
             let msl = elev + s.hat_ft;
-            let sp = energy_ft(s.tas_kt) - energy_ft(tas_from_ias(v, msl));
+            let sp = energy_ft(s.tas_kt) - energy_ft(ref_tas_kt(v, recorded_tas.then_some(s.tas_kt), s.ias_kt, msl));
             Some(EnergyPoint { total_ft: h + sp, height_ft: h, speed_ft: sp })
         };
         let from_l = ten.as_ref().and_then(|s| pts.iter().position(|q| q.t_ms >= s.t_ms)).unwrap_or(assess_l);
         let max = (from_l..=air_end).filter_map(|l| pts[l].energy_dev_ft.map(|e| (e, pts[l].hat_ft))).max_by(|a, b| a.0.total_cmp(&b.0));
+        // band 10 nm → 1000 ft (to the end when the approach never got below 1000 ft), on the
+        // final only: in a circuit the "path" before the final is no reference (like the 10 nm gate)
+        let to_l = g1000.as_ref().and_then(|s| pts.iter().rposition(|q| q.t_ms <= s.t_ms)).unwrap_or(air_end).min(air_end);
+        let seg: Vec<f64> = (from_l..=to_l).filter(|&l| pts[l].on_final).filter_map(|l| pts[l].energy_dev_ft).collect();
+        let (band_max, band_min) = if seg.len() >= cfg.min_stat_samples {
+            (seg.iter().copied().reduce(f64::max), seg.iter().copied().reduce(f64::min))
+        } else {
+            (None, None)
+        };
+        let band = band_max.zip(band_min).map(|(hi, lo)| {
+            let (over, under) = (hi / cfg.energy_band_high_ft.max(1.0), -lo / cfg.energy_band_low_ft.max(1.0));
+            match (over >= 1.0, under >= 1.0) {
+                (false, false) => EnergyBand::Good,
+                (true, false) => EnergyBand::High,
+                (false, true) => EnergyBand::Low,
+                // both: the one further beyond its threshold
+                (true, true) => {
+                    if over >= under {
+                        EnergyBand::High
+                    } else {
+                        EnergyBand::Low
+                    }
+                }
+            }
+        });
         EnergyStats {
             tas_source: if recorded_tas { TasSource::Recorded } else { TasSource::Derived },
             at_ten_nm: ten.as_ref().and_then(split),
@@ -1944,6 +2373,80 @@ fn analyze_attempt(inp: &Input, a: &ApproachAttempt, lower: usize, index: usize)
             at_1000: g1000.as_ref().and_then(split),
             max_excess_ft: max.map(|m| m.0),
             max_excess_hat_ft: max.map(|m| m.1),
+            band_max_ft: band_max,
+            band_min_ft: band_min,
+            band,
+        }
+    });
+
+    // sim wind in the final, 1000 → 50 ft
+    let wind = bottom.filter(|&b| band_lo <= b).and_then(|b| {
+        let win: Vec<usize> = (band_lo..=b).filter(|&l| !pts[l].on_ground).collect();
+        let w: Vec<(usize, f64, f64)> = win.iter().filter_map(|&l| track[p0 + l].wind_dir_true_deg.zip(track[p0 + l].wind_kt).map(|(d, k)| (l, d, k))).collect();
+        if w.len() < cfg.min_stat_samples {
+            return None;
+        }
+        // vector (towards north / east components of the "from" direction)
+        let vec_of = |d: f64, k: f64| (k * d.to_radians().cos(), k * d.to_radians().sin());
+        let mean_of = |xs: &[(usize, f64, f64)]| {
+            let (n, e) = xs.iter().fold((0.0, 0.0), |(n, e), &(_, d, k)| {
+                let v = vec_of(d, k);
+                (n + v.0, e + v.1)
+            });
+            let c = xs.len().max(1) as f64;
+            (n / c, e / c)
+        };
+        let dir_of = |(n, e): (f64, f64)| (n.hypot(e) > 0.05).then(|| e.atan2(n).to_degrees().rem_euclid(360.0));
+        let k = 3.min(w.len());
+        let (top, bot) = (mean_of(&w[..k]), mean_of(&w[w.len() - k..]));
+        let heads: Vec<f64> = w.iter().filter_map(|&(l, _, _)| pts[l].headwind_kt).collect();
+        let cross: Vec<f64> = w.iter().filter_map(|&(l, _, _)| pts[l].crosswind_kt).collect();
+        let head_of = |xs: &[(usize, f64, f64)]| {
+            let v: Vec<f64> = xs.iter().filter_map(|&(l, _, _)| pts[l].headwind_kt).collect();
+            (!v.is_empty()).then(|| v.iter().sum::<f64>() / v.len() as f64)
+        };
+        let speeds: Vec<f64> = w.iter().map(|x| x.2).collect();
+        Some(WindStats {
+            samples: w.len(),
+            dir_true_deg: dir_of(mean_of(&w)),
+            speed_kt: median(speeds.clone()),
+            headwind_kt: median(heads),
+            crosswind_kt: median(cross),
+            gust_spread_kt: speeds.iter().copied().reduce(f64::max).zip(speeds.iter().copied().reduce(f64::min)).map(|(a, b)| a - b),
+            top_dir_true_deg: dir_of(top),
+            top_kt: Some(top.0.hypot(top.1)),
+            bottom_dir_true_deg: dir_of(bot),
+            bottom_kt: Some(bot.0.hypot(bot.1)),
+            shear_kt: Some((top.0 - bot.0).hypot(top.1 - bot.1)),
+            headwind_change_kt: head_of(&w[w.len() - k..]).zip(head_of(&w[..k])).map(|(b, t)| b - t),
+        })
+    });
+
+    // automation (informative): last engaged sample of the approach
+    let automation = nav_recorded.then(|| {
+        let range: Vec<usize> = (assess_l..=air_end).filter(|&l| !pts[l].on_ground).collect();
+        let bit = |l: usize, b: u8| track[p0 + l].nav_flags & b != 0;
+        let off_after = |b: u8| -> (bool, bool, Option<f64>) {
+            let used = range.iter().any(|&l| bit(l, b));
+            let at_end = range.last().is_some_and(|&l| bit(l, b));
+            let off = if used && !at_end {
+                range.iter().rposition(|&l| bit(l, b)).and_then(|k| range.get(k + 1)).map(|&l| pts[l].hat_ft)
+            } else {
+                None
+            };
+            (used, at_end, off)
+        };
+        let (ap_used, ap_end, ap_off) = off_after(nav_flags::AUTOPILOT_MASTER);
+        let (at_used, at_end, at_off) = off_after(nav_flags::AUTOTHRUST);
+        AutomationStats {
+            autopilot_off_hat_ft: ap_off,
+            autothrust_off_hat_ft: at_off,
+            autopilot_used: ap_used,
+            autothrust_used: at_used,
+            autopilot_at_end: ap_end,
+            autothrust_at_end: at_end,
+            approach_mode: range.iter().any(|&l| bit(l, nav_flags::APPROACH_HOLD)),
+            glideslope_mode: range.iter().any(|&l| bit(l, nav_flags::GLIDE_SLOPE_HOLD)),
         }
     });
 
@@ -2019,8 +2522,10 @@ fn analyze_attempt(inp: &Input, a: &ApproachAttempt, lower: usize, index: usize)
         stability: st,
         lateral,
         energy,
+        ils,
+        wind,
         go_around,
-        automation: None,
+        automation,
         config_events,
         start_t_ms: pts[0].t_ms,
         assessed_from_t_ms: pts[assess_l].t_ms,

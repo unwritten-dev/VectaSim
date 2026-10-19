@@ -96,6 +96,11 @@ pub struct Airframe {
     /// assessment take it as the reference speed (`AircraftRef::vapp_kt`); `None` = the flown median.
     #[serde(default)]
     pub vapp_kt: Option<f64>,
+    /// Pilot's landing flap handle index for this airframe (schema v15), e.g. 3 for an A320
+    /// landing in CONF 3. The approach assessment checks it at 1000/500 ft
+    /// (`AircraftRef::landing_flaps_index`); `None` = the last handle position.
+    #[serde(default)]
+    pub landing_flaps: Option<i32>,
     pub created_ms: u64,
     pub updated_ms: u64,
 }
@@ -132,11 +137,17 @@ pub struct AirframeEdit {
     /// [`VAPP_MIN_KT`]..=[`VAPP_MAX_KT`] (anything else is refused).
     #[serde(default)]
     pub vapp_kt: Option<f64>,
+    /// Landing flap handle index: `None` leaves it, `Some(v)` with v < 0 clears it, otherwise
+    /// 0..=[`LANDING_FLAPS_MAX`].
+    #[serde(default)]
+    pub landing_flaps: Option<i32>,
 }
 
 /// Plausible range of a manually entered Vapp, KIAS.
 pub const VAPP_MIN_KT: f64 = 40.0;
 pub const VAPP_MAX_KT: f64 = 250.0;
+/// Highest landing flap handle index accepted (MSFS aircraft have at most ~10 handle positions).
+pub const LANDING_FLAPS_MAX: i32 = 10;
 
 /// The photo facts the store keeps; written by `set_airframe_photo`.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -172,8 +183,11 @@ CREATE INDEX IF NOT EXISTS flights_airframe ON flights(airframe_reg);
 /// v11: the pilot's Vapp per airframe (KIAS), reference speed of the approach assessment.
 pub(crate) const MIGRATION_V11: &str = "ALTER TABLE airframes ADD COLUMN vapp_kt REAL;";
 
+/// v15: the pilot's landing flap handle index per airframe (approach assessment).
+pub(crate) const MIGRATION_V15: &str = "ALTER TABLE airframes ADD COLUMN landing_flaps INTEGER;";
+
 const AIRFRAME_COLS: &str = "a.registration, a.icao_type, a.title, a.airline, a.custom_name, a.notes, a.image_url,
-    a.image_thumb_url, a.image_credit, a.image_link, a.image_source, a.image_fetched_ms, a.created_ms, a.updated_ms, a.vapp_kt";
+    a.image_thumb_url, a.image_credit, a.image_link, a.image_source, a.image_fetched_ms, a.created_ms, a.updated_ms, a.vapp_kt, a.landing_flaps";
 
 const DEMO_F2: &str = "(?1 OR COALESCE(f2.provider, '') <> 'mock')";
 
@@ -194,6 +208,7 @@ fn row_to_airframe(r: &Row<'_>) -> rusqlite::Result<Airframe> {
         created_ms: r.get::<_, i64>(12)? as u64,
         updated_ms: r.get::<_, i64>(13)? as u64,
         vapp_kt: r.get(14)?,
+        landing_flaps: r.get(15)?,
     })
 }
 
@@ -320,14 +335,14 @@ impl Store {
         let rows = stmt.query_map(params![include_demo], |r| {
             Ok(AirframeRow {
                 airframe: row_to_airframe(r)?,
-                flights: r.get::<_, i64>(15)? as u64,
-                total_flights: r.get::<_, i64>(22)? as u64,
-                block_time_ms: r.get::<_, i64>(16)?.max(0) as u64,
-                flight_time_ms: r.get::<_, i64>(17)?.max(0) as u64,
-                distance_nm: r.get(18)?,
-                landings: r.get::<_, i64>(19)? as u64,
-                avg_landing_vs_fpm: r.get(20)?,
-                last_flown_ms: r.get::<_, Option<i64>>(21)?.map(|v| v as u64),
+                flights: r.get::<_, i64>(16)? as u64,
+                total_flights: r.get::<_, i64>(23)? as u64,
+                block_time_ms: r.get::<_, i64>(17)?.max(0) as u64,
+                flight_time_ms: r.get::<_, i64>(18)?.max(0) as u64,
+                distance_nm: r.get(19)?,
+                landings: r.get::<_, i64>(20)? as u64,
+                avg_landing_vs_fpm: r.get(21)?,
+                last_flown_ms: r.get::<_, Option<i64>>(22)?.map(|v| v as u64),
             })
         })?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
@@ -357,8 +372,14 @@ impl Store {
             Some(v) if !v.is_finite() || v <= 0.0 => Some(None),
             Some(v) if (VAPP_MIN_KT..=VAPP_MAX_KT).contains(&v) => Some(Some(v)),
             Some(v) => {
-                return Err(crate::StoreError::Invalid(format!("Vapp {v} kt liegt außerhalb von {VAPP_MIN_KT}–{VAPP_MAX_KT} kt")));
+                return Err(crate::Invalid::VappOutOfRange { value: v, min: VAPP_MIN_KT, max: VAPP_MAX_KT }.into());
             }
+        };
+        let flaps: Option<Option<i32>> = match edit.landing_flaps {
+            None => None,
+            Some(v) if v < 0 => Some(None),
+            Some(v) if v <= LANDING_FLAPS_MAX => Some(Some(v)),
+            Some(v) => return Err(crate::Invalid::FlapsOutOfRange { value: v, max: LANDING_FLAPS_MAX }.into()),
         };
         {
             let conn = self.conn();
@@ -396,6 +417,17 @@ impl Store {
                     )?;
                 }
             }
+            if let Some(v) = flaps {
+                let before: Option<i32> = conn.query_row("SELECT landing_flaps FROM airframes WHERE registration = ?1", params![reg], |r| r.get(0))?;
+                if before != v {
+                    conn.execute("UPDATE airframes SET landing_flaps = ?2, updated_ms = ?3 WHERE registration = ?1", params![reg, v, now_ms as i64])?;
+                    // same as the Vapp: the gate checks change
+                    conn.execute(
+                        "DELETE FROM approach_facts WHERE flight_id IN (SELECT id FROM flights WHERE airframe_reg = ?1)",
+                        params![reg],
+                    )?;
+                }
+            }
         }
         self.get_airframe(&reg)
     }
@@ -420,7 +452,7 @@ impl Store {
                 params![flight_id, now_ms as i64],
             )? > 0);
         };
-        let reg = normalize_registration(raw).ok_or_else(|| crate::StoreError::Invalid(format!("ungültige Registrierung: {raw}")))?;
+        let reg = normalize_registration(raw).ok_or_else(|| crate::StoreError::from(crate::Invalid::InvalidRegistration { registration: raw.to_string() }))?;
         let facts = conn.query_row(&format!("{FLIGHT_FACTS_SQL} WHERE id = ?1"), params![flight_id], row_to_facts).optional()?;
         let Some(facts) = facts else { return Ok(false) };
         // A new airframe takes its type from the flight; an existing one keeps its own.
@@ -462,6 +494,7 @@ impl Store {
                     custom_name = COALESCE(custom_name, (SELECT custom_name FROM airframes WHERE registration = ?1)),
                     notes = COALESCE(notes, (SELECT notes FROM airframes WHERE registration = ?1)),
                     vapp_kt = COALESCE(vapp_kt, (SELECT vapp_kt FROM airframes WHERE registration = ?1)),
+                    landing_flaps = COALESCE(landing_flaps, (SELECT landing_flaps FROM airframes WHERE registration = ?1)),
                     created_ms = MIN(created_ms, (SELECT created_ms FROM airframes WHERE registration = ?1)),
                     updated_ms = ?3
                  WHERE registration = ?2",
@@ -516,15 +549,21 @@ impl Store {
 
     /// The Vapp (KIAS) of the airframe a flight is booked onto, if the pilot entered one.
     pub fn flight_vapp_kt(&self, flight_id: &str) -> Result<Option<f64>> {
+        Ok(self.flight_airframe_refs(flight_id)?.0)
+    }
+
+    /// Vapp (KIAS) and landing flap index of the airframe a flight is booked onto, as far as
+    /// the pilot entered them.
+    pub fn flight_airframe_refs(&self, flight_id: &str) -> Result<(Option<f64>, Option<i32>)> {
         Ok(self
             .conn()
             .query_row(
-                "SELECT a.vapp_kt FROM flights f JOIN airframes a ON a.registration = f.airframe_reg WHERE f.id = ?1",
+                "SELECT a.vapp_kt, a.landing_flaps FROM flights f JOIN airframes a ON a.registration = f.airframe_reg WHERE f.id = ?1",
                 params![flight_id],
-                |r| r.get::<_, Option<f64>>(0),
+                |r| Ok((r.get::<_, Option<f64>>(0)?, r.get::<_, Option<i32>>(1)?)),
             )
             .optional()?
-            .flatten())
+            .unwrap_or_default())
     }
 
     /// Flights booked onto an airframe, newest first.

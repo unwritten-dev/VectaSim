@@ -3,7 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { save } from "@tauri-apps/plugin-dialog";
 import type { DeletedFlight, FlightCounts, FlightDetail as Detail, FlightRow, MergeCandidate, MergeReport, TrackSample } from "./types";
-import { fmt, fmtDuration } from "./format";
+import { fmt, fmtDuration } from "./i18n/number";
+import { useT } from "./i18n";
 import ErrorNotice from "./ErrorNotice";
 import FlightDetail from "./FlightDetail";
 import FlightStrip, { type StripFact } from "./FlightStrip";
@@ -68,6 +69,7 @@ const STRIP_HINT_ID = "logbook-strip-hint";
 
 /** Chip „Tags“ with a dropdown of the logbook's tags (multiple choice: at least one must match). */
 function TagFilter({ tags, selected, disabled, onChange }: { tags: Array<{ tag: string; count: number }>; selected: string[]; disabled?: boolean; onChange: (next: string[]) => void }) {
+  const tr = useT();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -99,14 +101,14 @@ function TagFilter({ tags, selected, disabled, onChange }: { tags: Array<{ tag: 
         aria-expanded={open}
         aria-pressed={active}
         onClick={() => setOpen((o) => !o)}
-        title={tags.length ? "Nach Tags filtern (mehrere: mindestens einer passt)" : "Noch keine Tags – im Flugdetail unter „Notizen & Tags“ vergeben"}
+        title={tags.length ? tr("logbook.tagFilter.titleSome") : tr("logbook.tagFilter.titleNone")}
       >
-        Tags{active ? ` (${selected.length})` : ""} ▾
+        {active ? tr("logbook.tagFilter.buttonCount", { count: selected.length }) : tr("logbook.tagFilter.button")} ▾
       </button>
       {open && (
-        <div className="export-menu-list tag-filter-list" role="menu" aria-label="Tags">
+        <div className="export-menu-list tag-filter-list" role="menu" aria-label={tr("logbook.tagFilter.menu")}>
           {tags.length === 0 ? (
-            <span className="detail tag-filter-empty">Noch keine Tags vergeben.</span>
+            <span className="detail tag-filter-empty">{tr("logbook.tagFilter.empty")}</span>
           ) : (
             tags.map((t) => (
               <button key={t.tag} role="menuitemcheckbox" aria-checked={isOn(t.tag)} onClick={() => toggle(t.tag)}>
@@ -122,7 +124,7 @@ function TagFilter({ tags, selected, disabled, onChange }: { tags: Array<{ tag: 
             <>
               <div className="export-menu-sep" role="separator" />
               <button role="menuitem" onClick={() => onChange([])}>
-                Tag-Filter aufheben
+                {tr("logbook.tagFilter.clear")}
               </button>
             </>
           )}
@@ -133,6 +135,7 @@ function TagFilter({ tags, selected, disabled, onChange }: { tags: Array<{ tag: 
 }
 
 export default function Logbook({ active = true, focus, onGoLive }: Props) {
+  const t = useT();
   const [flights, setFlights] = useState<FlightRow[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -354,7 +357,7 @@ export default function Logbook({ active = true, focus, onGoLive }: Props) {
           setSelectedId(id);
         } else {
           setSelectedId(neighbour(id));
-          showToast({ tone: "ok", title: "Flug wiederhergestellt", body: "Er steht wieder im Logbuch." });
+          showToast({ tone: "ok", title: t("logbook.list.toastRestored"), body: t("logbook.list.toastRestoredBody") });
         }
       })
       .catch((e) => setError(String(e)));
@@ -367,7 +370,7 @@ export default function Logbook({ active = true, focus, onGoLive }: Props) {
         .then(() => {
           setSelectedId(next);
           refresh();
-          showToast({ tone: "ok", title: "Flug endgültig gelöscht" });
+          showToast({ tone: "ok", title: t("logbook.list.toastDeletedForGood") });
         })
         .catch((e) => setError(String(e)));
       return;
@@ -379,10 +382,10 @@ export default function Logbook({ active = true, focus, onGoLive }: Props) {
         showToast({
           id: `trash-${id}`,
           tone: "ok",
-          title: "Flug im Papierkorb",
-          body: `${TRASH_DAYS} Tage wiederherstellbar (Logbuch → Papierkorb).`,
+          title: t("logbook.list.toastTrashed"),
+          body: t("logbook.list.toastTrashedBody", { days: TRASH_DAYS }),
           durationMs: 10_000,
-          actions: [{ label: "Rückgängig", onClick: () => void restore(id, true) }],
+          actions: [{ label: t("logbook.list.undo"), onClick: () => void restore(id, true) }],
         });
       })
       .catch((e) => setError(String(e)));
@@ -407,14 +410,14 @@ export default function Logbook({ active = true, focus, onGoLive }: Props) {
         refresh();
         showToast({
           tone: "ok",
-          title: "Flüge zusammengeführt",
-          body: `Ein Flug mit Lücke ${fmtDuration(c.gapMs, { seconds: false })}. Der zweite Teil liegt im Papierkorb (${TRASH_DAYS} Tage).`,
+          title: t("logbook.list.toastMerged"),
+          body: t("logbook.list.toastMergedBody", { gap: fmtDuration(c.gapMs, { seconds: false }), days: TRASH_DAYS }),
           durationMs: 8000,
         });
       })
       .catch((e) => {
         const m = userMessage(e, "logbook");
-        showToast({ tone: "warn", title: "Zusammenführen nicht möglich", body: m.detail || m.hint, durationMs: 10_000 });
+        showToast({ tone: "warn", title: t("logbook.list.toastMergeFailed"), body: m.detail || m.hint, durationMs: 10_000 });
       })
       .finally(() => setMerging(false));
   };
@@ -427,10 +430,10 @@ export default function Logbook({ active = true, focus, onGoLive }: Props) {
   const exportLogbook = async () => {
     try {
       const date = new Date().toISOString().slice(0, 10);
-      const path = await save({ defaultPath: `vectasim-logbuch_${date}.csv`, filters: [{ name: "CSV", extensions: ["csv"] }] });
+      const path = await save({ defaultPath: t("logbook.list.exportFileName", { date }), filters: [{ name: "CSV", extensions: ["csv"] }] });
       if (!path) return;
       const n = await invoke<number>("export_logbook_csv", { path });
-      showToast({ tone: "ok", title: `Logbuch exportiert · ${fmt(n)} Flüge`, body: path });
+      showToast({ tone: "ok", title: t("logbook.list.toastExported", { count: n }), body: path });
     } catch (e) {
       const m = userMessage(e, "export");
       showToast({ tone: "err", title: m.title, body: m.hint });
@@ -450,11 +453,11 @@ export default function Logbook({ active = true, focus, onGoLive }: Props) {
         {error && <ErrorNotice error={error} context="logbook" onRetry={refresh} onDismiss={() => setError(null)} />}
         <EmptyState
           icon={BOOK_ICON}
-          title="Noch keine Flüge"
-          text="Dein erster Flug erscheint hier automatisch, sobald du im Simulator losrollst – mit Track, Profil und Landedaten."
+          title={t("logbook.list.emptyTitle")}
+          text={t("logbook.list.emptyText")}
           actions={onGoLive && (
             <button className="btn-primary" onClick={onGoLive}>
-              Zur Karte
+              {t("logbook.list.goLive")}
             </button>
           )}
         />
@@ -465,23 +468,23 @@ export default function Logbook({ active = true, focus, onGoLive }: Props) {
   return (
     <section className="logbook-view" hidden={!active}>
       <span id={STRIP_HINT_ID} className="sr-only">
-        Eingabetaste öffnet die Landeauswertung, Entf legt den Flug in den Papierkorb.
+        {t("logbook.list.stripHint")}
       </span>
       {/* first load failed: the list itself offers "Erneut versuchen", the notice keeps the details */}
       {error && <ErrorNotice error={error} context="logbook" onRetry={loaded ? refresh : undefined} onDismiss={loaded ? () => setError(null) : undefined} />}
 
       <div className="totals-strip">
-        <Stat size="sm" label="Flüge" value={totals ? fmt(totals.flights) : "–"} sub={totals ? `${fmt(totals.completed)} abgeschlossen` : undefined} />
-        <Stat size="sm" label="Blockzeit" value={fmtDuration(totals?.blockTimeMs, { seconds: false })} />
-        <Stat size="sm" label="Luftzeit" title="Abheben bis Aufsetzen – für das Flugbuch zählt die Blockzeit" value={fmtDuration(totals?.flightTimeMs, { seconds: false })} />
-        <Stat size="sm" label="Distanz" value={fmt(totals?.distanceNm, 0)} unit="nm" />
-        <Stat size="sm" label="Landungen" value={totals ? fmt(totals.landings) : "–"} />
+        <Stat size="sm" label={t("logbook.list.statFlights")} value={totals ? fmt(totals.flights) : "–"} sub={totals ? t("logbook.list.statCompleted", { count: totals.completed }) : undefined} />
+        <Stat size="sm" label={t("logbook.list.statBlockTime")} value={fmtDuration(totals?.blockTimeMs, { seconds: false })} />
+        <Stat size="sm" label={t("logbook.list.statAirTime")} title={t("logbook.list.statAirTimeTitle")} value={fmtDuration(totals?.flightTimeMs, { seconds: false })} />
+        <Stat size="sm" label={t("logbook.list.statDistance")} value={fmt(totals?.distanceNm, 0)} unit="nm" />
+        <Stat size="sm" label={t("logbook.list.statLandings")} value={totals ? fmt(totals.landings) : "–"} />
         <Stat
           size="sm"
-          label="Ø Landung"
+          label={t("logbook.list.statAvgLanding")}
           value={fmt(totals?.avgLandingVsFpm, 0)}
           unit="fpm"
-          sub={totals?.landings ? `aus ${totals.landings} Landung${totals.landings === 1 ? "" : "en"}` : undefined}
+          sub={totals?.landings ? t("logbook.list.statAvgLandingSub", { count: totals.landings }) : undefined}
         />
       </div>
 
@@ -490,9 +493,9 @@ export default function Logbook({ active = true, focus, onGoLive }: Props) {
           ref={searchRef}
           type="search"
           className="logbook-search"
-          placeholder="Suchen (Strg+F)"
-          title="Route, Flugzeug, Registrierung, Rufzeichen, Datum, Notizen oder Tags (Strg+F)"
-          aria-label="Logbuch durchsuchen: Route, Flugzeug, Registrierung, Rufzeichen, Datum, Notizen oder Tags"
+          placeholder={t("logbook.list.searchPlaceholder")}
+          title={t("logbook.list.searchTitle")}
+          aria-label={t("logbook.list.searchLabel")}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
@@ -504,7 +507,7 @@ export default function Logbook({ active = true, focus, onGoLive }: Props) {
             }
           }}
         />
-        <div className="chips" role="group" aria-label="Filter">
+        <div className="chips" role="group" aria-label={t("logbook.list.filterGroup")}>
           {QUICK_FILTERS.map((q) => (
             <button
               key={q.id}
@@ -515,7 +518,7 @@ export default function Logbook({ active = true, focus, onGoLive }: Props) {
                 setQuick(q.id);
               }}
             >
-              {q.label}
+              {t(q.label)}
             </button>
           ))}
           <TagFilter
@@ -532,17 +535,17 @@ export default function Logbook({ active = true, focus, onGoLive }: Props) {
             className={`chip${showDemo ? " active" : ""}`}
             aria-pressed={showDemo}
             onClick={() => setPref("showDemo", !showDemo).catch((e) => setError(String(e)))}
-            title="Demo-Flüge in Liste, Summen, Flotte und Aktivitäten einbeziehen (Einstellungen → Anzeige)"
+            title={t("logbook.list.demoTitle")}
           >
-            Demo-Flüge{demoCount ? ` (${demoCount})` : ""}
+            {demoCount ? t("logbook.list.demoCount", { count: demoCount }) : t("logbook.list.demo")}
           </button>
           <button
             className={`chip chip-trash${trash ? " active" : ""}`}
             aria-pressed={trash}
             onClick={toggleTrash}
-            title={`Gelöschte Flüge – ${TRASH_DAYS} Tage wiederherstellbar, danach endgültig weg`}
+            title={t("logbook.list.trashTitle", { days: TRASH_DAYS })}
           >
-            Papierkorb{deleted.length ? ` (${deleted.length})` : ""}
+            {deleted.length ? t("logbook.list.trashCount", { count: deleted.length }) : t("logbook.list.trash")}
           </button>
         </div>
         <div className="spacer" />
@@ -550,15 +553,15 @@ export default function Logbook({ active = true, focus, onGoLive }: Props) {
           className="btn-icon-text logbook-export"
           onClick={exportLogbook}
           disabled={flights.length === 0}
-          aria-label="Logbuch exportieren"
-          title="Das ganze Logbuch als CSV-Datei speichern (eine Zeile pro Flug, z. B. für Excel)"
+          aria-label={t("logbook.list.export")}
+          title={t("logbook.list.exportTitle")}
         >
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M12 4v11M7 10l5 5 5-5M5 20h14" />
           </svg>
-          <span className="label-long">Logbuch exportieren</span>
+          <span className="label-long">{t("logbook.list.export")}</span>
           <span className="label-short" aria-hidden="true">
-            Export
+            {t("logbook.list.exportShort")}
           </span>
         </button>
       </div>
@@ -568,22 +571,22 @@ export default function Logbook({ active = true, focus, onGoLive }: Props) {
           <div className="master-head detail num" aria-live="polite">
             {loaded && trash ? (
               <>
-                Papierkorb · {fmt(rows.length)} von {fmt(deleted.length)} Flügen · nach {TRASH_DAYS} Tagen endgültig gelöscht
+                {t("logbook.list.headTrash", { shown: rows.length, total: deleted.length, days: TRASH_DAYS })}
               </>
             ) : loaded ? (
               <>
-                {fmt(rows.length)} von {fmt(flights.length)} Flügen
-                {rows.length > LIST_LIMIT && ` · zeigt die neuesten ${LIST_LIMIT}, Suche grenzt ein`}
-                {!showDemo && demoCount > 0 && ` · ${demoCount} Demo ausgeblendet`}
+                {t("logbook.list.headCount", { shown: rows.length, total: flights.length })}
+                {rows.length > LIST_LIMIT && ` · ${t("logbook.list.headLimited", { limit: LIST_LIMIT })}`}
+                {!showDemo && demoCount > 0 && ` · ${t("logbook.list.headDemoHidden", { count: demoCount })}`}
               </>
             ) : error ? (
-              "Logbuch nicht geladen"
+              t("logbook.list.headError")
             ) : (
-              "Logbuch wird geladen …"
+              t("logbook.list.headLoading")
             )}
           </div>
           {!trash && visibleMerges.length > 0 && (
-            <div className="merge-hints" role="group" aria-label="Unterbrochene Flüge zusammenführen">
+            <div className="merge-hints" role="group" aria-label={t("logbook.list.mergeGroup")}>
               {visibleMerges.slice(0, MERGE_HINTS_MAX).map((c) => {
                 const key = mergeKey(c);
                 const h = mergeHint(c);
@@ -597,10 +600,10 @@ export default function Logbook({ active = true, focus, onGoLive }: Props) {
                       {confirm ? (
                         <>
                           <button className="btn-sm btn-primary" disabled={merging} onClick={() => merge(c)}>
-                            {merging ? "Wird zusammengeführt …" : "Ja, zusammenführen"}
+                            {merging ? t("logbook.list.merging") : t("logbook.list.mergeConfirm")}
                           </button>
                           <button className="btn-sm" disabled={merging} onClick={() => setMergeConfirm(null)}>
-                            Abbrechen
+                            {t("logbook.list.cancel")}
                           </button>
                         </>
                       ) : (
@@ -608,15 +611,15 @@ export default function Logbook({ active = true, focus, onGoLive }: Props) {
                           <button
                             className="btn-sm"
                             onClick={() => setMergeConfirm(key)}
-                            title="Beide Teile werden ein Flug (Zeiten, Track, Landung); der zweite Teil kommt in den Papierkorb"
+                            title={t("logbook.list.mergeTitle")}
                           >
-                            Zusammenführen
+                            {t("logbook.list.merge")}
                           </button>
                           <button className="link-btn" onClick={() => select(c.first.id, true)}>
-                            Anzeigen
+                            {t("logbook.list.mergeShow")}
                           </button>
-                          <button className="link-btn" onClick={() => ignoreMerge(c)} title="Diesen Hinweis nicht mehr zeigen">
-                            Ignorieren
+                          <button className="link-btn" onClick={() => ignoreMerge(c)} title={t("logbook.list.mergeIgnoreTitle")}>
+                            {t("logbook.list.mergeIgnore")}
                           </button>
                         </>
                       )}
@@ -628,7 +631,7 @@ export default function Logbook({ active = true, focus, onGoLive }: Props) {
           )}
           {selectedHidden && !trash && (
             <div className="master-hint detail">
-              Der ausgewählte Flug ist durch den Filter ausgeblendet.{" "}
+              {t("logbook.list.hiddenSelected")}{" "}
               <button
                 className="link-btn"
                 onClick={() => {
@@ -636,37 +639,37 @@ export default function Logbook({ active = true, focus, onGoLive }: Props) {
                   if (selectedRow && isDemoRow(selectedRow) && !showDemo) setPref("showDemo", true).catch((e) => setError(String(e)));
                 }}
               >
-                Einblenden
+                {t("logbook.list.showHidden")}
               </button>
             </div>
           )}
           {!loaded && error ? (
             <EmptyState
               compact
-              title="Logbuch konnte nicht geladen werden"
-              text="Deine Flüge sind nicht verloren – das Lesen ist gerade fehlgeschlagen."
+              title={t("logbook.list.loadFailedTitle")}
+              text={t("logbook.list.loadFailedText")}
               actions={
                 <button className="btn-primary" onClick={refresh}>
-                  Erneut versuchen
+                  {t("logbook.list.retry")}
                 </button>
               }
             />
           ) : loaded && trash && rows.length === 0 ? (
             <EmptyState
               compact
-              title={deleted.length ? "Kein gelöschter Flug passt zur Suche" : "Der Papierkorb ist leer"}
-              text={`Gelöschte Flüge bleiben ${TRASH_DAYS} Tage hier und lassen sich wiederherstellen.`}
-              actions={<button onClick={toggleTrash}>Zum Logbuch</button>}
+              title={deleted.length ? t("logbook.list.trashNoMatch") : t("logbook.list.trashEmpty")}
+              text={t("logbook.list.trashText", { days: TRASH_DAYS })}
+              actions={<button onClick={toggleTrash}>{t("logbook.list.backToLogbook")}</button>}
             />
           ) : loaded && rows.length === 0 ? (
             <EmptyState
               compact
-              title="Keine Flüge passen zum Filter"
-              text={!showDemo && demoCount > 0 && !filtered ? `${demoCount} Demo-Flüge sind ausgeblendet.` : "Ändere die Suche oder setze die Filter zurück."}
+              title={t("logbook.list.noMatchTitle")}
+              text={!showDemo && demoCount > 0 && !filtered ? t("logbook.list.noMatchDemo", { count: demoCount }) : t("logbook.list.noMatchText")}
               actions={
                 <>
-                  {filtered && <button onClick={resetFilters}>Filter zurücksetzen</button>}
-                  {!showDemo && demoCount > 0 && <button onClick={() => setPref("showDemo", true).catch((e) => setError(String(e)))}>Demo-Flüge zeigen</button>}
+                  {filtered && <button onClick={resetFilters}>{t("logbook.list.resetFilters")}</button>}
+                  {!showDemo && demoCount > 0 && <button onClick={() => setPref("showDemo", true).catch((e) => setError(String(e)))}>{t("logbook.list.showDemo")}</button>}
                 </>
               }
             />
@@ -675,7 +678,7 @@ export default function Logbook({ active = true, focus, onGoLive }: Props) {
               ref={listRef}
               className="flight-list strip-list"
               role="listbox"
-              aria-label="Flüge"
+              aria-label={t("logbook.list.listLabel")}
               onKeyDown={onListKey}
               onScroll={(e) => active && (scrollMemo.current.list = e.currentTarget.scrollTop)}
             >
@@ -713,9 +716,9 @@ export default function Logbook({ active = true, focus, onGoLive }: Props) {
             />
           ) : selectedId ? (
             // after an error the notice above says it; no endless "wird geladen"
-            !detailError && <div className="detail detail-loading">Flug wird geladen …</div>
+            !detailError && <div className="detail detail-loading">{t("logbook.list.detailLoading")}</div>
           ) : (
-            <EmptyState compact title="Kein Flug ausgewählt" text="Wähle links einen Flug – mit ↑/↓ blätterst du durch die Liste." />
+            <EmptyState compact title={t("logbook.list.noSelectionTitle")} text={t("logbook.list.noSelectionText")} />
           )}
         </div>
       </div>

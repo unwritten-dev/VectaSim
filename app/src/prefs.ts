@@ -7,6 +7,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { isWeightUnit, maskTitle, privacy, setPrivacyMode, setTimeLocal, setWeightUnit, type KnownSecrets, type PrivacyKind, type WeightUnit } from "./format";
 import { showToast } from "./ui/Toast";
 import { DEFAULT_THEME, applyTheme, isThemeId, type ThemeId } from "./themes";
+import { DEFAULT_LANGUAGE_SETTING, getLanguageSetting, isLanguageSetting, setLanguageSetting, type LanguageSetting } from "./i18n/lang";
 
 export interface Prefs {
   /** `time_local` = "1": clock times in local time instead of UTC ("z"). */
@@ -41,6 +42,8 @@ export interface Prefs {
   notifyUpdate: boolean;
   /** `tray_minimize` = "1": tray icon, minimising hides the window into the tray (default off; switch with `set_tray_enabled`). */
   trayMinimize: boolean;
+  /** `language`: UI language "de" | "en" | "system" (default: follow Windows, else de; i18n/lang.ts). */
+  language: LanguageSetting;
 }
 
 const KEYS: Record<keyof Prefs, string> = {
@@ -60,6 +63,7 @@ const KEYS: Record<keyof Prefs, string> = {
   notifyConnection: "notify_connection",
   notifyUpdate: "notify_update",
   trayMinimize: "tray_minimize",
+  language: "language",
 };
 /** Last theme also in localStorage, so the first paint after a restart is already right. */
 const THEME_CACHE_KEY = "vectasim.theme";
@@ -74,7 +78,8 @@ function cachedTheme(): ThemeId {
 }
 
 let prefs: Prefs = { timeLocal: false, showDemo: false, airframePhotos: true, theme: DEFAULT_THEME, simbriefAuto: true, weightUnit: "kg", privacyMode: false, cardAutosave: false, cardHideReg: false,
-  discordPresence: false, notifications: true, notifyLanding: true, notifySaved: true, notifyConnection: true, notifyUpdate: true, trayMinimize: false };
+  discordPresence: false, notifications: true, notifyLanding: true, notifySaved: true, notifyConnection: true, notifyUpdate: true, trayMinimize: false,
+  language: getLanguageSetting() };
 let loaded = false;
 const listeners = new Set<() => void>();
 
@@ -84,6 +89,7 @@ function publish(next: Prefs) {
   setTimeLocal(next.timeLocal);
   setWeightUnit(next.weightUnit);
   setPrivacyMode(next.privacyMode);
+  if (next.language !== getLanguageSetting()) setLanguageSetting(next.language);
   if (themeChanged) {
     applyTheme(next.theme);
     try {
@@ -111,6 +117,7 @@ export function parsePrefs(rows: [string, string][]): Prefs {
   const get = (k: string) => value(k) === "1";
   const theme = value(KEYS.theme);
   const weight = value(KEYS.weightUnit);
+  const language = value(KEYS.language);
   return {
     timeLocal: get(KEYS.timeLocal),
     showDemo: get(KEYS.showDemo),
@@ -128,6 +135,7 @@ export function parsePrefs(rows: [string, string][]): Prefs {
     notifyConnection: value(KEYS.notifyConnection) !== "0",
     notifyUpdate: value(KEYS.notifyUpdate) !== "0",
     trayMinimize: get(KEYS.trayMinimize),
+    language: isLanguageSetting(language) ? language : DEFAULT_LANGUAGE_SETTING,
   };
 }
 

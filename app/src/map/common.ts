@@ -9,6 +9,8 @@ import { lerpHeading, lowerBoundT, sampleAt, trackBearingAt } from "../landing/r
 
 /** OpenFreeMap: free vector tiles, no API key. OSM attribution is mandatory and left enabled. */
 export { BASEMAP_URL as BASEMAP_STYLE } from "./basemap";
+/** Globe / Mercator choice shared by every map (map/projection.ts). */
+export { applyProjection, loadGlobe, projectionFor, saveGlobe, useGlobe, withProjection } from "./projection";
 
 export interface TrackPoint {
   lon: number;

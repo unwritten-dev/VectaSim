@@ -191,6 +191,15 @@ button.country-flight .detail {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  /* overflow-y: auto alone makes x scroll too: long names ("Amerikanische Überseeinseln")
+     widened the table past the column */
+  overflow-x: hidden;
+}
+/* the name column takes the rest of the width and cuts long names with an ellipsis
+   (the full name stays in the button's text, the other language in its tooltip) */
+.country-list td:nth-child(2) {
+  width: 100%;
+  max-width: 0;
 }
 .country-list th.country-mark-col,
 .country-list td.country-mark {
@@ -208,6 +217,10 @@ button.country-flight .detail {
 }
 button.country-name {
   padding: 2px 4px;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   text-align: left;
   font-weight: var(--fw-text);
   color: var(--text);

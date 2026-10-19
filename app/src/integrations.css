@@ -28,3 +28,20 @@
 .integrations .setting-row input {
   width: 220px;
 }
+.integrations .setting-expert {
+  display: block;
+}
+.integrations .setting-expert > summary {
+  cursor: pointer;
+  list-style: none;
+}
+.integrations .setting-expert > summary::before {
+  content: "› ";
+}
+.integrations .setting-expert[open] > summary::before {
+  content: "⌄ ";
+}
+.integrations .setting-expert[open] > label {
+  display: inline-block;
+  margin: var(--sp-2) var(--sp-2) 0 0;
+}

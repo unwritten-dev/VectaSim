@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useThemeId } from "./themes";
 import type { PhaseEventRow, TouchdownReport, TrackSample } from "./types";
-import { PHASE_LABEL, fmt, fmtClock, fmtNum, fmtSigned } from "./format";
+import { PHASE_LABEL } from "./format";
+import { fmt, fmtClock, fmtNum, fmtSigned } from "./i18n/number";
+import { useT } from "./i18n";
 import { PROFILE } from "./theme";
 import { minMaxBucketIndices } from "./map/downsample";
 import { sampleAt, useReplayCursor, useReplayStore } from "./landing/replayStore";
@@ -57,6 +59,7 @@ export default function ProfileChart({ samples, phases, touchdowns }: Props) {
   const [wrap, setWrap] = useState<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(800);
   const store = useReplayStore();
+  const t = useT();
 
   useEffect(() => {
     if (!wrap) return;
@@ -114,7 +117,7 @@ export default function ProfileChart({ samples, phases, touchdowns }: Props) {
   if (!model) {
     return (
       <div ref={setWrap} className="profile-chart empty detail">
-        Kein Profil – zu wenige Trackpunkte.
+        {t("logbook.profile.empty")}
       </div>
     );
   }
@@ -161,13 +164,13 @@ export default function ProfileChart({ samples, phases, touchdowns }: Props) {
   return (
     <div ref={setWrap} className="profile-chart">
       <div className="profile-legend">
-        <span className="tile-label">Profil</span>
-        <span style={{ color: PROFILE.alt }}>■ Höhe MSL (ft)</span>
-        <span style={{ color: PROFILE.gs }}>━ Groundspeed (kt)</span>
-        <span style={{ color: PROFILE.vs }}>━ V/S (fpm)</span>
-        {tdMarks.length > 0 && <span style={{ color: PROFILE.touchdown }}>▼ Aufsetzen</span>}
+        <span className="tile-label">{t("logbook.profile.title")}</span>
+        <span style={{ color: PROFILE.alt }}>■ {t("logbook.profile.alt")}</span>
+        <span style={{ color: PROFILE.gs }}>━ {t("logbook.profile.gs")}</span>
+        <span style={{ color: PROFILE.vs }}>━ {t("logbook.profile.vs")}</span>
+        {tdMarks.length > 0 && <span style={{ color: PROFILE.touchdown }}>▼ {t("logbook.profile.touchdown")}</span>}
       </div>
-      <svg width={width} height={HEIGHT} role="img" aria-label="Höhen- und Geschwindigkeitsprofil">
+      <svg width={width} height={HEIGHT} role="img" aria-label={t("logbook.profile.ariaLabel")}>
         <defs>
           <linearGradient id="alt-fill" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor={PROFILE.alt} stopOpacity={0.45} />
@@ -279,6 +282,7 @@ interface CursorProps {
 /** Crosshair with the values at the cursor time (own component: a cursor move re-renders only this). */
 function ProfileCursor({ samples, phases, x, yAlt, yGs, yVs, plotW, plotH }: CursorProps) {
   const tMs = useReplayCursor();
+  const t = useT();
   const s = sampleAt(samples, tMs);
   if (!s) return null;
   const phase = [...phases].reverse().find((p) => p.timestampMs <= s.tMs);
@@ -302,7 +306,7 @@ function ProfileCursor({ samples, phases, x, yAlt, yGs, yVs, plotW, plotH }: Cur
         )}
         <g transform={`translate(0,${phase ? 14 : 0})`}>
           <text x={8} y={32} className="pc-tip-text" fill={PROFILE.alt}>
-            Höhe {fmt(s.altitudeMslFt, 0, "ft")}
+            {t("logbook.profile.tipAlt", { alt: fmt(s.altitudeMslFt, 0, "ft") })}
           </text>
           <text x={8} y={46} className="pc-tip-text" fill={PROFILE.gs}>
             GS {fmt(s.groundSpeedKt, 0, "kt")}

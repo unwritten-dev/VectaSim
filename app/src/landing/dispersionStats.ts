@@ -2,7 +2,8 @@
 // Coordinates are runway metres: x along the runway from the threshold, y from the
 // centreline, positive = right in landing direction (as in vectasim_core::landing).
 
-import { fmt, fmtNum } from "../format";
+import { t } from "../i18n";
+import { fmt, fmtNum } from "../i18n/number";
 import { sideLabel } from "./geometry";
 import type { RunwayFact } from "./types";
 
@@ -118,7 +119,7 @@ export function distanceText(f: Pick<RunwayFact, "touchdownDistanceM" | "touchdo
 /** Lateral offset as text; a derived runway has none. */
 export function lateralText(f: Pick<RunwayFact, "centerlineOffsetM">): string {
   const y = lateralOf(f);
-  return y == null ? "Querablage nicht messbar" : sideLabel(y);
+  return y == null ? t("dispersion.lateralUnmeasurable") : sideLabel(y);
 }
 
 /** Points for the 1σ ellipse: only landings with a measurable lateral offset. */
@@ -147,7 +148,7 @@ export function dispersionStats(facts: RunwayFact[]): DispersionStats {
 
 /** Filter key of the aircraft: ICAO type, else the title, else "Unbekannt". */
 export function aircraftKey(f: Pick<RunwayFact, "aircraftIcaoType" | "aircraftTitle">): string {
-  return f.aircraftIcaoType?.trim() || f.aircraftTitle?.trim() || "Unbekannt";
+  return f.aircraftIcaoType?.trim() || f.aircraftTitle?.trim() || t("landingHistory.unknownType");
 }
 
 export interface FilterOption {

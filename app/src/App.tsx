@@ -12,24 +12,29 @@ import Fleet from "./Fleet";
 import { onNavigate } from "./airframes/navigation";
 import Logbook from "./Logbook";
 import Settings from "./Settings";
-import LiveView, { type LogLine } from "./live/LiveView";
+import LiveView from "./live/LiveView";
+import { clearEvents, pushEvent, syncEventProvider } from "./live/eventLog";
 import { useStoredState } from "./live/hooks";
 import { Tabs } from "./ui/Tabs";
 import Landings from "./Landings";
+import YearReview from "./review/YearReview";
 import { matchRunway } from "./live/progress";
 import LandingDebrief from "./landing/LandingDebrief";
 import { isDebriefOpen, openDebrief, useDebrief } from "./landing/debriefStore";
 import { G_HARD } from "./landing/facts";
 import { autoSaveCard, saveCardPng } from "./landing/exportCard";
 import type { LandingDebriefData } from "./landing/types";
-import { PHASE_LABEL, fmt, fmtDuration, privacy } from "./format";
+import { PHASE_LABEL, privacy } from "./format";
+import { fmt, fmtDuration } from "./i18n/number";
+import { t, t as tGlobal, useT, type TKey } from "./i18n";
 import { getPrefs, initZoom, loadPrefs, setZoom, stepZoom } from "./prefs";
 import { userMessage } from "./errors";
-import { DEMO_LABEL, isDemo, recordingStatus } from "./status";
+import { isDemo, recordingStatus } from "./status";
 import type { AfterFlight } from "./live/AfterFlightCard";
 import StatusButton, { type LastError } from "./ui/StatusButton";
 import { getLiveState, resetLive, setFlight, setTelemetry, startTelemetryListeners, useRecFlight, useStats } from "./telemetryStore";
 import TitleBar from "./ui/TitleBar";
+import { rich } from "./ui/richText";
 import { ToastAnnouncer, ToastViewport, dismissToast, focusNewestToast, hasToast, showToast, type ToastOptions } from "./ui/Toast";
 import { checkForUpdate, setRecordingCheck } from "./updater";
 import { RESUME_TOAST_MS, resumeCandidate } from "./resume";
@@ -51,23 +56,24 @@ import type {
 } from "./types";
 
 type View = "live" | "logbook" | "countries" | "settings";
-/** Sections of the logbook: flights, aircraft (fleet), airports, landings. */
-type LogbookTab = "flights" | "aircraft" | "airports" | "landings";
-const LOGBOOK_TABS: Array<{ id: LogbookTab; label: string }> = [
-  { id: "flights", label: "Flüge" },
-  { id: "aircraft", label: "Flugzeuge" },
-  { id: "airports", label: "Flughäfen" },
-  { id: "landings", label: "Landungen" },
+/** Sections of the logbook: flights, aircraft (fleet), airports, landings, year in review. */
+type LogbookTab = "flights" | "aircraft" | "airports" | "landings" | "year";
+const LOGBOOK_TABS: Array<{ id: LogbookTab; label: TKey }> = [
+  { id: "flights", label: "shell.logbookTab.flights" },
+  { id: "aircraft", label: "shell.logbookTab.aircraft" },
+  { id: "airports", label: "shell.logbookTab.airports" },
+  { id: "landings", label: "shell.logbookTab.landings" },
+  { id: "year", label: "shell.logbookTab.year" },
 ];
 const LOGBOOK_TAB_KEY = "vectasim.logbookTab";
 const isLogbookTab = (v: string): v is LogbookTab => LOGBOOK_TABS.some((t) => t.id === v);
 
 /** Icon sidebar: map, logbook (with its sections), countries, settings. */
-const NAV: Array<{ view: View; label: string; key: string; icon: string }> = [
-  { view: "live", label: "Karte", key: "1", icon: "M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2zM9 4v14M15 6v14" },
-  { view: "logbook", label: "Logbuch", key: "2", icon: "M5 3h11l3 3v15H5zM8 9h8M8 13h8M8 17h5" },
-  { view: "countries", label: "Länder", key: "3", icon: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM3.5 9h17M3.5 15h17M12 3c-2.4 2.5-3.6 5.5-3.6 9s1.2 6.5 3.6 9M12 3c2.4 2.5 3.6 5.5 3.6 9s-1.2 6.5-3.6 9" },
-  { view: "settings", label: "Einstellungen", key: "4", icon: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm8.5 4a8.5 8.5 0 0 0-.1-1.2l2.1-1.6-2-3.5-2.5 1a8.7 8.7 0 0 0-2.1-1.2L15.5 2h-7l-.4 2.5a8.7 8.7 0 0 0-2.1 1.2l-2.5-1-2 3.5 2.1 1.6a8.5 8.5 0 0 0 0 2.4l-2.1 1.6 2 3.5 2.5-1a8.7 8.7 0 0 0 2.1 1.2L8.5 22h7l.4-2.5a8.7 8.7 0 0 0 2.1-1.2l2.5 1 2-3.5-2.1-1.6c.1-.4.1-.8.1-1.2z" },
+const NAV: Array<{ view: View; label: TKey; key: string; icon: string }> = [
+  { view: "live", label: "nav.map", key: "1", icon: "M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2zM9 4v14M15 6v14" },
+  { view: "logbook", label: "nav.logbook", key: "2", icon: "M5 3h11l3 3v15H5zM8 9h8M8 13h8M8 17h5" },
+  { view: "countries", label: "nav.countries", key: "3", icon: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM3.5 9h17M3.5 15h17M12 3c-2.4 2.5-3.6 5.5-3.6 9s1.2 6.5 3.6 9M12 3c2.4 2.5 3.6 5.5 3.6 9s-1.2 6.5-3.6 9" },
+  { view: "settings", label: "nav.settings", key: "4", icon: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm8.5 4a8.5 8.5 0 0 0-.1-1.2l2.1-1.6-2-3.5-2.5 1a8.7 8.7 0 0 0-2.1-1.2L15.5 2h-7l-.4 2.5a8.7 8.7 0 0 0-2.1 1.2l-2.5-1-2 3.5 2.1 1.6a8.5 8.5 0 0 0 0 2.4l-2.1 1.6 2 3.5 2.5-1a8.7 8.7 0 0 0 2.1 1.2L8.5 22h7l.4-2.5a8.7 8.7 0 0 0 2.1-1.2l2.5 1 2-3.5-2.1-1.6c.1-.4.1-.8.1-1.2z" },
 ];
 
 /** How long the landing notice stays on the map once the window has focus. */
@@ -127,18 +133,18 @@ function offerResume(c: ResumeCandidate, demo: boolean) {
     durationMs: RESUME_TOAST_MS,
     actions: [
       {
-        label: "Fortsetzen",
+        label: t("shell.resume.continue"),
         onClick: () => {
           answer();
           invoke("resume_flight", { flightId: c.flightId })
-            .then(() => showToast({ id: p.id, tone: "ok", title: "Flug wird fortgesetzt", body: "Die Aufzeichnung hängt an den unterbrochenen Flug an." }))
+            .then(() => showToast({ id: p.id, tone: "ok", title: t("shell.resume.resumed"), body: t("shell.resume.resumedBody") }))
             .catch((e) => {
               const m = userMessage(e, "logbook");
-              showToast({ id: p.id, tone: "warn", title: "Fortsetzen nicht möglich", body: m.detail || m.hint, durationMs: 8000 });
+              showToast({ id: p.id, tone: "warn", title: t("shell.resume.failed"), body: m.detail || m.hint, durationMs: 8000 });
             });
         },
       },
-      { label: "Neuer Flug", onClick: answer },
+      { label: t("shell.resume.newFlight"), onClick: answer },
     ],
   });
 }
@@ -151,15 +157,15 @@ function baseName(path: string): string {
 function describeSimEvent(e: SimEvent): string {
   switch (e.kind) {
     case "paused":
-      return e.paused ? "Simulator pausiert" : "Simulator fortgesetzt";
+      return e.paused ? t("shell.simEvent.paused") : t("shell.simEvent.resumed");
     case "simRunning":
-      return e.running ? "Simulation läuft" : "Simulation gestoppt (Menü)";
+      return e.running ? t("shell.simEvent.running") : t("shell.simEvent.stopped");
     case "crashed":
-      return "Absturz erkannt";
+      return t("shell.simEvent.crashed");
     case "aircraftLoaded":
-      return `Flugzeug geladen: ${baseName(e.path)}`;
+      return t("shell.simEvent.aircraftLoaded", { name: baseName(e.path) });
     case "flightLoaded":
-      return `Flug geladen: ${baseName(e.path)}`;
+      return t("shell.simEvent.flightLoaded", { name: baseName(e.path) });
   }
 }
 
@@ -167,7 +173,7 @@ type TouchdownOutcomeKind = Extract<FlightEvent, { kind: "touchdownOutcome" }>["
 
 /** Headline once the outcome is decided; `unknown` (stream broke off) leaves the toast as it is. */
 function outcomeHeadline(o: TouchdownOutcomeKind): string | null {
-  return o === "fullStop" ? "Gelandet" : o === "touchAndGo" ? "Touch-and-go" : null;
+  return o === "fullStop" ? t("shell.landing.landed") : o === "touchAndGo" ? t("shell.landing.touchAndGo") : null;
 }
 
 /**
@@ -193,15 +199,21 @@ function onTouchdownOutcome(touchdownMs: number, outcome: TouchdownOutcomeKind) 
 function describeFlightEvent(e: FlightEvent): string | null {
   switch (e.kind) {
     case "flightStarted":
-      return "Flug begonnen (Off-Block)";
+      return t("shell.flightEvent.started");
     case "flightEnded":
-      return e.interrupted ? "Flug unterbrochen gespeichert" : "Flug gespeichert (On-Block)";
+      return e.interrupted ? t("shell.flightEvent.interrupted") : t("shell.flightEvent.saved");
     case "phaseChanged":
       return `Phase: ${PHASE_LABEL[e.from]} → ${PHASE_LABEL[e.to]}`;
     case "touchdown":
-      return `Landung ${fmt(e.landingRateFpm, 0, "fpm")}, ${fmt(e.peakG, 2, "g")}${e.bounces ? `, ${e.bounces} Bounce${e.bounces > 1 ? "s" : ""}` : ""}${e.touchAndGo ? ", Touch-and-go" : ""}`;
+      return [
+        t("shell.flightEvent.touchdown", { rate: fmt(e.landingRateFpm, 0, "fpm"), g: fmt(e.peakG, 2, "g") }),
+        e.bounces ? t("count.bounces", { count: e.bounces }) : null,
+        e.touchAndGo ? t("shell.landing.touchAndGo") : null,
+      ]
+        .filter(Boolean)
+        .join(", ");
     case "touchdownOutcome":
-      return e.outcome === "fullStop" ? "Landung bestätigt (Full-Stop)" : e.outcome === "touchAndGo" ? "Touch-and-go" : null;
+      return e.outcome === "fullStop" ? t("shell.flightEvent.fullStop") : e.outcome === "touchAndGo" ? t("shell.landing.touchAndGo") : null;
   }
 }
 
@@ -229,13 +241,13 @@ async function currentFlightId(): Promise<string | null> {
 }
 
 export default function App() {
+  const t = useT();
   const [status, setStatus] = useState<StatusSnapshot | null>(null);
   // telemetry, flight summary and data rate arrive up to 10×/s: they live in telemetryStore, the
   // root only follows what the recording status needs (state, off-block) – so the logbook,
   // settings and countries do not re-render with every sample
   const flight = useRecFlight();
   const [aircraft, setAircraft] = useState<AircraftInfo | null>(null);
-  const [events, setEvents] = useState<LogLine[]>([]);
   const [providers, setProviders] = useState<string[]>([]);
   const [view, setView] = useState<View>("live");
   const [storedTab, setLogbookTab] = useStoredState<string>(LOGBOOK_TAB_KEY, "flights");
@@ -371,8 +383,6 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const pushEvent = (text: string) => setEvents((prev) => [{ ms: Date.now(), text }, ...prev].slice(0, 40));
-
   // SimBrief without a click: the latest OFP for the saved pilot id, at start and when the
   // sim connects. Quiet unless something changed; failures are a toast, never a blocker.
   const ofpRef = useRef<Ofp | null>(null);
@@ -392,13 +402,13 @@ export default function App() {
         showToast({
           id: "ofp-auto",
           tone: "ok",
-          title: "Flugplan geladen",
+          title: tGlobal("shell.ofp.loaded"),
           body: `${privacy(o.callsign, "callsign")} · ${o.originIcao} → ${o.destinationIcao} · ${o.aircraftIcao}`,
           durationMs: 6000,
         });
     } catch (e) {
       const m = userMessage(e, "simbrief");
-      showToast({ id: "ofp-auto", tone: "warn", title: "SimBrief-Flugplan nicht geladen", body: m.hint, durationMs: 8000 });
+      showToast({ id: "ofp-auto", tone: "warn", title: tGlobal("shell.ofp.failed"), body: m.hint, durationMs: 8000 });
     }
   }, []);
   const autoLoadOfpRef = useRef(autoLoadOfp);
@@ -418,11 +428,11 @@ export default function App() {
     const un = win
       .onCloseRequested(async (event) => {
         if (!recording()) return;
-        const quit = await ask("Der Flug wird abgebrochen und im Logbuch als unterbrochen gespeichert.", {
-          title: "Aufzeichnung läuft – trotzdem beenden?",
+        const quit = await ask(tGlobal("shell.quit.message"), {
+          title: tGlobal("shell.quit.title"),
           kind: "warning",
-          okLabel: "Beenden",
-          cancelLabel: "Weiterfliegen",
+          okLabel: tGlobal("shell.quit.ok"),
+          cancelLabel: tGlobal("shell.quit.cancel"),
         }).catch(() => true);
         if (!quit) event.preventDefault();
       })
@@ -443,14 +453,19 @@ export default function App() {
   // Quiet update check shortly after start; a dev build (vite) has no updater endpoint and just logs the error.
   // An update found while the window is in the background is also a Windows notification.
   useEffect(() => {
-    const t = window.setTimeout(
+    const timer = window.setTimeout(
       () =>
         void checkForUpdate({ silent: true }).then((u) => {
-          if (u.phase === "available") notifyUnfocused("update", u.version ? `Update ${u.version} verfügbar` : "Update verfügbar", "Installieren unter Einstellungen → Updates.");
+          if (u.phase === "available")
+            notifyUnfocused(
+              "update",
+              u.version ? tGlobal("shell.update.availableVersion", { version: u.version }) : tGlobal("shell.update.available"),
+              tGlobal("shell.update.hint"),
+            );
         }),
       10_000,
     );
-    return () => window.clearTimeout(t);
+    return () => window.clearTimeout(timer);
   }, []);
 
   const onFlightEvent = useCallback(
@@ -481,10 +496,14 @@ export default function App() {
             showToast({
               id: "flight-saved",
               tone: "ok",
-              title: `Flug gespeichert · ${done.depIcao ?? "····"} → ${done.arrIcao ?? "····"} · ${fmtDuration(done.blockMs, { seconds: false })}`,
+              title: tGlobal("shell.flightSaved", {
+                dep: done.depIcao ?? "····",
+                arr: done.arrIcao ?? "····",
+                block: fmtDuration(done.blockMs, { seconds: false }),
+              }),
               durationMs: LANDING_TOAST_MS,
               holdWhileUnfocused: true,
-              actions: done.landingRateFpm != null ? [{ label: "Landeauswertung", onClick: () => openDebrief(done.flightId, null) }] : undefined,
+              actions: done.landingRateFpm != null ? [{ label: tGlobal("shell.landing.debrief"), onClick: () => openDebrief(done.flightId, null) }] : undefined,
             });
         } catch {
           /* logbook not readable right now: the event line under Details → Ereignisse remains */
@@ -501,7 +520,12 @@ export default function App() {
       const build = (headline: string): ToastOptions => ({
         id: "landing",
         region: "map",
-        announce: `${headline}${place ? ` ${place}` : ""}. Landerate ${rate}, g-Last ${fmt(e.peakG, 2)}, ${e.bounces} Bounces. Alt+T für die Landeauswertung.`,
+        announce: tGlobal("shell.landing.announce", {
+          headline: place ? `${headline} ${place}` : headline,
+          rate,
+          g: fmt(e.peakG, 2),
+          bounces: tGlobal("count.bounces", { count: e.bounces }),
+        }),
         tone: hard ? "warn" : "ok",
         className: "toast-landing",
         durationMs: LANDING_TOAST_MS,
@@ -510,33 +534,33 @@ export default function App() {
         body: (
           <div className="landing-values num">
             <span>
-              <span className="detail">Landerate</span> <strong className={hard ? "warn-text" : undefined}>{rate}</strong>
+              <span className="detail">{tGlobal("shell.landing.rate")}</span> <strong className={hard ? "warn-text" : undefined}>{rate}</strong>
             </span>
             <span>
-              <span className="detail">g-Last</span> <strong className={e.peakG >= G_HARD ? "warn-text" : undefined}>{fmt(e.peakG, 2)}</strong>
+              <span className="detail">{tGlobal("shell.landing.gLoad")}</span> <strong className={e.peakG >= G_HARD ? "warn-text" : undefined}>{fmt(e.peakG, 2)}</strong>
             </span>
             <span>
-              <span className="detail">Bounces</span> <strong className={e.bounces > 0 ? "warn-text" : undefined}>{e.bounces}</strong>
+              <span className="detail">{tGlobal("shell.landing.bounces")}</span> <strong className={e.bounces > 0 ? "warn-text" : undefined}>{e.bounces}</strong>
             </span>
           </div>
         ),
         actions: [
-          { label: "Landeauswertung", onClick: () => (id ? openDebrief(id, null) : setView("logbook")) },
+          { label: tGlobal("shell.landing.debrief"), onClick: () => (id ? openDebrief(id, null) : setView("logbook")) },
           ...(id
             ? [
                 {
-                  label: "Landekarte",
+                  label: tGlobal("shell.landing.card"),
                   onClick: () =>
                     void invoke<LandingDebriefData>("landing_analysis", { flightId: id, touchdownIndex: null })
                       .then((d) => saveCardPng(d))
-                      .catch((err) => showToast({ tone: "warn", title: "Landekarte nicht erstellt", body: userMessage(err, "export").hint })),
+                      .catch((err) => showToast({ tone: "warn", title: tGlobal("shell.landing.cardFailed"), body: userMessage(err, "export").hint })),
                 },
               ]
             : []),
         ],
       });
       landingToast = { touchdownMs: e.timestampMs, build };
-      showToast(build(early ?? (e.touchAndGo ? "Touch-and-go" : "Aufgesetzt")));
+      showToast(build(early ?? (e.touchAndGo ? tGlobal("shell.landing.touchAndGo") : tGlobal("shell.landing.touchdown"))));
     },
     [],
   );
@@ -554,10 +578,12 @@ export default function App() {
       resetLive({ flight: s.flight ?? null, telemetry: s.lastTelemetry ?? null });
       setAircraft(s.aircraft ?? null);
       setAfterFlight(null);
-      setEvents([]);
+      clearEvents(s.provider);
       setLastSimError(null);
       dismissToast("landing");
     }
+    // the event list (live/eventLog) lives outside App and survives a remount; it belongs to this provider
+    syncEventProvider(s.provider);
     if (s.state === "disconnected") setAircraft(null);
     if (s.state === "error") setLastSimError({ detail: s.detail, ms: Date.now() });
     // connection lost mid-flight: reassure that nothing is lost; stays until the sim is back
@@ -566,12 +592,12 @@ export default function App() {
       showToast({
         id: "conn",
         tone: "warn",
-        title: "Sim weg – Flug gesichert",
-        body: "Dein Flug ist gesichert und läuft weiter, sobald der Simulator zurück ist.",
+        title: tGlobal("shell.conn.lost"),
+        body: tGlobal("shell.conn.lostBody"),
         durationMs: null,
       });
     } else if (prev && prev.state !== "connected" && s.state === "connected" && active) {
-      showToast({ id: "conn", tone: "ok", title: "Simulator wieder da", body: "Die Aufzeichnung läuft weiter.", durationMs: 5000 });
+      showToast({ id: "conn", tone: "ok", title: tGlobal("shell.conn.back"), body: tGlobal("shell.conn.backBody"), durationMs: 5000 });
     }
     if (prev?.state !== "connected" && s.state === "connected" && !active) void autoLoadOfpRef.current();
   };
@@ -586,6 +612,7 @@ export default function App() {
       .then((s) => {
         statusRef.current = s;
         setStatus(s);
+        syncEventProvider(s.provider);
         if (s.lastTelemetry) setTelemetry(s.lastTelemetry);
         if (s.aircraft) setAircraft(s.aircraft);
         if (s.flight) setFlight(s.flight);
@@ -640,7 +667,9 @@ export default function App() {
       setAppError(String(e));
     });
   };
-  const title = NAV.find((n) => n.view === view)?.label ?? "";
+  const navLabel = NAV.find((n) => n.view === view)?.label;
+  const title = navLabel ? t(navLabel) : "";
+  const logbookTabs = LOGBOOK_TABS.map((tab) => ({ id: tab.id, label: t(tab.label) }));
   const live = view === "live";
 
   return (
@@ -649,14 +678,14 @@ export default function App() {
         <TitleBar rec={rec} />
         <div className="shell-body">
           <aside className="sidebar">
-            <nav className="nav" aria-label="Ansichten">
+            <nav className="nav" aria-label={t("nav.sidebar")}>
               {NAV.map((n) => (
                 <button
                   key={n.view}
                   className={`nav-btn${view === n.view ? " active" : ""}`}
                   onClick={() => setView(n.view)}
-                  title={`${n.label} (Strg+${n.key})`}
-                  aria-label={n.label}
+                  title={t("shell.navShortcut", { label: t(n.label), key: n.key })}
+                  aria-label={t(n.label)}
                   aria-current={view === n.view ? "page" : undefined}
                 >
                   <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round" aria-hidden="true">
@@ -685,20 +714,18 @@ export default function App() {
             {!live && (
               <header className="topbar">
                 <h1>{title}</h1>
-                {view === "logbook" && <Tabs tabs={LOGBOOK_TABS} active={logbookTab} onChange={setLogbookTab} idBase="logbook" label="Logbuch-Bereiche" className="topbar-tabs" />}
+                {view === "logbook" && <Tabs tabs={logbookTabs} active={logbookTab} onChange={setLogbookTab} idBase="logbook" label={t("shell.logbookTab.label")} className="topbar-tabs" />}
               </header>
             )}
 
             {demo && (
               <div className="demo-banner" role="status">
-                <span className="badge badge-demo">Demo</span>
-                <span>
-                  <strong>Demo-Flug</strong> – die Flugdaten sind simuliert. Demo-Flüge bleiben nur bis zum Ende der Demo im Logbuch und werden dann gelöscht.
-                </span>
+                <span className="badge badge-demo">{t("shell.demo.badge")}</span>
+                <span>{rich(t("shell.demo.banner"), { demo: <strong>{t("status.demoLabel")}</strong> })}</span>
                 <div className="spacer" />
                 {/* always offered: without a SimConnect provider it falls back to the waiting state */}
                 <button className="btn btn-sm" onClick={() => selectProvider("simconnect")}>
-                  {DEMO_LABEL} beenden
+                  {t("shell.demo.stop")}
                 </button>
               </div>
             )}
@@ -710,6 +737,7 @@ export default function App() {
             {view === "logbook" && logbookTab === "aircraft" && <Fleet focus={fleetFocus} />}
             {view === "logbook" && logbookTab === "airports" && <Activities />}
             {view === "logbook" && logbookTab === "landings" && <Landings />}
+            {view === "logbook" && logbookTab === "year" && <YearReview />}
             {view === "countries" && <Countries />}
             {view === "settings" && (
               <LiveSettings providers={providers} onProvider={selectProvider} online={online} status={status} ofp={ofp} />
@@ -722,7 +750,6 @@ export default function App() {
               ofp={ofp}
               onOfp={setOfp}
               online={online}
-              events={events}
               onOpenFlight={openCurrentFlight}
               rec={rec}
               status={status}

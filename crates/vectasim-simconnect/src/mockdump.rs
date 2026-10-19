@@ -3,7 +3,9 @@
 //! run without a simulator. Used by `examples/mock-to-vsdump.rs` and the tests that check
 //! the checked-in fixture `crates/vectasim-core/tests/fixtures/mock-circuit.vsdump`.
 
-use crate::decoder::{EVT_SIM, REQ_FAST, REQ_SLOW, REQ_STATIC, encode_fast, encode_slow, encode_static};
+use crate::decoder::{
+    EVT_SIM, REQ_APPROACH, REQ_DESIGN, REQ_FAST, REQ_SLOW, REQ_STATIC, encode_approach, encode_design, encode_fast, encode_slow, encode_static,
+};
 use std::io::{self, Write};
 use std::path::Path;
 use vectasim_core::{MockFlight, MockVariant, ProviderEvent};
@@ -16,7 +18,7 @@ pub struct MockDumpSpec {
     /// Mock time span, seconds since the mock's start.
     pub from_s: f64,
     pub to_s: f64,
-    /// FAST frames per second (every frame complete, like SIM_FRAME); SLOW at 1 Hz.
+    /// FAST frames per second (every frame complete, like SIM_FRAME); SLOW and APPROACH at 1 Hz.
     pub hz: f64,
     /// Wall clock of the first line.
     pub start_wall_ms: u64,
@@ -71,6 +73,8 @@ pub fn mock_lines(spec: &MockDumpSpec) -> (Header, Vec<Line>) {
     lines.push(line(2, Body::data_str(REQ_STATIC, encode_static(&MockFlight::aircraft()), None)));
 
     let mut flight = MockFlight::with_variant(spec.variant);
+    // design speeds: once, right after the aircraft strings (as the sim answers a ONCE request)
+    lines.push(line(2, Body::data_f64(REQ_DESIGN, &encode_design(&flight.sample(spec.from_s, spec.start_wall_ms)), None)));
     let frames = ((spec.to_s - spec.from_s) * spec.hz).round() as u64;
     let mut last_slow_s: Option<u64> = None;
     for i in 0..=frames {
@@ -82,6 +86,7 @@ pub fn mock_lines(spec: &MockDumpSpec) -> (Header, Vec<Line>) {
             if last_slow_s != Some(sec) {
                 last_slow_s = Some(sec);
                 lines.push(line(t, Body::data_f64(REQ_SLOW, &encode_slow(&tel), None)));
+                lines.push(line(t, Body::data_f64(REQ_APPROACH, &encode_approach(&tel), None)));
             }
             lines.push(line(t, Body::data_f64(REQ_FAST, &encode_fast(&tel), None)));
         }

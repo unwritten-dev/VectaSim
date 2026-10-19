@@ -1,16 +1,18 @@
 // Logbook search and quick filters. Pure, see logbookFilter.test.ts.
 
 import type { FlightRow } from "./types";
-import { fmtDate } from "./format";
+import { fmtDate } from "./i18n/number";
+import { t, type TKey } from "./i18n";
 import { isDemoRow } from "./totals";
 
 export type QuickFilter = "all" | "completed" | "interrupted" | "landed";
 
-export const QUICK_FILTERS: Array<{ id: QuickFilter; label: string }> = [
-  { id: "all", label: "Alle" },
-  { id: "completed", label: "Abgeschlossen" },
-  { id: "interrupted", label: "Unvollständig" },
-  { id: "landed", label: "Mit Landung" },
+/** `label` is an i18n key (translate with `t`). */
+export const QUICK_FILTERS: Array<{ id: QuickFilter; label: TKey }> = [
+  { id: "all", label: "logbook.filter.all" },
+  { id: "completed", label: "logbook.filter.completed" },
+  { id: "interrupted", label: "logbook.filter.interrupted" },
+  { id: "landed", label: "logbook.filter.landed" },
 ];
 
 export interface FlightFilter {
@@ -60,7 +62,7 @@ export function callsignOf(f: FlightRow): string {
 export function originalTitle(user: string | null | undefined, recorded: string | null | undefined): string | null {
   const u = user?.trim();
   if (!u || u === (recorded ?? "")) return null;
-  return `Sim: ${recorded || "–"}`;
+  return t("logbook.recorded", { value: recorded || "–" });
 }
 
 /** First non-empty line of the notes (strip tooltip), cut to `max` characters. */

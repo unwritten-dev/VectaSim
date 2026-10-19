@@ -175,7 +175,9 @@ impl FlightSummary {
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum FlightEvent {
     FlightStarted { timestamp_ms: u64 },
-    PhaseChanged(PhaseTransition),
+    /// Boxed: the transition carries a full Telemetry sample (~440 B with the track-v2
+    /// options), the other variants are a few words.
+    PhaseChanged(Box<PhaseTransition>),
     Touchdown(TouchdownReport),
     /// `interrupted`: the flight did not reach Shutdown (state `Interrupted`).
     FlightEnded { timestamp_ms: u64, interrupted: bool },
@@ -492,7 +494,7 @@ impl FlightSession {
             if let Some(e) = started {
                 events.push(e);
             }
-            events.push(FlightEvent::PhaseChanged(tr));
+            events.push(FlightEvent::PhaseChanged(Box::new(tr)));
             if let Some(e) = ended {
                 events.push(e);
             }

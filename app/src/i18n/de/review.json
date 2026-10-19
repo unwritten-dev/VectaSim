@@ -1,0 +1,193 @@
+{
+  "review": {
+    "periodTitle": {
+      "year": "Dein Jahr {year}",
+      "last12": "Deine letzten 12 Monate"
+    },
+    "head": {
+      "year": "Dein Jahr",
+      "last12": "Deine letzten 12 Monate"
+    },
+    "cards": {
+      "overview": "Überblick",
+      "routes": "Deine Strecken",
+      "fleet": "Deine Flotte",
+      "landings": "Deine Landungen",
+      "approaches": "Deine Anflüge",
+      "months": "Deine Monate",
+      "countries": "Deine Länder",
+      "flags": "Mit Sternchen"
+    },
+    "file": {
+      "year": "Jahr",
+      "last12": "12Monate",
+      "stack": "Stapel",
+      "portrait": "hoch",
+      "landscape": "quer",
+      "overview": "Ueberblick",
+      "routes": "Strecken",
+      "fleet": "Flotte",
+      "landings": "Landungen",
+      "approaches": "Anfluege",
+      "months": "Monate",
+      "countries": "Laender",
+      "flags": "Sternchen"
+    },
+    "format": {
+      "portrait": "Hochformat",
+      "landscape": "Querformat"
+    },
+    "mode": {
+      "year": "Kalenderjahr",
+      "last12": "Letzte 12 Monate"
+    },
+    "earth": {
+      "none": "noch keine Erdumrundung",
+      "share": "{percent} % einer Erdumrundung",
+      "once": "einmal um die Erde",
+      "laps": "{laps}-mal um die Erde"
+    },
+    "count": {
+      "approaches": { "one": "{count} Anflug", "other": "{count} Anflüge" },
+      "goArounds": { "one": "{count} Durchstarten", "other": "{count} Durchstarts" },
+      "noGoArounds": "kein Durchstarten"
+    },
+    "unknownType": "Unbekannt",
+    "view": {
+      "yearGroup": "Jahr",
+      "periodGroup": "Zeitraum",
+      "formatGroup": "Format",
+      "saveAll": "Alle einzeln speichern",
+      "saveAllHint": "Jede Karte mit Daten als eigenes PNG ({format}) in einen Ordner speichern",
+      "saveStack": "Alle als ein langes Bild",
+      "saveStackHint": "Alle Karten mit Daten im Hochformat untereinander in einer einzigen PNG-Datei",
+      "imported": {
+        "one": "{count} importierter Flug zählt für Stunden, Strecken und Länder – Landungen und Anflüge kommen nur aus aufgezeichneten Flügen.",
+        "other": "{count} importierte Flüge zählen für Stunden, Strecken und Länder – Landungen und Anflüge kommen nur aus aufgezeichneten Flügen."
+      },
+      "firstRecorded": "Landungen und Anflüge erscheinen nach deinem ersten mit VectaSim aufgezeichneten Flug.",
+      "demoOut": { "one": "{count} Demo-Flug nicht mitgezählt", "other": "{count} Demo-Flüge nicht mitgezählt" },
+      "partialLandings": "Landungen nur aus den letzten {n} – ältere Landungen dieses Zeitraums fehlen in der Karte.",
+      "partialApproaches": "Anflüge nur aus den letzten {n} – ältere Anflüge dieses Zeitraums fehlen in der Karte.",
+      "partialBoth": "Landungen und Anflüge nur aus den letzten {n} – ältere dieses Zeitraums fehlen in den Karten.",
+      "masked": "Kennzeichen maskiert",
+      "loading": "Jahresrückblick wird geladen …",
+      "emptyYear": "Keine Flüge in {year}",
+      "emptyLast12": "Keine Flüge in den letzten 12 Monaten",
+      "emptyText": "Sobald du fliegst oder ein Logbuch importierst, entsteht hier dein Rückblick als Story-Karten zum Teilen.",
+      "noData": "ohne Daten",
+      "noDataHint": "Keine Daten in diesem Zeitraum – nichts zu speichern",
+      "saveCard": "„{card}“ speichern",
+      "copyCard": "„{card}“ kopieren",
+      "save": "Speichern",
+      "copy": "Kopieren"
+    },
+    "overview": {
+      "flights": { "one": "Flug", "other": "Flüge" },
+      "imported": "davon {n} importiert",
+      "routes": { "one": "{count} Strecke", "other": "{count} verschiedene Strecken" },
+      "blockHours": "Blockstunden",
+      "perFlight": "Ø {time} pro Flug",
+      "distance": "Distanz",
+      "countries": "Länder",
+      "newCountries": "{n} zum ersten Mal",
+      "noNewCountries": "keins zum ersten Mal",
+      "airports": "Flughäfen",
+      "airportsSub": "Abflug und Ziel"
+    },
+    "routes": {
+      "longest": "dein längster Flug",
+      "noRoute": "keine Strecke aufgezeichnet",
+      "top": "Top {n} Strecken",
+      "topNone": "Top Strecken",
+      "none": "Noch keine Strecke mit Abflug und Ziel."
+    },
+    "fleet": {
+      "types": "Muster",
+      "registrations": "Kennzeichen",
+      "noEntry": "keine Angabe",
+      "noType": "noch kein Muster",
+      "mostFlown": "dein meistgeflogenes Muster"
+    },
+    "landings": {
+      "none": "noch keine Landung",
+      "inPeriod": "aufgezeichnet in diesem Zeitraum",
+      "emptyText": "Landungen zählen nur, wenn VectaSim sie aufgezeichnet hat – importierte Flüge bringen keine gemessene Landerate mit.",
+      "median": "Median-Landerate",
+      "smoothest": "Sanfteste",
+      "hardest": "Härteste",
+      "threshold": "Schwelle",
+      "scatter": {
+        "one": "Aufsetzzone: {rate} · {count} Aufsetzpunkt auf einer normierten Piste",
+        "other": "Aufsetzzone: {rate} · {count} Aufsetzpunkte auf einer normierten Piste"
+      },
+      "noScatter": "Kein Aufsetzpunkt mit bekannter Piste – kein Streubild."
+    },
+    "approaches": {
+      "none": "noch kein Anflug",
+      "inPeriod": "aufgezeichnet in diesem Zeitraum",
+      "emptyText": "Anflüge werden aus der aufgezeichneten Spur bewertet – importierte Flüge zählen hier nicht.",
+      "stable": "stabil",
+      "deviations": "mit Abweichungen",
+      "unstable": "instabil",
+      "stableRate": "stabile Anflüge",
+      "stableOf": {
+        "one": "{stable} von {count} bewerteten Anflug",
+        "other": "{stable} von {count} bewerteten Anflügen"
+      },
+      "stableFrom": "Ø stabil ab",
+      "stableFromSub": "Höhe über der Schwelle",
+      "goArounds": "Durchstarten",
+      "goAroundOne": "eine gute Entscheidung",
+      "goAroundMany": "jedes eine gute Entscheidung",
+      "goAroundNone": "nicht nötig gewesen"
+    },
+    "months": {
+      "busiest": "dein aktivster Monat",
+      "noFlight": "noch kein Flug",
+      "legend": "Balken: Flüge je Monat · Zahl darunter: Blockstunden",
+      "busiestDay": "Aktivster Tag"
+    },
+    "countries": {
+      "visited": { "one": "Land angeflogen", "other": "Länder angeflogen" },
+      "newOnes": "{n} davon zum ersten Mal",
+      "noneNew": "kein neues Land dabei",
+      "firstTime": "zum ersten Mal",
+      "again": "wieder besucht"
+    },
+    "flags": {
+      "flights": { "one": "Flug mit Sternchen", "other": "Flüge mit Sternchen" },
+      "of": { "one": "von {count} aufgezeichneten Flug", "other": "von {count} aufgezeichneten Flügen" },
+      "pause": "Pause",
+      "timeAccel": "Zeitraffer",
+      "slew": "Slew",
+      "teleport": "Positionssprung",
+      "pausedTotal": "insgesamt {time} pausiert",
+      "maxRate": "bis {rate}-fach",
+      "slewSub": "Flugzeug im Slew-Modus verschoben",
+      "teleportSub": "neu geladen oder versetzt",
+      "clean": { "one": "{count} Flug ganz ohne Sternchen", "other": "{count} Flüge ganz ohne Sternchen" },
+      "note": "Ein Sternchen ist kein Makel – es zeigt nur, wo Pause, Zeitraffer, Slew oder ein Sprung im Spiel waren."
+    },
+    "footer": "Jahresrückblick",
+    "export": {
+      "pngFilter": "PNG-Bild",
+      "drawFailed": "Karte konnte nicht gezeichnet werden",
+      "loadFailed": "Karte konnte nicht als Bild geladen werden",
+      "noPng": "PNG konnte nicht erzeugt werden",
+      "noCanvas": "Canvas nicht verfügbar",
+      "noCard": "Keine Karte mit Daten",
+      "openFolder": "Ordner öffnen",
+      "cardSaved": "Karte gespeichert",
+      "cardFailed": "Karte nicht gespeichert",
+      "noClipboard": "Die Zwischenablage unterstützt hier keine Bilder",
+      "copied": "Karte in die Zwischenablage kopiert",
+      "copyFailed": "Karte nicht kopiert",
+      "pickFolder": "Ordner für den Jahresrückblick wählen",
+      "cardsSaved": { "one": "{count} Karte gespeichert", "other": "{count} Karten gespeichert" },
+      "cardsFailed": "Karten nicht gespeichert",
+      "stackSaved": "Langes Bild gespeichert",
+      "stackFailed": "Langes Bild nicht gespeichert"
+    }
+  }
+}

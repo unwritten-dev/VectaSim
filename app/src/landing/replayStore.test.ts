@@ -1,6 +1,7 @@
 import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setLanguageSetting } from "../i18n";
 import mockJson from "./fixtures/approach-mock.json";
 import type { ApproachAnalysis } from "./approachTypes";
 import { ReplayContext, createReplayStore, debriefReplayPlan, lerpHeading, nearestIndex, sampleAt, timeAtValue, trackBearingAt } from "./replayStore";
@@ -9,6 +10,11 @@ import { ReplayContext, createReplayStore, debriefReplayPlan, lerpHeading, neare
 vi.mock("../themes", async (importOriginal) => ({ ...(await importOriginal<typeof import("../themes")>()), useThemeId: () => "default" }));
 const { default: ApproachChart } = await import("./ApproachChart");
 const { default: ReplayBar, ReplayValues } = await import("./ReplayBar");
+
+// jsdom reports en-US: pin the reference language, also for the plans built while collecting
+setLanguageSetting("de");
+beforeEach(() => setLanguageSetting("de"));
+afterEach(() => setLanguageSetting("de"));
 
 const mock = mockJson as unknown as ApproachAnalysis;
 const R = { startMs: 10_000, endMs: 70_000 };
@@ -272,6 +278,22 @@ describe("cursor rendering", () => {
     expect(h).toMatch(/aria-valuetext="\d\d:\d\d:\d\dz/);
     expect(h).toContain("Zu Aufsetzen springen");
     expect(h).toContain('aria-label="Wiedergabe starten"');
+  });
+
+  it("speaks English with English markers", () => {
+    setLanguageSetting("en");
+    const enPlan = debriefReplayPlan(null, mock);
+    expect(enPlan.markers.find((m) => m.key === "touchdown")?.label).toBe("Touchdown");
+    const store = createReplayStore();
+    store.configure(enPlan.range, enPlan.markers);
+    store.jumpTo("touchdown");
+    const h = render(store, ReplayBar, {});
+    expect(h).toContain("Jump to Touchdown (");
+    expect(h).toContain('aria-label="Start playback"');
+    expect(h).toMatch(/aria-valuetext="\d\d:\d\d:\d\dz, [\d:]+ min after start, Touchdown"/);
+    const v = render(store, ReplayValues, { analysis: null, approach: mock });
+    expect(v).toContain("measured (1");
+    expect(v).toContain("Gear / flaps");
   });
 
   it("nearestIndex skips missing times", () => {

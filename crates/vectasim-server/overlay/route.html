@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VectaSim Route</title>
+<link rel="stylesheet" href="/overlay/overlay.css">
+</head>
+<body data-page="route">
+<div class="route" role="group" aria-label="Route">
+  <div class="od num"><span data-f="dep">····</span><span class="arrow">→</span><span data-f="arr">····</span></div>
+  <div class="line">
+    <span data-f="aircraft">–</span>
+    <span data-f="callsign"></span>
+  </div>
+  <div class="line">
+    <span class="label">Block</span><span class="v num" data-f="block">–</span>
+    <span class="label" data-t="label.dist">Strecke</span><span class="v num" data-f="dist">–</span>
+  </div>
+  <div class="phasebar" data-f="phasebar" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+  <div class="phasename" data-f="phasename"></div>
+</div>
+<div class="conn" data-f="conn" data-t="conn.down">VectaSim getrennt · verbinde neu …</div>
+<script src="/overlay/overlay.js"></script>
+</body>
+</html>

@@ -2,21 +2,10 @@ import { useEffect, useState } from "react";
 import LiveMap from "../map/LiveMap";
 import Dispatch from "../Dispatch";
 import OnlinePanel from "../OnlinePanel";
-import {
-  PHASE_LABEL,
-  fmt,
-  fmtAltitude,
-  TRANSITION_ALTITUDE_FT,
-  fmtClock,
-  fmtCoord,
-  fmtDuration,
-  fmtMetarLine,
-  fmtNum,
-  fmtSigned,
-  fmtWeight,
-  fmtWeightNum,
-  haversineNm,
-} from "../format";
+import { PHASE_LABEL, TRANSITION_ALTITUDE_FT, haversineNm } from "../format";
+import { fmtMetarLine } from "../i18n/number";
+import { fmt, fmtAltitude, fmtClock, fmtCoord, fmtDuration, fmtNum, fmtSigned, fmtWeight, fmtWeightNum } from "../i18n/number";
+import { useT, type TKey } from "../i18n";
 import { usePrefs, usePrivacy } from "../prefs";
 import { userMessage } from "../errors";
 import { CATEGORY_COLOR } from "../theme";
@@ -33,16 +22,12 @@ import AirframeImage from "../airframes/AirframeImage";
 import { airframeName, shownAirframeName } from "../airframes/airframe";
 import { useActiveAirframe } from "../airframes/hooks";
 import { navigate } from "../airframes/navigation";
-import { DEMO_LABEL, WAITING_SHORT, type RecStatus } from "../status";
+import { demoLabel, waitingShort, type RecStatus } from "../status";
 import AfterFlightCard, { type AfterFlight } from "./AfterFlightCard";
 import ReadyCard from "./ReadyCard";
 import { isDebriefOpen, openDebrief, useDebrief } from "../landing/debriefStore";
 import { G_HARD } from "../landing/facts";
-
-export interface LogLine {
-  ms: number;
-  text: string;
-}
+import { useEventLog } from "./eventLog";
 
 interface Props {
   /**
@@ -54,7 +39,6 @@ interface Props {
   ofp: Ofp | null;
   onOfp: (ofp: Ofp | null) => void;
   online: OnlineSummary | null;
-  events: LogLine[];
   /** Open the logbook detail of the running/last flight. */
   onOpenFlight?: () => void;
   /** Recording status for the pill on the map (same texts as the sidebar button). */
@@ -79,12 +63,12 @@ export function normalizeTab(raw: string): Tab {
 const PAST_TOD: FlightPhase[] = ["descent", "approach", "final", "landing", "taxiIn", "shutdown"];
 const DEST_WX_RANGE_NM = 100;
 
-const LIGHT_LABEL: Array<[keyof Telemetry["lights"], string]> = [
-  ["beacon", "Beacon"],
-  ["nav", "Positionslicht"],
-  ["strobe", "Strobe"],
-  ["landing", "Landelicht"],
-  ["taxi", "Rolllicht"],
+const LIGHT_LABEL: Array<[keyof Telemetry["lights"], TKey]> = [
+  ["beacon", "live.systems.light.beacon"],
+  ["nav", "live.systems.light.nav"],
+  ["strobe", "live.systems.light.strobe"],
+  ["landing", "live.systems.light.landing"],
+  ["taxi", "live.systems.light.taxi"],
 ];
 
 /**
@@ -110,7 +94,6 @@ export default function LiveView({
   ofp,
   onOfp,
   online,
-  events,
   onOpenFlight,
   rec,
   status,
@@ -119,8 +102,11 @@ export default function LiveView({
   onAfterFlightDismiss,
   onTryDemo,
 }: Props) {
+  const t = useT();
   const priv = usePrivacy();
   const f = useFlightHead();
+  // the session's event list: a store outside App, so a remount of the tree does not empty it
+  const events = useEventLog();
   const [panelOpen, setPanelOpen] = useStoredState<boolean>(PANEL_KEY, true);
   const [storedTab, setTab] = useStoredState<string>(TAB_KEY, "flight");
   const tab = normalizeTab(storedTab);
@@ -203,8 +189,8 @@ export default function LiveView({
   const callsign = priv.mask(rawCallsign, rawCallsign === aircraft?.atcId && !ofp?.callsign ? "registration" : "callsign");
 
   const tabs: Array<{ id: Tab; label: string; badge?: string }> = [
-    { id: "flight", label: "Flug", badge: events.length ? String(events.length) : undefined },
-    { id: "dispatch", label: "Dispatch", badge: ofp || online?.enabled ? "●" : undefined },
+    { id: "flight", label: t("live.tabs.flight"), badge: events.length ? String(events.length) : undefined },
+    { id: "dispatch", label: t("live.tabs.dispatch"), badge: ofp || online?.enabled ? "●" : undefined },
   ];
   const showAfter = !!afterFlight && f?.state !== "active";
   const showReady = !showAfter && !readyDismissed && f?.state !== "active";
@@ -223,9 +209,9 @@ export default function LiveView({
               {/* the Bereit card leads before a flight: the pill then only names the state, the demo is offered on the card */}
               <StatusPill rec={rec} onTryDemo={showReady ? undefined : onTryDemo} short={showReady && rec.kind === "waiting"} />
               {mapOffline && (
-                <div className="status-pill pill-suspended map-offline-pill" role="status" title="Die Kartenkacheln laden gerade nicht. Position, Track und Aufzeichnung laufen lokal weiter.">
+                <div className="status-pill pill-suspended map-offline-pill" role="status" title={t("live.mapOffline.title")}>
                   <span className="dot dot-suspended" aria-hidden="true" />
-                  <span className="status-pill-text">Karte offline – Tracking läuft weiter</span>
+                  <span className="status-pill-text">{t("live.mapOffline.text")}</span>
                 </div>
               )}
             </>
@@ -250,21 +236,21 @@ export default function LiveView({
           onClick={() => setPanelOpen(!panelOpen)}
           aria-expanded={panelOpen}
           aria-controls="live-side"
-          aria-label={panelOpen ? "Seitenpanel einklappen" : "Seitenpanel ausklappen"}
-          title={`${panelOpen ? "Seitenpanel einklappen" : "Seitenpanel ausklappen"} (Strg+.)`}
+          aria-label={panelOpen ? t("live.panel.collapse") : t("live.panel.expand")}
+          title={t("live.panel.shortcut", { action: panelOpen ? t("live.panel.collapse") : t("live.panel.expand") })}
         >
           <Chevron dir={panelOpen ? "right" : "left"} />
         </button>
 
-        <div className="hud" role="group" aria-label="Flugdaten">
+        <div className="hud" role="group" aria-label={t("live.hud.aria")}>
           <div className="hud-values">
             <div className="stat stat-lg hud-phase">
-              <div className="stat-label">Phase</div>
+              <div className="stat-label">{t("live.hud.phase")}</div>
               <div className={`stat-value phase-${phase}`} aria-live="polite">
                 {PHASE_LABEL[phase]}
               </div>
               {/* the recording state is the pill's and the Bereit card's job; here only what the flight is */}
-              {f?.state === "active" ? <div className="stat-sub">Aufzeichnung</div> : f?.state === "completed" ? <div className="stat-sub">abgeschlossen</div> : null}
+              {f?.state === "active" ? <div className="stat-sub">{t("live.hud.recording")}</div> : f?.state === "completed" ? <div className="stat-sub">{t("live.hud.completed")}</div> : null}
             </div>
             <HudValues destIcao={destIcao} destAirport={destAirport} routeForDest={routeForDest} landed={landed} />
           </div>
@@ -276,9 +262,9 @@ export default function LiveView({
         </div>
       </div>
 
-      <aside id="live-side" className="side-panel" hidden={!panelOpen} aria-label="Flugdetails">
+      <aside id="live-side" className="side-panel" hidden={!panelOpen} aria-label={t("live.panel.aria")}>
         <div className="side-head">
-          <Tabs tabs={tabs} active={tab} onChange={setTab} idBase="live" label="Flugdetails" />
+          <Tabs tabs={tabs} active={tab} onChange={setTab} idBase="live" label={t("live.panel.aria")} />
         </div>
         <div className="side-body">
           {tab === "flight" && (
@@ -287,9 +273,9 @@ export default function LiveView({
               <SystemsSection ofp={ofp} />
               <div className="side-stack">
                 <div className="side-group">
-                  <div className="side-group-title">Ereignisse</div>
+                  <div className="side-group-title">{t("live.events.title")}</div>
                   {events.length === 0 ? (
-                    <div className="detail">Phasenwechsel, Landungen und Pausen dieser Sitzung erscheinen hier.</div>
+                    <div className="detail">{t("live.events.empty")}</div>
                   ) : (
                     <ul className="events">
                       {events.map((e, i) => (
@@ -330,39 +316,46 @@ function HudValues({
   routeForDest: NavFix[] | null;
   landed: boolean;
 }) {
-  const t = useTelemetry();
-  const pos = t ? { latitude: t.latitude, longitude: t.longitude } : null;
+  const t = useT();
+  const tel = useTelemetry();
+  const pos = tel ? { latitude: tel.latitude, longitude: tel.longitude } : null;
   const restNm = remainingNm(pos, destAirport, routeForDest);
-  const eta = landed ? null : etaMs(Date.now(), restNm, t?.groundSpeedKt);
-  const vs = t?.verticalSpeedFpm ?? 0;
-  const vsWarn = !t
+  const eta = landed ? null : etaMs(Date.now(), restNm, tel?.groundSpeedKt);
+  const vs = tel?.verticalSpeedFpm ?? 0;
+  const vsWarn = !tel
     ? null
     : vs > 4000
-      ? "Steigrate über 4 000 fpm"
-      : vs < -1000 && !t.onGround && t.altitudeAglFt < 2500
-        ? "Sinkrate über 1 000 fpm unter 2 500 ft AGL"
+      ? t("live.hud.climbWarn", { rate: 4000 })
+      : vs < -1000 && !tel.onGround && tel.altitudeAglFt < 2500
+        ? t("live.hud.descentWarn", { rate: 1000, agl: 2500 })
         : null;
-  const altSub = !t ? undefined : !t.onGround && t.altitudeAglFt < 2500 ? `AGL ${fmt(t.altitudeAglFt, 0, "ft")}` : t.altitudeMslFt > TRANSITION_ALTITUDE_FT ? fmtAltitude(t.altitudeMslFt) : undefined;
+  const altSub = !tel
+    ? undefined
+    : !tel.onGround && tel.altitudeAglFt < 2500
+      ? t("live.hud.agl", { altitude: fmt(tel.altitudeAglFt, 0, "ft") })
+      : tel.altitudeMslFt > TRANSITION_ALTITUDE_FT
+        ? fmtAltitude(tel.altitudeMslFt)
+        : undefined;
   const restSub = landed
-    ? "gelandet"
+    ? t("live.hud.landed")
     : !destIcao
-      ? "Ziel unbekannt"
+      ? t("live.hud.destUnknown")
       : eta
-        ? `ETA ${fmtClock(eta)} · ${fmtDuration(eta - Date.now(), { seconds: false })}`
-        : "ETA ab 50 kt GS";
+        ? t("live.hud.eta", { time: fmtClock(eta), duration: fmtDuration(eta - Date.now(), { seconds: false }) })
+        : t("live.hud.etaFrom", { speed: fmt(50, 0, "kt") });
   return (
     <>
-      <Stat size="lg" label="Höhe MSL" value={t ? fmtNum(t.altitudeMslFt) : "–"} unit="ft" sub={altSub} />
-      <Stat size="lg" label="GS / IAS" value={t ? fmtNum(t.groundSpeedKt) : "–"} unit="kt" sub={t ? `IAS ${fmt(t.iasKt, 0, "kt")}` : undefined} />
-      <Stat size="lg" label="V/S" value={t ? fmtSigned(Math.round(vs)) : "–"} unit="fpm" warn={vsWarn} />
-      <Stat size="lg" label="HDG" value={t ? String(Math.round(t.headingMagDeg) % 360 || 360).padStart(3, "0") : "–"} unit="°" sub="magnetisch" />
+      <Stat size="lg" label={t("live.hud.altitudeMsl")} value={tel ? fmtNum(tel.altitudeMslFt) : "–"} unit="ft" sub={altSub} />
+      <Stat size="lg" label={t("live.hud.gsIas")} value={tel ? fmtNum(tel.groundSpeedKt) : "–"} unit="kt" sub={tel ? t("live.hud.ias", { speed: fmt(tel.iasKt, 0, "kt") }) : undefined} />
+      <Stat size="lg" label="V/S" value={tel ? fmtSigned(Math.round(vs)) : "–"} unit="fpm" warn={vsWarn} />
+      <Stat size="lg" label={t("live.hud.heading")} value={tel ? String(Math.round(tel.headingMagDeg) % 360 || 360).padStart(3, "0") : "–"} unit="°" sub={t("live.hud.magnetic")} />
       <Stat
         size="lg"
-        label={destIcao ? `Rest bis ${destIcao}` : "Rest"}
+        label={destIcao ? t("live.hud.remainingTo", { icao: destIcao }) : t("live.hud.remaining")}
         value={restNm != null && !landed ? fmtNum(restNm) : "–"}
         unit="nm"
         sub={restSub}
-        title={!destIcao ? "Lade einen SimBrief-Flugplan, um Restdistanz und ETA zu sehen." : routeForDest ? "Entlang der geplanten Route" : "Großkreis-Distanz"}
+        title={!destIcao ? t("live.hud.remainingNoPlan") : routeForDest ? t("live.hud.alongRoute") : t("live.hud.greatCircle")}
       />
     </>
   );
@@ -380,8 +373,9 @@ function LiveOnlinePanel({ summary, view, center }: { summary: OnlineSummary | n
 }
 
 function MetarInline({ icao, metar, error }: { icao: string; metar: Metar | null; error: string | null }) {
+  const t = useT();
   return (
-    <span className="metar-line" title={metar?.raw ?? (error ? userMessage(error, "metar").hint : "Kein METAR verfügbar")}>
+    <span className="metar-line" title={metar?.raw ?? (error ? userMessage(error, "metar").hint : t("live.metar.unavailable"))}>
       <strong>{icao}</strong>{" "}
       {metar ? (
         <>
@@ -398,7 +392,7 @@ function MetarInline({ icao, metar, error }: { icao: string; metar: Metar | null
           {userMessage(error, "metar").title}
         </span>
       ) : (
-        <span className="detail">kein METAR</span>
+        <span className="detail">{t("live.metar.none")}</span>
       )}
     </span>
   );
@@ -423,22 +417,23 @@ function FlightSection({
   wxError: string | null;
   onOpenFlight?: () => void;
 }) {
+  const t = useT();
   const { weightUnit } = usePrefs();
   const priv = usePrivacy();
   // times, totals and fuel run with every sample: this section reads them itself
-  const t = useTelemetry();
+  const tel = useTelemetry();
   const f = useFlight();
   // plan against actual (pirep.ts, same as the logbook detail); deltas only once a value is final
-  const pva = planVsActual(actualFromSummary(f, t), null, ofp);
+  const pva = planVsActual(actualFromSummary(f, tel), null, ofp);
   const L = pva.byKey;
   const blockMs = L.block?.actual ?? null;
   const flightMs = L.air?.actual ?? null;
   const fuelUsed = L.blockFuel?.actual ?? null;
   const delta = (l: PvaLine | undefined) => (l && l.delta != null ? fmtPvaDelta(l) : null);
-  const planSub = (l: PvaLine | undefined, label = "Plan") => {
+  const planSub = (l: PvaLine | undefined, label: "live.flight.plan" | "live.flight.planLanding" = "live.flight.plan") => {
     if (!ofp || !l) return undefined;
     const d = delta(l);
-    return `${label} ${fmtPvaValue(l.kind, l.plan)}${d ? ` · ${d}` : ""}`;
+    return `${t(label, { value: fmtPvaValue(l.kind, l.plan) })}${d ? ` · ${d}` : ""}`;
   };
   const lastTd = f?.touchdowns.length ? f.touchdowns[f.touchdowns.length - 1] : null;
   const aircraftLine = aircraft
@@ -449,12 +444,12 @@ function FlightSection({
   const integrity = f?.integrity;
   const issues = integrity
     ? [
-        integrity.slewDetected && "Slew",
-        integrity.timeAccelerationDetected && `Zeitraffer (max. ${fmt(integrity.maxSimRate, 0)}×)`,
-        integrity.crashed && "Absturz",
-        integrity.fuelIncreasedAirborne && "Treibstoff in der Luft erhöht",
-        integrity.teleportDetected && "Positionssprung (Teleport/Neuladen)",
-        integrity.pauseCount > 0 && `${integrity.pauseCount}× Pause (${fmtDuration(integrity.pausedMs)})`,
+        integrity.slewDetected && t("live.flight.issue.slew"),
+        integrity.timeAccelerationDetected && t("live.flight.issue.timeAccel", { rate: fmt(integrity.maxSimRate, 0) }),
+        integrity.crashed && t("live.flight.issue.crashed"),
+        integrity.fuelIncreasedAirborne && t("live.flight.issue.fuelAirborne"),
+        integrity.teleportDetected && t("live.flight.issue.teleport"),
+        integrity.pauseCount > 0 && t("live.flight.issue.pauses", { count: integrity.pauseCount, duration: fmtDuration(integrity.pausedMs) }),
       ].filter(Boolean)
     : [];
 
@@ -463,15 +458,15 @@ function FlightSection({
       <div className="flight-head">
         <div className="flight-route num">{routeText}</div>
         <div className="flight-aircraft" title={aircraftTitle ?? undefined}>
-          {aircraftTitle ?? "Kein Flugzeug erkannt"}
+          {aircraftTitle ?? t("live.flight.noAircraft")}
         </div>
         {aircraftLine && <div className="detail">{aircraftLine}</div>}
         {airframe && f?.state === "active" && (
-          <button className="af-live" onClick={() => navigate({ kind: "airframe", registration: airframe.registration })} title="Flugzeug in der Flotte öffnen">
+          <button className="af-live" onClick={() => navigate({ kind: "airframe", registration: airframe.registration })} title={t("live.flight.openAirframe")}>
             <AirframeImage airframe={airframe} />
             <span className="af-live-text">
               <strong className="num">{priv.mask(airframe.registration, "registration")}</strong>
-              <span className="detail">{airframeName(airframe) !== airframe.registration ? shownAirframeName(airframe, priv.on) : "gebucht auf dieses Flugzeug"}</span>
+              <span className="detail">{airframeName(airframe) !== airframe.registration ? shownAirframeName(airframe, priv.on) : t("live.flight.bookedOn")}</span>
             </span>
           </button>
         )}
@@ -484,64 +479,64 @@ function FlightSection({
               ▲
             </span>
             <div className="alert-text">
-              <strong>Integrität:</strong> {issues.join(" · ")}
+              <strong>{t("live.flight.integrity")}</strong> {issues.join(" · ")}
             </div>
           </div>
         </div>
       )}
 
       <div className="side-group">
-        <div className="side-group-title">Zeiten</div>
+        <div className="side-group-title">{t("live.flight.times")}</div>
         <div className="stat-grid cols-4">
-          <Stat size="sm" label="Off-Block" value={fmtClock(f?.offBlockMs)} sub={planSub(L.offBlock)} />
-          <Stat size="sm" label="Start" value={fmtClock(f?.takeoffMs)} sub={planSub(L.takeoff)} />
-          <Stat size="sm" label="Landung" value={fmtClock(f?.landingMs)} sub={planSub(L.landing)} />
+          <Stat size="sm" label={t("live.flight.offBlock")} value={fmtClock(f?.offBlockMs)} sub={planSub(L.offBlock)} />
+          <Stat size="sm" label={t("live.flight.takeoff")} value={fmtClock(f?.takeoffMs)} sub={planSub(L.takeoff)} />
+          <Stat size="sm" label={t("live.flight.landing")} value={fmtClock(f?.landingMs)} sub={planSub(L.landing)} />
           <Stat
             size="sm"
-            label="On-Block"
+            label={t("live.flight.onBlock")}
             value={fmtClock(f?.onBlockMs)}
             sub={planSub(L.onBlock)}
-            warn={pva.arrival?.status === "late" ? `On-Block ${fmtPunctuality(pva.arrival)}` : null}
+            warn={pva.arrival?.status === "late" ? t("live.flight.onBlockLate", { punctuality: fmtPunctuality(pva.arrival) }) : null}
           />
         </div>
       </div>
 
       <div className="side-group">
-        <div className="side-group-title">{ofp ? "Ist gegen Plan" : "Flug"}</div>
+        <div className="side-group-title">{ofp ? t("live.flight.vsPlan") : t("live.flight.flight")}</div>
         <div className="stat-grid cols-2">
-          <Stat label="Blockzeit" value={fmtDuration(blockMs)} sub={planSub(L.block)} warn={L.block?.warn ?? null} />
-          <Stat label="Luftzeit" title="Abheben bis Aufsetzen – für das Flugbuch zählt die Blockzeit" value={fmtDuration(flightMs)} sub={planSub(L.air)} />
-          <Stat label="Distanz" value={fmt(f?.distanceNm, 1)} unit="nm" sub={planSub(L.distance)} />
+          <Stat label={t("live.flight.blockTime")} value={fmtDuration(blockMs)} sub={planSub(L.block)} warn={L.block?.warn ?? null} />
+          <Stat label={t("live.flight.airTime")} title={t("live.flight.airTimeTitle")} value={fmtDuration(flightMs)} sub={planSub(L.air)} />
+          <Stat label={t("live.flight.distance")} value={fmt(f?.distanceNm, 1)} unit="nm" sub={planSub(L.distance)} />
           <Stat
-            label="Verbrauch"
+            label={t("live.flight.fuelUsed")}
             value={fmtWeightNum(fuelUsed)}
             unit={weightUnit}
-            sub={delta(L.landingFuel) ? `Landung ${delta(L.landingFuel)} vs. Plan` : planSub(L.blockFuel)}
+            sub={delta(L.landingFuel) ? t("live.flight.landingVsPlan", { delta: delta(L.landingFuel) ?? "" }) : planSub(L.blockFuel)}
             warn={L.landingFuel?.warn ?? null}
           />
-          <Stat label="Max. Höhe" value={fmt(f?.maxAltitudeMslFt, 0)} unit="ft" sub={planSub(L.cruise)} />
-          <Stat label="Treibstoff an Bord" value={fmtWeightNum(t?.fuelTotalKg)} unit={weightUnit} sub={planSub(L.landingFuel, "Plan Landung")} />
+          <Stat label={t("live.flight.maxAltitude")} value={fmt(f?.maxAltitudeMslFt, 0)} unit="ft" sub={planSub(L.cruise)} />
+          <Stat label={t("live.flight.fuelOnBoard")} value={fmtWeightNum(tel?.fuelTotalKg)} unit={weightUnit} sub={planSub(L.landingFuel, "live.flight.planLanding")} />
         </div>
       </div>
 
       <div className="side-group">
-        <div className="side-group-title">Wetter</div>
+        <div className="side-group-title">{t("live.flight.weather")}</div>
         {wxIcao ? (
           <>
             <MetarInline icao={wxIcao} metar={wx} error={wxError} />
             {wx && <div className="metar-raw mono">{wx.raw}</div>}
           </>
         ) : (
-          <div className="detail">Kein Flughafen in der Nähe bekannt – das Wetter erscheint, sobald Abflug oder Ziel feststehen.</div>
+          <div className="detail">{t("live.flight.noAirportWeather")}</div>
         )}
       </div>
 
       <div className="side-group" aria-live="polite">
         <div className="side-group-title">
-          Letzte Landung
+          {t("live.flight.lastLanding")}
           {lastTd && onOpenFlight && (
             <button className="link-btn" onClick={onOpenFlight}>
-              Im Logbuch
+              {t("live.flight.inLogbook")}
             </button>
           )}
         </div>
@@ -549,18 +544,24 @@ function FlightSection({
           <div className="stat-grid cols-4">
             <Stat
               size="sm"
-              label="Landerate"
+              label={t("live.flight.landingRate")}
               value={fmt(lastTd.landingRateFpm, 0)}
               unit="fpm"
-              sub={lastTd.landingRateSource === "sim" ? "Sim-Wert" : "gemessen"}
-              warn={lastTd.landingRateFpm <= -600 ? "Harte Landung (ab 600 fpm)" : null}
+              sub={lastTd.landingRateSource === "sim" ? t("live.flight.simValue") : t("live.flight.measured")}
+              warn={lastTd.landingRateFpm <= -600 ? t("live.flight.hardLanding", { rate: 600 }) : null}
             />
-            <Stat size="sm" label="Messwert" value={fmt(lastTd.vsFpmMeasured, 0)} unit="fpm" sub="letztes Sample" />
-            <Stat size="sm" label="g-Last" value={fmt(lastTd.peakG, 2)} unit="g" warn={lastTd.peakG >= G_HARD ? "g-Last ab 2,0 g (Band „hart“)" : null} />
-            <Stat size="sm" label="Bounces" value={String(lastTd.bounces)} warn={lastTd.bounces > 0 ? `${lastTd.bounces} Bounce${lastTd.bounces > 1 ? "s" : ""}` : null} />
+            <Stat size="sm" label={t("live.flight.measuredValue")} value={fmt(lastTd.vsFpmMeasured, 0)} unit="fpm" sub={t("live.flight.lastSample")} />
+            <Stat
+              size="sm"
+              label={t("live.flight.gLoad")}
+              value={fmt(lastTd.peakG, 2)}
+              unit="g"
+              warn={lastTd.peakG >= G_HARD ? t("live.flight.gHard", { g: fmtNum(G_HARD, 1), band: t("band.hard") }) : null}
+            />
+            <Stat size="sm" label={t("live.flight.bounces")} value={String(lastTd.bounces)} warn={lastTd.bounces > 0 ? t("count.bounces", { count: lastTd.bounces }) : null} />
           </div>
         ) : (
-          <div className="detail">Nach dem Aufsetzen siehst du hier Landerate, g-Last und Bounces.</div>
+          <div className="detail">{t("live.flight.noLandingYet")}</div>
         )}
       </div>
     </div>
@@ -570,78 +571,80 @@ function FlightSection({
 // ---- side panel: Systeme -------------------------------------------------------------
 
 function SystemsSection({ ofp }: { ofp: Ofp | null }) {
-  const t = useTelemetry();
+  const t = useT();
+  const tel = useTelemetry();
   const f = useFlight();
   // re-render on a kg/lb switch even while no telemetry arrives (paused sim)
   usePrefs();
   // without telemetry the flight section above already says that the sim is not connected
-  if (!t) return null;
-  const gear = t.gearPct >= 99 ? "ausgefahren" : t.gearPct <= 1 ? "eingefahren" : `${fmt(t.gearPct, 0, "%")} (in Bewegung)`;
-  const fuelUsed = f?.fuelStartKg != null ? f.fuelStartKg - (f.fuelEndKg ?? t.fuelTotalKg) : null;
+  if (!tel) return null;
+  const gear = tel.gearPct >= 99 ? t("live.systems.gearDown") : tel.gearPct <= 1 ? t("live.systems.gearUp") : t("live.systems.gearMoving", { pct: fmt(tel.gearPct, 0, "%") });
+  const fuelUsed = f?.fuelStartKg != null ? f.fuelStartKg - (f.fuelEndKg ?? tel.fuelTotalKg) : null;
+  const withMax = (value: number | null | undefined, max: number | null | undefined) => t("live.systems.withMax", { value: fmtWeight(value), max: fmtWeight(max) });
   return (
     <div className="side-stack">
       <div className="side-group">
-        <div className="side-group-title">Konfiguration</div>
+        <div className="side-group-title">{t("live.systems.config")}</div>
         <KV
           rows={[
-            ["Fahrwerk", gear],
-            ["Klappen", t.flapsIndex === 0 ? "eingefahren" : `Stufe ${t.flapsIndex}`],
-            ["Parkbremse", t.parkingBrake ? "gesetzt" : "gelöst"],
-            ["Am Boden", t.onGround ? "ja" : "nein"],
-            ["Nick / Querlage", `${fmt(t.pitchDeg, 1, "°")} / ${fmt(t.bankDeg, 1, "°")}`],
-            ["g-Last", fmt(t.gForce, 2, "g")],
-            ["Transponder", String(t.transponderCode).padStart(4, "0")],
+            [t("live.systems.gear"), gear],
+            [t("live.systems.flaps"), tel.flapsIndex === 0 ? t("live.systems.flapsUp") : t("live.systems.flapsStep", { step: tel.flapsIndex })],
+            [t("live.systems.parkingBrake"), tel.parkingBrake ? t("live.systems.brakeSet") : t("live.systems.brakeReleased")],
+            [t("live.systems.onGround"), tel.onGround ? t("live.systems.yes") : t("live.systems.no")],
+            [t("live.systems.pitchBank"), `${fmt(tel.pitchDeg, 1, "°")} / ${fmt(tel.bankDeg, 1, "°")}`],
+            [t("live.systems.gLoad"), fmt(tel.gForce, 2, "g")],
+            [t("live.systems.transponder"), String(tel.transponderCode).padStart(4, "0")],
           ]}
         />
       </div>
       <div className="side-group">
-        <div className="side-group-title">Triebwerke &amp; Treibstoff</div>
+        <div className="side-group-title">{t("live.systems.enginesFuel")}</div>
         <KV
           rows={[
-            ["Triebwerke", `${t.enginesRunning} von ${t.numEngines} laufen`],
-            ["Treibstoff", fmtWeight(t.fuelTotalKg)],
-            ["Verbrauch", fmtWeight(fuelUsed)],
-            ...(ofp ? ([["Plan Rampe / Landung", `${fmtWeight(ofp.fuel.planRampKg)} / ${fmtWeight(ofp.fuel.planLandingKg)}`]] as Array<[string, string]>) : []),
+            [t("live.systems.engines"), t("live.systems.enginesRunning", { running: tel.enginesRunning, total: tel.numEngines })],
+            [t("live.systems.fuel"), fmtWeight(tel.fuelTotalKg)],
+            [t("live.systems.fuelUsed"), fmtWeight(fuelUsed)],
+            ...(ofp ? ([[t("live.systems.planRampLanding"), `${fmtWeight(ofp.fuel.planRampKg)} / ${fmtWeight(ofp.fuel.planLandingKg)}`]] as Array<[string, string]>) : []),
           ]}
         />
       </div>
       <div className="side-group">
-        <div className="side-group-title">Gewichte</div>
+        <div className="side-group-title">{t("live.systems.weights")}</div>
         <KV
           rows={[
-            ["Gesamtgewicht", fmtWeight(t.totalWeightKg)],
+            [t("live.systems.grossWeight"), fmtWeight(tel.totalWeightKg)],
             ...(ofp
               ? ([
-                  ["Plan TOW", `${fmtWeight(ofp.weights.estTowKg)} (max. ${fmtWeight(ofp.weights.maxTowKg)})`],
-                  ["Plan LDW", `${fmtWeight(ofp.weights.estLdwKg)} (max. ${fmtWeight(ofp.weights.maxLdwKg)})`],
-                  ["Plan ZFW", fmtWeight(ofp.weights.estZfwKg)],
+                  [t("live.systems.planTow"), withMax(ofp.weights.estTowKg, ofp.weights.maxTowKg)],
+                  [t("live.systems.planLdw"), withMax(ofp.weights.estLdwKg, ofp.weights.maxLdwKg)],
+                  [t("live.systems.planZfw"), fmtWeight(ofp.weights.estZfwKg)],
                 ] as Array<[string, string]>)
               : []),
           ]}
         />
       </div>
       <div className="side-group">
-        <div className="side-group-title">Lichter</div>
+        <div className="side-group-title">{t("live.systems.lights")}</div>
         <ul className="light-list">
           {LIGHT_LABEL.map(([k, label]) => (
-            <li key={k} className={t.lights[k] ? "on" : "off"}>
+            <li key={k} className={tel.lights[k] ? "on" : "off"}>
               <span className="light-dot" aria-hidden="true" />
-              {label}
-              <span className="sr-only">{t.lights[k] ? " an" : " aus"}</span>
+              {t(label)}
+              <span className="sr-only"> {tel.lights[k] ? t("live.systems.lightOn") : t("live.systems.lightOff")}</span>
             </li>
           ))}
         </ul>
       </div>
       <div className="side-group">
-        <div className="side-group-title">Simulation</div>
+        <div className="side-group-title">{t("live.systems.simulation")}</div>
         <KV
           rows={[
-            ["Sim-Rate", `${fmt(t.simRate, 1, "×")}${t.paused ? " · Pause" : ""}`, t.simRate > 1.01 ? "Zeitraffer aktiv" : null],
-            ["Slew", t.slew ? "aktiv" : "aus", t.slew ? "Slew-Modus aktiv" : null],
-            ["Höhe AGL", fmt(t.altitudeAglFt, 0, "ft")],
-            ["TAS", fmt(t.tasKt, 0, "kt")],
-            ["Kurs (wahr)", fmt(t.headingTrueDeg, 0, "°")],
-            ["Position", fmtCoord(t.latitude, t.longitude, 4)],
+            [t("live.systems.simRate"), `${fmt(tel.simRate, 1, "×")}${tel.paused ? ` · ${t("live.systems.paused")}` : ""}`, tel.simRate > 1.01 ? t("live.systems.timeAccel") : null],
+            [t("live.systems.slew"), tel.slew ? t("live.systems.active") : t("live.systems.off"), tel.slew ? t("live.systems.slewActive") : null],
+            [t("live.systems.altitudeAgl"), fmt(tel.altitudeAglFt, 0, "ft")],
+            ["TAS", fmt(tel.tasKt, 0, "kt")],
+            [t("live.systems.trueCourse"), fmt(tel.headingTrueDeg, 0, "°")],
+            [t("live.systems.position"), fmtCoord(tel.latitude, tel.longitude, 4)],
           ]}
         />
       </div>
@@ -652,14 +655,15 @@ function SystemsSection({ ofp }: { ofp: Ofp | null }) {
 // ---- recording status pill (map, top left) -------------------------------------------
 
 function StatusPill({ rec, onTryDemo, short }: { rec: RecStatus; onTryDemo?: () => void; short?: boolean }) {
+  const t = useT();
   const mark = rec.error ? "error" : rec.kind;
   return (
     <div className={`status-pill pill-${mark}`} role="status" title={rec.hint}>
       <span className={`dot dot-${mark}`} aria-hidden="true" />
-      <span className="status-pill-text">{short ? WAITING_SHORT : rec.text}</span>
+      <span className="status-pill-text">{short ? waitingShort() : rec.text}</span>
       {rec.kind === "waiting" && onTryDemo && (
-        <button className="link-btn" onClick={onTryDemo} title="Ohne Simulator ausprobieren – ein simulierter Flug">
-          {DEMO_LABEL} starten
+        <button className="link-btn" onClick={onTryDemo} title={t("live.ready.tryDemoTitle")}>
+          {t("live.ready.startDemo", { demo: demoLabel() })}
         </button>
       )}
     </div>

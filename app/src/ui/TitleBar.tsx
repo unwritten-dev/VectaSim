@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { RecStatus } from "../status";
 import { Logo } from "./Logo";
+import { useT } from "../i18n";
 
 /**
  * Custom window title bar (tauri.conf.json: `decorations: false`). The bar and the brand
@@ -9,6 +10,7 @@ import { Logo } from "./Logo";
  * controls are buttons and therefore never drag. Glyphs follow Windows 11 (Segoe Fluent).
  */
 export default function TitleBar({ rec }: { rec: RecStatus }) {
+  const t = useT();
   const [maximized, setMaximized] = useState(false);
 
   useEffect(() => {
@@ -52,7 +54,7 @@ export default function TitleBar({ rec }: { rec: RecStatus }) {
       </div>
       <div className="titlebar-drag" data-tauri-drag-region />
       <div className="titlebar-controls">
-        <button type="button" className="titlebar-btn" aria-label="Minimieren" title="Minimieren" onClick={act((w) => w.minimize())}>
+        <button type="button" className="titlebar-btn" aria-label={t("shell.titleBar.minimize")} title={t("shell.titleBar.minimize")} onClick={act((w) => w.minimize())}>
           <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
             <path d="M0 5.5h10" stroke="currentColor" strokeWidth="1" />
           </svg>
@@ -60,8 +62,8 @@ export default function TitleBar({ rec }: { rec: RecStatus }) {
         <button
           type="button"
           className="titlebar-btn"
-          aria-label={maximized ? "Wiederherstellen" : "Maximieren"}
-          title={maximized ? "Wiederherstellen" : "Maximieren"}
+          aria-label={maximized ? t("shell.titleBar.restore") : t("shell.titleBar.maximize")}
+          title={maximized ? t("shell.titleBar.restore") : t("shell.titleBar.maximize")}
           onClick={act((w) => w.toggleMaximize())}
         >
           {maximized ? (
@@ -75,7 +77,7 @@ export default function TitleBar({ rec }: { rec: RecStatus }) {
             </svg>
           )}
         </button>
-        <button type="button" className="titlebar-btn titlebar-close" aria-label="Schließen" title="Schließen" onClick={act((w) => w.close())}>
+        <button type="button" className="titlebar-btn titlebar-close" aria-label={t("shell.action.close")} title={t("shell.action.close")} onClick={act((w) => w.close())}>
           <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true" stroke="currentColor" strokeWidth="1">
             <path d="M0.5 0.5l9 9M9.5 0.5l-9 9" />
           </svg>

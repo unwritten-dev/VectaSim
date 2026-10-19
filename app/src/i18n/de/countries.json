@@ -1,0 +1,82 @@
+{
+  "countries": {
+    "continent": {
+      "EU": "Europa",
+      "AS": "Asien",
+      "AF": "Afrika",
+      "NA": "Nordamerika",
+      "SA": "Südamerika",
+      "OC": "Ozeanien",
+      "AN": "Antarktis"
+    },
+    "filter": {
+      "all": "Alle",
+      "visited": "Besucht",
+      "open": "Offen"
+    },
+    "legend": {
+      "visited": "Besucht (Landung)",
+      "open": "Noch nicht besucht",
+      "pin": "Ankunftsflughafen"
+    },
+    "empty": {
+      "title": "Noch kein Land durch eine Landung besucht",
+      "text": "Deine erste Landung färbt die Karte. Es zählt nur der Ankunftsflughafen abgeschlossener Flüge.",
+      "demoSkipped": {
+        "one": "{count} Demo-Landung nicht mitgezählt (Filter „Demo-Flüge“ im Logbuch).",
+        "other": "{count} Demo-Landungen nicht mitgezählt (Filter „Demo-Flüge“ im Logbuch)."
+      }
+    },
+    "panel": "Länderliste",
+    "visitedCount": "Länder besucht",
+    "inContinent": "Länder in {continent}",
+    "saveImage": "Als Bild speichern",
+    "saveImageHint": "Karte als PNG speichern",
+    "progressLabel": "Besuchte Länder",
+    "progressText": "{visited} von {total} Ländern besucht",
+    "summary": "{landings} · zuletzt {country} am {date}",
+    "summaryNone": "Gezählt wird jede Landung am Ankunftsflughafen eines abgeschlossenen Flugs.",
+    "demoSkipped": {
+      "one": "{count} Demo-Landung nicht mitgezählt",
+      "other": "{count} Demo-Landungen nicht mitgezählt"
+    },
+    "continentGroup": "Kontinent",
+    "searchPlaceholder": "Land suchen (Name oder ISO-Code)",
+    "searchLabel": "Land suchen",
+    "visitGroup": "Besucht oder offen",
+    "airports": "Flughäfen",
+    "clearSelection": "Auswahl aufheben",
+    "visitLine": "✓ {landings} · erste {first} · letzte {last}",
+    "airportsLine": "Flughäfen: {list}",
+    "openInLogbook": "Im Logbuch öffnen",
+    "moreFlights": "… und {n} weitere im Logbuch",
+    "notVisited": "– Noch keine Landung in diesem Land.",
+    "loading": "Länder werden geladen …",
+    "list": {
+      "visited": "Besucht",
+      "country": "Land",
+      "landings": "Landungen",
+      "last": "Zuletzt",
+      "none": "Kein Land passt zu Filter und Suche.",
+      "yes": "besucht",
+      "no": "nicht besucht"
+    },
+    "tooltip": {
+      "visited": "✓ {landings} · zuletzt {date}",
+      "open": "– noch nicht besucht"
+    },
+    "map": {
+      "attribution": "Grenzen: Natural Earth"
+    },
+    "export": {
+      "fileStem": "Laender",
+      "pngFilter": "PNG-Bild",
+      "line": "{progress} Länder besucht · {landings}",
+      "title": "VectaSim · Länder",
+      "saved": "Länderkarte gespeichert",
+      "failed": "Länderkarte nicht gespeichert: {reason}",
+      "noCanvas": "Canvas nicht verfügbar",
+      "noPng": "PNG konnte nicht erzeugt werden"
+    }
+  }
+}

@@ -4,6 +4,7 @@ import type { AirframeRow } from "../types";
 import { airframeName, pickerOptions, shownAirframeName } from "./airframe";
 import { usePrivacy } from "../prefs";
 import AirframeImage from "./AirframeImage";
+import { useT } from "../i18n";
 
 interface Props {
   /** Registration currently booked (highlighted, offered as "keep"). */
@@ -15,6 +16,7 @@ interface Props {
 /** Search existing airframes or type a new registration. Enter takes the first option. */
 export default function AirframePicker({ current, onPick, onCancel }: Props) {
   const priv = usePrivacy();
+  const t = useT();
   const [all, setAll] = useState<AirframeRow[]>([]);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
@@ -51,12 +53,12 @@ export default function AirframePicker({ current, onPick, onCancel }: Props) {
   };
 
   return (
-    <div className="af-picker" role="dialog" aria-label="Flugzeug ändern">
+    <div className="af-picker" role="dialog" aria-label={t("logbook.airframe.change")}>
       <input
         ref={inputRef}
         type="search"
-        placeholder="Registrierung, Name oder Typ – z. B. D-AINA"
-        aria-label="Flugzeug suchen oder Registrierung eingeben"
+        placeholder={t("logbook.airframe.searchPlaceholder")}
+        aria-label={t("logbook.airframe.searchLabel")}
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onKeyDown={onKey}
@@ -78,32 +80,32 @@ export default function AirframePicker({ current, onPick, onCancel }: Props) {
                 <span className="af-option-text">
                   <strong className="num">{priv.mask(o.reg, "registration")}</strong>
                   <span className="detail">
-                    {[airframeName(o.row) !== o.reg ? shownAirframeName(o.row, priv.on) : null, o.row.icaoType, `${o.row.totalFlights} Flüge`].filter(Boolean).join(" · ")}
+                    {[airframeName(o.row) !== o.reg ? shownAirframeName(o.row, priv.on) : null, o.row.icaoType, t("count.flights", { count: o.row.totalFlights })].filter(Boolean).join(" · ")}
                   </span>
                 </span>
-                {o.reg === current && <span className="badge badge-inline">aktuell</span>}
+                {o.reg === current && <span className="badge badge-inline">{t("logbook.airframe.current")}</span>}
               </>
             ) : (
               <span className="af-option-text">
                 <strong className="num">+ {o.reg}</strong>
-                <span className="detail">Neues Flugzeug mit dieser Registrierung anlegen</span>
+                <span className="detail">{t("logbook.airframe.createNew")}</span>
               </span>
             )}
           </li>
         ))}
         {options.length === 0 && (
-          <li className="af-option empty detail">{query.trim() ? "Keine Treffer – eine Registrierung hat 3–8 Zeichen (Buchstaben, Ziffern, Bindestrich)." : "Noch keine Flugzeuge – tippe eine Registrierung."}</li>
+          <li className="af-option empty detail">{query.trim() ? t("logbook.airframe.noMatch") : t("logbook.airframe.noneYet")}</li>
         )}
       </ul>
       <div className="af-picker-actions">
         {current && (
-          <button className="btn-sm" onClick={() => onPick(null)} title="Flug keinem Flugzeug zuordnen">
-            Zuordnung entfernen
+          <button className="btn-sm" onClick={() => onPick(null)} title={t("logbook.airframe.unassignTitle")}>
+            {t("logbook.airframe.unassign")}
           </button>
         )}
         <span className="spacer" />
         <button className="btn-sm" onClick={onCancel}>
-          Abbrechen
+          {t("logbook.airframe.cancel")}
         </button>
       </div>
     </div>

@@ -18,7 +18,7 @@
 use crate::recorder::PREVIEW_EVERY;
 use crate::store::{FLIGHT_COLS, FlightRow, row_to_flight};
 use crate::track::{TrackSample, decode_track, encode_track, subsample};
-use crate::{Result, Store, StoreError};
+use crate::{Invalid, Result, Store, StoreError};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use vectasim_core::flight::{GeoPoint, haversine_nm};
@@ -113,25 +113,25 @@ fn start_of(f: &FlightRow, track: &[TrackSample]) -> End {
 
 /// Gap and position jump between the end of `first` and the start of `second`, or why the
 /// two cannot be one flight.
-fn check_pair(end: Option<End>, start: End) -> std::result::Result<(u64, f64), String> {
-    let end = end.ok_or("Vom ersten Flug ist kein Ende bekannt.")?;
+fn check_pair(end: Option<End>, start: End) -> std::result::Result<(u64, f64), Invalid> {
+    let end = end.ok_or(Invalid::MergeNoEnd)?;
     if start.t_ms + MERGE_OVERLAP_TOLERANCE_MS < end.t_ms {
-        return Err("Der zweite Flug beginnt vor dem Ende des ersten.".into());
+        return Err(Invalid::MergeOverlap);
     }
     let gap = start.t_ms.saturating_sub(end.t_ms);
     if gap > MERGE_MAX_GAP_MS {
-        return Err(format!("Zwischen den Flügen liegen {} min (höchstens 60 min).", gap / 60_000));
+        return Err(Invalid::MergeGap { minutes: gap / 60_000, max_minutes: MERGE_MAX_GAP_MS / 60_000 });
     }
-    let (Some(a), Some(b)) = (end.pos, start.pos) else { return Err("Die Position am Übergang ist nicht bekannt.".into()) };
+    let (Some(a), Some(b)) = (end.pos, start.pos) else { return Err(Invalid::MergePositionUnknown) };
     let d = haversine_nm(a, b);
     if !d.is_finite() || d > MERGE_MAX_JUMP_NM {
-        return Err(format!("Die Positionen liegen {d:.1} nm auseinander (höchstens 5 nm)."));
+        return Err(Invalid::MergeJump { distance_nm: d, max_nm: MERGE_MAX_JUMP_NM });
     }
     Ok((gap, d))
 }
 
-fn invalid(m: impl Into<String>) -> StoreError {
-    StoreError::Invalid(m.into())
+fn invalid(i: Invalid) -> StoreError {
+    StoreError::Invalid(i)
 }
 
 fn flight_row(conn: &Connection, id: &str) -> Result<Option<(FlightRow, bool)>> {
@@ -270,7 +270,7 @@ impl Store {
             params![id, now_ms as i64],
         )?;
         if n == 0 {
-            return Err(invalid("Nur ein unterbrochener Flug lässt sich fortsetzen."));
+            return Err(invalid(Invalid::ResumeNotInterrupted));
         }
         Ok(())
     }
@@ -314,17 +314,17 @@ impl Store {
 
     pub fn merge_flights_at(&self, first_id: &str, second_id: &str, now_ms: u64) -> Result<MergeReport> {
         if first_id == second_id {
-            return Err(invalid("Ein Flug lässt sich nicht mit sich selbst zusammenführen."));
+            return Err(invalid(Invalid::MergeSelf));
         }
         let mut conn = self.conn();
         let tx = conn.transaction()?;
-        let (a, a_deleted) = flight_row(&tx, first_id)?.ok_or_else(|| invalid("Flug nicht gefunden"))?;
-        let (b, b_deleted) = flight_row(&tx, second_id)?.ok_or_else(|| invalid("Flug nicht gefunden"))?;
+        let (a, a_deleted) = flight_row(&tx, first_id)?.ok_or_else(|| invalid(Invalid::FlightNotFound))?;
+        let (b, b_deleted) = flight_row(&tx, second_id)?.ok_or_else(|| invalid(Invalid::FlightNotFound))?;
         if a_deleted || b_deleted {
-            return Err(invalid("Flüge im Papierkorb lassen sich nicht zusammenführen."));
+            return Err(invalid(Invalid::MergeTrashed));
         }
         if a.state != "interrupted" {
-            return Err(invalid("Nur ein unterbrochener Flug lässt sich fortsetzen."));
+            return Err(invalid(Invalid::ResumeNotInterrupted));
         }
         let track_a = track_of(&tx, first_id, "data")?;
         let track_b = track_of(&tx, second_id, "data")?;

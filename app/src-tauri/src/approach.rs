@@ -79,8 +79,11 @@ pub(crate) fn analyze(store: &Store, airports: &AirportIndex, flight_id: &str, l
             push(c.end, c.geometry);
         }
     }
-    // the airframe's Vapp from the fleet, if the pilot entered one; else the flown median is the reference
-    let aircraft = aircraft_ref(store, flight_id);
+    // the airframe's Vapp / landing flaps from the fleet, if the pilot entered them; the
+    // aircraft constants of track v2 (VS0, flap handle positions) from the recording
+    let mut aircraft = aircraft_ref(store, flight_id);
+    aircraft.vs0_kt = aircraft.vs0_kt.or_else(|| track.iter().rev().find_map(|s| s.design_vs0_kt));
+    aircraft.flap_positions = aircraft.flap_positions.or_else(|| track.iter().rev().find_map(|s| s.flap_positions));
     let mut out = approach::analyze_flight(&samples, &phases, &detail.touchdowns, &ends, &aircraft, &cfg);
     for a in &mut out {
         if let Some(r) = a.runway.as_ref()

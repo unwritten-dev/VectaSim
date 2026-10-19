@@ -1,0 +1,520 @@
+{
+  "csvImport": {
+    "title": "CSV importieren",
+    "steps": "Schritte",
+    "close": "Import schließen",
+    "step": {
+      "file": "Datei",
+      "columns": "Spalten zuordnen",
+      "preview": "Vorschau"
+    },
+    "preset": {
+      "vectasim": "VectaSim-Logbuch (CSV)",
+      "volanta": "Volanta-Import-CSV",
+      "stkp": "SimToolkitPro (ohne Gewähr)",
+      "generic": "Eigene Zuordnung"
+    },
+    "encodingBom": "UTF-8 (mit BOM)",
+    "delimiter": {
+      "comma": "Komma",
+      "semicolon": "Semikolon",
+      "tab": "Tabulator",
+      "pipe": "senkrechter Strich",
+      "custom": "„{char}“"
+    },
+    "group": {
+      "route": "Strecke",
+      "times": "Zeiten",
+      "flight": "Flug und Flugzeug",
+      "values": "Werte",
+      "own": "Eigenes"
+    },
+    "field": {
+      "depIcao": "Abflughafen",
+      "arrIcao": "Zielflughafen",
+      "distanceNm": "Distanz (nm)",
+      "date": "Datum",
+      "offBlock": "Off-Block (Abfahrt)",
+      "takeoff": "Start (Abheben)",
+      "landing": "Landung (Aufsetzen)",
+      "onBlock": "On-Block (Ankunft)",
+      "blockMin": "Blockzeit",
+      "airMin": "Flugzeit",
+      "callsign": "Rufzeichen",
+      "flightNumber": "Flugnummer",
+      "airline": "Airline",
+      "aircraftTitle": "Flugzeug (Name)",
+      "aircraftIcao": "Flugzeugtyp (ICAO)",
+      "registration": "Registrierung",
+      "fuelStart": "Kraftstoff Start",
+      "fuelEnd": "Kraftstoff Ende",
+      "fuelUsed": "Kraftstoffverbrauch",
+      "maxAltFt": "Max. Höhe (ft)",
+      "landingRateFpm": "Landerate (fpm)",
+      "notes": "Notizen",
+      "tags": "Tags",
+      "rating": "Bewertung (1–5)"
+    },
+    "dateFormat": {
+      "label": "Datumsformat",
+      "auto": "automatisch erkennen",
+      "iso": "ISO (2026-10-18 14:05)",
+      "dmy": "TT.MM.JJJJ (18.10.2026 14:05)",
+      "mdy": "MM/TT/JJJJ (10/18/2026 2:05 PM)",
+      "epochS": "Unix-Zeit (Sekunden)",
+      "epochMs": "Unix-Zeit (Millisekunden)"
+    },
+    "missing": {
+      "dep": "Ordne den Abflughafen zu.",
+      "arr": "Ordne den Zielflughafen zu.",
+      "date": "Ordne Datum oder Off-Block zu.",
+      "file": "Wähle zuerst eine Datei."
+    },
+    "summary": {
+      "added": {
+        "one": "{count} Flug übernommen",
+        "other": "{count} Flüge übernommen"
+      },
+      "duplicate": {
+        "one": "{count} schon vorhanden",
+        "other": "{count} schon vorhanden"
+      },
+      "invalid": {
+        "one": "{count} fehlerhaft",
+        "other": "{count} fehlerhaft"
+      },
+      "airframes": {
+        "one": "{count} Flugzeug neu",
+        "other": "{count} Flugzeuge neu"
+      }
+    },
+    "pickTitle": "CSV-Datei zum Importieren wählen",
+    "fileType": "CSV-Datei",
+    "done": {
+      "title": "CSV importiert · {added} von {rows} Zeilen",
+      "bodyWarnings": "{summary} · {warnings}: {list}",
+      "warnings": {
+        "one": "{count} Hinweis",
+        "other": "{count} Hinweise"
+      }
+    },
+    "chooseFile": "Datei wählen",
+    "intro": "Flüge aus anderen Logbüchern übernehmen: die Import-CSV von Volanta, ein SimToolkitPro- oder VA-Export (phpVMS) oder das eigene Logbuch-CSV von VectaSim. Importierte Flüge zählen für Stunden, Strecken, Flotte und Länder – Landeanalyse, Streubild und Anflug bleiben leer, weil keine Aufzeichnung dabei ist.",
+    "reading": "Liest …",
+    "otherFile": "Andere Datei …",
+    "pickFile": "Datei wählen …",
+    "facts": {
+      "detected": "Erkannt",
+      "delimiter": "Trennzeichen",
+      "encoding": "Kodierung",
+      "rows": "Zeilen",
+      "withHeader": "(plus Kopfzeile)",
+      "noHeader": "(ohne Kopfzeile)"
+    },
+    "format": "Format",
+    "stkpHint": "Die Spalten von SimToolkitPro sind nicht dokumentiert – prüf die Zuordnung im nächsten Schritt.",
+    "next": "Weiter",
+    "back": "Zurück",
+    "mappingIntro": "Vorbelegt aus {preset} und den Spaltennamen. Datum und Uhrzeit dürfen in einer Spalte stehen oder getrennt (dann Datum + Off-Block-Uhrzeit). Fehlt die Ankunft, rechnet VectaSim sie aus der Blockzeit.",
+    "zone": {
+      "label": "Zeiten ohne Zeitzone",
+      "utc": "sind UTC",
+      "local": "sind Ortszeit dieses PCs"
+    },
+    "weightUnit": "Gewichte in",
+    "durationUnit": {
+      "label": "Dauer als Zahl in",
+      "minutes": "Minuten",
+      "hours": "Stunden"
+    },
+    "map": {
+      "caption": "Zielfeld und Quellspalte",
+      "field": "Feld in VectaSim",
+      "column": "Spalte der Datei",
+      "sample": "Beispiel",
+      "unmapped": "– nicht zugeordnet –"
+    },
+    "counts": {
+      "rows": "{rows} Zeilen · {valid} gültig",
+      "invalid": {
+        "one": "{count} fehlerhaft (wird übersprungen)",
+        "other": "{count} fehlerhaft (werden übersprungen)"
+      },
+      "duplicates": {
+        "one": "{count} schon im Logbuch",
+        "other": "{count} schon im Logbuch"
+      },
+      "shown": {
+        "one": "Gezeigt: die erste Zeile. Gezählt und importiert wird die ganze Datei.",
+        "other": "Gezeigt: die ersten {count} Zeilen. Gezählt und importiert wird die ganze Datei."
+      }
+    },
+    "dedupe": "Duplikate überspringen (gleiche Strecke, Off-Block weniger als 15 min auseinander)",
+    "sourceTag": "Quelle (Tag)",
+    "tagsHint": "Jeder Flug bekommt die Tags „import“ und die Quelle. Eine Landerate aus der Datei steht in den Notizen – sie stammt von einem anderen Messverfahren und zählt nicht für die Landestatistik.",
+    "importing": "Importiert …",
+    "importButton": {
+      "one": "{count} Flug importieren",
+      "other": "{count} Flüge importieren"
+    },
+    "noRows": "Die Datei enthält keine Datenzeilen.",
+    "sampleCaption": "Erste Zeilen der Datei",
+    "previewCaption": "Vorschau der ersten Zeilen",
+    "col": {
+      "line": "Zeile",
+      "offBlock": "Off-Block",
+      "route": "Strecke",
+      "aircraft": "Flugzeug",
+      "block": "Block",
+      "distance": "Distanz",
+      "status": "Status"
+    },
+    "row": {
+      "error": "Fehler: {error}",
+      "duplicate": "schon im Logbuch – wird übersprungen",
+      "ok": "ok",
+      "approx": "ca. {value}"
+    }
+  },
+  "dispatch": {
+    "user": {
+      "placeholder": "SimBrief-Pilot-ID oder Benutzername",
+      "title": "Deine Pilot-ID findest du auf simbrief.com unter Account. Sie wird gespeichert.",
+      "change": "ändern",
+      "missing": "Erst SimBrief-Pilot-ID eintragen"
+    },
+    "load": "Flugplan laden",
+    "reload": "Neu laden",
+    "remove": "Flugplan entfernen",
+    "empty": {
+      "title": "Kein Flugplan geladen",
+      "text": "Lade deinen letzten SimBrief-Flugplan, um Route, Restdistanz, ETA und Plan-gegen-Ist zu sehen.",
+      "idHint": "Deine Pilot-ID findest du auf simbrief.com → Account."
+    },
+    "stat": {
+      "departure": "Abflug",
+      "arrival": "Ankunft",
+      "alternate": "Ausweichflughafen",
+      "cruise": "Reiseflughöhe",
+      "blockTimes": "Off-Block / On-Block (Plan)",
+      "blockAir": "Blockzeit / Luftzeit",
+      "airTime": "Luftzeit {time}",
+      "rampFuel": "Treibstoff Rampe",
+      "fuelSub": "Trip {trip} · Landung {landing}",
+      "taxi": "Taxi out / in (Plan)",
+      "taxiFuel": "Taxi-Treibstoff {fuel}"
+    },
+    "route": "Route",
+    "footer": "AIRAC {airac} · erstellt {created} · {waypoints}",
+    "waypoints": {
+      "one": "{count} Wegpunkt",
+      "other": "{count} Wegpunkte"
+    }
+  },
+  "errors": {
+    "service": {
+      "sim": "Simulator",
+      "simbrief": "SimBrief",
+      "vatsim": "VATSIM",
+      "ivao": "IVAO",
+      "metar": "Wetterdienst",
+      "logbook": "Logbuch",
+      "export": "Export",
+      "settings": "Einstellungen",
+      "unknown": "Der Dienst"
+    },
+    "dllMissingText": "SimConnect fehlt noch – unter Einstellungen → Simulator mit einem Klick herunterladen",
+    "dllMissing": {
+      "title": "SimConnect fehlt noch.",
+      "hint": "Unter Einstellungen → Simulator mit einem Klick herunterladen (offizielles MSFS-SDK von Microsoft) oder dort die Datei wählen. Zum Ausprobieren: „Demo-Flug“ auf der Karte."
+    },
+    "waitingForSim": {
+      "title": "Warte auf Simulator …",
+      "hint": "Starte den Simulator – VectaSim verbindet sich automatisch.",
+      "hintRetry": "Starte den Simulator – VectaSim verbindet sich automatisch (nächster Versuch in {seconds} s)."
+    },
+    "unknownProvider": {
+      "title": "Unbekannter Simulator.",
+      "hint": "Wähle in den Einstellungen unter „Simulator“ einen verfügbaren Simulator."
+    },
+    "simException": {
+      "title": "Der Simulator hat eine Anfrage abgelehnt.",
+      "hint": "Meist harmlos. Tritt das wiederholt auf, starte den Flug im Simulator neu."
+    },
+    "simQuit": {
+      "title": "Simulator beendet.",
+      "hint": "Starte den Simulator erneut – VectaSim verbindet sich automatisch."
+    },
+    "simbriefNoId": {
+      "title": "Keine SimBrief-Pilot-ID hinterlegt.",
+      "hint": "Trage deine Pilot-ID oder deinen Benutzernamen ein (simbrief.com → Account)."
+    },
+    "simbriefNoPlan": {
+      "title": "Kein Flugplan gefunden.",
+      "titleUser": "Kein Flugplan für „{user}“ gefunden.",
+      "hint": "Prüfe deine Pilot-ID oder erstelle zuerst einen Flugplan auf simbrief.com."
+    },
+    "simbriefFetch": {
+      "title": "SimBrief hat keinen Flugplan geliefert.",
+      "hint": "Erstelle auf simbrief.com einen Flugplan und lade ihn erneut."
+    },
+    "rateLimit": {
+      "title": "{service}: zu viele Anfragen.",
+      "hint": "VectaSim wartet kurz und versucht es automatisch erneut."
+    },
+    "unreachable": {
+      "title": "{service} ist nicht erreichbar.",
+      "hintIvao": "Keine Internetverbindung? Der IVAO-Verkehr ist pausiert, das Tracking läuft lokal weiter. VectaSim versucht es automatisch erneut.",
+      "hintOnline": "Keine Internetverbindung? Wetter und VATSIM sind pausiert, das Tracking läuft lokal weiter. VectaSim versucht es automatisch erneut.",
+      "hint": "Prüfe deine Internetverbindung und versuche es erneut."
+    },
+    "http": {
+      "title": "{service} antwortet mit einem Fehler (HTTP {code}).",
+      "hintServer": "Der Dienst hat gerade Probleme. Versuche es später erneut.",
+      "hintClient": "Versuche es erneut. Bleibt der Fehler, prüfe deine Eingabe."
+    },
+    "parse": {
+      "title": "Die Antwort konnte nicht gelesen werden.",
+      "hint": "Versuche es später erneut. Bleibt der Fehler, melde ihn mit den Details unten."
+    },
+    "pathNotAllowed": {
+      "title": "Dieser Speicherort ist nicht erlaubt.",
+      "hint": "Wähle einen Ordner außerhalb von Windows- und Programmverzeichnissen, z. B. Dokumente oder den Desktop."
+    },
+    "flightNotFound": {
+      "title": "Flug nicht gefunden.",
+      "hint": "Er wurde vermutlich gelöscht. Die Liste wird aktualisiert."
+    },
+    "dbLocked": {
+      "title": "Logbuch ist gerade belegt.",
+      "hint": "Versuche es in ein paar Sekunden erneut."
+    },
+    "accessDenied": {
+      "title": "Datei konnte nicht geschrieben werden.",
+      "hint": "Wähle einen anderen Ordner oder schließe die Datei in anderen Programmen."
+    },
+    "unexpected": {
+      "title": "Unerwarteter Fehler.",
+      "titleService": "{service}: unerwarteter Fehler.",
+      "hint": "Versuche es erneut. Bleibt der Fehler, hilft der Text unter „Details“ bei der Fehlersuche."
+    }
+  },
+  "online": {
+    "part": {
+      "off": "{name} aus",
+      "error": "{name} an ({error} – nächster Versuch in {seconds} s)",
+      "waiting": "{name} an (warte auf ersten Abruf …)",
+      "on": "{name} an ({pilots} Piloten, {controllers} Lotsen)"
+    },
+    "line": {
+      "loading": "Online-Verkehr: Status wird geladen …",
+      "status": "Online-Verkehr: {parts}"
+    },
+    "ago": {
+      "seconds": "vor {n} s",
+      "minutes": "vor {n} min",
+      "hours": "vor {n} h"
+    },
+    "diag": {
+      "label": "Online-Verkehr",
+      "rowLabel": "Online {name}",
+      "off": "aus",
+      "on": "an",
+      "noFetch": "noch kein Abruf",
+      "counts": "{pilots} Piloten, {controllers} Lotsen",
+      "error": "Fehler: {error} · nächster Versuch in {seconds} s",
+      "errorRepeated": "Fehler ({times}× in Folge): {error} · nächster Versuch in {seconds} s",
+      "ok": "OK",
+      "waiting": "warte auf ersten Abruf"
+    }
+  },
+  "resume": {
+    "title": "Flug fortsetzen?",
+    "body": "{flight}. Aufzeichnung vor {ago} abgebrochen, {distance} von hier. Ohne Antwort zählt der Rest als neuer Flug.",
+    "bodySince": "{flight} seit {since}. Aufzeichnung vor {ago} abgebrochen, {distance} von hier. Ohne Antwort zählt der Rest als neuer Flug.",
+    "merge": {
+      "text": "{second} ist vermutlich die Fortsetzung von {first} ({time})",
+      "detail": "Lücke {gap} · {offset} Versatz"
+    },
+    "gap": {
+      "inside": "Aufzeichnungslücke {gap}",
+      "resumed": "Aufzeichnungslücke {gap} (fortgesetzt nach Absturz/Neustart)",
+      "nextFlight": "Nächster Flug folgt nach {gap} – „Zusammenführen“ über dem Logbuch",
+      "noShutdown": "Ohne Abstellen beendet (Absturz, Neustart oder neu geladener Flug)",
+      "interrupted": "Aufzeichnung unterbrochen"
+    }
+  },
+  "shell": {
+    "action": {
+      "show": "Anzeigen",
+      "hide": "Verbergen",
+      "copy": "Kopieren",
+      "openBrowser": "Im Browser öffnen",
+      "cancel": "Abbrechen",
+      "close": "Schließen",
+      "save": "Speichern",
+      "retry": "Erneut versuchen",
+      "details": "Details"
+    },
+    "errorNotice": {
+      "dismiss": "Hinweis schließen"
+    },
+    "toast": {
+      "closeTitle": "Schließen (Esc)"
+    },
+    "stat": {
+      "noValue": "kein Wert",
+      "warning": "Warnung: {text}"
+    },
+    "source": {
+      "nameDiffers": "{name} – Quellen weichen ab",
+      "aria": "Herkunft: {name}. Details",
+      "popover": "Herkunft des Werts",
+      "differs": "Quellen weichen ab"
+    },
+    "titleBar": {
+      "minimize": "Minimieren",
+      "maximize": "Maximieren",
+      "restore": "Wiederherstellen"
+    },
+    "statusButton": {
+      "aria": "Aufzeichnung: {label}. Details anzeigen",
+      "popover": "Aufzeichnungsstatus",
+      "privacyTitle": "Streamer-Modus an – Kennzeichen, Rufzeichen, IDs und Pfade ausgeblendet. Klicken zum Ausschalten (Strg+Umschalt+P)",
+      "privacyAria": "Streamer-Modus an. Ausschalten",
+      "dataRate": "Datenrate",
+      "rate": "{rate} · {frames} Datensätze",
+      "lastError": "Letzter Fehler ({time}):",
+      "error": "Fehler:",
+      "setupTitle": "Einstellungen → Simulator: SimConnect mit einem Klick herunterladen",
+      "connectTitle": "Sofort einen Verbindungsversuch starten, statt auf den nächsten automatischen zu warten",
+      "connect": "Jetzt verbinden"
+    },
+    "demo": {
+      "start": "Demo-Flug starten",
+      "startTitle": "Ohne Simulator ausprobieren – ein simulierter Flug",
+      "stop": "Demo-Flug beenden",
+      "stopReplay": "Replay beenden",
+      "badge": "Demo",
+      "banner": "{demo} – die Flugdaten sind simuliert. Demo-Flüge bleiben nur bis zum Ende der Demo im Logbuch und werden dann gelöscht."
+    },
+    "online": {
+      "off": "Online-Verkehr ist aus. Netzwerk auch auf der Karte neben „Verkehr“ wählbar.",
+      "enable": "{name} aktivieren",
+      "counts": "{pilots} Piloten · {controllers} Lotsen",
+      "nextAttempt": "Nächster Versuch in {seconds} s.",
+      "nearby": "Verkehr in der Nähe",
+      "noTraffic": "Kein Verkehr im Kartenausschnitt",
+      "loading": "Lädt …",
+      "showOnMap": "{callsign} auf der Karte zeigen",
+      "atc": "ATC im Ausschnitt",
+      "noAtc": "Keine Lotsen im Ausschnitt"
+    },
+    "navShortcut": "{label} (Strg+{key})",
+    "flightSaved": "Flug gespeichert · {dep} → {arr} · {block}",
+    "logbookTab": {
+      "label": "Logbuch-Bereiche",
+      "flights": "Flüge",
+      "aircraft": "Flugzeuge",
+      "airports": "Flughäfen",
+      "landings": "Landungen",
+      "year": "Jahr"
+    },
+    "resume": {
+      "continue": "Fortsetzen",
+      "newFlight": "Neuer Flug",
+      "resumed": "Flug wird fortgesetzt",
+      "resumedBody": "Die Aufzeichnung hängt an den unterbrochenen Flug an.",
+      "failed": "Fortsetzen nicht möglich"
+    },
+    "simEvent": {
+      "paused": "Simulator pausiert",
+      "resumed": "Simulator fortgesetzt",
+      "running": "Simulation läuft",
+      "stopped": "Simulation gestoppt (Menü)",
+      "crashed": "Absturz erkannt",
+      "aircraftLoaded": "Flugzeug geladen: {name}",
+      "flightLoaded": "Flug geladen: {name}"
+    },
+    "flightEvent": {
+      "started": "Flug begonnen (Off-Block)",
+      "interrupted": "Flug unterbrochen gespeichert",
+      "saved": "Flug gespeichert (On-Block)",
+      "touchdown": "Landung {rate}, {g}",
+      "fullStop": "Landung bestätigt (Full-Stop)"
+    },
+    "landing": {
+      "touchdown": "Aufgesetzt",
+      "landed": "Gelandet",
+      "touchAndGo": "Touch-and-go",
+      "announce": "{headline}. Landerate {rate}, g-Last {g}, {bounces}. Alt+T für die Landeauswertung.",
+      "rate": "Landerate",
+      "gLoad": "g-Last",
+      "bounces": "Bounces",
+      "debrief": "Landeauswertung",
+      "card": "Landekarte",
+      "cardFailed": "Landekarte nicht erstellt"
+    },
+    "ofp": {
+      "loaded": "Flugplan geladen",
+      "failed": "SimBrief-Flugplan nicht geladen"
+    },
+    "quit": {
+      "title": "Aufzeichnung läuft – trotzdem beenden?",
+      "message": "Der Flug wird abgebrochen und im Logbuch als unterbrochen gespeichert.",
+      "ok": "Beenden",
+      "cancel": "Weiterfliegen"
+    },
+    "update": {
+      "available": "Update verfügbar",
+      "availableVersion": "Update {version} verfügbar",
+      "hint": "Installieren unter Einstellungen → Updates."
+    },
+    "conn": {
+      "lost": "Sim weg – Flug gesichert",
+      "lostBody": "Dein Flug ist gesichert und läuft weiter, sobald der Simulator zurück ist.",
+      "back": "Simulator wieder da",
+      "backBody": "Die Aufzeichnung läuft weiter."
+    }
+  },
+  "status": {
+    "demoLabel": "Demo-Flug",
+    "replayLabel": "Replay (Roh-Dump)",
+    "waitingText": "Warte auf Simulator – Aufzeichnung startet beim Losrollen",
+    "waitingShort": "Warte auf Simulator",
+    "hint": {
+      "dllMissing": "{text}.",
+      "simQuit": "Simulator beendet. VectaSim verbindet sich automatisch, sobald er wieder läuft.",
+      "xplaneNotRunning": "X-Plane läuft noch nicht (oder seine Web API ist aus). Sobald X-Plane läuft, verbindet sich VectaSim von selbst.",
+      "msfsNotRunning": "Der Simulator läuft noch nicht. Sobald MSFS das Hauptmenü erreicht hat, verbindet sich VectaSim von selbst.",
+      "waiting": "Sobald dein Simulator läuft, verbindet sich VectaSim von selbst. Die Aufzeichnung startet beim Losrollen."
+    },
+    "replay": {
+      "label": "Replay",
+      "text": "Replay · aufgezeichnete Rohdaten, ohne Simulator",
+      "textActive": "Replay läuft · seit {since}",
+      "hint": "Ein aufgezeichneter Dump wird abgespielt. Für echte Flüge das Replay beenden – der Simulator wird dann automatisch erkannt."
+    },
+    "demo": {
+      "text": "Demo-Flug · simulierte Daten, ohne Simulator",
+      "textActive": "Demo-Flug läuft · seit {since}",
+      "hint": "Ein simulierter Flug zum Ausprobieren. Für echte Flüge den Demo-Flug beenden – der Simulator wird dann automatisch erkannt."
+    },
+    "recording": {
+      "label": "Aufzeichnung läuft",
+      "text": "Aufzeichnung läuft · seit {since}",
+      "hint": "Dein Flug wird aufgezeichnet. Du musst VectaSim dafür nicht im Blick haben."
+    },
+    "suspended": {
+      "label": "Unterbrochen, wird fortgesetzt",
+      "text": "Sim weg – Flug gesichert, läuft weiter",
+      "hint": "Sim weg – dein Flug ist gesichert und läuft weiter, sobald der Simulator zurück ist."
+    },
+    "ready": {
+      "label": "Bereit",
+      "text": "Bereit · Aufzeichnung startet beim Losrollen",
+      "hint": "Verbunden mit dem Simulator. Die Aufzeichnung startet automatisch, sobald du losrollst.",
+      "hintSim": "Verbunden mit {sim}. Die Aufzeichnung startet automatisch, sobald du losrollst."
+    }
+  }
+}

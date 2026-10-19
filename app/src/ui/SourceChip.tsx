@@ -1,6 +1,7 @@
 import { useRef, useState, type ReactNode } from "react";
 import { SOURCE_LABEL, SOURCE_NAME, type SourceKind } from "../landing/facts";
 import Popover from "./Popover";
+import { useT } from "../i18n";
 
 interface Props {
   kind: SourceKind;
@@ -15,6 +16,8 @@ interface Props {
  * ABGEL. in small mono caps; a click opens the explanation.
  */
 export default function SourceChip({ kind, detail, warn }: Props) {
+  const t = useT();
+  const name = warn ? t("shell.source.nameDiffers", { name: SOURCE_NAME[kind] }) : SOURCE_NAME[kind];
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLButtonElement>(null);
   return (
@@ -26,15 +29,15 @@ export default function SourceChip({ kind, detail, warn }: Props) {
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label={`Herkunft: ${SOURCE_NAME[kind]}${warn ? " – Quellen weichen ab" : ""}. Details`}
-        title={`${SOURCE_NAME[kind]}${warn ? " – Quellen weichen ab" : ""}`}
+        aria-label={t("shell.source.aria", { name })}
+        title={name}
       >
         {SOURCE_LABEL[kind]}
       </button>
-      <Popover open={open} onClose={() => setOpen(false)} anchorRef={ref} label="Herkunft des Werts" placement="bottom-end" className="source-popover">
+      <Popover open={open} onClose={() => setOpen(false)} anchorRef={ref} label={t("shell.source.popover")} placement="bottom-end" className="source-popover">
         <strong className="source-pop-title">
           {SOURCE_NAME[kind]}
-          {warn && <span className="warn-text"> · Quellen weichen ab</span>}
+          {warn && <span className="warn-text"> · {t("shell.source.differs")}</span>}
         </strong>
         <div className="detail">{detail}</div>
       </Popover>

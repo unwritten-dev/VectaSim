@@ -3,7 +3,9 @@
 
 use super::*;
 use crate::decode::{STRING256_LEN, decode_f64_def};
-use crate::decoder::{DEF_FAST, DEF_SLOW, DEF_STATIC, EVT_SIM, IDX_SLOW, REQ_FAST, REQ_SLOW, REQ_STATIC};
+use crate::decoder::{
+    DEF_APPROACH, DEF_DESIGN, DEF_FAST, DEF_SLOW, DEF_STATIC, EVT_SIM, IDX_APPROACH, IDX_SLOW, REQ_APPROACH, REQ_DESIGN, REQ_FAST, REQ_SLOW, REQ_STATIC,
+};
 use crate::ffi::period;
 use std::sync::mpsc::{Receiver, channel};
 use vectasim_core::Telemetry;
@@ -175,7 +177,7 @@ fn last_telemetry(ev: &[ProviderEvent]) -> Telemetry {
     ev.iter()
         .rev()
         .find_map(|e| match e {
-            ProviderEvent::Telemetry(t) => Some(t.clone()),
+            ProviderEvent::Telemetry(t) => Some((**t).clone()),
             _ => None,
         })
         .expect("telemetry sample")
@@ -209,6 +211,13 @@ fn definitions_have_expected_sizes() {
     assert_eq!(FAST_VARS[16].0, "IS SLEW ACTIVE");
     assert!(!SLOW_VARS.iter().any(|(v, _)| *v == "IS SLEW ACTIVE" || *v == "SIMULATION RATE"));
     assert_eq!(SLOW_VARS[15].0, "TRANSPONDER CODE:1");
+    assert_eq!(APPROACH_VARS.len(), 23);
+    assert_eq!(DESIGN_VARS.len(), 3);
+    // AIRSPEED TRUE stays in FAST; the approach definition does not duplicate it
+    assert!(FAST_VARS.iter().any(|(v, _)| *v == "AIRSPEED TRUE"));
+    assert!(!APPROACH_VARS.iter().any(|(v, _)| *v == "AIRSPEED TRUE" || *v == "AUTOTHROTTLE ACTIVE"));
+    // every NAV variable names its receiver index
+    assert!(APPROACH_VARS.iter().filter(|(v, _)| v.starts_with("NAV ")).all(|(v, _)| v.ends_with(":1")));
 }
 
 #[test]
@@ -254,10 +263,12 @@ fn register_adds_all_vars_requests_subscribes_and_queries_state() {
     let (s, _tx, _rx, _) = session();
     let calls: Vec<&Call> = s.api.calls.iter().map(|(_, c)| c).collect();
     let adds = calls.iter().filter(|c| matches!(c, Call::Add { .. })).count();
-    assert_eq!(adds, FAST_VARS.len() + SLOW_VARS.len() + STATIC_VARS.len());
+    assert_eq!(adds, FAST_VARS.len() + SLOW_VARS.len() + STATIC_VARS.len() + APPROACH_VARS.len() + DESIGN_VARS.len());
     assert!(calls.contains(&&Call::Request { req: REQ_FAST, def: DEF_FAST, period: period::SIM_FRAME }));
     assert!(calls.contains(&&Call::Request { req: REQ_SLOW, def: DEF_SLOW, period: period::SECOND }));
     assert!(calls.contains(&&Call::Request { req: REQ_STATIC, def: DEF_STATIC, period: period::ONCE }));
+    assert!(calls.contains(&&Call::Request { req: REQ_APPROACH, def: DEF_APPROACH, period: period::SECOND }));
+    assert!(calls.contains(&&Call::Request { req: REQ_DESIGN, def: DEF_DESIGN, period: period::ONCE }));
     assert_eq!(calls.iter().filter(|c| matches!(c, Call::Subscribe { .. })).count(), SYSTEM_EVENTS.len());
     assert_eq!(calls.last(), Some(&&Call::SystemState { req: REQ_STATE_SIM, state: "Sim".into() }));
     assert!(s.notices.is_empty());
@@ -327,7 +338,7 @@ fn short_fast_payload_still_yields_telemetry_and_warns_once() {
     let tele: Vec<&Telemetry> = ev
         .iter()
         .filter_map(|e| match e {
-            ProviderEvent::Telemetry(t) => Some(t),
+            ProviderEvent::Telemetry(t) => Some(&**t),
             _ => None,
         })
         .collect();
@@ -477,6 +488,130 @@ fn static_var_rejection_rebuilds_and_rerequests_static() {
         s.api.calls.last().map(|(_, c)| c.clone()),
         Some(Call::Request { req: REQ_STATIC, def: DEF_STATIC, period: period::ONCE })
     );
+}
+
+// ---- approach definition (track v2) ----
+
+fn approach_values() -> Vec<f64> {
+    vec![
+        12.0, 245.0, // wind kt, direction (true)
+        1.0, 1.0, 1.0, // has localizer, has glide slope, GS flag
+        -0.12, 34.0, 0.68, // GS error °, CDI, radial error °
+        3.0, 246.0, // raw glide slope °, localizer course °
+        1.0, 1.0, 0.0, // AP master, approach hold, glideslope hold
+        0.0, 1.0, // managed throttle, throttle arm
+        48.0, 52.0, 41.5, // N1 1, N1 2, throttle lever 1
+        0.0, 1.0, 0.0, // spoiler handle, armed, left surface
+        4.2, 5.0, // alpha °, flap positions
+    ]
+}
+
+#[test]
+fn approach_payload_fills_the_optional_telemetry() {
+    let (mut s, tx, rx, t0) = session();
+    s.api.queue.push_back(Ok(msg_f64(REQ_SLOW, DEF_SLOW, &slow_values())));
+    s.api.queue.push_back(Ok(msg_f64(REQ_APPROACH, DEF_APPROACH, &approach_values())));
+    s.api.queue.push_back(Ok(msg_f64(REQ_DESIGN, DEF_DESIGN, &[112.0, 128.0, 590.0])));
+    s.api.queue.push_back(Ok(msg_f64(REQ_FAST, DEF_FAST, &fast_values())));
+    run_queue(&mut s, &tx, t0).unwrap();
+    let ev = drain(&rx);
+    assert!(errors(&ev).is_empty(), "{:?}", errors(&ev));
+    let t = last_telemetry(&ev);
+    assert_eq!((t.wind_kt, t.wind_dir_true_deg), (Some(12.0), Some(245.0)));
+    assert_eq!((t.nav_has_localizer, t.nav_has_glide_slope, t.nav_gs_flag), (Some(true), Some(true), Some(true)));
+    assert_eq!((t.nav_gs_error_deg, t.nav_cdi, t.nav_radial_error_deg), (Some(-0.12), Some(34.0), Some(0.68)));
+    assert_eq!((t.nav_gs_angle_deg, t.nav_loc_course_deg), (Some(3.0), Some(246.0)));
+    assert_eq!((t.autopilot_master, t.autopilot_approach_hold, t.autopilot_glideslope_hold), (Some(true), Some(true), Some(false)));
+    assert_eq!(t.autothrottle_active, Some(true), "throttle arm counts");
+    assert_eq!(t.n1_pct, Some(50.0), "mean of both engines");
+    assert_eq!((t.throttle_lever_pct, t.spoilers_handle_pct, t.spoilers_armed, t.spoilers_pct), (Some(41.5), Some(0.0), Some(true), Some(0.0)));
+    assert_eq!((t.alpha_deg, t.flap_positions), (Some(4.2), Some(5)));
+    assert_eq!((t.design_vs0_kt, t.design_vs1_kt), (Some(112.0), Some(128.0)));
+    assert!((t.design_vc_kt.unwrap() - 349.57).abs() < 0.01, "VC from ft/s: {:?}", t.design_vc_kt);
+}
+
+#[test]
+fn ils_deviations_need_the_station_component() {
+    let (mut s, tx, rx, t0) = session();
+    let mut v = approach_values();
+    v[2] = 1.0; // localizer only (e.g. LOC approach)
+    v[3] = 0.0;
+    v[22] = 0.0; // FLAPS NUM HANDLE POSITIONS 0 = not set
+    s.api.queue.push_back(Ok(msg_f64(REQ_APPROACH, DEF_APPROACH, &v)));
+    s.api.queue.push_back(Ok(msg_f64(REQ_FAST, DEF_FAST, &fast_values())));
+    run_queue(&mut s, &tx, t0).unwrap();
+    let t = last_telemetry(&drain(&rx));
+    assert_eq!(t.nav_cdi, Some(34.0));
+    assert_eq!((t.nav_gs_error_deg, t.nav_gs_angle_deg), (None, None), "no glideslope: no deviation, not a centred needle");
+    assert_eq!(t.flap_positions, None);
+    // nothing tuned at all
+    v[2] = 0.0;
+    s.api.queue.push_back(Ok(msg_f64(REQ_APPROACH, DEF_APPROACH, &v)));
+    s.api.queue.push_back(Ok(msg_f64(REQ_FAST, DEF_FAST, &fast_values())));
+    run_queue(&mut s, &tx, t0).unwrap();
+    let t = last_telemetry(&drain(&rx));
+    assert_eq!((t.nav_cdi, t.nav_radial_error_deg, t.nav_loc_course_deg), (None, None, None));
+    assert_eq!(t.wind_kt, Some(12.0), "the rest is unaffected");
+}
+
+#[test]
+fn an_unknown_approach_variable_costs_only_itself() {
+    let (mut s, tx, rx, t0) = session();
+    let bad = "NAV RAW GLIDE SLOPE:1";
+    let send_id = s.api.send_id_of(|c| matches!(c, Call::Add { name, .. } if name == bad));
+    let calls_before = s.api.calls.len();
+    s.api.queue.push_back(Ok(msg_exception(7, send_id, 1)));
+    run_queue(&mut s, &tx, t0).unwrap();
+    let errs = errors(&drain(&rx));
+    assert!(errs[0].contains(&format!("AddToDataDefinition(APPROACH, \"{bad}\")")), "{}", errs[0]);
+    let new: Vec<Call> = s.api.calls[calls_before..].iter().map(|(_, c)| c.clone()).collect();
+    assert_eq!(new[0], Call::Clear { def: DEF_APPROACH });
+    assert!(new.iter().all(|c| !matches!(c, Call::Clear { def } if *def != DEF_APPROACH)), "FAST/SLOW untouched: {new:?}");
+    assert_eq!(new.last(), Some(&Call::Request { req: REQ_APPROACH, def: DEF_APPROACH, period: period::SECOND }));
+    assert!(!s.decoder.defs[IDX_APPROACH].active[8]);
+
+    // the next payload is one value shorter; the values after the gap stay in place
+    let mut v = approach_values();
+    v.remove(8);
+    s.api.queue.push_back(Ok(msg_f64(REQ_APPROACH, DEF_APPROACH, &v)));
+    s.api.queue.push_back(Ok(msg_f64(REQ_FAST, DEF_FAST, &fast_values())));
+    run_queue(&mut s, &tx, t0).unwrap();
+    let ev = drain(&rx);
+    assert!(errors(&ev).is_empty(), "{:?}", errors(&ev));
+    let t = last_telemetry(&ev);
+    assert_eq!(t.nav_gs_angle_deg, None, "rejected: not recorded");
+    assert_eq!((t.nav_loc_course_deg, t.flap_positions, t.alpha_deg), (Some(246.0), Some(5), Some(4.2)));
+    assert_eq!(t.latitude, 50.0379, "FAST unaffected");
+}
+
+#[test]
+fn aircraft_loaded_rerequests_static_and_design() {
+    let (mut s, tx, _rx, t0) = session();
+    let n = s.api.calls.len();
+    s.api.queue.push_back(Ok(msg_filename(decoder::EVT_AIRCRAFT_LOADED, "SimObjects/Airplanes/A320/aircraft.cfg")));
+    run_queue(&mut s, &tx, t0).unwrap();
+    let new: Vec<Call> = s.api.calls[n..].iter().map(|(_, c)| c.clone()).collect();
+    assert_eq!(
+        new,
+        [Call::Request { req: REQ_STATIC, def: DEF_STATIC, period: period::ONCE }, Call::Request { req: REQ_DESIGN, def: DEF_DESIGN, period: period::ONCE }]
+    );
+}
+
+#[test]
+fn approach_encoding_is_the_inverse_of_the_decoder() {
+    let mut flight = vectasim_core::MockFlight::new();
+    for t_s in [5.0, 200.0, 330.0, 345.0, 380.0] {
+        let m = flight.sample(t_s, 1_000);
+        let mut d = Decoder::new(RawDiag::shared("test"));
+        d.on_values_f64(decoder::IDX_SLOW, &decoder::encode_slow(&m), 0, 0, 0);
+        d.on_values_f64(IDX_APPROACH, &decoder::encode_approach(&m), 0, 0, 0);
+        d.on_values_f64(decoder::IDX_DESIGN, &decoder::encode_design(&m), 0, 0, 0);
+        let t = d.telemetry();
+        assert_eq!((t.wind_kt, t.nav_gs_error_deg, t.nav_cdi, t.nav_gs_flag), (m.wind_kt, m.nav_gs_error_deg, m.nav_cdi, m.nav_gs_flag), "t={t_s}");
+        assert_eq!((t.autopilot_master, t.autothrottle_active, t.n1_pct, t.spoilers_pct), (m.autopilot_master, m.autothrottle_active, m.n1_pct, m.spoilers_pct));
+        assert_eq!((t.alpha_deg, t.flap_positions, t.design_vs0_kt), (m.alpha_deg, m.flap_positions, m.design_vs0_kt));
+        assert!((t.design_vc_kt.unwrap() - m.design_vc_kt.unwrap()).abs() < 1e-9);
+    }
 }
 
 // ---- connection lifecycle ----
@@ -694,7 +829,7 @@ fn diagnostics_show_raw_and_converted_values_and_named_events() {
     assert_eq!((pause.name.as_str(), pause.data_hex.as_deref()), ("Pause", Some("0x00000001")));
 }
 
-// ---- golden events and hostile buffers (code review 12 §3 no. 1) ----
+// ---- golden events and hostile buffers ----
 
 #[test]
 fn system_events_and_filenames_map_to_sim_events() {

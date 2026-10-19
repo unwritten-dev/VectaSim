@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { icaoFromAtcModel, wakeCategory } from "./aircraftIcons";
+import { ensureContrast, icaoFromAtcModel, trafficColorsOf, wakeCategory } from "./aircraftIcons";
+import { OWN_AIRCRAFT, THEMES, contrastRatio } from "../themes";
 
 describe("wakeCategory", () => {
   it("classifies by ICAO designator first", () => {
@@ -49,5 +50,44 @@ describe("wakeCategory", () => {
     expect(icaoFromAtcModel("A320neo")).toBe("");
     expect(icaoFromAtcModel(null)).toBe("");
     expect(wakeCategory(icaoFromAtcModel("TT:ATCCOM.AC_MODEL_B748.0.text"))).toBe("heavy");
+  });
+});
+
+describe("trafficColorsOf", () => {
+  it("light themes: labels >= 4.5:1 and symbols >= 3:1 on the land colour", () => {
+    for (const t of THEMES.filter((x) => x.scheme === "light")) {
+      const c = trafficColorsOf(t);
+      expect(contrastRatio(c.label, t.map.land), t.id).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(c.ivaoLabel, t.map.land), t.id).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(c.fill, t.map.land), t.id).toBeGreaterThanOrEqual(3);
+      // still distinct from the own aircraft yellow
+      expect(c.fill.toLowerCase()).not.toBe(OWN_AIRCRAFT);
+    }
+  });
+
+  it("dark themes: readable on the land colour, and dark-theme tokens that pass stay unchanged", () => {
+    for (const t of THEMES.filter((x) => x.scheme === "dark")) {
+      const c = trafficColorsOf(t);
+      expect(contrastRatio(c.label, t.map.land), t.id).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(c.fill, t.map.land), t.id).toBeGreaterThanOrEqual(3);
+      if (contrastRatio(t.colors.traffic, t.map.land) >= 4.5) expect(c.fill).toBe(t.colors.traffic);
+    }
+  });
+
+  it("traffic is a cool blue-grey in every theme, far from the own aircraft yellow (UX 1.4)", () => {
+    const rgb = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+    for (const t of THEMES) {
+      const [r, g, b] = rgb(t.colors.traffic);
+      // blue channel on top: never yellow/amber; red not above green: never purple/magenta
+      expect(b, t.id).toBeGreaterThan(r);
+      expect(b, t.id).toBeGreaterThanOrEqual(g);
+      expect(r, t.id).toBeLessThanOrEqual(g);
+      const [, , fb] = rgb(trafficColorsOf(t).fill);
+      expect(fb, t.id).toBeGreaterThan(rgb(trafficColorsOf(t).fill)[0]);
+    }
+  });
+
+  it("ensureContrast returns the colour unchanged when it already passes", () => {
+    expect(ensureContrast("#000000", "#ffffff", "#000000", 4.5)).toBe("#000000");
   });
 });

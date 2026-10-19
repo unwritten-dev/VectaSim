@@ -25,7 +25,8 @@
 use crate::backup::{BackupKind, stamp};
 use crate::store::SCHEMA_VERSION;
 use crate::track::decode_track;
-use crate::{Result, Store, StoreError};
+use crate::error::path_text;
+use crate::{Invalid, Result, Store, StoreError};
 use rusqlite::types::{Value as SqlValue, ValueRef};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
@@ -34,6 +35,7 @@ use std::collections::HashSet;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, Write};
 use std::path::{Path, PathBuf};
+use vectasim_core::Lang;
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, DateTime, ZipArchive, ZipWriter};
 
@@ -90,6 +92,8 @@ pub struct ExportOptions {
     pub include_demo: bool,
     /// Written into the manifest.
     pub app_version: String,
+    /// Language of the warnings in the report.
+    pub lang: Lang,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -120,6 +124,8 @@ pub struct ImportOptions {
     pub images_dir: Option<PathBuf>,
     /// Backup folder for the `pre-import` copy (required for [`ImportMode::Replace`]).
     pub backup_dir: Option<PathBuf>,
+    /// Language of the warnings in the report.
+    pub lang: Lang,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -188,8 +194,8 @@ struct RunwayLine {
     landings: Vec<Map<String, Value>>,
 }
 
-fn invalid(msg: impl Into<String>) -> StoreError {
-    StoreError::Invalid(msg.into())
+fn invalid(i: Invalid) -> StoreError {
+    StoreError::Invalid(i)
 }
 
 // ---- values -------------------------------------------------------------------------------
@@ -319,6 +325,7 @@ fn write_bundle<W: Write + Seek>(conn: &Connection, out: W, opts: &ExportOptions
     let zerr = |e: zip::result::ZipError| StoreError::Io(std::io::Error::other(e));
     let mut zip = ZipWriter::new(out);
     let mut warnings = Vec::new();
+    let lang = opts.lang;
     let mut m = BundleManifest {
         format: BUNDLE_FORMAT,
         app: "VectaSim".into(),
@@ -418,7 +425,7 @@ fn write_bundle<W: Write + Seek>(conn: &Connection, out: W, opts: &ExportOptions
                     images.push((entry.clone(), p));
                     image_file = Some(entry);
                 }
-                _ => warnings.push(format!("Bild von {reg} nicht gefunden: {url}")),
+                _ => warnings.push(ltr!(lang, "Bild von {reg} nicht gefunden: {url}", "Picture of {reg} not found: {url}")),
             }
         }
         serde_json::to_writer(&mut zip, &AirframeLine { airframe, image_file })?;
@@ -432,7 +439,7 @@ fn write_bundle<W: Write + Seek>(conn: &Connection, out: W, opts: &ExportOptions
                 zip.write_all(&bytes)?;
                 m.images += 1;
             }
-            Err(e) => warnings.push(format!("Bild {} nicht lesbar: {e}", path.display())),
+            Err(e) => warnings.push(ltr!(lang, "Bild {} nicht lesbar: {e}", "Picture {} unreadable: {e}", path.display())),
         }
     }
 
@@ -463,16 +470,16 @@ fn read_entry<R: Read + Seek>(zip: &mut ZipArchive<R>, name: &str, limit: u64) -
     let mut f = match zip.by_name(name) {
         Ok(f) => f,
         Err(zip::result::ZipError::FileNotFound) => return Ok(None),
-        Err(e) => return Err(invalid(format!("{name}: {e}"))),
+        Err(e) => return Err(invalid(Invalid::BundleEntry { entry: name.to_string(), detail: e.to_string() })),
     };
     if f.size() > limit {
-        return Err(invalid(format!("{name} ist zu groß ({} Bytes)", f.size())));
+        return Err(invalid(Invalid::BundleEntryTooLarge { entry: name.to_string(), bytes: Some(f.size()) }));
     }
     let mut buf = Vec::with_capacity(f.size() as usize);
     // the header can lie; never read more than the limit
     (&mut f).take(limit + 1).read_to_end(&mut buf)?;
     if buf.len() as u64 > limit {
-        return Err(invalid(format!("{name} ist zu groß")));
+        return Err(invalid(Invalid::BundleEntryTooLarge { entry: name.to_string(), bytes: None }));
     }
     Ok(Some(buf))
 }
@@ -484,7 +491,7 @@ fn read_jsonl<T: for<'de> Deserialize<'de>>(bytes: &[u8], name: &str) -> Result<
         if line.trim().is_empty() {
             continue;
         }
-        out.push(serde_json::from_str(&line).map_err(|e| invalid(format!("{name}, Zeile {}: {e}", i + 1)))?);
+        out.push(serde_json::from_str(&line).map_err(|e| invalid(Invalid::BundleLine { entry: name.to_string(), line: i + 1, detail: e.to_string() }))?);
     }
     Ok(out)
 }
@@ -497,19 +504,18 @@ struct Parsed {
     runways: Vec<RunwayLine>,
 }
 
-fn parse_bundle<R: Read + Seek>(zip: &mut ZipArchive<R>, warnings: &mut Vec<String>) -> Result<Parsed> {
+fn parse_bundle<R: Read + Seek>(zip: &mut ZipArchive<R>, warnings: &mut Vec<String>, lang: Lang) -> Result<Parsed> {
     let manifest =
-        read_entry(zip, MANIFEST, MAX_MANIFEST_BYTES)?.ok_or_else(|| invalid("keine VectaSim-Exportdatei (manifest.json fehlt)"))?;
-    let manifest: BundleManifest = serde_json::from_slice(&manifest).map_err(|e| invalid(format!("manifest.json unlesbar: {e}")))?;
+        read_entry(zip, MANIFEST, MAX_MANIFEST_BYTES)?.ok_or_else(|| invalid(Invalid::ManifestMissing))?;
+    let manifest: BundleManifest = serde_json::from_slice(&manifest).map_err(|e| invalid(Invalid::ManifestUnreadable { detail: e.to_string() }))?;
     if manifest.format > BUNDLE_FORMAT {
-        return Err(invalid(format!(
-            "Die Datei stammt von einer neueren VectaSim-Version (Exportformat {}, diese Version kennt bis {BUNDLE_FORMAT}). Bitte VectaSim aktualisieren.",
-            manifest.format
-        )));
+        return Err(invalid(Invalid::BundleTooNew { format: manifest.format, supported: BUNDLE_FORMAT }));
     }
     if manifest.schema_version > SCHEMA_VERSION {
-        warnings.push(format!(
+        warnings.push(ltr!(
+            lang,
             "Export aus einer neueren VectaSim-Version (Datenformat v{}); Felder, die diese Version nicht kennt, werden übergangen.",
+            "Export from a newer VectaSim version (data format v{}); fields this version does not know are skipped.",
             manifest.schema_version
         ));
     }
@@ -527,11 +533,17 @@ fn parse_bundle<R: Read + Seek>(zip: &mut ZipArchive<R>, warnings: &mut Vec<Stri
     };
     for (i, f) in flights.iter().enumerate() {
         if str_of(&f.flight, "id").is_none_or(str::is_empty) {
-            return Err(invalid(format!("{FLIGHTS}, Zeile {}: Flug ohne id", i + 1)));
+            return Err(invalid(Invalid::FlightWithoutId { entry: FLIGHTS.to_string(), line: i + 1 }));
         }
     }
     if flights.len() as u64 != manifest.flights {
-        warnings.push(format!("manifest.json nennt {} Flüge, die Datei enthält {}", manifest.flights, flights.len()));
+        warnings.push(ltr!(
+            lang,
+            "manifest.json nennt {} Flüge, die Datei enthält {}",
+            "manifest.json lists {} flights, the file contains {}",
+            manifest.flights,
+            flights.len()
+        ));
     }
     Ok(Parsed { manifest, flights, airframes, runways })
 }
@@ -546,19 +558,20 @@ fn prepare_track<R: Read + Seek>(
     zip: &mut ZipArchive<R>,
     line: &FlightLine,
     warnings: &mut Vec<String>,
+    lang: Lang,
 ) -> Result<Option<(Vec<u8>, Vec<u8>)>> {
     let Some(t) = &line.track else { return Ok(None) };
     let id = str_of(&line.flight, "id").unwrap_or_default();
     if t.encoding != TRACK_ENCODING {
-        warnings.push(format!("Flug {id}: Track-Format {} unbekannt, Track übergangen", t.encoding));
+        warnings.push(ltr!(lang, "Flug {id}: Track-Format {} unbekannt, Track übergangen", "Flight {id}: track format {} unknown, track skipped", t.encoding));
         return Ok(None);
     }
     let Some(data) = read_entry(zip, &t.file, MAX_TRACK_BYTES)? else {
-        warnings.push(format!("Flug {id}: {} fehlt, Flug ohne Track übernommen", t.file));
+        warnings.push(ltr!(lang, "Flug {id}: {} fehlt, Flug ohne Track übernommen", "Flight {id}: {} missing, flight imported without track", t.file));
         return Ok(None);
     };
     if let Err(e) = decode_track(&data) {
-        warnings.push(format!("Flug {id}: Track beschädigt ({e}), Flug ohne Track übernommen"));
+        warnings.push(ltr!(lang, "Flug {id}: Track beschädigt ({e}), Flug ohne Track übernommen", "Flight {id}: track damaged ({e}), flight imported without track"));
         return Ok(None);
     }
     let preview = match &t.preview_file {
@@ -652,7 +665,7 @@ struct Cols {
 fn write_image(images_dir: &Path, reg: &str, entry: &str, bytes: &[u8]) -> Result<PathBuf> {
     let ext = extension_of(Path::new(entry));
     if !IMAGE_EXTENSIONS.contains(&ext.as_str()) {
-        return Err(invalid(format!("{entry}: kein Bildformat")));
+        return Err(invalid(Invalid::NotAnImage { entry: entry.to_string() }));
     }
     std::fs::create_dir_all(images_dir)?;
     let stem = reg.replace('-', "_");
@@ -681,6 +694,7 @@ fn image_values<R: Read + Seek>(
     line: &AirframeLine,
     images_dir: Option<&Path>,
     warnings: &mut Vec<String>,
+    lang: Lang,
 ) -> Result<Option<ImageValues>> {
     let a = &line.airframe;
     let reg = str_of(a, "registration").unwrap_or_default();
@@ -692,15 +706,15 @@ fn image_values<R: Read + Seek>(
         return Ok(Some((IMAGE_COLS.iter().copied().map(field).collect(), false)));
     }
     let Some(entry) = &line.image_file else {
-        warnings.push(format!("Eigenes Bild von {reg} ist nicht in der Datei"));
+        warnings.push(ltr!(lang, "Eigenes Bild von {reg} ist nicht in der Datei", "Own picture of {reg} is not in the file"));
         return Ok(None);
     };
     let Some(dir) = images_dir else {
-        warnings.push(format!("Eigenes Bild von {reg} übergangen (kein Bildordner)"));
+        warnings.push(ltr!(lang, "Eigenes Bild von {reg} übergangen (kein Bildordner)", "Own picture of {reg} skipped (no picture folder)"));
         return Ok(None);
     };
     let Some(bytes) = read_entry(zip, entry, MAX_IMAGE_BYTES)? else {
-        warnings.push(format!("Eigenes Bild von {reg} fehlt in der Datei ({entry})"));
+        warnings.push(ltr!(lang, "Eigenes Bild von {reg} fehlt in der Datei ({entry})", "Own picture of {reg} missing from the file ({entry})"));
         return Ok(None);
     };
     let path = write_image(dir, reg, entry, &bytes)?.display().to_string();
@@ -724,13 +738,13 @@ fn import_airframes<R: Read + Seek>(
     for line in lines {
         let a = &line.airframe;
         let Some(reg) = str_of(a, "registration").filter(|r| !r.is_empty()) else {
-            report.warnings.push("Flugzeug ohne Registrierung übergangen".into());
+            report.warnings.push(opts.lang.tr("Flugzeug ohne Registrierung übergangen", "Aircraft without registration skipped").into());
             continue;
         };
         let existing = dump_rows(tx, "SELECT * FROM airframes WHERE registration = ?1", params![reg])?.into_iter().next();
         match existing {
             None => {
-                let image = image_values(zip, line, opts.images_dir.as_deref(), &mut report.warnings)?;
+                let image = image_values(zip, line, opts.images_dir.as_deref(), &mut report.warnings, opts.lang)?;
                 let extra: Vec<(&str, SqlValue)> = match &image {
                     Some((v, _)) => v.clone(),
                     // no picture here: cleared, so the app looks it up again
@@ -754,7 +768,7 @@ fn import_airframes<R: Read + Seek>(
                     }
                 }
                 if !has_image(&current)
-                    && let Some((values, file)) = image_values(zip, line, opts.images_dir.as_deref(), &mut report.warnings)?
+                    && let Some((values, file)) = image_values(zip, line, opts.images_dir.as_deref(), &mut report.warnings, opts.lang)?
                 {
                     for (k, v) in values {
                         tx.execute(&format!("UPDATE airframes SET {k} = ?2 WHERE registration = ?1"), params![reg, v])?;
@@ -838,14 +852,14 @@ fn add_runway_landings(tx: &Transaction<'_>, icao: &str, ident: &str, landings: 
 /// ones become their mean weighted by landings, where the bundle only weighs with the landings
 /// not yet counted here (none new: unchanged). An end that is only a lower bound gives way to
 /// a known one.
-fn import_runways(tx: &Transaction<'_>, cols: &Cols, lines: &[RunwayLine], report: &mut ImportReport) -> Result<()> {
+fn import_runways(tx: &Transaction<'_>, cols: &Cols, lines: &[RunwayLine], report: &mut ImportReport, lang: Lang) -> Result<()> {
     let mut touched: HashSet<String> = HashSet::new();
     for line in lines {
         let r = &line.runway;
         let icao = runway_key(str_of(r, "airport_icao").unwrap_or_default());
         let ident = runway_key(str_of(r, "ident").unwrap_or_default());
         let Some(theirs) = RunwayGeo::of(r).filter(|_| !icao.is_empty() && !ident.is_empty()) else {
-            report.warnings.push(format!("Piste {icao} {ident} ohne gültige Koordinaten übergangen"));
+            report.warnings.push(ltr!(lang, "Piste {icao} {ident} ohne gültige Koordinaten übergangen", "Runway {icao} {ident} without valid coordinates skipped"));
             continue;
         };
         let mine = dump_rows(tx, "SELECT * FROM user_runways WHERE airport_icao = ?1 AND ident = ?2", params![icao, ident])?.into_iter().next();
@@ -939,10 +953,10 @@ fn import_runways(tx: &Transaction<'_>, cols: &Cols, lines: &[RunwayLine], repor
 }
 
 fn run_import(store: &Store, path: &Path, opts: &ImportOptions) -> Result<ImportReport> {
-    let file = File::open(path).map_err(|e| invalid(format!("{}: {e}", path.display())))?;
-    let mut zip = ZipArchive::new(file).map_err(|e| invalid(format!("keine VectaSim-Exportdatei: {e}")))?;
+    let file = File::open(path).map_err(|e| invalid(Invalid::FileOpen { path: path_text(path), detail: e.to_string() }))?;
+    let mut zip = ZipArchive::new(file).map_err(|e| invalid(Invalid::NotABundle { detail: e.to_string() }))?;
     let mut report = ImportReport::default();
-    let parsed = parse_bundle(&mut zip, &mut report.warnings)?;
+    let parsed = parse_bundle(&mut zip, &mut report.warnings, opts.lang)?;
     report.flights_in_bundle = parsed.flights.len() as u64;
     log::info!(
         "import {} ({:?}): {} flights, {} airframes, exported by VectaSim {} (schema v{})",
@@ -955,7 +969,7 @@ fn run_import(store: &Store, path: &Path, opts: &ImportOptions) -> Result<Import
     );
 
     if opts.mode == ImportMode::Replace {
-        let dir = opts.backup_dir.as_deref().ok_or_else(|| invalid("Kein Sicherungsordner für die Sicherung vor dem Ersetzen"))?;
+        let dir = opts.backup_dir.as_deref().ok_or_else(|| invalid(Invalid::NoBackupDir))?;
         let saved = store.create_backup(dir, BackupKind::PreImport)?;
         report.backup = Some(saved.display().to_string());
     }
@@ -983,7 +997,7 @@ fn run_import(store: &Store, path: &Path, opts: &ImportOptions) -> Result<Import
                 tx.execute("DELETE FROM user_runway_landings", [])?;
             }
             import_airframes(&tx, &mut zip, &cols, &parsed.airframes, opts, &mut report)?;
-            import_runways(&tx, &cols, &parsed.runways, &mut report)?;
+            import_runways(&tx, &cols, &parsed.runways, &mut report, opts.lang)?;
             first = false;
         }
         for line in flights.by_ref().take(size) {
@@ -994,10 +1008,10 @@ fn run_import(store: &Store, path: &Path, opts: &ImportOptions) -> Result<Import
                 }
                 continue;
             }
-            let track = prepare_track(&mut zip, &line, &mut report.warnings)?;
+            let track = prepare_track(&mut zip, &line, &mut report.warnings, opts.lang)?;
             let p = Prepared { line, track };
             insert_flight(&tx, &cols, &p)
-                .map_err(|e| invalid(format!("Flug {}: {e}", str_of(&p.line.flight, "id").unwrap_or_default())))?;
+                .map_err(|e| invalid(Invalid::FlightImport { flight_id: str_of(&p.line.flight, "id").unwrap_or_default().to_string(), source: Box::new(e) }))?;
             report.flights_added += 1;
         }
         tx.commit()?;
@@ -1062,11 +1076,11 @@ impl Store {
 
 /// The manifest of a bundle, without importing it (for a preview in the UI).
 pub fn read_manifest(path: &Path) -> Result<BundleManifest> {
-    let file = File::open(path).map_err(|e| invalid(format!("{}: {e}", path.display())))?;
-    let mut zip = ZipArchive::new(file).map_err(|e| invalid(format!("keine VectaSim-Exportdatei: {e}")))?;
+    let file = File::open(path).map_err(|e| invalid(Invalid::FileOpen { path: path_text(path), detail: e.to_string() }))?;
+    let mut zip = ZipArchive::new(file).map_err(|e| invalid(Invalid::NotABundle { detail: e.to_string() }))?;
     let bytes =
-        read_entry(&mut zip, MANIFEST, MAX_MANIFEST_BYTES)?.ok_or_else(|| invalid("keine VectaSim-Exportdatei (manifest.json fehlt)"))?;
-    serde_json::from_slice(&bytes).map_err(|e| invalid(format!("manifest.json unlesbar: {e}")))
+        read_entry(&mut zip, MANIFEST, MAX_MANIFEST_BYTES)?.ok_or_else(|| invalid(Invalid::ManifestMissing))?;
+    serde_json::from_slice(&bytes).map_err(|e| invalid(Invalid::ManifestUnreadable { detail: e.to_string() }))
 }
 
 /// `VectaSim-Export_2026-10-18.vectasim` (local date from the UI is better; this is UTC).

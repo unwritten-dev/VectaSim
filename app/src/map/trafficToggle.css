@@ -1,0 +1,75 @@
+/* "Verkehr" + network choice in the map toolbar (TrafficToggle.tsx): a split button with one
+   frame – on/off on the left, the network menu on the right, set off by a hairline – so the
+   choice reads as part of "Verkehr", not as a switched-off toggle of its own. */
+
+.traffic-toggle {
+  position: relative;
+  display: flex;
+  gap: 0;
+}
+.traffic-split {
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--r-sm);
+}
+.traffic-split.on {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.map-toolbar .traffic-split button {
+  border-radius: 0;
+  border-color: transparent;
+}
+.map-toolbar .traffic-split button.traffic-main {
+  border-top-left-radius: var(--r-sm);
+  border-bottom-left-radius: var(--r-sm);
+}
+/* the pressed half keeps the accent fill, the frame already carries the edge */
+.map-toolbar .traffic-split button.traffic-main[aria-pressed="true"] {
+  border-color: transparent;
+}
+
+/* the network half: the chosen network in normal text, a caret, a hairline divider */
+.map-toolbar .traffic-split button.traffic-net {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding-left: var(--sp-2);
+  padding-right: var(--sp-2);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.02em;
+  color: var(--text);
+  border-left: 1px solid var(--hairline-strong);
+  border-top-right-radius: var(--r-sm);
+  border-bottom-right-radius: var(--r-sm);
+}
+.map-toolbar .traffic-split button.traffic-net[aria-expanded="true"] {
+  background: var(--surface-2);
+}
+.traffic-net-caret {
+  font-size: var(--fs-2xs);
+  opacity: 0.8;
+}
+
+.traffic-net-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 112px;
+  padding: 3px;
+  background: var(--overlay);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-overlay);
+}
+.traffic-net-menu button {
+  justify-content: flex-start;
+  width: 100%;
+  text-align: left;
+}
+.traffic-net-menu button.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+}

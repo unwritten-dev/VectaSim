@@ -6,6 +6,11 @@
   <Style id="track"><LineStyle><color>ffffc24c</color><width>3</width></LineStyle><IconStyle><Icon><href>http://maps.google.com/mapfiles/kml/shapes/airports.png</href></Icon></IconStyle></Style>
   <Style id="airport"><IconStyle><Icon><href>http://maps.google.com/mapfiles/kml/paddle/wht-circle.png</href></Icon></IconStyle></Style>
   <Style id="touchdown"><IconStyle><color>ff3c4ce7</color><Icon><href>http://maps.google.com/mapfiles/kml/shapes/target.png</href></Icon></IconStyle></Style>
+  <Schema id="air" name="air">
+    <gx:SimpleArrayField name="tas_kt" type="float"><displayName>TAS (kt)</displayName></gx:SimpleArrayField>
+    <gx:SimpleArrayField name="wind_dir_true_deg" type="float"><displayName>Wind aus (° wahr)</displayName></gx:SimpleArrayField>
+    <gx:SimpleArrayField name="wind_kt" type="float"><displayName>Wind (kt)</displayName></gx:SimpleArrayField>
+  </Schema>
   <Placemark>
     <name>Abflug EDDF</name>
     <TimeStamp><when>2026-10-16T08:00:00Z</when></TimeStamp>
@@ -47,6 +52,46 @@
       <gx:angles>249.8 7.2 -1.5</gx:angles>
       <gx:angles>249.8 7.2 -1.5</gx:angles>
       <gx:angles>249.8 7.2 -1.5</gx:angles>
+      <ExtendedData>
+        <SchemaData schemaUrl="#air">
+          <gx:SimpleArrayData name="tas_kt">
+            <gx:value/>
+            <gx:value/>
+            <gx:value>143.2</gx:value>
+            <gx:value>144.2</gx:value>
+            <gx:value>145.2</gx:value>
+            <gx:value>146.2</gx:value>
+            <gx:value>147.2</gx:value>
+            <gx:value>148.2</gx:value>
+            <gx:value>149.2</gx:value>
+            <gx:value>150.2</gx:value>
+          </gx:SimpleArrayData>
+          <gx:SimpleArrayData name="wind_dir_true_deg">
+            <gx:value/>
+            <gx:value/>
+            <gx:value>245</gx:value>
+            <gx:value>245</gx:value>
+            <gx:value>245</gx:value>
+            <gx:value/>
+            <gx:value>245</gx:value>
+            <gx:value>245</gx:value>
+            <gx:value>245</gx:value>
+            <gx:value>245</gx:value>
+          </gx:SimpleArrayData>
+          <gx:SimpleArrayData name="wind_kt">
+            <gx:value/>
+            <gx:value/>
+            <gx:value>12.2</gx:value>
+            <gx:value>12.2</gx:value>
+            <gx:value>12.2</gx:value>
+            <gx:value/>
+            <gx:value>12.2</gx:value>
+            <gx:value>12.2</gx:value>
+            <gx:value>12.2</gx:value>
+            <gx:value>12.2</gx:value>
+          </gx:SimpleArrayData>
+        </SchemaData>
+      </ExtendedData>
     </gx:Track>
   </Placemark>
   <Placemark>

@@ -13,6 +13,7 @@ export function Hero({
   sub,
   size = "md",
   title,
+  labelTitle,
 }: {
   label: string;
   value: string;
@@ -22,11 +23,15 @@ export function Hero({
   sub?: ReactNode;
   size?: "xl" | "md";
   title?: string;
+  /** Plain-language explanation of the label (tooltip on the label only). */
+  labelTitle?: string;
 }) {
   return (
     <div className={`hero hero-${size}`} title={title}>
       <div className="hero-label">
-        <span>{label}</span>
+        <span title={labelTitle} className={labelTitle ? "hero-label-help" : undefined}>
+          {label}
+        </span>
         <SourceChip kind={source.kind} detail={source.detail} warn={source.warn} />
       </div>
       <div className="hero-value">

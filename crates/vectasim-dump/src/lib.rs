@@ -7,8 +7,9 @@
 //! ```text
 //! {"type":"header","format":1,"app":"0.1.0","source":"simconnect","sim":"KittyHawk",
 //!  "simVersion":"11.0.282174.999","simconnect":"11.0.62651.3","dll":"C:\\…\\SimConnect.dll",
-//!  "defs":{"fast":[["PLANE LATITUDE","degrees"],…],"slow":[…],"static":["TITLE",…]},
-//!  "reqs":{"fast":1,"slow":2,"static":3},"inactive":{"fast":[14]},"startedWallMs":1760700000000}
+//!  "defs":{"fast":[["PLANE LATITUDE","degrees"],…],"slow":[…],"static":["TITLE",…],
+//!          "approach":[["AMBIENT WIND VELOCITY","knots"],…],"design":[["DESIGN SPEED VS0","knots"],…]},
+//!  "reqs":{"approach":4,"design":5,"fast":1,"slow":2,"static":3},"inactive":{"fast":[14]},"startedWallMs":1760700000000}
 //! {"t":1234,"w":1760700001234,"k":"data","req":1,"v":[50.0451,8.58698,…]}
 //! {"t":1250,"w":…,"k":"data","req":3,"s":["Airbus A320neo","TT:ATCCOM.AC_MODEL_A20N.0.text",…]}
 //! {"t":1300,"w":…,"k":"event","id":"Pause","data":1}
@@ -35,6 +36,9 @@
 //!   starts; later drops are `exception` lines with `dropped: true`. Every `open` starts a
 //!   fresh SimConnect session with all variables registered again.
 //! * `end`: the session ended (the provider reports `Disconnected { reason }`).
+//! * `defs.approach` / `defs.design` (additive, still format 1): the 1-Hz approach
+//!   definition and the once-per-aircraft design speeds. Older dumps lack them; a reader
+//!   that does not know them ignores the keys and their `data` lines (unknown `req`).
 
 pub mod delta;
 mod reader;
@@ -101,7 +105,7 @@ impl Header {
     }
 }
 
-/// The declared variables of the three definitions, in registration order.
+/// The declared variables of the definitions, in registration order.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Defs {
     /// `[name, unit]`
@@ -109,6 +113,12 @@ pub struct Defs {
     pub slow: Vec<(String, String)>,
     #[serde(rename = "static")]
     pub statics: Vec<String>,
+    /// Approach data at 1 Hz (for track v2); absent in older dumps.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub approach: Vec<(String, String)>,
+    /// Design speeds, requested once per aircraft; absent in older dumps.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub design: Vec<(String, String)>,
 }
 
 /// A FLOAT64 as recorded: NaN and ±inf (not representable in JSON) are written as `null`

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { NNBSP, fmt, fmtClock, fmtDateTime, fmtNum, fmtSigned, fmtWind } from "../format";
+import { NNBSP, fmt, fmtClock, fmtDateTime, fmtNum, fmtSigned, fmtWind } from "../i18n/number";
+import { useT, type TFunction } from "../i18n";
 import { usePrivacy } from "../prefs";
 import { userMessage } from "../errors";
 import TrackMap from "../map/TrackMap";
@@ -25,21 +26,28 @@ import {
   VS_BANDS,
   approachHints,
   approachLabel,
+  automationText,
   buildHints,
   degNum,
+  ilsProtocolText,
   indexFormulaLines,
   indexText,
   isDerivedRunway,
   keySentence,
   landingIndex,
   lateralMeasurable,
+  METAR_MAX_AGE_MIN,
   metarAgeNote,
   provenance,
+  recordedProtocolText,
   runwaySourceNote,
   runwaySourceOf,
   sampleRateHz,
+  simWindComponentsText,
+  simWindText,
   widthText,
   windComponentsText,
+  windProtocolText,
   zoneText,
   type Hint,
 } from "./facts";
@@ -52,6 +60,19 @@ import type { ApproachAnalysis } from "./approachTypes";
 import type { LandingAnalysis, LandingDebriefData } from "./types";
 import HistoryPanel from "./HistoryPanel";
 import "./landing.css";
+
+/** "0,3 Dots" / "0.3 dots", "1 Dot" / "1 dot". */
+function dotsText(t: TFunction, v: number, digits = 0): string {
+  return t("debrief.unit.dots", { count: v, n: fmtNum(v, digits) });
+}
+
+/** Side of the runway centreline at touchdown, as a phrase ("9 m rechts der Mittellinie"). */
+function sideOfCentreline(t: TFunction, lateralM: number): string {
+  const a = Math.abs(lateralM);
+  if (a < 0.5) return t("debrief.hero.onCentreline");
+  const dist = `${fmtNum(a, 0)}${NNBSP}m`;
+  return lateralM > 0 ? t("debrief.hero.rightOfCentreline", { dist }) : t("debrief.hero.leftOfCentreline", { dist });
+}
 
 /** Everything that can take keyboard focus inside the dialog, in DOM order and visible. */
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
@@ -132,6 +153,7 @@ function approachError(e: unknown): string {
 }
 
 function DebriefModal({ target }: { target: DebriefTarget }) {
+  const t = useT();
   const [index, setIndex] = useState<number | null>(target.touchdownIndex);
   /** Approach chosen in the picker (or by the caller); null = the one of the shown touchdown. */
   const [approachPick, setApproachPick] = useState<number | null>(target.approachIndex);
@@ -161,7 +183,7 @@ function DebriefModal({ target }: { target: DebriefTarget }) {
       .catch((e) => {
         if (!alive) return;
         const raw = String(e);
-        if (/keine Landung/i.test(raw)) setError({ title: raw, final: true });
+        if (/keine Landung|no landing/i.test(raw)) setError({ title: raw, final: true });
         else {
           const m = userMessage(e, "logbook");
           setError({ title: m.title, hint: m.hint });
@@ -224,7 +246,7 @@ function DebriefModal({ target }: { target: DebriefTarget }) {
         ? { kind: "error", reason: approaches.error }
         : selected && selected.outcome.kind !== "goAround" && data && selected.outcome.touchdownIndex === data.analysis.touchdownIndex
           ? { kind: "ok", approach: selected }
-          : { kind: "error", reason: "zu dieser Landung wurde im Track kein Anflug gefunden" };
+          : { kind: "error", reason: t("debrief.state.noApproachForLanding") };
 
   const pickApproach = (a: ApproachAnalysis) => {
     setApproachPick(a.index);
@@ -240,9 +262,9 @@ function DebriefModal({ target }: { target: DebriefTarget }) {
     <div ref={dialogRef} className="debrief-overlay" role="dialog" aria-modal="true" aria-labelledby={`${kickerId} ${titleId}`}>
       <div className="debrief">
         <div className="debrief-bar">
-          <span className="debrief-kicker" id={kickerId}>{isGoAround ? "Anflugauswertung" : "Landeauswertung"}</span>
+          <span className="debrief-kicker" id={kickerId}>{isGoAround ? t("debrief.bar.kickerApproach") : t("debrief.bar.kickerLanding")}</span>
           {showPicker ? (
-            <span className="segmented approach-picker" role="radiogroup" aria-label="Anflug wählen">
+            <span className="segmented approach-picker" role="radiogroup" aria-label={t("debrief.bar.pickApproach")}>
               {list.map((a) => (
                 <button key={a.index} role="radio" aria-checked={selected?.index === a.index} className={selected?.index === a.index ? "active" : ""} onClick={() => pickApproach(a)}>
                   {approachLabel(a)}
@@ -251,14 +273,12 @@ function DebriefModal({ target }: { target: DebriefTarget }) {
             </span>
           ) : (
             count > 1 && (
-              <span className="debrief-pager" role="group" aria-label="Landung wählen">
-                <button className="btn-sm" disabled={shownIndex <= 0} onClick={() => pickTouchdown(shownIndex - 1)} aria-label="Vorherige Landung">
+              <span className="debrief-pager" role="group" aria-label={t("debrief.bar.pickLanding")}>
+                <button className="btn-sm" disabled={shownIndex <= 0} onClick={() => pickTouchdown(shownIndex - 1)} aria-label={t("debrief.bar.prevLanding")}>
                   ‹
                 </button>
-                <span className="detail num">
-                  Landung {shownIndex + 1} von {count}
-                </span>
-                <button className="btn-sm" disabled={shownIndex >= count - 1} onClick={() => pickTouchdown(shownIndex + 1)} aria-label="Nächste Landung">
+                <span className="detail num">{t("debrief.bar.landingOf", { n: shownIndex + 1, count })}</span>
+                <button className="btn-sm" disabled={shownIndex >= count - 1} onClick={() => pickTouchdown(shownIndex + 1)} aria-label={t("debrief.bar.nextLanding")}>
                   ›
                 </button>
               </span>
@@ -271,12 +291,12 @@ function DebriefModal({ target }: { target: DebriefTarget }) {
               navigate({ kind: "flight", id: target.flightId });
               closeDebrief();
             }}
-            title="Diesen Flug im Logbuch öffnen"
+            title={t("debrief.bar.inLogbookTitle")}
           >
-            Im Logbuch
+            {t("debrief.bar.inLogbook")}
           </button>
-          <button ref={closeRef} className="btn-sm" onClick={closeDebrief} title="Schließen (Esc)">
-            Schließen
+          <button ref={closeRef} className="btn-sm" onClick={closeDebrief} title={t("debrief.bar.closeTitle")}>
+            {t("debrief.bar.close")}
           </button>
         </div>
         {isGoAround && selected ? (
@@ -296,13 +316,13 @@ function DebriefModal({ target }: { target: DebriefTarget }) {
                     setAttempt((n) => n + 1);
                   }}
                 >
-                  Erneut versuchen
+                  {t("debrief.state.retry")}
                 </button>
               </div>
             )}
           </div>
         ) : !data ? (
-          <div className="debrief-state detail">Landung wird ausgewertet …</div>
+          <div className="debrief-state detail">{t("debrief.state.loading")}</div>
         ) : (
           <DebriefBody d={data} approach={landingApproach} titleId={titleId} onRunwayChanged={runwayChanged} />
         )}
@@ -326,6 +346,7 @@ export function selectApproach(list: ApproachAnalysis[] | null, pick: number | n
 
 /** Touchdown Card (PNG, 1200×675 at 2×): save to a file or copy to the clipboard. */
 function CardActions({ d, approach }: { d: LandingDebriefData; approach: ApproachAnalysis | null }) {
+  const t = useT();
   const [busy, setBusy] = useState<"save" | "copy" | null>(null);
   const run = (kind: "save" | "copy") => {
     setBusy(kind);
@@ -333,11 +354,11 @@ function CardActions({ d, approach }: { d: LandingDebriefData; approach: Approac
   };
   return (
     <div className="debrief-card-actions">
-      <button className="btn-sm" disabled={busy != null} onClick={() => run("save")} title="Landekarte als PNG speichern (2400 × 1350 px)">
-        {busy === "save" ? "Speichert …" : "Landekarte speichern"}
+      <button className="btn-sm" disabled={busy != null} onClick={() => run("save")} title={t("debrief.card.saveTitle", { size: "2400 × 1350 px" })}>
+        {busy === "save" ? t("debrief.card.saving") : t("debrief.card.save")}
       </button>
-      <button className="btn-sm" disabled={busy != null} onClick={() => run("copy")} title="Landekarte als PNG in die Zwischenablage kopieren">
-        {busy === "copy" ? "Kopiert …" : "Landekarte kopieren"}
+      <button className="btn-sm" disabled={busy != null} onClick={() => run("copy")} title={t("debrief.card.copyTitle")}>
+        {busy === "copy" ? t("debrief.card.copying") : t("debrief.card.copy")}
       </button>
     </div>
   );
@@ -360,49 +381,125 @@ function HintList({ hints }: { hints: Hint[] }) {
 
 /** Methodik items of the approach assessment (references, bands, minimum durations, 1 Hz). */
 function ApproachMethodItems({ a }: { a: ApproachAnalysis }) {
+  const t = useT();
   const c = a.config;
+  const pct = (v: number) => `${fmtNum(v)}${NNBSP}%`;
   return (
     <>
       <li>
-        <strong>Anflug-Referenzen:</strong> Gleitpfad ist ein angenommener {fmt(c.glidepathDeg, 0, "°")}-Pfad über {fmt(c.tchFt, 0, "ft")} Schwellenhöhe – ohne
-        Verfahrensdaten, der echte ILS-/RNAV-Winkel kann abweichen („{fmt(c.glidepathDeg, 0, "°")}-Annahme“). 1 Dot Gleitpfad = {fmtNum(c.gsDotDeg, 2)}°. Kurs
-        (Lokalizer-Ersatz): Winkel von einer gedachten Antenne {fmt(c.locAntennaBeyondEndM, 0, "m")} hinter dem Pistenende, 1 Dot = {fmt(c.locDotMAtThreshold, 0, "m")}{" "}
-        an der Schwelle. „Eingedreht“ ab dem ersten Punkt, ab dem Kurs ≤ {fmt(c.establishedTrackDeg, 0, "°")} zur Bahn und Querablage ≤ max.{" "}
-        {fmt(c.establishedMinM, 0, "m")} bzw. {fmtNum(c.establishedRatio * 100)}{NNBSP}% der Distanz blieben.
+        <strong>{t("debrief.approachMethod.references.title")}</strong>{" "}
+        {t("debrief.approachMethod.references.text", {
+          deg: fmt(c.glidepathDeg, 0, "°"),
+          tch: fmt(c.tchFt, 0, "ft"),
+          gsDot: `${fmtNum(c.gsDotDeg, 2)}°`,
+          antenna: fmt(c.locAntennaBeyondEndM, 0, "m"),
+          locDot: fmt(c.locDotMAtThreshold, 0, "m"),
+          track: fmt(c.establishedTrackDeg, 0, "°"),
+          minM: fmt(c.establishedMinM, 0, "m"),
+          ratio: pct(c.establishedRatio * 100),
+        })}
       </li>
       <li>
-        <strong>Referenz-Speed (Vapp):</strong> 1. die beim Flugzeug eingetragene Vapp (Logbuch → Flugzeuge); 2. sonst der Median der eigenen IAS zwischen {fmtNum(c.vappFromFt)} und{" "}
-        {fmt(c.vappToFt, 0, "ft")} dieses Anflugs – das bewertet die Konstanz der Geschwindigkeit, nicht ob sie für das Muster richtig war; 3. ohne messbare IAS
-        entfallen Speed- und Energiekriterien. Sobald VS0 bekannt ist, wird die Referenz gegen {fmtNum(c.vappMinVs0, 1)}–{fmtNum(c.vappMaxVs0, 1)} × VS0 geprüft. Dieser
-        Anflug: {fmt(a.reference.vappKt, 0, "kt")} ({VAPP_SOURCE_LABEL[a.reference.vappSource]}).
+        <strong>{t("debrief.approachMethod.ils.title")}</strong>{" "}
+        {t("debrief.approachMethod.ils.text", {
+          share: pct((c.ilsMinShare ?? 0.6) * 100),
+          top: fmtNum(c.windowTopFt),
+          floor: fmt(c.gsFloorFt, 0, "ft"),
+          deg: fmt(c.glidepathDeg, 1, "°"),
+          fullScale: dotsText(t, c.locFullScaleDots ?? 2),
+          mismatch: dotsText(t, c.ilsMismatchDots ?? 0.5, 1),
+          rejectGs: `${fmtNum(c.ilsRejectGsDeg ?? 1, 1)}°`,
+          rejectLoc: dotsText(t, c.ilsRejectLocDots ?? 1.5, 1),
+        })}
       </li>
       <li>
-        <strong>Gates:</strong> 10{NNBSP}nm – Höhe ±{fmt(c.tenNmAltToleranceFt, 0, "ft")} zum Pfad und Energie ≤ {fmtSigned(c.tenNmMaxEnergyFt, 0, "ft")} (nur wenn
-        eingedreht), IAS ≤ {fmt(c.tenNmMaxIasKt, 0, "kt")}; FAF ({fmt(c.fafDistNm, 0, "nm")} vor der Schwelle oder {fmt(c.fafHatFt, 0, "ft")}, was zuerst kommt) –
-        Fahrwerk, Klappen ≥ 1, Höhe ±{fmt(c.fafAltToleranceFt, 0, "ft")}, Speed {fmtSigned(-c.fafSpeedBelowKt, 0)}/{fmtSigned(c.fafSpeedAboveKt, 0, "kt")}; 1000 und
-        500{NNBSP}ft – Fahrwerk ≥ {fmtNum(c.gearDownPct)}{NNBSP}%, Landeklappen, |V/S| ≤ {fmt(c.gateMaxVsFpm, 0, "fpm")}, Speed {fmtSigned(-c.gateSpeedBelowKt, 0)}/
-        {fmtSigned(c.gateSpeedAboveKt, 0, "kt")}, Gleitpfad und Kurs ±{fmtNum(c.gateDots)}{NNBSP}Dot, Querneigung ≤ {fmt(c.gateMaxBankDeg, 0, "°")}; 50{NNBSP}ft nur
-        Werte. Werte sind beim letzten Durchflug interpoliert. „Nicht messbar“ zählt nie als „nicht erfüllt“.
+        <strong>{t("debrief.approachMethod.vapp.title")}</strong>{" "}
+        {t("debrief.approachMethod.vapp.text", {
+          from: fmtNum(c.vappFromFt),
+          to: fmt(c.vappToFt, 0, "ft"),
+          factor: fmtNum(c.vappVs0Factor ?? 1.3, 1),
+          min: fmtNum(c.vappMinVs0, 1),
+          max: fmtNum(c.vappMaxVs0, 1),
+          speed: fmt(a.reference.vappKt, 0, "kt"),
+          source: VAPP_SOURCE_LABEL[a.reference.vappSource],
+        })}
       </li>
       <li>
-        <strong>Stabilität und 3-s-Regel:</strong> Bewertet wird das Fenster {fmtNum(c.windowTopFt)} → {fmt(c.windowBottomFt, 0, "ft")} (Gleitpfad bis{" "}
-        {fmt(c.gsFloorFt, 0, "ft")}). Eine Abweichung zählt erst, wenn sie ununterbrochen ihre Mindestdauer anhält – Speed {fmt(c.speedDurationS, 0, "s")}, Querneigung{" "}
-        {fmt(c.bankDurationS, 0, "s")}, Sinkrate {fmt(c.vsS1DurationS, 0, "s")} (S2 {fmt(c.vsS2DurationS, 0, "s")}), Gleitpfad und Kurs {fmt(c.gsDurationS, 0, "s")};
-        kürzere Ausreißer unter {fmt(c.momentaryS, 0, "s")} gelten als Momentanwerte. Stufe S1/S2: Speed {fmtSigned(-c.speedS1BelowKt, 0)}/{fmtSigned(c.speedS1AboveKt, 0)} bzw.{" "}
-        {fmtSigned(-c.speedS2BelowKt, 0)}/{fmtSigned(c.speedS2AboveKt, 0, "kt")}, Sinkrate {fmtNum(c.vsS1Fpm)}/{fmt(c.vsS2Fpm, 0, "fpm")}, Gleitpfad {fmtNum(c.gsS1Dots)}/
-        {fmtNum(c.gsS2Dots)}{NNBSP}Dots, Kurs {fmtNum(c.locS1Dots)}/{fmtNum(c.locS2Dots, 1)}{NNBSP}Dots, Querneigung {fmtNum(c.bankS1Deg)}/{fmt(c.bankS2Deg, 0, "°")}. „Stabil ab“ ist
-        die höchste Höhe (bis {fmt(c.stableFromMaxFt, 0, "ft")}, auf {fmtNum(c.stableRoundFt)}{NNBSP}ft abgerundet), ab der bis {fmt(c.windowBottomFt, 0, "ft")} nichts
-        mehr überschritten wurde.
+        <strong>{t("debrief.approachMethod.config.title")}</strong>{" "}
+        {t("debrief.approachMethod.config.text", {
+          n1: fmt(c.thrustMinN1Pct ?? 40, 0, "%"),
+          gate: fmt(c.configGateFt, 0, "ft"),
+          idle: fmt(c.thrustDurationS ?? 5, 0, "s"),
+          floor: fmt(c.thrustFloorFt ?? 50, 0, "ft"),
+          spoilers: fmt(c.spoilersMaxPct ?? 2, 0, "%"),
+        })}
       </li>
       <li>
-        <strong>Bänder:</strong> {APPROACH_BAND_LABEL.stable} – keine Überschreitung; {APPROACH_BAND_LABEL.deviations} – 1–2 Kriterien über 500{NNBSP}ft, keine darunter;{" "}
-        {APPROACH_BAND_LABEL.unstable} – 3 oder mehr Kriterien über 500{NNBSP}ft; {APPROACH_BAND_LABEL.unstableBelow500} – mindestens eine Überschreitung unter 500{NNBSP}ft
-        (nach EASA / Data4Safety). Ein Durchstarten ist kein Band, sondern das Ergebnis des Anflugs.
+        <strong>{t("debrief.approachMethod.windEnergy.title")}</strong>{" "}
+        {t("debrief.approachMethod.windEnergy.text", {
+          top: fmtNum(c.windowTopFt),
+          bottom: fmt(c.windowBottomFt, 0, "ft"),
+          tail: fmt(c.windTailwindKt ?? 5, 0, "kt"),
+          cross: fmt(c.windCrosswindKt ?? 15, 0, "kt"),
+          shear: fmt(c.windShearKt ?? 15, 0, "kt"),
+          topFt: fmt(c.windowTopFt, 0, "ft"),
+          high: fmtSigned(c.energyBandHighFt ?? 500, 0, "ft"),
+          low: fmtSigned(-(c.energyBandLowFt ?? 300), 0, "ft"),
+        })}
       </li>
       <li>
-        <strong>Auflösung:</strong> Grundlage ist der gespeicherte Track mit 1 Sample pro Sekunde (über {fmt(c.profileDenseBelowFt, 0, "ft")} auf eines je{" "}
-        {fmt(c.profileSparseS, 0, "s")} ausgedünnt). Dauern sind ganze Sekunden; Spitzen zwischen zwei Samples sieht die Auswertung nicht. Höhen sind über dem
-        Aufsetzpunkt (HAT); beim Durchstarten über der Platzhöhe aus der Datenbank.
+        <strong>{t("debrief.approachMethod.gates.title")}</strong>{" "}
+        {t("debrief.approachMethod.gates.text", {
+          tenAlt: fmt(c.tenNmAltToleranceFt, 0, "ft"),
+          tenEnergy: fmtSigned(c.tenNmMaxEnergyFt, 0, "ft"),
+          tenIas: fmt(c.tenNmMaxIasKt, 0, "kt"),
+          fafDist: fmt(c.fafDistNm, 0, "nm"),
+          fafHat: fmt(c.fafHatFt, 0, "ft"),
+          fafAlt: fmt(c.fafAltToleranceFt, 0, "ft"),
+          fafBelow: fmtSigned(-c.fafSpeedBelowKt, 0),
+          fafAbove: fmtSigned(c.fafSpeedAboveKt, 0, "kt"),
+          gear: pct(c.gearDownPct),
+          vs: fmt(c.gateMaxVsFpm, 0, "fpm"),
+          below: fmtSigned(-c.gateSpeedBelowKt, 0),
+          above: fmtSigned(c.gateSpeedAboveKt, 0, "kt"),
+          dots: dotsText(t, c.gateDots),
+          bank: fmt(c.gateMaxBankDeg, 0, "°"),
+        })}
+      </li>
+      <li>
+        <strong>{t("debrief.approachMethod.stability.title")}</strong>{" "}
+        {t("debrief.approachMethod.stability.text", {
+          top: fmtNum(c.windowTopFt),
+          bottom: fmt(c.windowBottomFt, 0, "ft"),
+          gsFloor: fmt(c.gsFloorFt, 0, "ft"),
+          speedS: fmt(c.speedDurationS, 0, "s"),
+          bankS: fmt(c.bankDurationS, 0, "s"),
+          vsS1: fmt(c.vsS1DurationS, 0, "s"),
+          vsS2: fmt(c.vsS2DurationS, 0, "s"),
+          gsS: fmt(c.gsDurationS, 0, "s"),
+          momentary: fmt(c.momentaryS, 0, "s"),
+          speed1: `${fmtSigned(-c.speedS1BelowKt, 0)}/${fmtSigned(c.speedS1AboveKt, 0)}`,
+          speed2: `${fmtSigned(-c.speedS2BelowKt, 0)}/${fmtSigned(c.speedS2AboveKt, 0, "kt")}`,
+          vs: `${fmtNum(c.vsS1Fpm)}/${fmt(c.vsS2Fpm, 0, "fpm")}`,
+          gs: `${fmtNum(c.gsS1Dots)}/${dotsText(t, c.gsS2Dots)}`,
+          loc: `${fmtNum(c.locS1Dots)}/${dotsText(t, c.locS2Dots, 1)}`,
+          bank: `${fmtNum(c.bankS1Deg)}/${fmt(c.bankS2Deg, 0, "°")}`,
+          stableMax: fmt(c.stableFromMaxFt, 0, "ft"),
+          round: fmt(c.stableRoundFt, 0, "ft"),
+        })}
+      </li>
+      <li>
+        <strong>{t("debrief.approachMethod.bands.title")}</strong>{" "}
+        {t("debrief.approachMethod.bands.text", {
+          stable: APPROACH_BAND_LABEL.stable,
+          deviations: APPROACH_BAND_LABEL.deviations,
+          unstable: APPROACH_BAND_LABEL.unstable,
+          unstableBelow500: APPROACH_BAND_LABEL.unstableBelow500,
+        })}
+      </li>
+      <li>
+        <strong>{t("debrief.approachMethod.resolution.title")}</strong>{" "}
+        {t("debrief.approachMethod.resolution.text", { dense: fmt(c.profileDenseBelowFt, 0, "ft"), sparse: fmt(c.profileSparseS, 0, "s") })}
       </li>
     </>
   );
@@ -410,17 +507,18 @@ function ApproachMethodItems({ a }: { a: ApproachAnalysis }) {
 
 /** Debrief of a go-around: only the approach (with the lowest point), no landing part, no card. */
 function GoAroundBody({ a, flight, titleId }: { a: ApproachAnalysis; flight: FlightRow | null; titleId: string }) {
+  const t = useT();
   const priv = usePrivacy();
   const hints = useMemo(() => approachHints(a), [a]);
   const rwy = a.runway;
-  const title = rwy ? `${rwy.airport} RWY ${rwy.ident}` : "Anflug ohne zugeordnete Piste";
+  const title = rwy ? `${rwy.airport} RWY ${rwy.ident}` : t("debrief.goAround.noRunway");
   const when = a.goAround?.lowestTMs ?? a.endTMs;
   return (
     <div className="debrief-body">
       <header className="debrief-head">
         <div>
           <h2 className="debrief-title" id={titleId}>
-            {title} <span className="detail">· Durchstarten</span>
+            {title} <span className="detail">· {t("debrief.goAround.suffix")}</span>
           </h2>
           <div className="detail">
             {[
@@ -435,29 +533,28 @@ function GoAroundBody({ a, flight, titleId }: { a: ApproachAnalysis; flight: Fli
         </div>
       </header>
 
-      <ApproachSection status={{ kind: "ok", approach: a }} />
+      <ApproachSection status={{ kind: "ok", approach: a }} flight={flight} />
 
       <section className="debrief-section">
-        <h3>Anflugprofil</h3>
+        <h3>{t("debrief.section.approachProfile")}</h3>
         <ApproachChart approach={a} />
         <ReplaySection a={null} apr={a} />
       </section>
 
       <section className="debrief-section">
-        <h3>Hinweise</h3>
+        <h3>{t("debrief.section.hints")}</h3>
         <HintList hints={hints} />
       </section>
 
-      <Panel title="Stabilisierter Anflug – Gates" collapsible defaultOpen={false} level={3} className="debrief-fold">
+      <Panel title={t("debrief.section.gates")} collapsible defaultOpen={false} level={3} className="debrief-fold">
         <StabilisedTable approach={a} />
       </Panel>
 
-      <Panel title="Methodik" collapsible defaultOpen={false} level={3} className="debrief-fold debrief-method">
+      <Panel title={t("debrief.section.methodology")} collapsible defaultOpen={false} level={3} className="debrief-fold debrief-method">
         <ul className="method">
           <li>
-            <strong>Durchstarten:</strong> erkannt, wenn nach einem Sinkflug unter {fmt(a.config.gaMaxAglFt, 0, "ft")} innerhalb von {fmt(a.config.gaWindowS, 0, "s")}{" "}
-            mindestens {fmt(a.config.gaMinClimbFt, 0, "ft")} gestiegen wird (bzw. die Phasen-Erkennung Approach/Final → Climb meldet). Der tiefste Punkt ist der
-            Entscheidungspunkt; es gibt keine Landekarte.
+            <strong>{t("debrief.goAround.methodTitle")}</strong>{" "}
+            {t("debrief.goAround.methodText", { agl: fmt(a.config.gaMaxAglFt, 0, "ft"), window: fmt(a.config.gaWindowS, 0, "s"), climb: fmt(a.config.gaMinClimbFt, 0, "ft") })}
           </li>
           <ApproachMethodItems a={a} />
         </ul>
@@ -466,12 +563,15 @@ function GoAroundBody({ a, flight, titleId }: { a: ApproachAnalysis; flight: Fli
   );
 }
 
-function DebriefBody({ d, approach, titleId, onRunwayChanged }: { d: LandingDebriefData; approach: ApproachStatus; titleId: string; onRunwayChanged: () => void }) {
+/** Landing debrief body (exported for the i18n render test). */
+export function DebriefBody({ d, approach, titleId, onRunwayChanged }: { d: LandingDebriefData; approach: ApproachStatus; titleId: string; onRunwayChanged: () => void }) {
+  const t = useT();
   const [editing, setEditing] = useState(false);
   const priv = usePrivacy();
   const closeEditor = useCallback(() => setEditing(false), []);
   const apr = approach.kind === "ok" ? approach.approach : null;
   const a = d.analysis;
+  const c = a.config;
   const td = a.touchdown;
   const rwy = a.runway;
   const tp = a.touchdownPoint;
@@ -481,7 +581,7 @@ function DebriefBody({ d, approach, titleId, onRunwayChanged }: { d: LandingDebr
   const src = useMemo(() => provenance(d), [d]);
   const index = useMemo(() => landingIndex(a, apr), [a, apr]);
   const place = d.airport?.ident ?? rwy?.airport ?? null;
-  const title = rwy ? `${rwy.airport} RWY ${rwy.ident}` : place ? `${place} · keine Piste zugeordnet` : "Landung ohne Flugplatz";
+  const title = rwy ? `${rwy.airport} RWY ${rwy.ident}` : place ? t("debrief.header.titleNoRunway", { place }) : t("debrief.header.titleNoAirport");
   const metarAge = metarAgeNote(d);
   const declaredLengthM = d.runwayData?.lengthFt ? d.runwayData.lengthFt * 0.3048 : rwy?.lengthM;
   const trackHz = sampleRateHz(a.samples);
@@ -491,6 +591,10 @@ function DebriefBody({ d, approach, titleId, onRunwayChanged }: { d: LandingDebr
   const uncertainty = tp?.distanceUncertaintyM ?? null;
   // the editor needs an airport: the matched runway's, else the nearest one
   const editIcao = rwy?.airport ?? d.airport?.ident ?? null;
+  const oneDot = dotsText(t, 1);
+  const twoDots = dotsText(t, 2);
+  const matchRadius = fmt(c.matchLateralM / 1852, 0, "nm");
+  const matchHeading = `${fmtNum(c.matchHeadingDeg)}°`;
 
   // the track map needs track samples; rebuild them from the approach points
   const mapSamples: TrackSample[] = useMemo(
@@ -519,18 +623,48 @@ function DebriefBody({ d, approach, titleId, onRunwayChanged }: { d: LandingDebr
 
   const w = a.wind;
   const metarWind = d.metar?.wind ? fmtWind(d.metar.wind) : null;
+  const metarId = d.metar ? ["METAR", d.metar.station, d.metar.time].filter(Boolean).join(" ") : "METAR";
   const ap = a.approach;
   const halfW = rwy?.widthM != null ? rwy.widthM / 2 : null;
   const integrity = f.integrity;
   const flags = integrity
     ? [
-        integrity.slewDetected && "Slew",
-        integrity.timeAccelerationDetected && `Zeitraffer (max. ${fmt(integrity.maxSimRate, 0)}×)`,
-        integrity.crashed && "Absturz",
-        integrity.fuelIncreasedAirborne && "Treibstoff in der Luft erhöht",
-        integrity.pauseCount > 0 && `${integrity.pauseCount}× Pause`,
+        integrity.slewDetected && t("debrief.integrity.slew"),
+        integrity.timeAccelerationDetected && t("debrief.integrity.timeAccel", { rate: `${fmt(integrity.maxSimRate, 0)}×` }),
+        integrity.crashed && t("debrief.integrity.crashed"),
+        integrity.fuelIncreasedAirborne && t("debrief.integrity.fuelIncreased"),
+        integrity.pauseCount > 0 && t("debrief.integrity.pauses", { count: integrity.pauseCount }),
       ].filter(Boolean)
     : [];
+  const zone = tp ? t(tp.inTdz ? (rwy?.lengthEstimated ? "debrief.hero.inTdzAssumed" : "debrief.hero.inTdz") : rwy?.lengthEstimated ? "debrief.hero.outsideTdzAssumed" : "debrief.hero.outsideTdz") : null;
+
+  const runwayProtocol = (): string => {
+    if (!rwy) return t("debrief.protocol.noRunway");
+    const diff = fmt(rwy.headingDiffDeg, 0, "°");
+    if (rwySource === "database")
+      return [
+        t("debrief.protocol.runwayDb", { ident: rwy.ident, opposite: rwy.oppositeIdent, surface: rwy.surface || t("debrief.protocol.surfaceUnknown"), diff }),
+        d.thresholdDisplacedM ? t("debrief.protocol.displaced", { dist: fmt(d.thresholdDisplacedM, 0, "m") }) : null,
+        t("debrief.protocol.accuracy", { acc: fmt(5, 0, "m") }),
+      ]
+        .filter(Boolean)
+        .join(" · ");
+    if (rwySource === "user") return t("debrief.protocol.runwayUser", { ident: rwy.ident, opposite: rwy.oppositeIdent, diff });
+    return [
+      runwaySourceNote(rwy),
+      t("debrief.protocol.derivedUncertainty", { along: fmt(rwy.alongUncertaintyM ?? uncertainty ?? 50, 0, "m"), cross: fmt(rwy.crossUncertaintyM ?? 5, 0, "m") }),
+      t("debrief.protocol.lateralNotMeasurable"),
+      rwy.lengthEstimated ? t("debrief.protocol.lengthUnknown") : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+  };
+
+  const windProtocol = (): string => {
+    if (!d.metar) return d.metarNote ?? t("debrief.protocol.noMetar");
+    const id = d.metarObservedMs ? t("debrief.protocol.observed", { metar: metarId, time: fmtClock(d.metarObservedMs, { local: false }) }) : metarId;
+    return [id, d.metarAtLanding ? t("debrief.protocol.storedAtLanding") : t("debrief.protocol.currentApprox"), metarAge].filter(Boolean).join(" · ");
+  };
 
   return (
     <div className="debrief-body">
@@ -541,10 +675,10 @@ function DebriefBody({ d, approach, titleId, onRunwayChanged }: { d: LandingDebr
           </h2>
           {(rwy || editIcao) && (
             <div className={`debrief-rwy-source src-${rwySource}`}>
-              <span>{rwy ? runwaySourceNote(rwy) : "Keine Piste zugeordnet"}</span>
+              <span>{rwy ? runwaySourceNote(rwy) : t("debrief.header.noRunway")}</span>
               {editIcao && (
-                <button className="btn-sm" onClick={() => setEditing(true)} title="Schwelle und Ende der Piste selbst festlegen">
-                  Piste korrigieren …
+                <button className="btn-sm" onClick={() => setEditing(true)} title={t("debrief.header.correctRunwayTitle")}>
+                  {t("debrief.header.correctRunway")}
                 </button>
               )}
             </div>
@@ -553,7 +687,7 @@ function DebriefBody({ d, approach, titleId, onRunwayChanged }: { d: LandingDebr
             {[
               d.airport?.name,
               fmtDateTime(td.timestampMs),
-              priv.title(f.aircraft.title, { registration: f.aircraft.atcId, airline: f.aircraft.atcAirline, callsign: f.callsign }) || "Unbekanntes Flugzeug",
+              priv.title(f.aircraft.title, { registration: f.aircraft.atcId, airline: f.aircraft.atcAirline, callsign: f.callsign }) || t("debrief.header.unknownAircraft"),
               priv.mask(f.aircraft.atcId, "registration"),
               priv.mask(f.callsign, "callsign"),
             ]
@@ -564,18 +698,28 @@ function DebriefBody({ d, approach, titleId, onRunwayChanged }: { d: LandingDebr
           {editing && editIcao && <RunwayEditor analysis={a} airportIcao={editIcao} onClose={closeEditor} onChanged={onRunwayChanged} />}
         </div>
         <div className="debrief-wind">
-          <div className="hero-label">Wind (METAR{d.metar ? ` ${d.metar.station}` : ""}{d.metar?.time ? ` ${d.metar.time}` : ""})</div>
+          <div className="hero-label">{t("debrief.wind.label", { source: metarId })}</div>
           {d.metar ? (
             <>
               <div className={`debrief-wind-source${d.metarAtLanding && !metarAge ? "" : " is-current"}`}>
-                {metarAge ?? (d.metarAtLanding ? "Wetter zum Zeitpunkt der Landung" : "aktuelles Wetter")}
+                {metarAge ?? (d.metarAtLanding ? t("debrief.wind.atLanding") : t("debrief.wind.current"))}
               </div>
-              <div className="debrief-wind-main num">{metarWind ?? "keine Windangabe"}</div>
-              {w && <div className="detail num">{windComponentsText(a)}{w.relativeToRunway ? "" : " (zum Steuerkurs)"}</div>}
+              <div className="debrief-wind-main num">{metarWind ?? t("debrief.wind.noWind")}</div>
+              {w && (
+                <div className="detail num">
+                  {w.relativeToRunway ? windComponentsText(a) : t("debrief.wind.componentsToHeading", { components: windComponentsText(a) })}
+                </div>
+              )}
               {d.metarNote && <div className="detail">{d.metarNote}</div>}
             </>
           ) : (
-            <div className="detail">{d.metarNote ?? "keine METAR"}</div>
+            <div className="detail">{d.metarNote ?? t("debrief.wind.noMetar")}</div>
+          )}
+          {apr?.wind && simWindText(apr.wind) && (
+            <div className="debrief-sim-wind" title={t("debrief.wind.simTitle", { top: fmtNum(apr.config.windowTopFt), bottom: fmt(apr.config.windowBottomFt, 0, "ft") })}>
+              <span className="hero-label">{t("debrief.wind.simLabel")}</span> <span className="num">{simWindText(apr.wind)}</span>
+              {simWindComponentsText(apr.wind) && <div className="detail num">{simWindComponentsText(apr.wind)}</div>}
+            </div>
           )}
         </div>
       </header>
@@ -585,217 +729,261 @@ function DebriefBody({ d, approach, titleId, onRunwayChanged }: { d: LandingDebr
       <div className="hero-row">
         <Hero
           size="xl"
-          label="Landerate"
+          label={t("debrief.hero.rate")}
           value={fmt(td.landingRateFpm, 0)}
           unit="fpm"
           band={a.vsBand}
           source={src.rate}
-          title={`Bänder: ${VS_BANDS}`}
-          sub={td.landingRateSource === "sim" ? `Messwert ${fmt(td.vsFpmMeasured, 0, "fpm")} · letztes Sample in der Luft` : "Sim lieferte keinen Wert – Messwert"}
+          title={t("debrief.hero.bandsTitle", { bands: VS_BANDS })}
+          sub={td.landingRateSource === "sim" ? t("debrief.hero.rateSubSim", { measured: fmt(td.vsFpmMeasured, 0, "fpm") }) : t("debrief.hero.rateSubMeasured")}
         />
         <Hero
-          label="Aufsetzpunkt"
+          label={t("debrief.hero.point")}
           value={tp ? fmt(tp.distanceM, 0) : "–"}
           unit={uncertainty != null && uncertainty > 0 ? `± ${fmtNum(uncertainty, 0)}${NNBSP}m` : "m"}
           source={src.point}
-          sub={
-            tp
-              ? `${tp.inTdz ? "in der Aufsetzzone" : "außerhalb der Aufsetzzone"}${rwy?.lengthEstimated ? " (angenommen)" : ""} · ` +
-                (measurable ? `${sideLabel(tp.lateralM)}${sideLabel(tp.lateralM).startsWith("auf") ? "" : " der Mittellinie"}` : "Querablage nicht messbar")
-              : "keine Piste zugeordnet"
-          }
+          sub={tp ? `${zone} · ${measurable ? sideOfCentreline(t, tp.lateralM) : t("debrief.hero.lateralNotMeasurable")}` : t("debrief.hero.noRunway")}
         />
-        <Hero label="g-Last" value={fmt(td.peakG, 2)} unit="g" band={a.gBand} source={src.g} title={`Bänder: ${G_BANDS}`} sub="Spitze 0,5 s nach dem Kontakt" />
+        <Hero
+          label={t("debrief.hero.g")}
+          value={fmt(td.peakG, 2)}
+          unit="g"
+          band={a.gBand}
+          source={src.g}
+          title={t("debrief.hero.bandsTitle", { bands: G_BANDS })}
+          sub={t("debrief.hero.gSub", { window: fmt(0.5, 1, "s") })}
+        />
       </div>
       {/* the band definitions as text, not only in the heroes' tooltips (keyboard, screen reader) */}
-      <p className="detail debrief-bands">
-        Bänder – Landerate: {VS_BANDS} · g-Last: {G_BANDS}
-      </p>
+      <p className="detail debrief-bands">{t("debrief.hero.bandsLine", { vs: VS_BANDS, g: G_BANDS })}</p>
 
       <div className="fact-row">
-        <Fact label={td.bounces ? `härtester Kontakt ${fmt(td.vsFpmHardest, 0, "fpm")}` : td.touchAndGo ? "Touch-and-go" : "Full Stop"} value={`${td.bounces} ${td.bounces === 1 ? "Bounce" : "Bounces"}`} warn={td.bounces ? "Bounce nach dem ersten Aufsetzen" : null} />
+        <Fact
+          label={td.bounces ? t("debrief.facts.hardestContact", { vs: fmt(td.vsFpmHardest, 0, "fpm") }) : td.touchAndGo ? t("debrief.facts.touchAndGo") : t("debrief.facts.fullStop")}
+          value={t("count.bounces", { count: td.bounces })}
+          warn={td.bounces ? t("debrief.facts.bounceWarn") : null}
+        />
         {tp && !measurable ? (
-          <div className="fact fact-na" title="Die Piste wurde aus deiner Rollspur abgeleitet: ihre Achse ist deine eigene Linie, die Abweichung von der echten Mittellinie lässt sich daraus nicht bestimmen.">
-            <div className="fact-value">nicht messbar</div>
-            <div className="fact-label">Mittellinie · Piste aus deiner Rollspur abgeleitet</div>
+          <div className="fact fact-na" title={t("debrief.facts.derivedTitle")}>
+            <div className="fact-value">{t("debrief.facts.notMeasurable")}</div>
+            <div className="fact-label">{t("debrief.facts.derivedLabel")}</div>
           </div>
         ) : (
           <Fact
-            label={rwy ? (rwy.widthM != null ? `Mittellinie · Piste ${fmt(rwy.widthM, 0, "m")} breit` : "Mittellinie · Breite unbekannt") : "Mittellinie"}
+            label={
+              rwy
+                ? rwy.widthM != null
+                  ? t("debrief.facts.centrelineWidth", { width: fmt(rwy.widthM, 0, "m") })
+                  : t("debrief.facts.centrelineWidthUnknown")
+                : t("debrief.facts.centreline")
+            }
             value={tp ? sideLabel(tp.lateralM) : "–"}
-            warn={tp && halfW != null && Math.abs(tp.lateralM) > halfW / 2 ? "Mehr als ein Viertel der Pistenbreite neben der Mittellinie" : null}
+            warn={tp && halfW != null && Math.abs(tp.lateralM) > halfW / 2 ? t("debrief.facts.centrelineWarn") : null}
           />
         )}
         <Fact
-          label={a.rollout ? `Rollout bis ${fmt(a.config.rolloutEndKt, 0, "kt")}${rwy && a.rollout.remainingM != null ? ` · Rest ${fmt(a.rollout.remainingM, 0, "m")}` : ""}` : "Rollout"}
-          value={a.rollout ? fmt(a.rollout.distanceM, 0, "m") : td.touchAndGo ? "Touch-and-go" : "–"}
-          warn={a.rollout?.remainingM != null && a.rollout.remainingM < 0 ? "Rollout endete hinter dem Pistenende" : null}
+          label={
+            a.rollout
+              ? rwy && a.rollout.remainingM != null
+                ? t("debrief.facts.rolloutToRest", { speed: fmt(c.rolloutEndKt, 0, "kt"), rest: fmt(a.rollout.remainingM, 0, "m") })
+                : t("debrief.facts.rolloutTo", { speed: fmt(c.rolloutEndKt, 0, "kt") })
+              : t("debrief.facts.rollout")
+          }
+          value={a.rollout ? fmt(a.rollout.distanceM, 0, "m") : td.touchAndGo ? t("debrief.facts.touchAndGo") : "–"}
+          warn={a.rollout?.remainingM != null && a.rollout.remainingM < 0 ? t("debrief.facts.rolloutWarn") : null}
         />
-        <div className="index-line" title="Zusammenfassung der Rohwerte – Formel unter „Methodik“">
-          <span className="detail">VectaSim-Index</span>{" "}
+        <div className="index-line" title={t("debrief.facts.indexTitle")}>
+          <span className="detail">{t("debrief.facts.index")}</span>{" "}
           {index.value != null ? (
             <>
               <strong className="num">{index.value}</strong>
-              <span className="detail"> / 100 · Formel unter „Methodik“</span>
+              <span className="detail"> {t("debrief.facts.indexOutOf")}</span>
             </>
           ) : (
-            <span className="detail">{indexText(index)} · nur mit allen Teilen messbar, siehe „Methodik“</span>
+            <span className="detail">{t("debrief.facts.indexNa", { reason: indexText(index) })}</span>
           )}
         </div>
       </div>
 
-      <ApproachSection status={approach} />
+      <ApproachSection status={approach} flight={f} />
 
       <HistoryPanel flightId={f.id} touchdownIndex={a.touchdownIndex} approachIndex={apr?.index ?? null} />
 
       <section className="debrief-section">
-        <h3>{rwy ? `Piste ${rwy.ident} von oben` : "Aufsetzpunkt auf der Karte"}</h3>
+        <h3>{rwy ? t("debrief.section.runwayFromAbove", { ident: rwy.ident }) : t("debrief.section.touchdownOnMap")}</h3>
         {rwy && tp ? (
           <RunwayDiagram analysis={a} />
         ) : (
           <>
-            <p className="detail">
-              Keine Piste zugeordnet: Im Umkreis von {fmt(a.config.matchLateralM / 1852, 0, "nm")} um den Aufsetzpunkt liegt keine Piste, deren Richtung bis auf ±
-              {fmtNum(a.config.matchHeadingDeg)}° zum Steuerkurs passt. Aufsetzpunkt, Abweichung von der Mittellinie und Gleitpfad entfallen.
-            </p>
+            <p className="detail">{t("debrief.noRunway.text", { radius: matchRadius, heading: matchHeading })}</p>
             {mapSamples.length > 1 && <TrackMap samples={mapSamples} touchdowns={tdList} />}
           </>
         )}
       </section>
 
       <section className="debrief-section">
-        <h3>Anflugprofil</h3>
+        <h3>{t("debrief.section.approachProfile")}</h3>
         <ApproachChart analysis={a} approach={apr} />
         <ReplaySection a={a} apr={apr} />
       </section>
 
       <section className="debrief-section">
-        <h3>Hinweise</h3>
+        <h3>{t("debrief.section.hints")}</h3>
         <HintList hints={hints} />
       </section>
 
-      <Panel title={apr ? "Stabilisierter Anflug – Gates" : "Stabilisierter Anflug"} collapsible defaultOpen={false} level={3} className="debrief-fold">
+      <Panel title={apr ? t("debrief.section.gates") : t("debrief.section.stabilised")} collapsible defaultOpen={false} level={3} className="debrief-fold">
         {apr ? (
           <>
             <StabilisedTable approach={apr} />
             <p className="detail sa-note">
-              Speed gegen die Referenz {fmt(apr.reference.vappKt, 0, "kt")} ({VAPP_SOURCE_LABEL[apr.reference.vappSource]}); Gleitpfad gegen den{" "}
-              {fmt(apr.reference.glidepathDeg, 0, "°")}-Pfad{apr.reference.glidepathSource === "assumed" ? " (Annahme)" : ""}.
+              {t("debrief.stabilised.noteApproach", {
+                vapp: fmt(apr.reference.vappKt, 0, "kt"),
+                source: VAPP_SOURCE_LABEL[apr.reference.vappSource],
+                path:
+                  apr.reference.glidepathSource === "ils"
+                    ? t("debrief.stabilised.ilsPath", { deg: fmt(apr.reference.glidepathDeg, 1, "°") })
+                    : t("debrief.stabilised.assumedPath", { deg: fmt(apr.reference.glidepathDeg, 0, "°") }),
+              })}
             </p>
           </>
         ) : (
           <>
             <StabilisedTable gates={a.gates} />
             <p className="detail sa-note">
-              Speed gegen die Referenz {fmt(a.referenceSpeedKt, 0, "kt")} ({SPEED_REF_LABEL[a.referenceSpeedSource]}); Gleitpfad ±{degNum(a.config.glidepathToleranceDeg)}° = 1{NNBSP}Dot,
-              mehr als {degNum(a.config.glidepathFullScaleDeg)}° (2 Dots, Vollausschlag) ist Stufe S2.
+              {t("debrief.stabilised.noteGates", {
+                speed: fmt(a.referenceSpeedKt, 0, "kt"),
+                source: SPEED_REF_LABEL[a.referenceSpeedSource],
+                tol: `${degNum(c.glidepathToleranceDeg)}°`,
+                oneDot,
+                full: `${degNum(c.glidepathFullScaleDeg)}°`,
+                twoDots,
+              })}
             </p>
           </>
         )}
       </Panel>
 
-      <Panel title="Abfangen & Rollout" collapsible defaultOpen={false} level={3} className="debrief-fold">
+      <Panel title={t("debrief.section.flareRollout")} collapsible defaultOpen={false} level={3} className="debrief-fold">
         <KV
           rows={[
-            ["Abfangen ab", a.flare ? fmt(a.flare.startHatFt, 0, "ft") : "nicht erkennbar"],
-            ["Dauer bis Aufsetzen", a.flare ? fmt(a.flare.durationS, 0, "s") : "–"],
-            ["Sinkrate vor / nach Abfangen", a.flare ? `${fmt(a.flare.approachVsFpm, 0)} / ${fmt(a.flare.finalVsFpm, 0, "fpm")}` : "–"],
-            ["Schwellenüberflug", a.threshold ? `${fmt(a.threshold.heightFt, 0, "ft")} · ${fmt(a.threshold.iasKt, 0, "kt")}` : "–"],
-            ["Zeit Schwelle → Aufsetzen", a.threshold ? fmt(a.threshold.airborneS, 0, "s") : "–"],
-            ["IAS min / max", `${fmt(ap.iasMinKt, 0)} / ${fmt(ap.iasMaxKt, 0, "kt")}`],
-            ["IAS bei 500 ft / 50 ft / Aufsetzen", `${fmt(ap.iasAt500Kt, 0)} / ${fmt(ap.iasAt50Kt, 0)} / ${fmt(ap.iasAtTouchdownKt, 0, "kt")}`],
-            ["V/S unter 1000 ft", `${fmt(ap.vsMin1000Fpm, 0)} … ${fmt(ap.vsMax1000Fpm, 0, "fpm")}`],
-            ["V/S unter 500 ft", `${fmt(ap.vsMin500Fpm, 0)} … ${fmt(ap.vsMax500Fpm, 0, "fpm")}`],
-            ["Querneigung max. unter 500 ft", fmt(ap.bankMaxBelow500Deg, 0, "°")],
+            [t("debrief.flare.flareFrom"), a.flare ? fmt(a.flare.startHatFt, 0, "ft") : t("debrief.flare.notDetectable")],
+            [t("debrief.flare.durationToTd"), a.flare ? fmt(a.flare.durationS, 0, "s") : "–"],
+            [t("debrief.flare.vsBeforeAfter"), a.flare ? `${fmt(a.flare.approachVsFpm, 0)} / ${fmt(a.flare.finalVsFpm, 0, "fpm")}` : "–"],
+            [t("debrief.flare.thresholdCrossing"), a.threshold ? `${fmt(a.threshold.heightFt, 0, "ft")} · ${fmt(a.threshold.iasKt, 0, "kt")}` : "–"],
+            [t("debrief.flare.thresholdToTd"), a.threshold ? fmt(a.threshold.airborneS, 0, "s") : "–"],
+            [t("debrief.flare.iasMinMax"), `${fmt(ap.iasMinKt, 0)} / ${fmt(ap.iasMaxKt, 0, "kt")}`],
+            [t("debrief.flare.iasAt", { h1: fmt(500, 0, "ft"), h2: fmt(50, 0, "ft") }), `${fmt(ap.iasAt500Kt, 0)} / ${fmt(ap.iasAt50Kt, 0)} / ${fmt(ap.iasAtTouchdownKt, 0, "kt")}`],
+            [t("debrief.flare.vsBelow", { alt: fmt(1000, 0, "ft") }), `${fmt(ap.vsMin1000Fpm, 0)} … ${fmt(ap.vsMax1000Fpm, 0, "fpm")}`],
+            [t("debrief.flare.vsBelow", { alt: fmt(500, 0, "ft") }), `${fmt(ap.vsMin500Fpm, 0)} … ${fmt(ap.vsMax500Fpm, 0, "fpm")}`],
+            [t("debrief.flare.bankMaxBelow", { alt: fmt(500, 0, "ft") }), fmt(ap.bankMaxBelow500Deg, 0, "°")],
             [
-              "Gleitpfad max. über / unter",
-              rwy ? `${fmtSigned(ap.glidepathDevMaxAboveDeg ?? 0, 2, "°")} / ${fmtSigned(ap.glidepathDevMaxBelowDeg ?? 0, 2, "°")}` : "ohne Piste n. v.",
+              t("debrief.flare.gpMax"),
+              rwy ? `${fmtSigned(ap.glidepathDevMaxAboveDeg ?? 0, 2, "°")} / ${fmtSigned(ap.glidepathDevMaxBelowDeg ?? 0, 2, "°")}` : t("debrief.flare.noRunwayNa"),
             ],
-            ["Pitch / Bank beim Aufsetzen", `${fmt(td.pitchDeg, 1, "°")} / ${fmt(td.bankDeg, 1, "°")}`],
-            ["GS beim Aufsetzen", fmt(td.groundSpeedKt, 0, "kt")],
-            ["Rollout", a.rollout ? `${fmt(a.rollout.distanceM, 0, "m")} in ${fmt(a.rollout.durationS, 0, "s")}` : "–"],
+            [t("debrief.flare.pitchBank"), `${fmt(td.pitchDeg, 1, "°")} / ${fmt(td.bankDeg, 1, "°")}`],
+            [t("debrief.flare.gs"), fmt(td.groundSpeedKt, 0, "kt")],
+            [t("debrief.flare.rollout"), a.rollout ? t("debrief.flare.rolloutValue", { dist: fmt(a.rollout.distanceM, 0, "m"), time: fmt(a.rollout.durationS, 0, "s") }) : "–"],
             [
-              rwySource === "database" ? "Piste (Datenbank)" : rwySource === "user" ? "Piste (von dir festgelegt)" : "Piste (abgeleitet)",
-              rwy ? `${rwy.lengthEstimated ? `mind. ${fmt(rwy.lengthM, 0, "m")} (Länge unbekannt)` : fmt(rwySource === "user" ? rwy.lengthM : declaredLengthM, 0, "m")} × ${widthText(rwy.widthM)}` : "–",
+              rwySource === "database" ? t("debrief.flare.runwayDb") : rwySource === "user" ? t("debrief.flare.runwayUser") : t("debrief.flare.runwayDerived"),
+              rwy
+                ? `${rwy.lengthEstimated ? t("debrief.flare.lengthMin", { len: fmt(rwy.lengthM, 0, "m") }) : fmt(rwySource === "user" ? rwy.lengthM : declaredLengthM, 0, "m")} × ${widthText(rwy.widthM)}`
+                : "–",
             ],
           ]}
         />
       </Panel>
 
-      <Panel title="Methodik" collapsible defaultOpen={false} level={3} className="debrief-fold debrief-method">
+      <Panel title={t("debrief.section.methodology")} collapsible defaultOpen={false} level={3} className="debrief-fold debrief-method">
         <ul className="method">
           <li>
-            <strong>Landerate:</strong> Wert des Simulators (PLANE TOUCHDOWN NORMAL VELOCITY, ×60 in fpm, negativ = sinkend). Liefert der Sim keinen neuen Wert
-            (unter 1 fpm oder unverändert), gilt die Vertikalgeschwindigkeit des letzten Samples in der Luft. Bei Bounces zählt der härteste Kontakt dieses
-            Landeereignisses, nie ein Spitzenwert über den ganzen Flug; zwei Bodenkontakte mit weniger als 0,3{NNBSP}s Luft dazwischen gelten als ein Kontakt. Die
-            Flug-Landerate im Logbuch ist die letzte Landung mit Full Stop.
+            <strong>{t("debrief.method.landingRate.title")}</strong> {t("debrief.method.landingRate.text", { gap: fmt(0.3, 1, "s") })}
           </li>
           <li>
-            <strong>Messwert:</strong> letztes Sample vor dem Bodenkontakt aus dem Telemetriestrom (in der Bildrate des Simulators). Weil V/S am Boden bedeutungslos ist
-            und auch eine hohe Abtastrate den Kontaktmoment verfehlen kann, weicht er vom Sim-Wert ab. „Am Boden“ zählt nur, wenn die Höhe über Grund höchstens 50 ft
-            beträgt; die Landung gilt erst nach drei aufeinanderfolgenden Boden-Samples (≥ 2 s) als bestätigt.
+            <strong>{t("debrief.method.measured.title")}</strong> {t("debrief.method.measured.text", { agl: fmt(50, 0, "ft"), confirm: fmt(2, 0, "s") })}
           </li>
           <li>
-            <strong>g-Last:</strong> höchstes Lastvielfaches in der halben Sekunde nach jedem Kontakt (Bugrad-Aufsetzen danach nicht enthalten); unplausible Werte
-            (über 5 g, negativ) werden verworfen. {G_BAND_REASON}
+            <strong>{t("debrief.method.gLoad.title")}</strong> {t("debrief.method.gLoad.text", { max: fmt(5, 0, "g") })} {G_BAND_REASON}
           </li>
           <li>
-            <strong>Track:</strong> Anflug, Abfangen und Rollout stammen aus dem gespeicherten Track mit 1 Sample pro Sekunde. Höhen sind „über Aufsetzpunkt“: Höhe MSL minus
-            MSL des ersten Boden-Samples – unabhängig von Gelände unter dem Anflug und von der Flugplatzhöhe in der Datenbank. Der Anflug beginnt beim letzten Sinken
-            durch 1000 ft, sonst 3 nm vor dem Aufsetzen.
+            <strong>{t("debrief.method.track.title")}</strong>{" "}
+            {t("debrief.method.track.text", { start: fmt(c.approachStartFt, 0, "ft"), fallback: fmt(c.approachFallbackM / 1852, 0, "nm") })}
           </li>
           <li>
-            <strong>Piste:</strong> OurAirports (Public Domain); Koordinaten beider Pistenenden, Breite aus der Datenbank (fehlt sie: „Breite unbekannt“). Eine
-            versetzte Schwelle aus der Datenbank verschiebt die Schwelle entlang der Achse
-            {d.thresholdDisplacedM ? ` (hier ${fmt(d.thresholdDisplacedM, 0, "m")})` : ""}. Zugeordnet wird die nächste Piste innerhalb{" "}
-            {fmt(a.config.matchLateralM / 1852, 0, "nm")}, deren Richtung bis auf ±{fmtNum(a.config.matchHeadingDeg)}° zum Steuerkurs beim Aufsetzen passt.{" "}
-            {RUNWAY_ACCURACY_NOTE} <strong>Aufsetzzone</strong> (ICAO/FAA): ab der Schwelle bis {fmt(a.config.tdzEndM, 0, "m")}, auf Pisten unter{" "}
-            {fmt(a.config.tdzEndM * 3, 0, "m")} das erste Drittel. Der Zielpunkt (Markierung nach ICAO Annex 14: 150/250/300/400{NNBSP}m je nach Pistenlänge
-            {tp ? `, hier ${fmt(tp.aimingPointM, 0, "m")}` : ""}) liegt in der Zone und ist nur eine Marke.{" "}
-            <strong>Ohne Koordinaten in OurAirports</strong> leitet VectaSim die Piste aus deiner Rollspur ab: Achse = Linie deines Rollouts, Schwelle{" "}
-            {fmt(300, 0, "m")} vor dem Aufsetzpunkt (bzw. am Zielpunkt der Datenbank-Länge) angenommen, ±50{NNBSP}m entlang. Die Querablage ist dann nicht
-            messbar; ohne bekannte Länge ist die Aufsetzzone die feste Annahme 0–{fmt(a.config.tdzEndM, 0, "m")} und der Rest der Piste entfällt. Jede weitere
-            Landung dort verfeinert die gemerkte Piste. Mit „Piste korrigieren …“ legst du Schwelle und Ende selbst fest – deine Piste hat Vorrang vor OurAirports.
-            {derived ? " Diese Landung: abgeleitete Piste." : ""}
+            <strong>{t("debrief.method.runway.title")}</strong> {t("debrief.method.runway.source")}{" "}
+            {d.thresholdDisplacedM ? t("debrief.method.runway.displacedHere", { dist: fmt(d.thresholdDisplacedM, 0, "m") }) : t("debrief.method.runway.displaced")}{" "}
+            {t("debrief.method.runway.match", { radius: matchRadius, heading: matchHeading })} {RUNWAY_ACCURACY_NOTE}{" "}
+            <strong>{t("debrief.method.runway.tdzTitle")}</strong>{" "}
+            {t("debrief.method.runway.tdz", { end: fmt(c.tdzEndM, 0, "m"), short: fmt(c.tdzEndM * 3, 0, "m") })}{" "}
+            {tp
+              ? t("debrief.method.runway.aimingHere", { marks: `150/250/300/400${NNBSP}m`, here: fmt(tp.aimingPointM, 0, "m") })
+              : t("debrief.method.runway.aiming", { marks: `150/250/300/400${NNBSP}m` })}{" "}
+            <strong>{t("debrief.method.runway.derivedTitle")}</strong>{" "}
+            {t("debrief.method.runway.derived", { offset: fmt(300, 0, "m"), along: fmt(50, 0, "m"), tdzEnd: fmt(c.tdzEndM, 0, "m") })}{" "}
+            {t("debrief.method.runway.correct")}
+            {derived ? ` ${t("debrief.method.runway.thisDerived")}` : ""}
           </li>
           <li>
-            <strong>Gleitpfad:</strong> Winkel vom Aufsetzpunkt der {fmt(a.config.glidepathDeg, 0, "°")}-Referenz ({fmt(a.config.tchFt, 0, "ft")} über der Schwelle) zum
-            Flugzeug, erst ab 0,25 nm davor. Toleranz ±{degNum(a.config.glidepathToleranceDeg)}° = 1{NNBSP}Dot (FSF: „within one dot“); ±
-            {degNum(a.config.glidepathFullScaleDeg)}° ist der Vollausschlag (2 Dots) und wird nur als Stufe S2 genannt. Ohne zugeordnete Piste entfällt er.
+            <strong>{t("debrief.method.glidepath.title")}</strong>{" "}
+            {t("debrief.method.glidepath.text", {
+              deg: fmt(c.glidepathDeg, 0, "°"),
+              tch: fmt(c.tchFt, 0, "ft"),
+              from: fmt(0.25, 2, "nm"),
+              tol: `${degNum(c.glidepathToleranceDeg)}°`,
+              oneDot,
+              full: `${degNum(c.glidepathFullScaleDeg)}°`,
+              twoDots,
+            })}
           </li>
           {apr ? (
             <ApproachMethodItems a={apr} />
           ) : (
-          <li>
-            <strong>Stabilisierter Anflug</strong> bei 1000 ft und 500 ft (interpoliert): Fahrwerk unten, Klappen gesetzt, |V/S| ≤ {fmt(a.config.maxVsFpm, 0, "fpm")},
-            IAS {fmtSigned(-a.config.speedBelowKt, 0)}/{fmtSigned(a.config.speedAboveKt, 0, "kt")} zur Referenz-Geschwindigkeit, Gleitpfad ±1{NNBSP}Dot, Querneigung
-            ≤ {fmt(a.config.maxBankDeg, 0, "°")}. Referenz: 1. die beim Flugzeug eingetragene Vapp (Logbuch → Flugzeuge); 2. sonst der Median der geflogenen IAS zwischen {fmtNum(a.config.vappFromFt)}{" "}
-            und {fmt(a.config.vappToFt, 0, "ft")} – das misst die Konstanz, nicht ob die Geschwindigkeit für das Muster richtig war; 3. sonst{" "}
-            {fmtNum(a.config.vs0Factor, 1)} × VS0. Diese Landung: {fmt(a.referenceSpeedKt, 0, "kt")} ({SPEED_REF_LABEL[a.referenceSpeedSource]}).
-          </li>
+            <li>
+              <strong>{t("debrief.method.stabilised.title")}</strong>{" "}
+              {t("debrief.method.stabilised.text", {
+                gate1: fmt(1000, 0, "ft"),
+                gate2: fmt(500, 0, "ft"),
+                vs: fmt(c.maxVsFpm, 0, "fpm"),
+                below: fmtSigned(-c.speedBelowKt, 0),
+                above: fmtSigned(c.speedAboveKt, 0, "kt"),
+                oneDot,
+                bank: fmt(c.maxBankDeg, 0, "°"),
+                from: fmtNum(c.vappFromFt),
+                to: fmt(c.vappToFt, 0, "ft"),
+                factor: fmtNum(c.vs0Factor, 1),
+                speed: fmt(a.referenceSpeedKt, 0, "kt"),
+                source: SPEED_REF_LABEL[a.referenceSpeedSource],
+              })}
+            </li>
           )}
           <li>
-            <strong>Abfangen:</strong> ab dem Sample, nach dem die Sinkrate bis zum Aufsetzen unter {fmtNum(a.config.flareVsFraction * 100)}{NNBSP}% der mittleren Anflug-Sinkrate
-            (500–200 ft) blieb; Auflösung 1 s. <strong>Rollout:</strong> vom Aufsetzen bis GS unter {fmt(a.config.rolloutEndKt, 0, "kt")}.
+            <strong>{t("debrief.method.flare.title")}</strong> {t("debrief.method.flare.text", { pct: `${fmtNum(c.flareVsFraction * 100)}${NNBSP}%` })}{" "}
+            <strong>{t("debrief.method.rollout.title")}</strong> {t("debrief.method.rollout.text", { speed: fmt(c.rolloutEndKt, 0, "kt") })}
           </li>
           <li>
-            <strong>Wind:</strong> METAR des Flugplatzes zum Zeitpunkt der Landung (bei der Landung gespeichert), sonst die aktuelle – ohne eigene METAR die der nächsten
-            Station im Umkreis von 25 nm (aviationweather.gov bzw. VATSIM), nur für Landungen der letzten 2 Stunden. Liegt die Beobachtungszeit der Meldung mehr als
-            1{NNBSP}h vor oder nach dem Aufsetzen, steht das beim Wind. Gegen-/Seitenwind sind auf die Pistenrichtung (rechtweisend) bezogen; bei VRB oder einer
-            Richtungs-Spanne (dddVddd) zeigt VectaSim zusätzlich den ungünstigsten Seitenwind darin.
+            <strong>{t("debrief.method.wind.title")}</strong>{" "}
+            {t("debrief.method.wind.text", {
+              radius: fmt(25, 0, "nm"),
+              hours: t("debrief.method.wind.hours", { count: 2 }),
+              maxAge: fmt(METAR_MAX_AGE_MIN / 60, 0, "h"),
+            })}
           </li>
-          <li>Bänder: Landerate {VS_BANDS}; g-Last {G_BANDS}.</li>
+          <li>{t("debrief.method.bands", { vs: VS_BANDS, g: G_BANDS })}</li>
           <li>
-            <strong>VectaSim-Index</strong> (klein unter den Rohwerten, nie als Urteil gedacht):
+            <strong>{t("debrief.method.index.title")}</strong> {t("debrief.method.index.text")}
             <ul className="method-sub">
               {indexFormulaLines().map((l) => (
                 <li key={l}>{l}</li>
               ))}
             </ul>
             <div className="index-parts num">
-              Diese Landung:{" "}
+              {t("debrief.method.index.thisLanding")}{" "}
               {index.parts
-                .map((p) => `${INDEX_LABEL[p.key]} ${p.points == null ? "entfällt" : `${fmtNum(p.points, 2)} × ${p.weight}`}`)
+                .map((p) =>
+                  p.points == null
+                    ? t("debrief.method.index.partNa", { label: INDEX_LABEL[p.key] })
+                    : t("debrief.method.index.part", { label: INDEX_LABEL[p.key], points: fmtNum(p.points, 2), weight: p.weight }),
+                )
                 .join(" · ")}{" "}
               → {index.value ?? indexText(index)}
             </div>
@@ -803,36 +991,51 @@ function DebriefBody({ d, approach, titleId, onRunwayChanged }: { d: LandingDebr
         </ul>
       </Panel>
 
-      <Panel title="Messprotokoll" collapsible defaultOpen={false} level={3} className="debrief-fold debrief-protocol">
+      <Panel title={t("debrief.section.protocol")} collapsible defaultOpen={false} level={3} className="debrief-fold debrief-protocol">
         <KV
           rows={[
-            ["Simulator", `${providerLabel(f.provider)}${f.simName ? ` · ${f.simName}` : ""}`],
-            ["Abtastrate", `Landeerkennung im Telemetriestrom (Bildrate des Simulators) · gespeicherter Track ${trackHz != null ? fmt(trackHz, trackHz < 2 ? 1 : 0, "Hz") : "–"} (${fmtNum(a.samples.length)} Samples im Anflug)`],
-            ["Landerate", td.landingRateSource === "sim" ? `Sim-Wert (PLANE TOUCHDOWN NORMAL VELOCITY) ${fmt(td.vsFpmSim, 0, "fpm")} · Messwert ${fmt(td.vsFpmMeasured, 0, "fpm")}` : `Messwert ${fmt(td.vsFpmMeasured, 0, "fpm")} (Sim lieferte keinen Wert)`],
+            [t("debrief.protocol.simulator"), `${providerLabel(f.provider)}${f.simName ? ` · ${f.simName}` : ""}`],
             [
-              "Pistendaten",
-              !rwy
-                ? "keine Piste zugeordnet"
-                : rwySource === "database"
-                  ? `OurAirports (Public Domain) · RWY ${rwy.ident}/${rwy.oppositeIdent}, ${rwy.surface || "Belag unbekannt"}, Richtung ±${fmt(rwy.headingDiffDeg, 0, "°")} zum Steuerkurs` +
-                    (d.thresholdDisplacedM ? ` · Schwelle ${fmt(d.thresholdDisplacedM, 0, "m")} versetzt (DB)` : "") +
-                    " · Genauigkeit ca. ±5 m"
-                  : rwySource === "user"
-                    ? `von dir festgelegt · RWY ${rwy.ident}/${rwy.oppositeIdent}, Richtung ±${fmt(rwy.headingDiffDeg, 0, "°")} zum Steuerkurs`
-                    : `${runwaySourceNote(rwy)} · Schwelle ±${fmt(rwy.alongUncertaintyM ?? uncertainty ?? 50, 0, "m")} entlang, Achse ±${fmt(rwy.crossUncertaintyM ?? 5, 0, "m")} quer (deine Linie) · Querablage nicht messbar` +
-                      (rwy.lengthEstimated ? " · Länge unbekannt" : ""),
+              t("debrief.protocol.sampleRate"),
+              t("debrief.protocol.sampleRateValue", { count: a.samples.length, hz: trackHz != null ? fmt(trackHz, trackHz < 2 ? 1 : 0, "Hz") : "–" }),
             ],
             [
-              "Wind",
-              d.metar
-                ? `METAR ${d.metar.station}${d.metar.time ? ` ${d.metar.time}` : ""}${d.metarObservedMs ? ` (beobachtet ${fmtClock(d.metarObservedMs, { local: false })})` : ""} · ${d.metarAtLanding ? "bei der Landung gespeichert" : "aktuell (Näherung)"}${metarAge ? ` · ${metarAge}` : ""}`
-                : d.metarNote ?? "keine METAR",
+              t("debrief.protocol.landingRate"),
+              td.landingRateSource === "sim"
+                ? t("debrief.protocol.rateSim", { sim: fmt(td.vsFpmSim, 0, "fpm"), measured: fmt(td.vsFpmMeasured, 0, "fpm") })
+                : t("debrief.protocol.rateMeasured", { measured: fmt(td.vsFpmMeasured, 0, "fpm") }),
             ],
-            ["Anflugbeginn", ap.startReason === "altitude" ? `letztes Sinken durch ${fmtNum(a.config.approachStartFt)} ft` : ap.startReason === "distance" ? `${fmt(a.config.approachFallbackM / 1852, 0, "nm")} vor dem Aufsetzen` : ap.startReason === "trackStart" ? "Beginn des Tracks" : "–"],
-            ["Integrität", flags.length ? flags.join(" · ") : "keine Auffälligkeiten (kein Slew, kein Zeitraffer, keine Pause)"],
+            [t("debrief.protocol.runwayData"), runwayProtocol()],
+            [t("debrief.protocol.wind"), windProtocol()],
+            // what a track-v2 flight recorded from the sim (TAS, wind at the aircraft, ILS); older flights: no row
+            ...(recordedProtocolText(d.recorded) ? [[t("debrief.protocol.recorded"), recordedProtocolText(d.recorded)] as [string, string]] : []),
+            // approach stage 2: sim ILS next to the geometry, sim wind of the final, automation (informative)
+            ...(apr && ilsProtocolText(apr) ? [[t("debrief.protocol.ilsGeometry"), ilsProtocolText(apr)] as [string, string]] : []),
+            ...(apr && windProtocolText(apr) ? [[t("debrief.protocol.simWind"), windProtocolText(apr)] as [string, string]] : []),
+            ...(apr && automationText(apr) ? [[t("debrief.protocol.automation"), t("debrief.protocol.automationInfo", { text: automationText(apr) ?? "" })] as [string, string]] : []),
             [
-              "Schwellwerte",
-              `Aufsetzzone ${tp ? zoneText(tp, rwy) : `0–${fmt(a.config.tdzEndM, 0, "m")}`} · Gleitpfad ${fmt(a.config.glidepathDeg, 1, "°")} ±${degNum(a.config.glidepathToleranceDeg)}° (1 Dot) · |V/S| ≤ ${fmt(a.config.maxVsFpm, 0, "fpm")} · Speed ${fmtSigned(-a.config.speedBelowKt, 0)}/${fmtSigned(a.config.speedAboveKt, 0, "kt")} zur Referenz · Bank ≤ ${fmt(a.config.maxBankDeg, 0, "°")}`,
+              t("debrief.protocol.approachStart"),
+              ap.startReason === "altitude"
+                ? t("debrief.protocol.startAltitude", { alt: fmt(c.approachStartFt, 0, "ft") })
+                : ap.startReason === "distance"
+                  ? t("debrief.protocol.startDistance", { dist: fmt(c.approachFallbackM / 1852, 0, "nm") })
+                  : ap.startReason === "trackStart"
+                    ? t("debrief.protocol.startTrack")
+                    : "–",
+            ],
+            [t("debrief.protocol.integrity"), flags.length ? flags.join(" · ") : t("debrief.protocol.integrityOk")],
+            [
+              t("debrief.protocol.thresholds"),
+              t("debrief.protocol.thresholdsValue", {
+                tdz: tp ? zoneText(tp, rwy) : `0–${fmt(c.tdzEndM, 0, "m")}`,
+                gp: fmt(c.glidepathDeg, 1, "°"),
+                tol: `${degNum(c.glidepathToleranceDeg)}°`,
+                oneDot,
+                vs: fmt(c.maxVsFpm, 0, "fpm"),
+                below: fmtSigned(-c.speedBelowKt, 0),
+                above: fmtSigned(c.speedAboveKt, 0, "kt"),
+                bank: fmt(c.maxBankDeg, 0, "°"),
+              }),
             ],
           ]}
         />

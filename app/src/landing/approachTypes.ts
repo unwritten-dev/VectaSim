@@ -19,6 +19,11 @@
 // - Source of the numbers: all from the 1 Hz track ("gemessen"), path/localizer/energy/TAS
 //   are geometric or derived ("abgeleitet"), the 3° path is an assumption, the reference speed
 //   is the flown median unless the pilot set one (`reference.vappSource`).
+// - Track v2 (stage 2, all optional – v1 payloads and flights without ILS lack them): the sim's
+//   ILS replaces the 3° assumption and the geometric localizer when received over ≥ 60 % of
+//   the window and plausible to the runway (`reference.glidepathSource` / `localizerSource`,
+//   both sources in `ils` and the profile); sim wind in `wind`; N1 / spoilers / landing flaps
+//   as criteria; autopilot / autothrust informative in `automation`.
 
 import type { CheckStatus, Criterion, CriterionKind, RunwayGeometrySource, RunwayMatch } from "./types";
 
@@ -34,7 +39,13 @@ export type ApproachCriterionKind =
   /** Energy excess over the reference profile, ft (+ = too much). */
   | "energy"
   /** Flap handle changed below 1000 ft (event; measured 1 = change). */
-  | "flapChange";
+  | "flapChange"
+  /** Flap handle index at a gate vs the landing flaps (`reference.landingFlapsIndex`). */
+  | "landingFlaps"
+  /** N1 %, at least `thrustMinN1Pct` below 1000 ft (track v2; FSF BN 7.1). */
+  | "thrust"
+  /** Deployed spoiler surface %, at most `spoilersMaxPct` in the final (track v2; FSF BN 7.1). */
+  | "spoilers";
 
 /**
  * A gate criterion, same shape as the landing's `Criterion`. Units of `measured`:
@@ -64,10 +75,15 @@ export type ElevationSource = "touchdown" | "database" | "terrain";
 /** What trackDistM = 0 is: the runway threshold, the touchdown point (no runway) or the go-around's lowest point (no runway). */
 export type TrackDistRef = "threshold" | "touchdown" | "lowestPoint";
 /** user = pilot value; flown = median IAS 500 → 100 ft of this approach (judges consistency, not the absolute speed); unavailable = speed not measurable. */
-export type VappSource = "user" | "flown" | "unavailable";
-export type GlidepathSource = "assumed";
-/** aircraftPositions = last handle position; touchdown = flap index at the touchdown; unknown = gate checks "≥ 1". */
-export type LandingFlapsSource = "aircraftPositions" | "touchdown" | "unknown";
+export type VappSource = "user" | "flown" | "design" | "unavailable";
+/** assumed = 3° (no procedure data); ils = the sim's ILS (angle and deviation, track v2). */
+export type GlidepathSource = "assumed" | "ils";
+/** geometric = from position and runway coordinates; ils = the sim's NAV CDI (track v2). */
+export type LocalizerSource = "geometric" | "ils";
+/** user = pilot's landing flaps of the airframe; aircraftPositions = last handle position; touchdown = flap index at the touchdown; unknown = gate checks "≥ 1". */
+export type LandingFlapsSource = "user" | "aircraftPositions" | "touchdown" | "unknown";
+/** Energy 10 nm → 1000 ft on the final vs `energyBandHighFt` / `energyBandLowFt`. */
+export type EnergyBand = "good" | "high" | "low";
 export type MarkerKind = "tod" | "tenNm" | "faf" | "gate1000" | "gate500" | "gate50" | "threshold" | "touchdown" | "goAround";
 /** phase = phase-engine event sharpened in the track; track = from the track alone. */
 export type MarkerSource = "phase" | "track";
@@ -82,12 +98,14 @@ export type GoAroundSource = "track" | "phase" | "both";
 export type ConfigEventKind = "gearDown" | "gearUp" | "flaps";
 
 export interface ApproachReference {
-  /** Reference path angle, ° (3°, assumed – no procedure data). */
+  /** Reference path angle, ° (the sim's ILS angle with glidepathSource "ils", else the assumed 3°). */
   glidepathDeg: number;
   glidepathSource: GlidepathSource;
+  /** Missing in payloads before stage 2 (= geometric). */
+  localizerSource?: LocalizerSource;
   /** Threshold crossing height of the reference path, ft. */
   tchFt: number;
-  /** Reference speed of the speed criteria, KIAS; null = speed not measurable. */
+  /** Reference speed of the speed criteria, KIAS; null = speed not measurable. Cascade: user → flown → design (VS0 × 1.3). */
   vappKt: number | null;
   vappSource: VappSource;
   /** Median IAS 500 → 100 ft HAT (always shown, also when a user value is the reference), KIAS. */
@@ -162,6 +180,9 @@ export interface ApproachGateSample {
   iasDevKt: number | null;
   /** ft, + = too much energy. */
   energyDevFt: number | null;
+  /** Track v2: N1 % (null: not recorded / piston), deployed spoilers %. */
+  n1Pct?: number | null;
+  spoilersPct?: number | null;
 }
 
 /** Same role as the landing's `GateCheck`, keyed by `kind` instead of `gateFt`. */
@@ -177,7 +198,8 @@ export interface ApproachGate {
    * energy (≤ +1000 ft, only when established); faf: gear, flaps (≥ 1), altitudeDeviation
    * (±300 ft), speed (−5/+40 kt); ft1000/ft500: gear (≥ 95 %), flaps (landing flaps), verticalSpeed
    * (±1000 fpm), speed (−5/+20 kt), glidepath (±1 dot), localizer (±1 dot), bank (≤ 15°);
-   * ft50: none (values only).
+   * landingFlaps instead of flaps when the landing flaps are known; track v2: thrust (N1 ≥ 40 %),
+   * spoilers (≤ 2 %); ft50: none (values only).
    */
   criteria: ApproachCriterion[];
 }
@@ -255,6 +277,7 @@ export interface EnergyPoint {
 
 /** Only with a runway and a reference speed. */
 export interface EnergyStats {
+  /** recorded: the sim's TAS and its TAS/IAS ratio for the reference; derived: ISA. */
   tasSource: TasSource;
   atTenNm: EnergyPoint | null;
   atFaf: EnergyPoint | null;
@@ -262,6 +285,55 @@ export interface EnergyStats {
   /** Largest excess from 10 nm to the end, ft, and where (ft HAT). */
   maxExcessFt: number | null;
   maxExcessHatFt: number | null;
+  /** Largest excess / deficit 10 nm → 1000 ft on the final and the band (stage 2; missing before). */
+  bandMaxFt?: number | null;
+  bandMinFt?: number | null;
+  band?: EnergyBand | null;
+}
+
+/** The sim's ILS against the geometry (track v2); dots + = above / right. */
+export interface IlsStats {
+  /** Share 0–1 of the samples with a valid glideslope (1000 → 200 ft) / a localizer (1000 → 50 ft). */
+  gsShare: number | null;
+  locShare: number | null;
+  /** Published glideslope angle, °. */
+  gsAngleDeg: number | null;
+  /** Which source the criteria took (true = sim). */
+  gsUsed: boolean;
+  locUsed: boolean;
+  /** Received, but implausible to the runway (other ILS tuned) – the geometry is used. */
+  gsRejected: boolean;
+  locRejected: boolean;
+  /** Median |sim − geometric|, dots. */
+  gsDiffDots: number | null;
+  locDiffDots: number | null;
+  gsRmsSimDots: number | null;
+  gsRmsGeoDots: number | null;
+  locRmsSimDots: number | null;
+  locRmsGeoDots: number | null;
+  /** A difference above 0.5 dot (`ilsMismatchDots`): check the runway coordinates. */
+  mismatch: boolean;
+}
+
+/** The sim's wind at the aircraft 1000 → 50 ft (track v2). Head/cross + = headwind / from the right. */
+export interface WindStats {
+  samples: number;
+  /** Direction (true, from) of the mean vector, median speed. */
+  dirTrueDeg: number | null;
+  speedKt: number | null;
+  /** Medians relative to the runway (null without runway). */
+  headwindKt: number | null;
+  crosswindKt: number | null;
+  /** max − min wind speed, kt. */
+  gustSpreadKt: number | null;
+  topDirTrueDeg: number | null;
+  topKt: number | null;
+  bottomDirTrueDeg: number | null;
+  bottomKt: number | null;
+  /** Vector change 1000 ft → threshold, kt. */
+  shearKt: number | null;
+  /** Headwind change top → bottom (+ = more headwind near the ground). */
+  headwindChangeKt: number | null;
 }
 
 export interface GoAround {
@@ -283,10 +355,18 @@ export interface GoAround {
   minIasKt: number;
 }
 
-/** Track v2 only – always null today. */
+/** Track v2 only (null for v1 tracks). Informative, never a criterion. */
 export interface AutomationStats {
+  /** ft HAT of the first sample after the last engaged one (null: never on, or on to the end). */
   autopilotOffHatFt: number | null;
   autothrustOffHatFt: number | null;
+  autopilotUsed?: boolean;
+  autothrustUsed?: boolean;
+  /** Still engaged at the last airborne sample (autoland). */
+  autopilotAtEnd?: boolean;
+  autothrustAtEnd?: boolean;
+  approachMode?: boolean;
+  glideslopeMode?: boolean;
 }
 
 /** Configuration changes during the approach (for a configuration strip). */
@@ -336,9 +416,16 @@ export interface ApproachProfilePoint {
   altDevFt: number | null;
   iasDevKt: number | null;
   energyDevFt: number | null;
-  /** Track v2 (wind at the aircraft): + = headwind / from the right. Null today. */
+  /** Track v2 (wind at the aircraft): + = headwind / from the right. */
   headwindKt: number | null;
   crosswindKt: number | null;
+  /** Track v2: both deviation sources (gsDots / locDots are the criteria's), N1 and spoilers %. */
+  gsDotsSim?: number | null;
+  gsDotsGeo?: number | null;
+  locDotsSim?: number | null;
+  locDotsGeo?: number | null;
+  n1Pct?: number | null;
+  spoilersPct?: number | null;
 }
 
 /** Thresholds used (ApproachConfig::default in Rust). */
@@ -424,6 +511,23 @@ export interface ApproachConfig {
   profileSparseS: number;
   profileAfterTouchdownS: number;
   minStatSamples: number;
+  /** Stage 2 (optional in older payloads): ILS share/scale/plausibility, wind hints, thrust, spoilers, energy band, design Vapp. */
+  ilsMinShare?: number;
+  locFullScaleDots?: number;
+  ilsMismatchDots?: number;
+  ilsRejectGsDeg?: number;
+  ilsRejectLocDots?: number;
+  windTailwindKt?: number;
+  windCrosswindKt?: number;
+  windShearKt?: number;
+  thrustMinN1Pct?: number;
+  thrustDurationS?: number;
+  thrustFloorFt?: number;
+  n1ValidMinPct?: number;
+  spoilersMaxPct?: number;
+  energyBandHighFt?: number;
+  energyBandLowFt?: number;
+  vappVs0Factor?: number;
 }
 
 /** One approach of a flight (result of `approach_analysis`, time order). */
@@ -477,6 +581,10 @@ export interface ApproachAnalysis {
   /** Lateral guidance; missing in payloads from before it existed. */
   lateral?: LateralStats;
   energy: EnergyStats | null;
+  /** Sim ILS vs geometry (track v2 with a runway; missing / null otherwise). */
+  ils?: IlsStats | null;
+  /** Sim wind 1000 → 50 ft (track v2). */
+  wind?: WindStats | null;
   goAround: GoAround | null;
   automation: AutomationStats | null;
   configEvents: ConfigEvent[];

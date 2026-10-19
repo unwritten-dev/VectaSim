@@ -2,10 +2,12 @@
 // the connection, only "is my flight being recorded?". `sim:status` and the flight state
 // combine into four user states plus demo; the map pill, the sidebar StatusButton and its
 // popover all show these texts. "Getrennt", "Verbinde …" and "Fehler" are not labels.
+// Texts come from i18n `status.*` in the active language.
 
 import type { FlightSummary, StatusSnapshot } from "./types";
-import { DLL_MISSING_TEXT, isDllMissing, isWaitingForSim, userMessage } from "./errors";
+import { dllMissingText, isDllMissing, isWaitingForSim, userMessage } from "./errors";
 import { fmtClock } from "./format";
+import { t } from "./i18n";
 
 export type RecKind = "waiting" | "ready" | "recording" | "suspended" | "demo";
 
@@ -45,26 +47,42 @@ export function isRealSimError(status: StatusSnapshot | null | undefined): boole
   return status?.state === "error" && !isSimMissing(status.detail ?? "");
 }
 
-const SIM_LABEL: Record<string, string> = { simconnect: "MSFS 2020/2024", mock: "Demo-Flug", replay: "Replay (Roh-Dump)" };
-
 /** Simulator name for UI text (UI wording: "Simulator", not "Quelle"/"Provider"). */
 export function providerLabel(provider: string | null | undefined): string {
   if (!provider) return "–";
-  return SIM_LABEL[provider] ?? provider;
+  switch (provider) {
+    case "simconnect":
+      return "MSFS 2020/2024";
+    case "xplane":
+      return "X-Plane 12";
+    case "mock":
+      return t("status.demoLabel");
+    case "replay":
+      return t("status.replayLabel");
+    default:
+      return provider;
+  }
 }
 
 /** Map pill while waiting: says what starts (the recording), not "something starts". */
-export const WAITING_TEXT = "Warte auf MSFS – Aufzeichnung startet beim Losrollen";
+export function waitingText(): string {
+  return t("status.waitingText");
+}
 /** Short pill text while the Bereit card is on screen: the card carries the details and the demo. */
-export const WAITING_SHORT = "Warte auf MSFS";
+export function waitingShort(): string {
+  return t("status.waitingShort");
+}
 /** One name for the demo everywhere (buttons); "Ohne Simulator ausprobieren" only as a subtitle. */
-export const DEMO_LABEL = "Demo-Flug";
+export function demoLabel(): string {
+  return t("status.demoLabel");
+}
 
 function waitingHint(detail: string): string {
-  if (isSimMissing(detail)) return `${DLL_MISSING_TEXT}.`;
-  if (/simulator quit/i.test(detail)) return "Simulator beendet. VectaSim verbindet sich automatisch, sobald er wieder läuft.";
-  if (isWaitingForSim(detail)) return "MSFS läuft noch nicht. Sobald das Hauptmenü erreicht ist, verbindet sich VectaSim von selbst.";
-  return "Sobald MSFS läuft, verbindet sich VectaSim von selbst. Die Aufzeichnung startet beim Losrollen.";
+  if (isSimMissing(detail)) return t("status.hint.dllMissing", { text: dllMissingText() });
+  if (/simulator quit/i.test(detail)) return t("status.hint.simQuit");
+  if (isWaitingForSim(detail) && /X-Plane/.test(detail)) return t("status.hint.xplaneNotRunning");
+  if (isWaitingForSim(detail)) return t("status.hint.msfsNotRunning");
+  return t("status.hint.waiting");
 }
 
 export function recordingStatus(status: StatusSnapshot | null | undefined, flight: FlightSummary | null | undefined): RecStatus {
@@ -75,19 +93,18 @@ export function recordingStatus(status: StatusSnapshot | null | undefined, fligh
 
   if (isDemo(status)) {
     const replay = status?.provider === "replay";
+    const since = fmtClock(flight?.offBlockMs);
     return {
       kind: "demo",
-      label: replay ? "Replay" : "Demo-Flug",
+      label: replay ? t("status.replay.label") : t("status.demoLabel"),
       text: replay
         ? active
-          ? `Replay läuft · seit ${fmtClock(flight?.offBlockMs)}`
-          : "Replay · aufgezeichnete Rohdaten, ohne Simulator"
+          ? t("status.replay.textActive", { since })
+          : t("status.replay.text")
         : active
-          ? `Demo-Flug läuft · seit ${fmtClock(flight?.offBlockMs)}`
-          : "Demo-Flug · simulierte Daten, ohne Simulator",
-      hint: replay
-        ? "Ein aufgezeichneter Dump wird abgespielt. Für echte Flüge das Replay beenden – MSFS wird dann automatisch erkannt."
-        : "Ein simulierter Flug zum Ausprobieren. Für echte Flüge den Demo-Flug beenden – MSFS wird dann automatisch erkannt.",
+          ? t("status.demo.textActive", { since })
+          : t("status.demo.text"),
+      hint: replay ? t("status.replay.hint") : t("status.demo.hint"),
       color: "var(--info)",
       error: false,
       detail,
@@ -97,9 +114,9 @@ export function recordingStatus(status: StatusSnapshot | null | undefined, fligh
     if (connected) {
       return {
         kind: "recording",
-        label: "Aufzeichnung läuft",
-        text: `Aufzeichnung läuft · seit ${fmtClock(flight?.offBlockMs)}`,
-        hint: "Dein Flug wird aufgezeichnet. Du musst VectaSim dafür nicht im Blick haben.",
+        label: t("status.recording.label"),
+        text: t("status.recording.text", { since: fmtClock(flight?.offBlockMs) }),
+        hint: t("status.recording.hint"),
         color: "var(--ok)",
         error: false,
         detail,
@@ -107,21 +124,21 @@ export function recordingStatus(status: StatusSnapshot | null | undefined, fligh
     }
     return {
       kind: "suspended",
-      label: "Unterbrochen, wird fortgesetzt",
-      text: "Sim weg – Flug gesichert, läuft weiter",
-      hint: "Sim weg – dein Flug ist gesichert und läuft weiter, sobald der Simulator zurück ist.",
+      label: t("status.suspended.label"),
+      text: t("status.suspended.text"),
+      hint: t("status.suspended.hint"),
       color: "var(--warn)",
       error: isRealSimError(status),
       detail,
     };
   }
   if (connected) {
-    const sim = status?.simName ? `${status.simName}${status.simVersion ? ` ${status.simVersion}` : ""}` : "dem Simulator";
+    const sim = status?.simName ? `${status.simName}${status.simVersion ? ` ${status.simVersion}` : ""}` : null;
     return {
       kind: "ready",
-      label: "Bereit",
-      text: "Bereit · Aufzeichnung startet beim Losrollen",
-      hint: `Verbunden mit ${sim}. Die Aufzeichnung startet automatisch, sobald du losrollst.`,
+      label: t("status.ready.label"),
+      text: t("status.ready.text"),
+      hint: sim ? t("status.ready.hintSim", { sim }) : t("status.ready.hint"),
       color: "var(--ok)",
       error: false,
       detail,
@@ -130,8 +147,8 @@ export function recordingStatus(status: StatusSnapshot | null | undefined, fligh
   const realError = isRealSimError(status);
   return {
     kind: "waiting",
-    label: "Warte auf Simulator",
-    text: WAITING_TEXT,
+    label: t("status.waitingShort"),
+    text: waitingText(),
     hint: realError ? `${userMessage(detail, "sim").title} ${userMessage(detail, "sim").hint}` : waitingHint(detail),
     color: realError ? "var(--err)" : "var(--text-muted)",
     error: realError,

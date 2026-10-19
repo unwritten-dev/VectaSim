@@ -1,0 +1,25 @@
+{
+  "nav": {
+    "map": "Karte",
+    "logbook": "Logbuch",
+    "countries": "Länder",
+    "settings": "Einstellungen",
+    "sidebar": "Hauptnavigation"
+  },
+  "band": {
+    "smooth": "sanft",
+    "normal": "normal",
+    "firm": "fest",
+    "hard": "hart",
+    "vsScale": "sanft < {smooth} · normal < {normal} · fest < {firm} · hart ≥ {firm} fpm"
+  },
+  "time": {
+    "utc": "UTC",
+    "local": "Ortszeit"
+  },
+  "count": {
+    "flights": { "one": "{count} Flug", "other": "{count} Flüge" },
+    "landings": { "one": "{count} Landung", "other": "{count} Landungen" },
+    "bounces": { "one": "{count} Bounce", "other": "{count} Bounces" }
+  }
+}

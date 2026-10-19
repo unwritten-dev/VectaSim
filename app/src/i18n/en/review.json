@@ -1,0 +1,193 @@
+{
+  "review": {
+    "periodTitle": {
+      "year": "Your year {year}",
+      "last12": "Your last 12 months"
+    },
+    "head": {
+      "year": "Your year",
+      "last12": "Your last 12 months"
+    },
+    "cards": {
+      "overview": "Overview",
+      "routes": "Your routes",
+      "fleet": "Your fleet",
+      "landings": "Your landings",
+      "approaches": "Your approaches",
+      "months": "Your months",
+      "countries": "Your countries",
+      "flags": "With an asterisk"
+    },
+    "file": {
+      "year": "Year",
+      "last12": "12Months",
+      "stack": "Stack",
+      "portrait": "portrait",
+      "landscape": "landscape",
+      "overview": "Overview",
+      "routes": "Routes",
+      "fleet": "Fleet",
+      "landings": "Landings",
+      "approaches": "Approaches",
+      "months": "Months",
+      "countries": "Countries",
+      "flags": "Asterisks"
+    },
+    "format": {
+      "portrait": "Portrait",
+      "landscape": "Landscape"
+    },
+    "mode": {
+      "year": "Calendar year",
+      "last12": "Last 12 months"
+    },
+    "earth": {
+      "none": "not around the Earth yet",
+      "share": "{percent}% of the way around the Earth",
+      "once": "once around the Earth",
+      "laps": "{laps} times around the Earth"
+    },
+    "count": {
+      "approaches": { "one": "{count} approach", "other": "{count} approaches" },
+      "goArounds": { "one": "{count} go-around", "other": "{count} go-arounds" },
+      "noGoArounds": "no go-arounds"
+    },
+    "unknownType": "Unknown",
+    "view": {
+      "yearGroup": "Year",
+      "periodGroup": "Period",
+      "formatGroup": "Format",
+      "saveAll": "Save each one",
+      "saveAllHint": "Save every card with data as its own PNG ({format}) into a folder",
+      "saveStack": "All as one long image",
+      "saveStackHint": "Every card with data in portrait, stacked into a single PNG file",
+      "imported": {
+        "one": "{count} imported flight counts for hours, routes and countries – landings and approaches only come from recorded flights.",
+        "other": "{count} imported flights count for hours, routes and countries – landings and approaches only come from recorded flights."
+      },
+      "firstRecorded": "Landings and approaches appear after your first flight recorded with VectaSim.",
+      "demoOut": { "one": "{count} demo flight not counted", "other": "{count} demo flights not counted" },
+      "partialLandings": "Landings only from the last {n} – older landings of this period are missing from the card.",
+      "partialApproaches": "Approaches only from the last {n} – older approaches of this period are missing from the card.",
+      "partialBoth": "Landings and approaches only from the last {n} – older ones of this period are missing from the cards.",
+      "masked": "Registrations masked",
+      "loading": "Loading the year in review …",
+      "emptyYear": "No flights in {year}",
+      "emptyLast12": "No flights in the last 12 months",
+      "emptyText": "As soon as you fly or import a logbook, your review appears here as story cards to share.",
+      "noData": "no data",
+      "noDataHint": "No data in this period – nothing to save",
+      "saveCard": "Save “{card}”",
+      "copyCard": "Copy “{card}”",
+      "save": "Save",
+      "copy": "Copy"
+    },
+    "overview": {
+      "flights": { "one": "flight", "other": "flights" },
+      "imported": "{n} of them imported",
+      "routes": { "one": "{count} route", "other": "{count} different routes" },
+      "blockHours": "Block hours",
+      "perFlight": "Ø {time} per flight",
+      "distance": "Distance",
+      "countries": "Countries",
+      "newCountries": "{n} for the first time",
+      "noNewCountries": "none for the first time",
+      "airports": "Airports",
+      "airportsSub": "departure and destination"
+    },
+    "routes": {
+      "longest": "your longest flight",
+      "noRoute": "no route recorded",
+      "top": "Top {n} routes",
+      "topNone": "Top routes",
+      "none": "No route with departure and destination yet."
+    },
+    "fleet": {
+      "types": "Types",
+      "registrations": "Registrations",
+      "noEntry": "not specified",
+      "noType": "no type yet",
+      "mostFlown": "your most flown type"
+    },
+    "landings": {
+      "none": "no landing yet",
+      "inPeriod": "recorded in this period",
+      "emptyText": "Landings only count when VectaSim recorded them – imported flights bring no measured landing rate.",
+      "median": "median landing rate",
+      "smoothest": "Smoothest",
+      "hardest": "Hardest",
+      "threshold": "Threshold",
+      "scatter": {
+        "one": "Touchdown zone: {rate} · {count} touchdown point on a normalised runway",
+        "other": "Touchdown zone: {rate} · {count} touchdown points on a normalised runway"
+      },
+      "noScatter": "No touchdown point with a known runway – no scatter."
+    },
+    "approaches": {
+      "none": "no approach yet",
+      "inPeriod": "recorded in this period",
+      "emptyText": "Approaches are assessed from the recorded track – imported flights do not count here.",
+      "stable": "stable",
+      "deviations": "with deviations",
+      "unstable": "unstable",
+      "stableRate": "stable approaches",
+      "stableOf": {
+        "one": "{stable} of {count} assessed approach",
+        "other": "{stable} of {count} assessed approaches"
+      },
+      "stableFrom": "Ø stable from",
+      "stableFromSub": "height above the threshold",
+      "goArounds": "Go-arounds",
+      "goAroundOne": "a good decision",
+      "goAroundMany": "each one a good decision",
+      "goAroundNone": "none needed"
+    },
+    "months": {
+      "busiest": "your busiest month",
+      "noFlight": "no flight yet",
+      "legend": "Bars: flights per month · number below: block hours",
+      "busiestDay": "Busiest day"
+    },
+    "countries": {
+      "visited": { "one": "country flown to", "other": "countries flown to" },
+      "newOnes": "{n} of them for the first time",
+      "noneNew": "no new country this time",
+      "firstTime": "first time",
+      "again": "visited again"
+    },
+    "flags": {
+      "flights": { "one": "flight with an asterisk", "other": "flights with an asterisk" },
+      "of": { "one": "of {count} recorded flight", "other": "of {count} recorded flights" },
+      "pause": "Pause",
+      "timeAccel": "Time acceleration",
+      "slew": "Slew",
+      "teleport": "Position jump",
+      "pausedTotal": "{time} paused in total",
+      "maxRate": "up to {rate}×",
+      "slewSub": "aircraft moved in slew mode",
+      "teleportSub": "reloaded or relocated",
+      "clean": { "one": "{count} flight without any asterisk", "other": "{count} flights without any asterisk" },
+      "note": "An asterisk is no blemish – it only shows where pause, time acceleration, slew or a jump played a part."
+    },
+    "footer": "Year in review",
+    "export": {
+      "pngFilter": "PNG image",
+      "drawFailed": "Could not draw the card",
+      "loadFailed": "Could not load the card as an image",
+      "noPng": "Could not create the PNG",
+      "noCanvas": "Canvas not available",
+      "noCard": "No card with data",
+      "openFolder": "Open folder",
+      "cardSaved": "Card saved",
+      "cardFailed": "Card not saved",
+      "noClipboard": "The clipboard does not support images here",
+      "copied": "Card copied to the clipboard",
+      "copyFailed": "Card not copied",
+      "pickFolder": "Choose a folder for the year in review",
+      "cardsSaved": { "one": "{count} card saved", "other": "{count} cards saved" },
+      "cardsFailed": "Cards not saved",
+      "stackSaved": "Long image saved",
+      "stackFailed": "Long image not saved"
+    }
+  }
+}

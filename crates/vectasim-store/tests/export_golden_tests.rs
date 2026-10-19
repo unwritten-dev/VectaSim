@@ -75,6 +75,11 @@ fn samples() -> Vec<TrackSample> {
                 flaps_index: 2,
                 gear_pct: if i < 6 { 100.0 } else { 0.0 },
                 fuel_total_kg: 6_200.0 - f * 1.5,
+                // track v2 from sample 2 on (a flight continued over an update); sample 5 without wind
+                tas_kt: (i >= 2).then_some(141.25 + f),
+                wind_dir_true_deg: (i >= 2 && i != 5).then_some(244.6),
+                wind_kt: (i >= 2 && i != 5).then_some(12.25),
+                ..Default::default()
             }
         })
         .collect()
