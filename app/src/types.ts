@@ -1175,3 +1175,10 @@ export interface SimConnectDownloadProgress {
   received: number;
   total: number;
 }
+
+/** Answer of `sim_text_test` (Settings → Simulator → "Send test message"). */
+export type SimTextTestResult =
+  | { status: "sent" }
+  | { status: "rejected"; hresult: string }
+  | { status: "exception"; code: number; name: string }
+  | { status: "noSession" };

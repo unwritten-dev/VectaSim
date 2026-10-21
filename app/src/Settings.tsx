@@ -24,6 +24,7 @@ import type {
   Stats,
   StatusSnapshot,
   WipeResult,
+  SimTextTestResult,
 } from "./types";
 import { fmt, fmtClock, fmtDate } from "./i18n/number";
 import { useT, type TFunction, type TKey } from "./i18n";
@@ -344,6 +345,28 @@ export default function Settings({ providers, onProvider, online, status, flight
   };
 
   const toggle = (key: keyof Prefs, value: boolean) => setPref(key, value).catch((e) => setError(String(e)));
+  // "Send test message" into the sim (SimConnect_Text), answered by the running session
+  const [simTextBusy, setSimTextBusy] = useState(false);
+  const [simTextResult, setSimTextResult] = useState<SimTextTestResult | null>(null);
+  const simTextTest = async () => {
+    setSimTextBusy(true);
+    setSimTextResult(null);
+    try {
+      setSimTextResult(await invoke<SimTextTestResult>("sim_text_test"));
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSimTextBusy(false);
+    }
+  };
+  const simTextResultText = (r: SimTextTestResult) =>
+    r.status === "sent"
+      ? t("settings.sim.textTestSent")
+      : r.status === "rejected"
+        ? t("settings.sim.textTestRejected", { code: r.hresult })
+        : r.status === "exception"
+          ? t("settings.sim.textTestException", { name: r.name, code: r.code })
+          : t("settings.sim.textTestNoSession");
   /** Switch one network; the summary comes back via `online:summary` (App state). */
   const setNetwork = (network: Network, on: boolean) => {
     setNetBusy(true);
@@ -501,6 +524,16 @@ export default function Settings({ providers, onProvider, online, status, flight
             {t("settings.sim.textLanding")}
           </label>
           <div className="detail">{t("settings.sim.textLandingHint")}</div>
+          <div className="setting-row">
+            <button onClick={() => void simTextTest()} disabled={simTextBusy || status?.provider !== "simconnect" || status?.state !== "connected"} title={t("settings.sim.textTestTitle")}>
+              {simTextBusy ? t("settings.sim.textTestBusy") : t("settings.sim.textTest")}
+            </button>
+            {simTextResult && (
+              <span className={simTextResult.status === "sent" ? "ok-text" : "detail"} role="status">
+                {simTextResultText(simTextResult)}
+              </span>
+            )}
+          </div>
         </Panel>
 
         <Panel title={t("settings.planning.title")} description={t("settings.planning.description")}>

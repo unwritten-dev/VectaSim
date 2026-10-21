@@ -968,6 +968,8 @@ fn queued_text_is_sent_once_and_its_exception_is_no_error() {
     s.api.queue.push_back(Ok(msg_exception(1, id, 0)));
     s.step(t0, &tx).unwrap();
     assert!(errors(&drain(&rx)).is_empty());
+    // the queue tells the "test message" button what happened: sent, then the sim's exception
+    assert_eq!(s.texts.last_report_since(t0).map(|r| r.outcome), Some(text::TextOutcome::Exception(1)));
 }
 
 #[test]

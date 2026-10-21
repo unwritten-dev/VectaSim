@@ -18,6 +18,57 @@ pub const SETTING: &str = "sim_text_landing";
 /// How long the line stays in the sim, seconds.
 pub const SECONDS: f32 = 20.0;
 
+/// Result of the "test message" button (Settings → Simulator): did the running SimConnect
+/// session hand the line to the sim, and what did the sim say?
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", tag = "status")]
+pub enum TextTestResult {
+    /// SimConnect accepted the call; the line should be on screen now (if the sim shows text).
+    Sent,
+    /// The call failed at once (no `SimConnect_Text` export, or an HRESULT).
+    Rejected { hresult: String },
+    /// The sim answered with an exception – this sim version does not show SimConnect text.
+    Exception { code: u32, name: String },
+    /// No connected MSFS session picked the message up within the wait.
+    NoSession,
+}
+
+/// The test line itself, in the app language, with the clock so repeated tests are distinguishable.
+pub fn test_line(lang: Lang, hhmm: &str) -> String {
+    match lang {
+        Lang::De => format!("VectaSim · Testnachricht {hhmm} – wenn du das liest, zeigt dein Simulator SimConnect-Text an."),
+        Lang::En => format!("VectaSim · test message {hhmm} – if you can read this, your simulator shows SimConnect text."),
+    }
+}
+
+/// Queue the test line and wait up to `wait` for the session's report.
+pub fn run_test(lang: Lang, wait: std::time::Duration) -> TextTestResult {
+    use vectasim_simconnect::text::{TextOutcome, global, show_text};
+    let now = chrono_free_clock();
+    let started = std::time::Instant::now();
+    show_text(&test_line(lang, &now), SECONDS);
+    let deadline = started + wait;
+    loop {
+        if let Some(r) = global().last_report_since(started) {
+            return match r.outcome {
+                TextOutcome::Sent => TextTestResult::Sent,
+                TextOutcome::Rejected(hr) => TextTestResult::Rejected { hresult: format!("0x{:08X}", hr as u32) },
+                TextOutcome::Exception(code) => TextTestResult::Exception { code, name: vectasim_simconnect::ffi::exception_name(code).to_owned() },
+            };
+        }
+        if std::time::Instant::now() >= deadline {
+            return TextTestResult::NoSession;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
+/// "hh:mm" UTC without pulling a date crate into this module.
+fn chrono_free_clock() -> String {
+    let s = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    format!("{:02}:{:02}z", (s / 3600) % 24, (s / 60) % 60)
+}
+
 pub fn enabled(store: &Store) -> bool {
     store.get_setting(SETTING).ok().flatten().as_deref() != Some("0")
 }
@@ -120,6 +171,21 @@ mod tests {
         assert_eq!(s, "VectaSim · Landed landing rate not rated · 1.05 g · no bounces");
         let s = landing_line(Lang::De, None, 1.05, 0, false, None);
         assert!(s.contains("Gelandet Landerate nicht bewertbar") && !s.contains("fpm") && !s.contains("sanft"), "{s}");
+    }
+
+    #[test]
+    fn test_line_is_short_and_in_the_app_language() {
+        let de = test_line(Lang::De, "12:34z");
+        let en = test_line(Lang::En, "12:34z");
+        assert!(de.starts_with("VectaSim · Testnachricht 12:34z"));
+        assert!(en.starts_with("VectaSim · test message 12:34z"));
+        assert!(de.len() < vectasim_simconnect::text::MAX_BYTES && en.len() < vectasim_simconnect::text::MAX_BYTES);
+    }
+
+    #[test]
+    fn without_a_session_the_test_reports_no_session() {
+        // nothing drains the global queue in a unit test: the wait runs out
+        assert_eq!(run_test(Lang::En, std::time::Duration::from_millis(120)), TextTestResult::NoSession);
     }
 
     #[test]

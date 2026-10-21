@@ -4,6 +4,14 @@ Entries are in English from 2026-10-18 on; earlier entries were translated.
 
 ## Unreleased
 
+## 0.5.3 – 2026-10-21 (Beta)
+
+A test button for the in-sim text: find out in a second whether your MSFS shows SimConnect text before relying on the landing line.
+
+### Simulator
+
+- *Settings → Simulator → Send test message to the sim* sends a test line into MSFS via SimConnect and reports what happened – sent, refused by the DLL, rejected by the sim (with the exception name), or no connected session – so you can check whether your MSFS version shows SimConnect text before relying on the landing line.
+
 ## 0.5.2 – 2026-10-21 (Beta)
 
 Second audit round: flight detection corrected again (reconnect gaps, short hops), a faster start, the overlay server hardened further, every dialog on one focus module, and the map lighter on the GPU while following.

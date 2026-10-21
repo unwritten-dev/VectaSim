@@ -33,32 +33,65 @@ pub struct SimText {
     pub queued: Instant,
 }
 
+/// What became of the last message the session sent (for the "test message" button).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextOutcome {
+    /// `SimConnect_Text` accepted the call; whether the sim shows the line is up to the sim.
+    Sent,
+    /// The call failed right away (HRESULT), e.g. the DLL has no `SimConnect_Text`.
+    Rejected(i32),
+    /// The sim answered the packet with an exception (code as in SIMCONNECT_EXCEPTION).
+    Exception(u32),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TextReport {
+    pub at: Instant,
+    pub outcome: TextOutcome,
+}
+
+#[derive(Debug, Default)]
+struct Inner {
+    queue: VecDeque<SimText>,
+    last: Option<TextReport>,
+}
+
 /// Shared queue between the app (producer) and the SimConnect session (consumer).
 #[derive(Debug, Clone, Default)]
-pub struct TextQueue(Arc<Mutex<VecDeque<SimText>>>);
+pub struct TextQueue(Arc<Mutex<Inner>>);
 
 impl TextQueue {
+    /// The session notes how a send went; `last_report_since` lets a caller wait for it.
+    pub fn report(&self, outcome: TextOutcome, now: Instant) {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).last = Some(TextReport { at: now, outcome });
+    }
+
+    /// The newest report made at or after `since`, if any.
+    pub fn last_report_since(&self, since: Instant) -> Option<TextReport> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).last.filter(|r| r.at >= since)
+    }
+
     pub fn push(&self, text: &str, seconds: f32, now: Instant) {
         let text = clip(text.trim());
         if text.is_empty() {
             return;
         }
-        let mut q = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        while q.len() >= MAX_QUEUED {
-            q.pop_front();
+        let mut g = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        while g.queue.len() >= MAX_QUEUED {
+            g.queue.pop_front();
         }
         let seconds = if seconds.is_finite() { seconds.clamp(1.0, MAX_SECONDS) } else { 10.0 };
-        q.push_back(SimText { text, seconds, queued: now });
+        g.queue.push_back(SimText { text, seconds, queued: now });
     }
 
     /// Everything due at `now`, oldest first; stale messages are dropped.
     pub fn take(&self, now: Instant) -> Vec<SimText> {
-        let mut q = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        q.drain(..).filter(|m| now.saturating_duration_since(m.queued) <= MAX_AGE).collect()
+        let mut g = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        g.queue.drain(..).filter(|m| now.saturating_duration_since(m.queued) <= MAX_AGE).collect()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.0.lock().unwrap_or_else(|e| e.into_inner()).is_empty()
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).queue.is_empty()
     }
 }
 
@@ -100,6 +133,19 @@ mod tests {
         let got = q.take(t0 + Duration::from_secs(40));
         assert_eq!(got.iter().map(|m| m.text.as_str()).collect::<Vec<_>>(), ["new"]);
         assert!(q.is_empty());
+    }
+
+    #[test]
+    fn reports_are_read_back_only_from_their_time_on() {
+        let q = TextQueue::default();
+        let t0 = Instant::now();
+        assert_eq!(q.last_report_since(t0), None);
+        q.report(TextOutcome::Rejected(-1), t0 + Duration::from_millis(5));
+        assert_eq!(q.last_report_since(t0).map(|r| r.outcome), Some(TextOutcome::Rejected(-1)));
+        // a caller that started later does not see the old report
+        assert_eq!(q.last_report_since(t0 + Duration::from_secs(1)), None);
+        q.report(TextOutcome::Sent, t0 + Duration::from_secs(2));
+        assert_eq!(q.last_report_since(t0 + Duration::from_secs(1)).map(|r| r.outcome), Some(TextOutcome::Sent));
     }
 
     #[test]

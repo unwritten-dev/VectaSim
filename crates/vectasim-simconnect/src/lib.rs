@@ -383,8 +383,10 @@ impl<A: SimApi> Session<A> {
             }
             if hr < 0 {
                 log::info!("SimConnect_Text not available or rejected (hr=0x{hr:08X}); in-sim message dropped");
+                self.texts.report(text::TextOutcome::Rejected(hr), now);
             } else {
                 log::debug!("in-sim message sent: {}", m.text);
+                self.texts.report(text::TextOutcome::Sent, now);
             }
         }
     }
@@ -466,6 +468,7 @@ impl<A: SimApi> Session<A> {
         // an in-sim message the sim does not support: logged, never an error for the recording
         if call == Some(SentCall::Text) {
             log::info!("SimConnect_Text rejected with exception {} ({code}); in-sim message not shown", ffi::exception_name(code));
+            self.texts.report(text::TextOutcome::Exception(code), now);
             return Vec::new();
         }
         let what = call.map(|c| self.describe(c));

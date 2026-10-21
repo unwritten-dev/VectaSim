@@ -36,6 +36,18 @@ struct StoreNoticeOut {
     message: String,
 }
 
+/// Settings → Simulator → "Send test message": a line into MSFS via SimConnect, with the
+/// session's verdict (sent / rejected / exception / no session). Waits at most 3 s.
+#[tauri::command]
+async fn sim_text_test(manager: State<'_, ProviderManager>) -> Result<simtext::TextTestResult, String> {
+    let snap = manager.snapshot();
+    if snap.provider != "simconnect" || snap.state != "connected" {
+        return Ok(simtext::TextTestResult::NoSession);
+    }
+    let lang = lang::current();
+    blocking(move || Ok(simtext::run_test(lang, std::time::Duration::from_secs(3)))).await
+}
+
 #[tauri::command]
 fn store_notices(store: State<'_, Store>) -> Vec<StoreNoticeOut> {
     let lang = lang::current();
@@ -913,6 +925,7 @@ pub fn run() {
             notify::notify,
             notify::notify_test,
             store_notices,
+            sim_text_test,
             tray::set_tray_enabled,
             tray::tray_active,
             countries::countries_geojson,

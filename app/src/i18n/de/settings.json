@@ -180,6 +180,13 @@
     "sim": {
       "textLanding": "Landerate im Simulator anzeigen (MSFS)",
       "textLandingHint": "Nach dem Aufsetzen zeigt MSFS oben im Bild 20 Sekunden lang eine Zeile wie „VectaSim · Gelandet −142 fpm (sanft) · 1,18 g · keine Bounces · 27L: 412 m hinter der Schwelle, 1 m links“. Ob sie erscheint, hängt von der MSFS-Version ab – ohne Anzeige ändert sich an der Aufzeichnung nichts.",
+      "textTest": "Testnachricht im Sim anzeigen",
+      "textTestBusy": "Wird gesendet …",
+      "textTestTitle": "Schickt eine Testzeile über SimConnect an MSFS – zum Prüfen, ob dein Simulator SimConnect-Text oben im Bild anzeigt. Nur mit verbundenem MSFS.",
+      "textTestSent": "✓ gesendet – im Sim sollte jetzt oben „VectaSim · Testnachricht …“ stehen",
+      "textTestRejected": "SimConnect hat den Aufruf abgelehnt ({code}) – die DLL kennt SimConnect_Text nicht",
+      "textTestException": "Der Sim hat die Nachricht abgelehnt ({name}, {code}) – diese MSFS-Version zeigt keinen SimConnect-Text",
+      "textTestNoSession": "Keine verbundene MSFS-Sitzung hat die Nachricht abgeholt",
       "description": "VectaSim erkennt MSFS 2020/2024 und X-Plane 12 automatisch, sobald der Simulator läuft. Die Aufzeichnung startet beim Losrollen – du musst nichts starten.",
       "demoTitle": "Ein simulierter Flug, um VectaSim ohne Simulator kennenzulernen",
       "demoHint": "ohne Simulator ausprobieren",

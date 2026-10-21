@@ -180,6 +180,13 @@
     "sim": {
       "textLanding": "Show the landing rate in the simulator (MSFS)",
       "textLandingHint": "After touchdown MSFS shows a line at the top of the screen for 20 seconds, such as “VectaSim · Landed -142 fpm (smooth) · 1.18 g · no bounces · 27L: 412 m past the threshold, 1 m left”. Whether it appears depends on the MSFS version – the recording is the same either way.",
+      "textTest": "Send test message to the sim",
+      "textTestBusy": "Sending …",
+      "textTestTitle": "Sends a test line to MSFS via SimConnect – to check whether your simulator shows SimConnect text at the top of the screen. Only with MSFS connected.",
+      "textTestSent": "✓ sent – the sim should now show “VectaSim · test message …” at the top",
+      "textTestRejected": "SimConnect refused the call ({code}) – this DLL has no SimConnect_Text",
+      "textTestException": "The sim rejected the message ({name}, {code}) – this MSFS version does not show SimConnect text",
+      "textTestNoSession": "No connected MSFS session picked the message up",
       "description": "VectaSim detects MSFS 2020/2024 and X-Plane 12 automatically as soon as the simulator is running. Recording starts when you taxi – you don't need to start anything.",
       "demoTitle": "A simulated flight to get to know VectaSim without a simulator",
       "demoHint": "try it without a simulator",
