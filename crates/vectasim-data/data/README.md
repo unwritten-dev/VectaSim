@@ -11,6 +11,16 @@ ICAO code where OurAirports has one, else the GPS code, else OurAirports' own id
 Refresh with `scripts/update-airports.py` (downloads the nightly CSVs and rewrites these two files).
 Last refresh: 2026-10-17.
 
+## Navaids
+
+`navaids.csv.zst` holds the radio navaids (VOR, VOR-DME, VORTAC, TACAN, NDB, NDB-DME, DME) of
+OurAirports `navaids.csv` (**public domain**), reduced to ident, name, type, position, frequency
+(kHz) and country, sorted by ident and zstd-compressed (≈ 200 KiB). It places the navaid tokens of
+an online aircraft's filed route when neither a running MSFS nor an installed X-Plane knows them.
+
+Refresh with `python -I scripts/update-navaids.py [download-dir]` (Python 3.14+, stdlib only).
+Last refresh: 2026-10-21.
+
 ## Countries
 
 `countries.csv` lists the 249 ISO 3166-1 alpha-2 codes plus Kosovo (`XK`, as used by OurAirports)

@@ -1,6 +1,18 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { fmt } from "./i18n/number";
-import { diagText, fmtAgo, networkStatuses, networksWith, onlineDiagRows, onlineLine, onlineTone, sourceHost } from "./onlineText";
+import {
+  backgroundNetworks,
+  diagText,
+  fmtAgo,
+  networkStatuses,
+  networksWith,
+  onlineDiagRows,
+  onlineLine,
+  onlineTone,
+  shownChoice,
+  sourceHost,
+  trafficShown,
+} from "./onlineText";
 import type { NetworkStatus, OnlineSummary } from "./types";
 import { setLanguageSetting } from "./i18n";
 
@@ -119,5 +131,33 @@ describe("onlineText in English", () => {
     expect(onlineLine(s)).toBe("Online traffic: VATSIM on (2,176 pilots, 211 controllers) · IVAO off");
     expect(fmtAgo(12)).toBe("12 s ago");
     expect(onlineLine(null)).toBe("Online traffic: loading status …");
+  });
+});
+
+describe("traffic shown on the map vs. network enabled", () => {
+  const shownVatsim = { ...vatsimOn, shown: true, background: false, backgroundPollS: 60 };
+  const hiddenIvao = net({ network: "ivao", enabled: true, fetchedMs: 1, pilots: 7, controllers: 2, shown: false, background: true, backgroundPollS: 60 });
+  it("the status line says shown / hidden / off per network", () => {
+    const s = summary([shownVatsim, hiddenIvao], { network: "both", shown: "vatsim" });
+    expect(onlineLine(s)).toBe(
+      `Online-Verkehr: VATSIM an (${fmt(2176)} Piloten, ${fmt(211)} Lotsen) – auf der Karte angezeigt · IVAO an (7 Piloten, 2 Lotsen) – auf der Karte ausgeblendet, Abruf alle 60 s im Hintergrund`,
+    );
+    const off = summary([net({ network: "vatsim", shown: true }), net({ network: "ivao" })]);
+    expect(onlineLine(off)).toBe("Online-Verkehr: VATSIM aus · IVAO aus");
+  });
+  it("what the map draws: enabled and shown; older builds: every enabled network", () => {
+    expect(shownChoice(summary([shownVatsim, hiddenIvao], { network: "both", shown: "vatsim" }))).toBe("vatsim");
+    expect(trafficShown(summary([shownVatsim, hiddenIvao], { network: "both", shown: "vatsim" }))).toBe(true);
+    expect(trafficShown(summary([hiddenIvao], { network: "ivao", shown: "off" }))).toBe(false);
+    expect(trafficShown(summary(undefined, { network: "vatsim", enabled: true }))).toBe(true);
+    expect(trafficShown(summary(undefined, { network: "off" }))).toBe(false);
+    expect(trafficShown(null)).toBe(false);
+    expect(backgroundNetworks(summary([shownVatsim, hiddenIvao]))).toEqual(["ivao"]);
+    expect(backgroundNetworks(summary([{ ...shownVatsim, shown: false }, net({ network: "ivao", shown: false })]))).toEqual(["vatsim"]);
+  });
+  it("diagnostics name the map state and the background rate", () => {
+    expect(diagText(hiddenIvao)).toContain("an · auf der Karte ausgeblendet · Hintergrund-Abruf alle 60 s");
+    expect(diagText(shownVatsim)).toContain("an · auf der Karte angezeigt · data.vatsim.net");
+    expect(diagText(shownVatsim)).not.toContain("Hintergrund");
   });
 });

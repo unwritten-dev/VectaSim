@@ -4,7 +4,12 @@ Entries are in English from 2026-10-18 on; earlier entries were translated.
 
 ## 0.6.0 – 2026-10-21 (Beta)
 
-The logbook learns to read your flying: markers along the flight path, a green approach from the gear extension on, a full-screen flight view, and your take-off and approach numbers compared with your other flights.
+The logbook learns to read your flying: markers along the flight path, a green approach from the gear extension on, a full-screen flight view, and your take-off and approach numbers compared with your other flights. On the live map a clicked online aircraft shows its filed route through the waypoints and up to two hours of flown track.
+
+### Map
+
+- *Show route* on a VATSIM/IVAO aircraft's flight card now draws its filed route through the waypoints instead of a plain great circle: fixes, navaids and airways are taken from a running MSFS 2020/2024, from the nav data of an X-Plane installed on this PC, or from the navaids now bundled with VectaSim (OurAirports), and coordinates in the route are placed as written. Gaps are bridged with a dashed great circle, waypoint names appear when you zoom in, and a line under the button says how much was found ("14 of 18 waypoints resolved · MSFS, X-Plane"); without any navigation data it stays the dashed great circle.
+- The altitude curtain of a clicked VATSIM/IVAO aircraft now shows up to two hours of its flown track even right after you switch the traffic on: an enabled network is polled from app start on – every 15 s while its traffic is shown, every 60 s in the background while it is hidden on the map or the window is minimised – and hiding the traffic no longer drops the recorded tracks. The map's *Traffic* toggle now only shows or hides the traffic; whether a network is downloaded at all is the switch in *Settings → Display → Online traffic* (turning it off stops the downloads and drops the tracks). The status line there and the diagnostics say whether each network is shown on the map or running in the background.
 
 ### Logbook
 

@@ -310,7 +310,11 @@
       "off": "{name} aus",
       "error": "{name} an ({error} – nächster Versuch in {seconds} s)",
       "waiting": "{name} an (warte auf ersten Abruf …)",
-      "on": "{name} an ({pilots} Piloten, {controllers} Lotsen)"
+      "on": "{name} an ({pilots} Piloten, {controllers} Lotsen)",
+      "map": {
+        "shown": "auf der Karte angezeigt",
+        "hidden": "auf der Karte ausgeblendet, Abruf alle {seconds} s im Hintergrund"
+      }
     },
     "line": {
       "loading": "Online-Verkehr: Status wird geladen …",
@@ -326,6 +330,9 @@
       "rowLabel": "Online {name}",
       "off": "aus",
       "on": "an",
+      "shown": "auf der Karte angezeigt",
+      "hidden": "auf der Karte ausgeblendet",
+      "background": "Hintergrund-Abruf alle {seconds} s",
       "noFetch": "noch kein Abruf",
       "counts": "{pilots} Piloten, {controllers} Lotsen",
       "error": "Fehler: {error} · nächster Versuch in {seconds} s",
@@ -407,6 +414,8 @@
     "online": {
       "off": "Online-Verkehr ist aus. Netzwerk auch auf der Karte neben „Verkehr“ wählbar.",
       "enable": "{name} aktivieren",
+      "hidden": "Verkehr ist auf der Karte ausgeblendet – {networks} läuft im Hintergrund weiter (Strecke angeklickter Flugzeuge bis zu zwei Stunden).",
+      "show": "Auf der Karte zeigen",
       "counts": "{pilots} Piloten · {controllers} Lotsen",
       "nextAttempt": "Nächster Versuch in {seconds} s.",
       "nearby": "Verkehr in der Nähe",

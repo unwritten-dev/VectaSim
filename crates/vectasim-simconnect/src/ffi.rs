@@ -81,6 +81,20 @@ pub mod recv_id {
     pub const RESERVED_KEY: u32 = 13;
     pub const CUSTOM_ACTION: u32 = 14;
     pub const SYSTEM_STATE: u32 = 15;
+    /// Facility data (`SimConnect_RequestFacilityData`). The MSFS 2024 SDK numbers these
+    /// 29/30/31; headers without `SIMCONNECT_RECV_ID_PICK` (an experimental entry before them)
+    /// give 28/29/30. `facility::classify` tells them apart by shape, so either numbering works.
+    pub const FACILITY_FIRST: u32 = 28;
+    pub const FACILITY_LAST: u32 = 31;
+}
+
+/// `SIMCONNECT_FACILITY_DATA_TYPE` (the `Type` of a facility data message).
+pub mod facility_data_type {
+    pub const AIRPORT: u32 = 0;
+    pub const VOR: u32 = 19;
+    pub const NDB: u32 = 20;
+    pub const WAYPOINT: u32 = 21;
+    pub const ROUTE: u32 = 22;
 }
 
 #[repr(C, packed(1))]
@@ -205,6 +219,19 @@ type FnText = unsafe extern "system" fn(
     cb_unit_size: DWORD,
     p_data_set: *const c_void,
 ) -> HRESULT;
+type FnAddToFacilityDefinition = unsafe extern "system" fn(h: HANDLE, define_id: DWORD, field_name: *const c_char) -> HRESULT;
+type FnRequestFacilityData =
+    unsafe extern "system" fn(h: HANDLE, define_id: DWORD, request_id: DWORD, icao: *const c_char, region: *const c_char) -> HRESULT;
+/// MSFS 2024: like `RequestFacilityData`, plus the type ('W', 'V', 'N') that separates a waypoint,
+/// VOR and NDB sharing ident and region.
+type FnRequestFacilityDataEx1 = unsafe extern "system" fn(
+    h: HANDLE,
+    define_id: DWORD,
+    request_id: DWORD,
+    icao: *const c_char,
+    region: *const c_char,
+    kind: c_char,
+) -> HRESULT;
 type FnGetNextDispatch =
     unsafe extern "system" fn(h: HANDLE, pp_data: *mut *mut SIMCONNECT_RECV, pcb_data: *mut DWORD) -> HRESULT;
 
@@ -223,6 +250,11 @@ pub struct SimConnectLib {
     pub get_next_dispatch: FnGetNextDispatch,
     /// `SimConnect_Text`; optional – a DLL without it still records (no in-sim messages then).
     pub text: Option<FnText>,
+    /// Facility data (MSFS 2020 SU10+, MSFS 2024); optional – without them the route lookup
+    /// of online traffic simply skips the simulator.
+    pub add_to_facility_definition: Option<FnAddToFacilityDefinition>,
+    pub request_facility_data: Option<FnRequestFacilityData>,
+    pub request_facility_data_ex1: Option<FnRequestFacilityDataEx1>,
 }
 
 /// One failed candidate of the DLL search.
@@ -505,6 +537,12 @@ impl SimConnectLib {
                 sym!("SimConnect_GetLastSentPacketID", FnGetLastSentPacketId);
             let get_next_dispatch: FnGetNextDispatch = sym!("SimConnect_GetNextDispatch", FnGetNextDispatch);
             let text: Option<FnText> = lib.get::<FnText>(b"SimConnect_Text\0").ok().map(|s| *s);
+            let add_to_facility_definition: Option<FnAddToFacilityDefinition> =
+                lib.get::<FnAddToFacilityDefinition>(b"SimConnect_AddToFacilityDefinition\0").ok().map(|s| *s);
+            let request_facility_data: Option<FnRequestFacilityData> =
+                lib.get::<FnRequestFacilityData>(b"SimConnect_RequestFacilityData\0").ok().map(|s| *s);
+            let request_facility_data_ex1: Option<FnRequestFacilityDataEx1> =
+                lib.get::<FnRequestFacilityDataEx1>(b"SimConnect_RequestFacilityData_EX1\0").ok().map(|s| *s);
             Ok(Self {
                 _lib: lib,
                 path,
@@ -518,6 +556,9 @@ impl SimConnectLib {
                 get_last_sent_packet_id,
                 get_next_dispatch,
                 text,
+                add_to_facility_definition,
+                request_facility_data,
+                request_facility_data_ex1,
             })
         }
     }

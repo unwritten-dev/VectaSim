@@ -175,7 +175,7 @@
     "reset": "Reset",
     "folder": "Folder",
     "savedMark": "✓ saved",
-    "about": "VectaSim {version} · Your logbook lives only on this PC – no account, no cloud. Data: map © OpenStreetMap contributors, OpenFreeMap · airports OurAirports (public domain) · weather NOAA aviationweather.gov (fallback VATSIM) · online traffic VATSIM · IVAO · flight plans SimBrief (Navigraph) · aircraft photos Planespotters.net · satellite imagery EOxCloudless 2017 by EOX IT Services GmbH (contains modified Copernicus Sentinel data, CC BY 4.0) · precipitation radar RainViewer · clouds EUMETSAT (contains modified Meteosat data) · country borders Natural Earth (public domain) · Thanks to npooky for the first flight test ·",
+    "about": "VectaSim {version} · Your logbook lives only on this PC – no account, no cloud. Data: map © OpenStreetMap contributors, OpenFreeMap · airports and navaids OurAirports (public domain) · weather NOAA aviationweather.gov (fallback VATSIM) · online traffic VATSIM · IVAO · flight plans SimBrief (Navigraph) · aircraft photos Planespotters.net · satellite imagery EOxCloudless 2017 by EOX IT Services GmbH (contains modified Copernicus Sentinel data, CC BY 4.0) · precipitation radar RainViewer · clouds EUMETSAT (contains modified Meteosat data) · country borders Natural Earth (public domain) · Thanks to npooky for the first flight test ·",
     "thirdParty": "Third-party licenses",
     "sim": {
       "textLanding": "Show the landing rate in the simulator (MSFS)",
@@ -256,7 +256,7 @@
         "help": "Cloud-free Sentinel-2 mosaic (EOxCloudless 2017) instead of the drawn map, with place names and borders on top. Applies to the map and the track map – the same choice as the “Satellite” button. The app only loads the tiles while this is on."
       },
       "online": {
-        "hint": "like “Traffic” on the map · fetches the network's public feed",
+        "hint": "An enabled network is polled in the background every 60 s from app start, even when “Traffic” is hidden on the map – so a clicked aircraft shows up to two hours of its flown track. Traffic data is only downloaded while the network is enabled here.",
         "notOn": "{name} not turned on",
         "notOff": "{name} not turned off"
       }

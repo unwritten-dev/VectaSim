@@ -4,10 +4,20 @@
 //! often (IVAO bans IPs that do, see `ivao.rs`). The feed enforces that floor even across
 //! stop/start and backs off on errors. One poller per network serves every map view through the
 //! cached [`OnlineSnapshot`].
+//!
+//! The poller runs while the network is *enabled* (Settings), whether or not its traffic is
+//! *shown* on the map: hidden (or with the window hidden) it polls every
+//! [`BACKGROUND_POLL_INTERVAL`] and keeps recording the flown tracks (history.rs), so a click
+//! on an aircraft after switching the traffic on shows its last two hours, not only the minutes
+//! since. Showing the traffic again wakes the poller and returns it to the 15 s rate.
 
 use serde::Serialize;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tokio::sync::Notify;
+// tokio's clock (not std's): the wait for the next poll can be tested with paused time
+use tokio::time::Instant;
 
 use crate::history::{TrackFix, TrackHistory};
 use crate::model::{Facility, NearbyPilot, Network, OnlineSnapshot, Pilot};
@@ -18,6 +28,9 @@ use crate::{OnlineError, ivao, vatsim};
 pub const MIN_POLL_INTERVAL: Duration = Duration::from_secs(15);
 /// Backoff ceiling when the feed keeps failing (network down, outage).
 pub const MAX_POLL_INTERVAL: Duration = Duration::from_secs(300);
+/// Poll interval while the traffic is not shown on the map or the window is hidden: enough for
+/// the track history (history.rs), a quarter of the downloads.
+pub const BACKGROUND_POLL_INTERVAL: Duration = Duration::from_secs(60);
 /// The IVAO file is ~1.2 MB (≈200 kB gzip); give slow lines a bit more than VATSIM needs.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -37,8 +50,14 @@ pub struct FeedStatus {
     pub source: Option<String>,
     pub last_error: Option<String>,
     pub consecutive_errors: u32,
-    /// Seconds until the next poll (15 normally, more while backing off).
+    /// Seconds until the next poll (15 shown, 60 in the background, more while backing off).
     pub next_poll_s: u64,
+    /// The network's traffic is shown on the map (the map's traffic toggle; kept while disabled).
+    pub shown: bool,
+    /// Polling at the background rate (traffic not shown on the map, or the window hidden).
+    pub background: bool,
+    /// The background rate in seconds ([`BACKGROUND_POLL_INTERVAL`]).
+    pub background_poll_s: u64,
 }
 
 impl FeedStatus {
@@ -56,6 +75,9 @@ impl FeedStatus {
             last_error: None,
             consecutive_errors: 0,
             next_poll_s: MIN_POLL_INTERVAL.as_secs(),
+            shown: false,
+            background: true,
+            background_poll_s: BACKGROUND_POLL_INTERVAL.as_secs(),
         }
     }
 }
@@ -74,12 +96,19 @@ pub(crate) struct Inner {
     /// VATSIM: the data URL discovered through status.json (cached until a fetch fails).
     pub(crate) data_url: Mutex<Option<String>>,
     snapshot: RwLock<Option<Arc<OnlineSnapshot>>>,
-    /// Flown track per pilot from the snapshots (history.rs; bounded, cleared by `stop`).
+    /// Flown track per pilot from the snapshots (history.rs; bounded, cleared by `stop` only –
+    /// hiding the traffic keeps it).
     history: Mutex<TrackHistory>,
     status: Mutex<FeedStatus>,
     task: Mutex<Option<tokio::task::JoinHandle<()>>>,
     /// Survives stop/start so toggling the setting cannot hammer the endpoint.
     last_fetch: Mutex<Option<Instant>>,
+    /// Traffic shown on the map (survives stop/start: it is the map's choice, not the feed's).
+    shown: AtomicBool,
+    /// The app window is visible (`set_ui_visible`).
+    ui_visible: AtomicBool,
+    /// Wakes the sleeping poller when the rate changes (traffic shown again, window visible).
+    wake: Notify,
 }
 
 /// Background poller for one network. Cheap to clone; all clones share one task and snapshot.
@@ -97,6 +126,13 @@ pub fn backoff_delay(consecutive_errors: u32) -> Duration {
     (MIN_POLL_INTERVAL * factor).min(MAX_POLL_INTERVAL)
 }
 
+/// Time between two polls: 15 s while the traffic is shown and the window visible
+/// (`foreground`), 60 s in the background; after errors the backoff, never faster than that.
+pub fn poll_interval(foreground: bool, consecutive_errors: u32) -> Duration {
+    let base = if foreground { MIN_POLL_INTERVAL } else { BACKGROUND_POLL_INTERVAL };
+    if consecutive_errors == 0 { base } else { backoff_delay(consecutive_errors).max(base) }
+}
+
 impl OnlineFeed {
     pub fn new(network: Network) -> Self {
         let client = crate::client(REQUEST_TIMEOUT);
@@ -110,6 +146,9 @@ impl OnlineFeed {
                 status: Mutex::new(FeedStatus::idle(network)),
                 task: Mutex::new(None),
                 last_fetch: Mutex::new(None),
+                shown: AtomicBool::new(false),
+                ui_visible: AtomicBool::new(true),
+                wake: Notify::new(),
             }),
         }
     }
@@ -131,7 +170,41 @@ impl OnlineFeed {
     }
 
     pub fn status(&self) -> FeedStatus {
-        self.inner.status.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        let mut st = self.inner.status.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        st.shown = self.is_shown();
+        st.background = !self.inner.foreground();
+        st
+    }
+
+    /// The network's traffic is shown on the map.
+    pub fn is_shown(&self) -> bool {
+        self.inner.shown.load(Ordering::Relaxed)
+    }
+
+    /// The map shows (true) or hides this network's traffic. Hiding only slows the poller to the
+    /// background rate – snapshot and track history stay; showing wakes it (15 s again).
+    pub fn set_shown(&self, shown: bool) {
+        if self.inner.shown.swap(shown, Ordering::Relaxed) != shown {
+            self.rate_changed();
+        }
+    }
+
+    /// The app window is visible; while hidden the poller runs at the background rate.
+    pub fn set_ui_visible(&self, visible: bool) {
+        if self.inner.ui_visible.swap(visible, Ordering::Relaxed) != visible {
+            self.rate_changed();
+        }
+    }
+
+    /// The interval the poller uses now (shown / hidden / backing off).
+    pub fn poll_interval(&self) -> Duration {
+        self.inner.interval()
+    }
+
+    fn rate_changed(&self) {
+        let d = self.inner.interval();
+        self.inner.status.lock().unwrap_or_else(|e| e.into_inner()).next_poll_s = d.as_secs();
+        self.inner.wake.notify_waiters();
     }
 
     pub fn snapshot(&self) -> Option<Arc<OnlineSnapshot>> {
@@ -168,7 +241,8 @@ impl OnlineFeed {
         log::info!("{} feed started", self.inner.network.label());
     }
 
-    /// Stop polling and drop the snapshot, so a disabled network shows no stale traffic.
+    /// Stop polling and drop snapshot and track history (the network was disabled), so a
+    /// disabled network shows no stale traffic. Hiding the traffic on the map never calls this.
     pub fn stop(&self) {
         if let Some(t) = self.inner.task.lock().unwrap_or_else(|e| e.into_inner()).take() {
             t.abort();
@@ -199,21 +273,46 @@ impl OnlineFeed {
     }
 }
 
+impl Inner {
+    /// Traffic shown and the window visible: the 15 s rate.
+    fn foreground(&self) -> bool {
+        self.shown.load(Ordering::Relaxed) && self.ui_visible.load(Ordering::Relaxed)
+    }
+
+    fn interval(&self) -> Duration {
+        let errors = self.status.lock().unwrap_or_else(|e| e.into_inner()).consecutive_errors;
+        poll_interval(self.foreground(), errors)
+    }
+
+    /// Sleep until `interval` after the last download, re-evaluated whenever the rate changes:
+    /// showing the traffic cuts a 60 s wait short (never below the 15 s floor).
+    async fn wait_until_due(&self, interval: fn(&Self) -> Duration) {
+        loop {
+            // registered before the deadline is read, so a change in between is not missed
+            let woken = self.wake.notified();
+            let Some(last) = *self.last_fetch.lock().unwrap_or_else(|e| e.into_inner()) else { return };
+            let due = last + interval(self);
+            if Instant::now() >= due {
+                return;
+            }
+            tokio::select! {
+                _ = tokio::time::sleep_until(due) => return,
+                _ = woken => {}
+            }
+        }
+    }
+}
+
 async fn poll_loop(inner: Arc<Inner>, on_update: UpdateCallback) {
     let label = inner.network.label();
+    // just (re)started: only the 15 s floor since the last download applies
+    inner.wait_until_due(|_| MIN_POLL_INTERVAL).await;
     loop {
-        // Honour the 15 s floor even if the feed was just restarted.
-        let since_last = inner.last_fetch.lock().unwrap_or_else(|e| e.into_inner()).map(|t| t.elapsed());
-        if let Some(elapsed) = since_last
-            && elapsed < MIN_POLL_INTERVAL
-        {
-            tokio::time::sleep(MIN_POLL_INTERVAL - elapsed).await;
-        }
         *inner.last_fetch.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
 
         let result = fetch_once(&inner).await;
         let feed = OnlineFeed { inner: inner.clone() };
-        let delay = match result {
+        match result {
             Ok((snap, url)) => {
                 // stop() may have run while the request was in flight; don't resurrect its data.
                 if !inner.status.lock().unwrap_or_else(|e| e.into_inner()).enabled {
@@ -224,23 +323,20 @@ async fn poll_loop(inner: Arc<Inner>, on_update: UpdateCallback) {
                 st.source = Some(url);
                 st.last_error = None;
                 st.consecutive_errors = 0;
-                st.next_poll_s = MIN_POLL_INTERVAL.as_secs();
-                MIN_POLL_INTERVAL
+                st.next_poll_s = poll_interval(inner.foreground(), 0).as_secs();
             }
             Err(e) => {
                 log::warn!("{label} feed: {e}");
                 let mut st = inner.status.lock().unwrap_or_else(|e| e.into_inner());
                 st.consecutive_errors += 1;
                 st.last_error = Some(e.to_string());
-                let d = backoff_delay(st.consecutive_errors);
-                st.next_poll_s = d.as_secs();
+                st.next_poll_s = poll_interval(inner.foreground(), st.consecutive_errors).as_secs();
                 // A failing discovered URL may have moved; rediscover next time.
                 *inner.data_url.lock().unwrap_or_else(|e| e.into_inner()) = None;
-                d
             }
-        };
+        }
         on_update(&feed.status());
-        tokio::time::sleep(delay).await;
+        inner.wait_until_due(Inner::interval).await;
     }
 }
 
@@ -263,4 +359,46 @@ async fn fetch_once(inner: &Inner) -> Result<(OnlineSnapshot, String), OnlineErr
         Network::Ivao => ivao::parse_ivao_json(&bytes)?,
     };
     Ok((snap, url))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn waiting(feed: &OnlineFeed) -> tokio::task::JoinHandle<Duration> {
+        let inner = feed.inner.clone();
+        tokio::spawn(async move {
+            let start = Instant::now();
+            inner.wait_until_due(Inner::interval).await;
+            start.elapsed()
+        })
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn hidden_waits_the_background_rate_and_showing_cuts_it_short() {
+        let feed = OnlineFeed::vatsim();
+        *feed.inner.last_fetch.lock().unwrap() = Some(Instant::now());
+        // hidden: the next poll is 60 s after the last one
+        assert_eq!(waiting(&feed).await.unwrap(), BACKGROUND_POLL_INTERVAL);
+
+        // shown after 5 s of a 60 s wait: the poll comes 15 s after the last one, not 60
+        *feed.inner.last_fetch.lock().unwrap() = Some(Instant::now());
+        let h = waiting(&feed);
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        assert!(!h.is_finished());
+        feed.set_shown(true);
+        assert_eq!(h.await.unwrap(), MIN_POLL_INTERVAL);
+
+        // shown 40 s after the last poll: due at once
+        *feed.inner.last_fetch.lock().unwrap() = Some(Instant::now());
+        feed.set_shown(false);
+        let h = waiting(&feed);
+        tokio::time::sleep(Duration::from_secs(40)).await;
+        feed.set_shown(true);
+        assert_eq!(h.await.unwrap(), Duration::from_secs(40));
+
+        // never started: no wait
+        let fresh = OnlineFeed::ivao();
+        assert_eq!(waiting(&fresh).await.unwrap(), Duration::ZERO);
+    }
 }

@@ -1,8 +1,12 @@
 // "Verkehr" in the map toolbar plus the network choice next to it (VATSIM / IVAO / beide).
 //
-// The toggle switches the feeds themselves (online_set_networks), so map, side panel and
-// settings can never disagree. The choice is the backend's while traffic is on; while it is
-// off the last choice is remembered in localStorage, so "Verkehr" brings back the same networks.
+// The toggle only shows or hides the traffic on the map (online_set_shown, backend setting
+// `online_shown`); it never stops a feed. An enabled network (Settings → Online traffic) keeps
+// being polled in the background every 60 s while hidden, so its track history – the altitude
+// curtain of a clicked aircraft – covers up to two hours when the traffic is shown again.
+// Showing a network that is disabled enables it (picking traffic on the map is the opt-in).
+// The choice is the backend's while traffic is shown; while it is hidden the last choice is
+// remembered in localStorage, so "Verkehr" brings back the same networks.
 
 import { Fragment, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -11,6 +15,7 @@ import type { Network, OnlineSummary } from "../types";
 import { userMessage } from "../errors";
 import { showToast } from "../ui/Toast";
 import { useT, type TKey } from "../i18n";
+import { shownChoice } from "../onlineText";
 import "./trafficToggle.css";
 import { useHintIds } from "./hint";
 
@@ -28,11 +33,21 @@ export function networksOfChoice(choice: NetworkChoice): Network[] {
   return choice === "both" ? ["vatsim", "ivao"] : [choice];
 }
 
-/** Choice shown in the toolbar: what runs, else what ran last, else VATSIM (the former default). */
-export function currentChoice(summary: Pick<OnlineSummary, "network"> | null, stored: string | null): NetworkChoice {
-  const n = summary?.network;
+/** Choice shown in the toolbar: what the map shows, else what it showed last, else VATSIM (the former default). */
+export function currentChoice(summary: Pick<OnlineSummary, "network" | "shown"> | null, stored: string | null): NetworkChoice {
+  const n = shownChoice(summary);
   if (n === "vatsim" || n === "ivao" || n === "both") return n;
   return stored === "ivao" || stored === "both" ? stored : "vatsim";
+}
+
+/** Networks to show after a click on "Verkehr": none when it was on (hide), else the choice. */
+export function toggledNetworks(on: boolean, choice: NetworkChoice): Network[] {
+  return on ? [] : networksOfChoice(choice);
+}
+
+/** Show exactly these networks' traffic on the map (empty = hide). Never stops a feed. */
+export function setTrafficShown(networks: Network[]): Promise<OnlineSummary> {
+  return invoke<OnlineSummary>("online_set_shown", { networks });
 }
 
 function loadStored(): string | null {
@@ -52,7 +67,7 @@ function store(choice: NetworkChoice) {
 }
 
 interface Props {
-  /** Some network is on (summary.enabled). */
+  /** The map shows some network's traffic (enabled and shown, `trafficShown`). */
   on: boolean;
   /** Called before traffic is switched on (LiveMap re-shows a hidden traffic layer). */
   onEnable?: () => void;
@@ -136,7 +151,7 @@ export default function TrafficToggle({ on, onEnable }: Props) {
   const apply = (networks: Network[], enable: boolean) => {
     setBusy(true);
     if (enable) onEnable?.();
-    invoke<OnlineSummary>("online_set_networks", { networks })
+    setTrafficShown(networks)
       .then(setSummary)
       // the button stays as it was; say why instead of failing silently
       .catch((e) => {
@@ -151,7 +166,7 @@ export default function TrafficToggle({ on, onEnable }: Props) {
     netRef.current?.focus();
     store(next);
     setStored(next);
-    // picking a network means "show me that traffic": it also switches traffic on
+    // picking a network means "show me that traffic": it also shows the traffic
     apply(networksOfChoice(next), true);
   };
 
@@ -170,7 +185,7 @@ export default function TrafficToggle({ on, onEnable }: Props) {
     <span className={on ? "traffic-toggle traffic-split on" : "traffic-toggle traffic-split"} ref={wrapRef} role="group" aria-label={t("map.traffic.groupLabel")}>
       <button
         className="toggle traffic-main"
-        onClick={() => apply(on ? [] : networksOfChoice(choice), !on)}
+        onClick={() => apply(toggledNetworks(on, choice), !on)}
         disabled={busy}
         aria-pressed={on}
         title={toggleTitle}

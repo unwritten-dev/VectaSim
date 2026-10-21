@@ -369,6 +369,34 @@ export interface Runway {
   heDisplacedThresholdFt?: number | null;
 }
 
+// ---- filed route of online traffic (crates/vectasim-route, traffic_route_resolve) ----
+
+export type RouteSource = "msfs" | "xplane" | "navaids" | "airport" | "coord";
+
+export interface RoutePoint {
+  ident: string;
+  lat: number;
+  lon: number;
+  source: RouteSource;
+  resolved: boolean;
+  /** Something unresolved lies between the previous point and this one. */
+  gapBefore: boolean;
+  /** Set for fixes an airway expansion inserted. */
+  airway?: string;
+}
+
+export interface RouteResolution {
+  /** Departure, route points (airway fixes included), arrival. */
+  points: RoutePoint[];
+  unresolved: string[];
+  total: number;
+  resolvedCount: number;
+  /** Resolved points between departure and arrival; 0 = only the great circle to draw. */
+  enroute: number;
+  airwaysExpanded: number;
+  sources: RouteSource[];
+}
+
 // ---- dispatch / SimBrief (crates/vectasim-simbrief) ----
 
 export interface NavFix {
@@ -537,11 +565,20 @@ export interface NetworkStatus {
   lastError?: string | null;
   consecutiveErrors: number;
   nextPollS: number;
+  /** Traffic shown on the map (the map's toggle; independent of `enabled`). Missing in older builds. */
+  shown?: boolean;
+  /** Polling at the background rate now (hidden on the map or window hidden). */
+  background?: boolean;
+  /** The background rate in seconds (60). */
+  backgroundPollS?: number;
 }
 
 /** Totals over the enabled networks (shape of the former VATSIM-only status) plus `networks`. */
 export interface OnlineSummary {
+  /** Enabled networks (Settings → Online traffic): polled, in the background when not shown. */
   network: "off" | Network | "both";
+  /** Enabled networks whose traffic the map shows. Missing in older builds: same as `network`. */
+  shown?: "off" | Network | "both";
   enabled: boolean;
   pilots: number;
   controllers: number;

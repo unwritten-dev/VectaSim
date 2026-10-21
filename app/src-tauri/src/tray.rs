@@ -240,6 +240,7 @@ pub fn on_window_event(window: &Window, event: &WindowEvent) {
     }
     let _ = window.hide();
     app.state::<ProviderManager>().set_ui_visible(false);
+    app.state::<crate::online::OnlineState>().set_ui_visible(false);
 }
 
 /// Settings → Integrations → tray switch.

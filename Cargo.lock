@@ -5265,6 +5265,7 @@ dependencies = [
  "vectasim-dump",
  "vectasim-online",
  "vectasim-photos",
+ "vectasim-route",
  "vectasim-server",
  "vectasim-simbrief",
  "vectasim-simconnect",
@@ -5324,6 +5325,18 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "tokio",
+]
+
+[[package]]
+name = "vectasim-route"
+version = "0.6.0"
+dependencies = [
+ "log",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "vectasim-data",
+ "vectasim-simconnect",
 ]
 
 [[package]]

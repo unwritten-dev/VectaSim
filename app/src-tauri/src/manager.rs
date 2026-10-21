@@ -16,7 +16,8 @@
 //! Hidden window (`set_ui_visible(false)`: minimised, in the tray or the tab hidden): the
 //! periodic streams drop to `sim:telemetry` (+ its `sim:flight`) 1 Hz and `sim:stats` 0.2 Hz,
 //! `diag:raw` pauses. Event-driven emits (status, flight events, aircraft) and the
-//! `FlightSession`/recorder run unchanged on the full stream.
+//! `FlightSession`/recorder run unchanged on the full stream. The `set_ui_visible` command also
+//! puts the online feeds on their 60 s background rate (`OnlineState::set_ui_visible`).
 //!
 //! Sessions: every `start` is a new provider session with its own `FlightSession`,
 //! recorder and live-track buffer. The previous session is stopped first: its
@@ -1034,9 +1035,15 @@ pub(crate) fn resume_position_plausible(t: &Telemetry) -> bool {
 }
 
 /// Frontend → `invoke("set_ui_visible", { visible })` on `visibilitychange` / minimise / tray.
+/// Also slows the online feeds to their background rate while hidden (online.rs).
 #[tauri::command]
-pub(crate) fn set_ui_visible(visible: bool, manager: tauri::State<'_, ProviderManager>) {
+pub(crate) fn set_ui_visible(
+    visible: bool,
+    manager: tauri::State<'_, ProviderManager>,
+    online: tauri::State<'_, crate::online::OnlineState>,
+) {
     manager.set_ui_visible(visible);
+    online.set_ui_visible(visible);
 }
 
 /// Frontend → `invoke("get_live_track_since", { tsMs })`: samples with `t_ms > tsMs`.

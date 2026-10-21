@@ -60,6 +60,11 @@
 .traffic-actions {
   flex-wrap: wrap;
 }
+/* "14 of 18 waypoints resolved · MSFS, X-Plane" under the route button */
+.traffic-route-status {
+  margin-top: -2px;
+  overflow-wrap: anywhere;
+}
 @media (max-height: 720px) {
   .after-flight.traffic-card {
     gap: 6px;

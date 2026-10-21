@@ -19,6 +19,10 @@
 //!   and the field reads as NaN (→ previous/default value) instead of losing the whole
 //!   definition.
 //!
+//! * Facility lookups for the app ([`facility`], route of online traffic) go through the same
+//!   handle: queued by the app, sent and answered inside this pump; while one is waiting the
+//!   idle wait shrinks to `FACILITY_WAIT` so a chain of lookups (an airway walk) stays quick.
+//!
 //! Interpretation (units, events → `ProviderEvent`) lives in [`decoder`], shared with the
 //! [`replay`] provider. Every message can be recorded raw into a [`DumpRecorder`]
 //! (`.vsdump`) *before* it is interpreted.
@@ -26,6 +30,7 @@
 pub mod api;
 pub mod decode;
 pub mod decoder;
+pub mod facility;
 pub mod ffi;
 pub mod mockdump;
 pub mod replay;
@@ -80,6 +85,8 @@ impl Default for SimConnectProvider {
 
 /// Longest block in `wait_for_dispatch` before the stop flag and watchdog are checked again.
 const MAX_WAIT: Duration = Duration::from_millis(100);
+/// The same while the app waits for a facility answer (next queued lookup picked up sooner).
+const FACILITY_WAIT: Duration = Duration::from_millis(5);
 /// Client event id of our in-sim messages (SimConnect_Text); not a system event.
 const EVT_TEXT: u32 = 0x5654;
 const INITIAL_BACKOFF: Duration = Duration::from_secs(2);
@@ -206,6 +213,8 @@ enum SentCall {
     Subscribe { event: &'static str },
     SystemState,
     Text,
+    FacilityDef,
+    Facility { req: u32 },
 }
 
 /// Bounded SendID → call map (registration is ~45 packets; probes add a few per minute at most).
@@ -251,6 +260,11 @@ struct Session<A: SimApi> {
     epoch: Instant,
     /// In-sim messages queued by the app ([`text::show_text`]).
     texts: text::TextQueue,
+    /// Facility lookups queued by the app ([`facility::FacilityBroker::lookup`]).
+    facilities: facility::FacilityBroker,
+    fac: facility::FacilityState,
+    /// Whether this session is announced to `facilities` (from `register` until drop).
+    fac_attached: bool,
 }
 
 impl<A: SimApi> Session<A> {
@@ -266,6 +280,9 @@ impl<A: SimApi> Session<A> {
             rec: None,
             epoch: now,
             texts: text::global().clone(),
+            facilities: facility::global().clone(),
+            fac: facility::FacilityState::default(),
+            fac_attached: false,
         }
     }
 
@@ -315,6 +332,8 @@ impl<A: SimApi> Session<A> {
             SentCall::Subscribe { event } => format!("SubscribeToSystemEvent(\"{event}\")"),
             SentCall::SystemState => "RequestSystemState(\"Sim\")".into(),
             SentCall::Text => "Text".into(),
+            SentCall::FacilityDef => "AddToFacilityDefinition".into(),
+            SentCall::Facility { req } => format!("RequestFacilityData(#{req})"),
         }
     }
 
@@ -372,6 +391,80 @@ impl<A: SimApi> Session<A> {
         }
         // learn whether a flight is running (selects the watchdog threshold)
         self.send_state_probe();
+        if !self.fac_attached {
+            self.facilities.attach();
+            self.fac_attached = true;
+        }
+    }
+
+    /// Facility definitions, once per session on the first lookup. A DLL without the exports or
+    /// a rejected call marks the source unavailable for this session (callers skip it).
+    fn register_facility_defs(&mut self) {
+        if !self.api.has_facility_data() {
+            log::info!("SimConnect.dll has no facility data calls (needs MSFS 2020 SU10+ / 2024); route lookups skip the simulator");
+            self.fac_broken();
+            return;
+        }
+        for kind in facility::FacKind::ALL {
+            for field in kind.fields() {
+                let hr = self.api.add_to_facility_definition(kind.def_id(), field);
+                if let Some(id) = self.api.last_sent_packet_id() {
+                    self.sent.push(id, SentCall::FacilityDef);
+                }
+                if hr < 0 {
+                    log::info!("AddToFacilityDefinition(\"{field}\") failed hr=0x{hr:08X}; route lookups skip the simulator");
+                    self.fac_broken();
+                    return;
+                }
+            }
+        }
+        self.fac.defs = facility::DefState::Ready;
+        self.facilities.set_supported(true);
+    }
+
+    fn fac_broken(&mut self) {
+        self.fac.defs = facility::DefState::Broken;
+        for ticket in self.fac.drain() {
+            self.facilities.complete(ticket, facility::FacilityAnswer::Unavailable);
+        }
+        self.facilities.set_supported(false);
+    }
+
+    /// Queued facility lookups out, expired ones answered (never an error for the recording).
+    fn send_facility_requests(&mut self, now: Instant) {
+        for ticket in self.fac.expired(now) {
+            self.facilities.complete(ticket, facility::FacilityAnswer::NotFound);
+        }
+        let room = facility::MAX_PENDING.saturating_sub(self.fac.pending.len());
+        if room == 0 || !self.fac_attached {
+            return;
+        }
+        let queued = self.facilities.take(room);
+        if queued.is_empty() {
+            return;
+        }
+        if self.fac.defs == facility::DefState::Unregistered {
+            self.register_facility_defs();
+        }
+        if self.fac.defs != facility::DefState::Ready {
+            for (ticket, _) in queued {
+                self.facilities.complete(ticket, facility::FacilityAnswer::Unavailable);
+            }
+            return;
+        }
+        for (ticket, q) in queued {
+            let req = self.fac.next_request_id();
+            let hr = self.api.request_facility_data(q.kind.def_id(), req, &q.ident, &q.region, q.kind.type_byte());
+            if let Some(id) = self.api.last_sent_packet_id() {
+                self.sent.push(id, SentCall::Facility { req });
+            }
+            if hr < 0 {
+                log::debug!("RequestFacilityData({}) failed hr=0x{hr:08X}", q.ident);
+                self.facilities.complete(ticket, facility::FacilityAnswer::NotFound);
+            } else {
+                self.fac.pending.insert(req, facility::Pending::new(ticket, q.kind, now));
+            }
+        }
     }
 
     /// Queued in-sim messages out (a rejected one is only logged: never a recording error).
@@ -414,7 +507,10 @@ impl<A: SimApi> Session<A> {
                 Ok(true) => {}
                 // queue empty: sleep until SimConnect signals (or poll); the cap keeps the stop
                 // flag and the watchdog (second-scale thresholds) responsive
-                Ok(false) => self.api.wait_for_dispatch(MAX_WAIT),
+                Ok(false) => {
+                    let wait = if self.fac.pending.is_empty() && !self.facilities.busy() { MAX_WAIT } else { FACILITY_WAIT };
+                    self.api.wait_for_dispatch(wait)
+                }
                 Err(end) => return end,
             }
         }
@@ -427,6 +523,7 @@ impl<A: SimApi> Session<A> {
             tx.send(ProviderEvent::Error { message }).map_err(|_| SessionEnd::ChannelClosed)?;
         }
         self.send_texts(now);
+        self.send_facility_requests(now);
         let mut buf = std::mem::take(&mut self.buf);
         let kind = self.api.next_dispatch(&mut buf);
         let result = match kind {
@@ -470,6 +567,25 @@ impl<A: SimApi> Session<A> {
             log::info!("SimConnect_Text rejected with exception {} ({code}); in-sim message not shown", ffi::exception_name(code));
             self.texts.report(text::TextOutcome::Exception(code), now);
             return Vec::new();
+        }
+        // facility lookups: an unknown ident is answered "not found", a rejected definition
+        // switches the source off for this session – logged, never an error for the recording
+        match call {
+            Some(SentCall::Facility { req }) => {
+                if let Some(p) = self.fac.pending.remove(&req) {
+                    self.facilities.complete(p.ticket, facility::FacilityAnswer::NotFound);
+                }
+                return Vec::new();
+            }
+            Some(SentCall::FacilityDef) => {
+                log::info!(
+                    "facility definition rejected with exception {} ({code}); route lookups skip the simulator",
+                    ffi::exception_name(code)
+                );
+                self.fac_broken();
+                return Vec::new();
+            }
+            _ => {}
         }
         let what = call.map(|c| self.describe(c));
         let added = match call {
@@ -632,7 +748,26 @@ impl<A: SimApi> Session<A> {
                 send_all(events)?;
                 Ok(false)
             }
+            id @ recv_id::FACILITY_FIRST..=recv_id::FACILITY_LAST => {
+                if let Some(msg) = facility::classify(id, bytes)
+                    && let Some((ticket, answer)) = self.fac.on_message(msg)
+                {
+                    self.facilities.complete(ticket, answer);
+                }
+                Ok(false)
+            }
             _ => Ok(false),
+        }
+    }
+}
+
+impl<A: SimApi> Drop for Session<A> {
+    fn drop(&mut self) {
+        for ticket in self.fac.drain() {
+            self.facilities.complete(ticket, facility::FacilityAnswer::Unavailable);
+        }
+        if self.fac_attached {
+            self.facilities.detach();
         }
     }
 }

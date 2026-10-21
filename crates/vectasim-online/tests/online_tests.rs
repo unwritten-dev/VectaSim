@@ -1,6 +1,6 @@
 use std::time::Duration;
 use vectasim_online::metar::{decode, observation_ms, parse_noaa_json, parse_vatsim_text};
-use vectasim_online::feed::backoff_delay;
+use vectasim_online::feed::{BACKGROUND_POLL_INTERVAL, MIN_POLL_INTERVAL, backoff_delay, poll_interval};
 use vectasim_online::{Facility, FlightCategory, Metar, MetarClient, Network, OnlineFeed, parse_ivao_json, parse_vatsim_json};
 
 const VATSIM_DATA: &str = include_str!("fixtures/vatsim-data.json");
@@ -86,6 +86,63 @@ fn feed_snapshot_updates_status() {
     feed.stop();
     assert!(feed.snapshot().is_none());
     assert_eq!(feed.status().pilots, 0);
+}
+
+#[test]
+fn poll_interval_shown_hidden_and_backoff() {
+    // shown (and window visible): 15 s; hidden or window hidden: the 60 s background rate
+    assert_eq!(poll_interval(true, 0), MIN_POLL_INTERVAL);
+    assert_eq!(poll_interval(false, 0), BACKGROUND_POLL_INTERVAL);
+    assert_eq!(BACKGROUND_POLL_INTERVAL, Duration::from_secs(60));
+    // backing off: the backoff, but never faster than the current rate
+    assert_eq!(poll_interval(true, 1), Duration::from_secs(30));
+    assert_eq!(poll_interval(false, 1), Duration::from_secs(60));
+    assert_eq!(poll_interval(false, 3), Duration::from_secs(120));
+    assert_eq!(poll_interval(true, 10), Duration::from_secs(300));
+    assert_eq!(poll_interval(false, 10), Duration::from_secs(300));
+
+    let feed = OnlineFeed::vatsim();
+    // not shown until the map says so
+    assert!(!feed.is_shown());
+    assert_eq!(feed.poll_interval(), BACKGROUND_POLL_INTERVAL);
+    assert!(feed.status().background);
+    assert_eq!(feed.status().background_poll_s, 60);
+    feed.set_shown(true);
+    assert_eq!(feed.poll_interval(), MIN_POLL_INTERVAL);
+    let st = feed.status();
+    assert!(st.shown && !st.background);
+    assert_eq!(st.next_poll_s, 15);
+    // window minimised / in the tray: background rate although shown
+    feed.set_ui_visible(false);
+    assert_eq!(feed.poll_interval(), BACKGROUND_POLL_INTERVAL);
+    assert!(feed.status().shown && feed.status().background);
+    assert_eq!(feed.status().next_poll_s, 60);
+    feed.set_ui_visible(true);
+    feed.set_shown(false);
+    assert_eq!(feed.poll_interval(), BACKGROUND_POLL_INTERVAL);
+    let json = serde_json::to_value(feed.status()).unwrap();
+    assert_eq!(json["shown"], false);
+    assert_eq!(json["background"], true);
+    assert_eq!(json["backgroundPollS"], 60);
+}
+
+#[test]
+fn history_survives_hiding_and_is_dropped_on_disable() {
+    let feed = OnlineFeed::vatsim();
+    feed.set_shown(true);
+    feed.set_snapshot(parse_vatsim_json(VATSIM_DATA.as_bytes()).unwrap());
+    assert_eq!(feed.track(1300001).len(), 1);
+    // traffic hidden on the map: snapshot and history stay
+    feed.set_shown(false);
+    assert_eq!(feed.track(1300001).len(), 1);
+    assert!(feed.snapshot().is_some());
+    feed.set_shown(true);
+    assert_eq!(feed.track(1300001).len(), 1);
+    // network disabled in the settings: both go; the map's choice survives
+    feed.stop();
+    assert!(feed.track(1300001).is_empty());
+    assert!(feed.snapshot().is_none());
+    assert!(feed.is_shown() && feed.status().shown);
 }
 
 #[test]

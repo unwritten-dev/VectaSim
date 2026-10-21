@@ -21,6 +21,20 @@ pub trait SimApi {
     fn text(&mut self, _text_type: u32, _seconds: f32, _event_id: u32, _text: &str) -> HRESULT {
         ffi::E_FAIL
     }
+    /// Whether the DLL has the facility data calls (`SimConnect_AddToFacilityDefinition`,
+    /// `SimConnect_RequestFacilityData`). Backends without them answer false.
+    fn has_facility_data(&self) -> bool {
+        false
+    }
+    /// `SimConnect_AddToFacilityDefinition`; `E_FAIL` without the export.
+    fn add_to_facility_definition(&mut self, _def: u32, _field: &str) -> HRESULT {
+        ffi::E_FAIL
+    }
+    /// `SimConnect_RequestFacilityData`, or `_EX1` with the type byte ('W', 'V', 'N') where the DLL
+    /// has it (MSFS 2024); `E_FAIL` without the export.
+    fn request_facility_data(&mut self, _def: u32, _req: u32, _icao: &str, _region: &str, _kind: Option<u8>) -> HRESULT {
+        ffi::E_FAIL
+    }
     /// SendID of the packet sent by the last call (`SimConnect_GetLastSentPacketID`).
     fn last_sent_packet_id(&mut self) -> Option<u32>;
     /// Fetch the next message and copy it into `buf` (only touched for `Message`).
@@ -124,6 +138,30 @@ impl SimApi for LiveApi {
         let bytes = c.as_bytes_with_nul();
         // SAFETY: handle is open; the buffer outlives the call and its size includes the NUL.
         unsafe { f(self.handle, text_type, seconds, event_id, bytes.len() as u32, bytes.as_ptr() as *const std::ffi::c_void) }
+    }
+
+    fn has_facility_data(&self) -> bool {
+        self.lib.add_to_facility_definition.is_some() && self.lib.request_facility_data.is_some()
+    }
+
+    fn add_to_facility_definition(&mut self, def: u32, field: &str) -> HRESULT {
+        let Some(f) = self.lib.add_to_facility_definition else { return ffi::E_FAIL };
+        let c = cstring(field);
+        // SAFETY: handle is open; the string outlives the call.
+        unsafe { f(self.handle, def, c.as_ptr()) }
+    }
+
+    fn request_facility_data(&mut self, def: u32, req: u32, icao: &str, region: &str, kind: Option<u8>) -> HRESULT {
+        // idents come from network flight plans: a NUL inside would only cut them short
+        let icao_c = CString::new(icao.split('\0').next().unwrap_or_default()).unwrap_or_default();
+        let region_c = CString::new(region.split('\0').next().unwrap_or_default()).unwrap_or_default();
+        match (kind, self.lib.request_facility_data_ex1, self.lib.request_facility_data) {
+            // SAFETY: handle is open; both strings outlive the call.
+            (Some(k), Some(f), _) => unsafe { f(self.handle, def, req, icao_c.as_ptr(), region_c.as_ptr(), k as std::ffi::c_char) },
+            // SAFETY: as above.
+            (_, _, Some(f)) => unsafe { f(self.handle, def, req, icao_c.as_ptr(), region_c.as_ptr()) },
+            _ => ffi::E_FAIL,
+        }
     }
 
     fn last_sent_packet_id(&mut self) -> Option<u32> {

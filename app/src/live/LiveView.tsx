@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { LiveMap } from "../lazyMaps";
 import Dispatch from "../Dispatch";
 import OnlinePanel from "../OnlinePanel";
+import { trafficShown } from "../onlineText";
 import { PHASE_LABEL, TRANSITION_ALTITUDE_FT, haversineNm } from "../format";
 import { fmtMetarLine } from "../i18n/number";
 import { fmt, fmtAltitude, fmtClock, fmtCoord, fmtDuration, fmtNum, fmtSigned, fmtWeight, fmtWeightNum } from "../i18n/number";
@@ -205,7 +206,7 @@ export default function LiveView({
         <LiveMap
           aircraft={aircraft}
           route={ofp?.navlog}
-          trafficOn={online?.enabled ?? false}
+          trafficOn={trafficShown(online)}
           onOnlineView={(v, center) => setOnlineView({ view: v, center })}
           onOffline={setMapOffline}
           overlay={

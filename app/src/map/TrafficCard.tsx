@@ -8,7 +8,8 @@
 import { useEffect, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { planespottersLink } from "./photoLink";
-import type { Pilot } from "../types";
+import type { Pilot, RouteResolution } from "../types";
+import { routeSourcesText } from "./trafficRoute";
 import { DASH, fmt, fmtAltitude, fmtDuration } from "../i18n/number";
 import { useT, type TKey } from "../i18n";
 import { usePrivacy } from "../prefs";
@@ -40,9 +41,25 @@ interface Props {
   own: { lat: number; lon: number } | null;
   following: boolean;
   routeShown: boolean;
+  /** State of the shown route (null while it is hidden). */
+  route?: TrafficRouteState | null;
   onFollow: () => void;
   onRoute: () => void;
   onClose: () => void;
+}
+
+/** The route drawn for the card: being resolved, resolved (backend result), or the backend failed. */
+export type TrafficRouteState = { status: "resolving" } | { status: "done"; res: RouteResolution } | { status: "failed" };
+
+/** The line under the route button: "14 of 18 waypoints resolved · MSFS, X-Plane" or the great-circle note. */
+export function routeStatusLine(route: TrafficRouteState, t: ReturnType<typeof useT>): { text: string; title?: string } {
+  if (route.status === "resolving") return { text: t("map.trafficCard.routeResolving") };
+  if (route.status === "failed" || route.res.enroute === 0) return { text: t("map.trafficCard.routeGreatCircle") };
+  const { res } = route;
+  const sources = routeSourcesText(res.sources);
+  const vars = { resolved: res.resolvedCount, total: res.total };
+  const text = sources ? t("map.trafficCard.routeResolved", { ...vars, sources }) : t("map.trafficCard.routeResolvedPlain", vars);
+  return { text, title: res.unresolved.length ? t("map.trafficCard.routeUnresolvedTitle", { idents: res.unresolved.join(" ") }) : undefined };
 }
 
 const TREND_TEXT: Record<"climb" | "descent" | "level", TKey> = {
@@ -113,7 +130,7 @@ function AirportLine({ ident, role }: { ident: string; role: string }) {
   );
 }
 
-export default function TrafficCard({ sel, own, following, routeShown, onFollow, onRoute, onClose }: Props) {
+export default function TrafficCard({ sel, own, following, routeShown, route, onFollow, onRoute, onClose }: Props) {
   const t = useT();
   const priv = usePrivacy();
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -234,6 +251,7 @@ export default function TrafficCard({ sel, own, following, routeShown, onFollow,
         </button>
         {routeHint.node}
       </div>
+      {fullPlan && routeShown && route && <RouteStatus route={route} />}
 
       <Collapsible id="traffic.photo" className="traffic-more" headClassName="traffic-more-head" title={t("map.trafficCard.photoTitle")} summary={trafficRegistration(p) ?? undefined}>
         <Photo pilot={p} />
@@ -329,6 +347,16 @@ export default function TrafficCard({ sel, own, following, routeShown, onFollow,
       )}
 
     </section>
+  );
+}
+
+function RouteStatus({ route }: { route: TrafficRouteState }) {
+  const t = useT();
+  const line = routeStatusLine(route, t);
+  return (
+    <div className="detail traffic-route-status" role="status" aria-busy={route.status === "resolving"} title={line.title}>
+      {line.text}
+    </div>
   );
 }
 

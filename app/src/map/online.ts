@@ -16,7 +16,7 @@ import { WAKE_LABEL, WAKE_SIZE, iconSizeByZoom, loadAircraftIcons, trafficColors
 export type OnlineLayerGroup = "traffic" | "atc" | "weather";
 
 export const LAYER_GROUPS: Record<OnlineLayerGroup, string[]> = {
-  traffic: ["vatsim-pilots", "vatsim-pilots-label", "traffic-3d-sym", "traffic-3d-sel-sym", "traffic-selected", "traffic-route-casing", "traffic-route-line"],
+  traffic: ["vatsim-pilots", "vatsim-pilots-label", "traffic-3d-sym", "traffic-3d-sel-sym", "traffic-selected", "traffic-route-casing", "traffic-route-line", "traffic-route-bridge", "traffic-route-fix", "traffic-route-label"],
   atc: ["vatsim-atc-dot", "vatsim-atc-label"],
   weather: ["metar-ring"],
 };
@@ -224,15 +224,20 @@ export async function addOnlineLayers(map: maplibregl.Map, before?: string, isCu
     },
     before,
   );
-  // the selected aircraft's planned great circle (TrafficCard "Route zeigen"): above the traffic
-  // symbols, so a busy hub does not hide it, with a halo so it reads over the aircraft
+  // the selected aircraft's filed route (TrafficCard "Show route", map/trafficRoute.ts): above
+  // the traffic symbols, so a busy hub does not hide it, with a halo so it reads over the
+  // aircraft. Solid legs through the resolved waypoints, dashed bridges over gaps (and the plain
+  // great circle), in the muted traffic colour – not the own aircraft's yellow, and not the
+  // own planned route's colour; waypoint dots from zoom 6, idents from zoom 7 like that route.
+  const routeColors = trafficColors();
   addSourceOnce(map, "traffic-route", { type: "geojson", data: EMPTY });
   addLayerOnce(map,
     {
       id: "traffic-route-casing",
       type: "line",
       source: "traffic-route",
-      layout: { "line-cap": "round" },
+      filter: ["==", ["geometry-type"], "LineString"],
+      layout: { "line-cap": "round", "line-join": "round" },
       paint: { "line-color": COLOR.halo, "line-width": 4.5, "line-opacity": 0.7 },
     },
     before,
@@ -242,8 +247,49 @@ export async function addOnlineLayers(map: maplibregl.Map, before?: string, isCu
       id: "traffic-route-line",
       type: "line",
       source: "traffic-route",
+      filter: ["all", ["==", ["geometry-type"], "LineString"], ["==", ["get", "kind"], "leg"]],
+      layout: { "line-cap": "round", "line-join": "round" },
+      paint: { "line-color": routeColors.label, "line-width": 2, "line-opacity": 0.9 },
+    },
+    before,
+  );
+  addLayerOnce(map,
+    {
+      id: "traffic-route-bridge",
+      type: "line",
+      source: "traffic-route",
+      filter: ["all", ["==", ["geometry-type"], "LineString"], ["==", ["get", "kind"], "bridge"]],
       layout: { "line-cap": "round" },
-      paint: { "line-color": COLOR.accent, "line-width": 2, "line-opacity": 0.9, "line-dasharray": [2, 2] },
+      paint: { "line-color": routeColors.label, "line-width": 2, "line-opacity": 0.9, "line-dasharray": [2, 2] },
+    },
+    before,
+  );
+  addLayerOnce(map,
+    {
+      id: "traffic-route-fix",
+      type: "circle",
+      source: "traffic-route",
+      filter: ["==", ["geometry-type"], "Point"],
+      minzoom: 6,
+      paint: { "circle-radius": 2.5, "circle-color": routeColors.fill, "circle-stroke-color": COLOR.halo, "circle-stroke-width": 1, "circle-pitch-alignment": "map" },
+    },
+    before,
+  );
+  addLayerOnce(map,
+    {
+      id: "traffic-route-label",
+      type: "symbol",
+      source: "traffic-route",
+      filter: ["==", ["geometry-type"], "Point"],
+      minzoom: 7,
+      layout: {
+        "text-field": ["get", "ident"],
+        "text-font": ["Noto Sans Regular"],
+        "text-size": 10,
+        "text-offset": [0, -0.9],
+        "text-anchor": "bottom",
+      },
+      paint: { "text-color": routeColors.label, "text-halo-color": COLOR.halo, "text-halo-width": 1.2 },
     },
     before,
   );
@@ -393,11 +439,6 @@ export function selectedGeoJson(pos: { lon: number; lat: number } | null): GeoJS
   return pos ? { type: "FeatureCollection", features: [pointFeature(pos.lon, pos.lat)] } : EMPTY;
 }
 
-/** Route source data: one dashed line (great circle points as [lon, lat]). */
-export function routeLineGeoJson(points: Array<[number, number]> | null): GeoJSON.FeatureCollection {
-  if (!points || points.length < 2) return EMPTY;
-  return { type: "FeatureCollection", features: [{ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: points } }] };
-}
 
 function attachPopups(map: maplibregl.Map) {
   if (withPopups.has(map)) return;

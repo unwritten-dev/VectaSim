@@ -1,0 +1,18 @@
+[package]
+name = "vectasim-route"
+description = "Filed route of online traffic: ICAO route-string grammar and waypoint resolution (running MSFS, installed X-Plane nav data, embedded OurAirports navaids)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+vectasim-data = { path = "../vectasim-data" }
+vectasim-simconnect = { path = "../vectasim-simconnect" }
+serde = { workspace = true }
+log = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+serde_json = { workspace = true }

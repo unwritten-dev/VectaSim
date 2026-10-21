@@ -24,6 +24,7 @@ vectasim-store = { path = "../../crates/vectasim-store" }
 vectasim-data = { path = "../../crates/vectasim-data" }
 vectasim-simbrief = { path = "../../crates/vectasim-simbrief" }
 vectasim-online = { path = "../../crates/vectasim-online" }
+vectasim-route = { path = "../../crates/vectasim-route" }
 vectasim-photos = { path = "../../crates/vectasim-photos" }
 # Overlay & Schnittstelle: local HTTP/WebSocket server for OBS overlays and the JSON API
 vectasim-server = { path = "../../crates/vectasim-server" }

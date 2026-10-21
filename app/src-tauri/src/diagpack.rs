@@ -114,7 +114,8 @@ fn collect(app: &AppHandle) -> Sources {
             "threads": std::thread::available_parallelism().map(|n| n.get()).ok(),
         },
         "simulator": { "provider": status.provider, "state": status.state, "name": status.sim_name, "version": status.sim_version },
-        // VATSIM/IVAO feeds: on/off, source URL, age of the last download, last error
+        // VATSIM/IVAO feeds: on/off, shown on the map, background rate (backgroundPollS, and
+        // whether it applies now), source URL, age of the last download, last error
         "online": app.state::<crate::online::OnlineState>().summary().networks,
     });
     let db_path = app.path().app_data_dir().map(|d| d.join("vectasim.db")).ok();

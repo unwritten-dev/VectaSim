@@ -10,7 +10,8 @@
 //! Memory bound: at most [`MAX_FIXES`] fixes (24 bytes each) per pilot, none older than
 //! [`MAX_AGE_MS`]; a fix that lies on the straight, level line between its neighbours is replaced
 //! by the next one (cruise adds nothing, turns and climbs do), a parked aircraft keeps one fix.
-//! Pilots missing from the feed for longer than [`GONE_MS`] are dropped; `stop()` drops all.
+//! Pilots missing from the feed for longer than [`GONE_MS`] are dropped; `stop()` (network
+//! disabled) drops all – hiding the traffic on the map does not, the poller keeps recording.
 //! Worst case (2 500 pilots, all turning and climbing for two hours) ≈ 2 500 × 480 × 24 B ≈ 29 MB;
 //! a typical evening (≈ 1 500 pilots, mostly in cruise or parked) stays well below 5 MB.
 
@@ -19,12 +20,14 @@ use std::collections::{HashMap, VecDeque};
 
 use crate::model::{Pilot, haversine_nm};
 
-/// Fixes kept per pilot (two hours at the feed's 15 s).
+/// Fixes kept per pilot (two hours at the feed's 15 s; at the 60 s background rate the age limit
+/// applies first).
 pub const MAX_FIXES: usize = 480;
 /// Fixes older than this are dropped (ms).
 pub const MAX_AGE_MS: u64 = 2 * 3600 * 1000;
-/// A pilot missing from the feed for this long is forgotten (a single missed poll is not).
-pub const GONE_MS: u64 = 2 * 60 * 1000;
+/// A pilot missing from the feed for this long is forgotten (a single missed poll is not, also
+/// at the 60 s background rate of a feed whose traffic is hidden on the map).
+pub const GONE_MS: u64 = 3 * 60 * 1000;
 /// A fix this close (nm) to the straight line between its neighbours, at the same level, adds nothing.
 const STRAIGHT_NM: f64 = 0.03;
 const LEVEL_FT: i32 = 50;

@@ -18,6 +18,8 @@ enum Call {
     Subscribe { name: String },
     SystemState { req: u32, state: String },
     Text { text_type: u32, seconds: f32, text: String },
+    FacDef { def: u32, field: String },
+    FacReq { def: u32, req: u32, icao: String, region: String, kind: Option<u8> },
 }
 
 /// Scripted backend. Every call gets the next SendID (starting at 1).
@@ -33,6 +35,8 @@ struct FakeApi {
     waits: Vec<Duration>,
     /// Raised by the n-th idle wait (n = `stop_after_waits`), to end a `pump` run.
     stop: Option<(Arc<AtomicBool>, usize)>,
+    /// The DLL has the facility exports.
+    facilities: bool,
 }
 
 impl FakeApi {
@@ -66,6 +70,15 @@ impl SimApi for FakeApi {
     }
     fn text(&mut self, text_type: u32, seconds: f32, _event_id: u32, text: &str) -> ffi::HRESULT {
         self.record(Call::Text { text_type, seconds, text: text.into() })
+    }
+    fn has_facility_data(&self) -> bool {
+        self.facilities
+    }
+    fn add_to_facility_definition(&mut self, def: u32, field: &str) -> ffi::HRESULT {
+        self.record(Call::FacDef { def, field: field.into() })
+    }
+    fn request_facility_data(&mut self, def: u32, req: u32, icao: &str, region: &str, kind: Option<u8>) -> ffi::HRESULT {
+        self.record(Call::FacReq { def, req, icao: icao.into(), region: region.into(), kind })
     }
     fn last_sent_packet_id(&mut self) -> Option<u32> {
         (self.next_id > 0).then_some(self.next_id)
@@ -978,4 +991,157 @@ fn stale_text_is_not_sent() {
     s.texts.push("late", 10.0, t0);
     s.step(t0 + text::MAX_AGE + Duration::from_secs(1), &tx).unwrap();
     assert!(!s.api.calls.iter().any(|(_, c)| matches!(c, Call::Text { .. })));
+}
+
+// ---- facility lookups (route of online traffic) ----
+
+use crate::facility::tests::{msg_data as msg_fac, msg_end, msg_minimal, position, route, waypoint};
+use crate::facility::{FacKind, FacilityAnswer, FacilityBroker, FacilityQuery};
+use crate::ffi::facility_data_type as fdt;
+
+fn fac_session(exports: bool) -> (Session<FakeApi>, Sender<ProviderEvent>, Receiver<ProviderEvent>, FacilityBroker) {
+    let t0 = Instant::now();
+    let mut s = Session::new(FakeApi { facilities: exports, ..FakeApi::default() }, WatchdogConfig::default(), t0);
+    s.texts = text::TextQueue::default();
+    // own broker: tests must not race on the process-wide one
+    let broker = FacilityBroker::default();
+    s.facilities = broker.clone();
+    s.register();
+    let (tx, rx) = channel();
+    (s, tx, rx, broker)
+}
+
+fn fac_requests(s: &Session<FakeApi>) -> Vec<(u32, u32, String)> {
+    s.api
+        .calls
+        .iter()
+        .filter_map(|(id, c)| match c {
+            Call::FacReq { req, icao, .. } => Some((*id, *req, icao.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Run a lookup on another thread while the session pumps; `answer` scripts the sim's reply
+/// to each new request (send id, request id, ident).
+fn lookup_while_pumping(
+    s: &mut Session<FakeApi>,
+    tx: &Sender<ProviderEvent>,
+    broker: &FacilityBroker,
+    queries: Vec<FacilityQuery>,
+    timeout: Duration,
+    mut answer: impl FnMut(u32, u32, &str) -> Vec<Vec<u8>>,
+) -> Option<Vec<FacilityAnswer>> {
+    let b = broker.clone();
+    let h = std::thread::spawn(move || b.lookup(&queries, timeout));
+    let mut seen = 0;
+    for _ in 0..5000 {
+        let _ = s.step(Instant::now(), tx);
+        let reqs = fac_requests(s);
+        for (send_id, req, icao) in reqs.iter().skip(seen) {
+            for m in answer(*send_id, *req, icao) {
+                s.api.queue.push_back(Ok(m));
+            }
+        }
+        seen = reqs.len();
+        if h.is_finished() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    h.join().unwrap()
+}
+
+#[test]
+fn facility_lookup_goes_through_the_session_and_reads_routes() {
+    let (mut s, tx, rx, broker) = fac_session(true);
+    assert!(broker.available());
+    let queries = vec![FacilityQuery::new(FacKind::Waypoint, "aneki", ""), FacilityQuery::new(FacKind::Vor, "XXX", "")];
+    let got = lookup_while_pumping(&mut s, &tx, &broker, queries, Duration::from_secs(3), |_, req, icao| match icao {
+        "ANEKI" => vec![
+            msg_fac(29, req, fdt::WAYPOINT, &waypoint(49.72, 8.47, "ED"), false),
+            msg_fac(29, req, fdt::ROUTE, &route("UZ650", Some(("DIBIR", "ED", 49.5, 8.9)), Some(("KOPOR", "ED", 50.0, 8.0))), false),
+            msg_end(30, req),
+        ],
+        _ => vec![msg_end(30, req)],
+    })
+    .expect("answered");
+    let FacilityAnswer::Found { lat, region, routes, .. } = &got[0] else { panic!("{got:?}") };
+    assert_eq!((*lat, region.as_str()), (49.72, "ED"));
+    assert_eq!(routes[0].airway, "UZ650");
+    assert_eq!(routes[0].next.as_ref().map(|f| f.ident.as_str()), Some("DIBIR"));
+    assert_eq!(got[1], FacilityAnswer::NotFound);
+    // definitions once: every field of every kind, then the requests with the EX1 type byte
+    let defs = s.api.calls.iter().filter(|(_, c)| matches!(c, Call::FacDef { .. })).count();
+    assert_eq!(defs, FacKind::ALL.iter().map(|k| k.fields().len()).sum::<usize>());
+    assert!(
+        s.api.calls.iter().any(|(_, c)| matches!(c, Call::FacReq { icao, kind: Some(b'W'), region, .. } if icao == "ANEKI" && region.is_empty()))
+    );
+    assert!(errors(&drain(&rx)).is_empty());
+
+    // a second lookup reuses the definitions; an ambiguous ident lists its candidates
+    let got = lookup_while_pumping(&mut s, &tx, &broker, vec![FacilityQuery::new(FacKind::Ndb, "KPT", "")], Duration::from_secs(3), |_, req, _| {
+        vec![msg_minimal(31, req, &[(b'N', "KPT", "ED", 47.7, 10.3), (b'N', "KPT", "UU", 55.0, 37.0)])]
+    })
+    .unwrap();
+    assert!(matches!(&got[0], FacilityAnswer::Ambiguous(v) if v.len() == 2));
+    assert_eq!(s.api.calls.iter().filter(|(_, c)| matches!(c, Call::FacDef { .. })).count(), defs);
+}
+
+#[test]
+fn facility_exception_means_not_found_and_is_no_error() {
+    let (mut s, tx, rx, broker) = fac_session(true);
+    let queries = vec![FacilityQuery::new(FacKind::Waypoint, "NOPE", ""), FacilityQuery::new(FacKind::Airport, "EDDF", "")];
+    let got = lookup_while_pumping(&mut s, &tx, &broker, queries, Duration::from_secs(3), |send_id, req, icao| {
+        if icao == "NOPE" {
+            vec![msg_exception(1, send_id, 0)]
+        } else {
+            vec![msg_fac(29, req, fdt::AIRPORT, &position(50.03, 8.57), true), msg_end(30, req)]
+        }
+    })
+    .unwrap();
+    assert_eq!(got[0], FacilityAnswer::NotFound);
+    assert!(matches!(got[1], FacilityAnswer::Found { lat, .. } if lat == 50.03));
+    assert!(errors(&drain(&rx)).is_empty());
+}
+
+#[test]
+fn rejected_facility_definition_switches_the_source_off() {
+    let (mut s, tx, rx, broker) = fac_session(true);
+    // the sim stays silent: skipped after the timeout
+    let got = lookup_while_pumping(&mut s, &tx, &broker, vec![FacilityQuery::new(FacKind::Waypoint, "ANEKI", "")], Duration::from_millis(200), |_, _, _| vec![]);
+    assert_eq!(got, None);
+    // now it rejects one definition field: the source is off for this session, no error event
+    let def_id = s.api.calls.iter().find(|(_, c)| matches!(c, Call::FacDef { .. })).map(|(i, _)| *i).unwrap();
+    s.api.queue.push_back(Ok(msg_exception(28, def_id, 1)));
+    run_queue(&mut s, &tx, Instant::now()).unwrap();
+    assert!(!broker.available());
+    assert_eq!(broker.lookup(&[FacilityQuery::new(FacKind::Vor, "FFM", "")], Duration::from_secs(2)), None);
+    assert!(errors(&drain(&rx)).is_empty());
+}
+
+#[test]
+fn without_facility_exports_or_session_the_lookup_is_skipped_at_once() {
+    let (mut s, tx, _rx, broker) = fac_session(false);
+    let t = Instant::now();
+    let got = lookup_while_pumping(&mut s, &tx, &broker, vec![FacilityQuery::new(FacKind::Vor, "FFM", "")], Duration::from_secs(3), |_, _, _| vec![]);
+    assert_eq!(got, None);
+    assert!(t.elapsed() < Duration::from_secs(1), "{:?}", t.elapsed());
+    assert!(fac_requests(&s).is_empty());
+    assert!(!broker.available());
+    // a session that ends is no longer announced
+    let (s2, _, _, broker2) = fac_session(true);
+    assert!(broker2.available());
+    drop(s2);
+    assert!(!broker2.available());
+}
+
+#[test]
+fn facility_messages_cut_short_never_panic_the_session() {
+    let (mut s, tx, _rx, _broker) = fac_session(true);
+    let full = msg_fac(29, crate::facility::REQ_BASE, fdt::WAYPOINT, &waypoint(1.0, 2.0, "ED"), false);
+    for n in 0..full.len() {
+        s.api.queue.push_back(Ok(full[..n].to_vec()));
+    }
+    run_queue(&mut s, &tx, Instant::now()).unwrap();
 }

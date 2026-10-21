@@ -4,7 +4,7 @@ import type { Controller, LocatedController, Network, OnlineSummary, OnlineView 
 import { haversineNm } from "./format";
 import { fmt, fmtAltitude } from "./i18n/number";
 import { useT } from "./i18n";
-import { FACILITY_LABEL, NETWORK_LABEL } from "./onlineText";
+import { FACILITY_LABEL, NETWORK_LABEL, networkStatuses, trafficShown } from "./onlineText";
 import { userMessage } from "./errors";
 import ErrorNotice from "./ErrorNotice";
 import Collapsible from "./ui/Collapsible";
@@ -52,11 +52,13 @@ export default function OnlinePanel({ summary, view, origin }: Props) {
   const [frozen, setFrozen] = useState(false);
   const orderRef = useRef<string[]>([]);
   const sortedFeedRef = useRef<number | null | undefined>(undefined);
+  /** Show these networks' traffic on the map (enables a disabled one, like the map's network choice). */
+  const show = (networks: Network[]) => {
+    setError(null);
+    invoke("online_set_shown", { networks }).catch((e) => setError(String(e)));
+  };
   if (!summary?.enabled) {
-    const enable = (network: Network) => {
-      setError(null);
-      invoke("online_set_enabled", { network, enabled: true }).catch((e) => setError(String(e)));
-    };
+    const enable = (network: Network) => show([network]);
     return (
       <section className="online-panel">
         <div className="tile-label">Online · VATSIM · IVAO</div>
@@ -65,6 +67,22 @@ export default function OnlinePanel({ summary, view, origin }: Props) {
         <div className="online-actions">
           <button onClick={() => enable("vatsim")}>{t("shell.online.enable", { name: "VATSIM" })}</button>{" "}
           <button onClick={() => enable("ivao")}>{t("shell.online.enable", { name: "IVAO" })}</button>
+        </div>
+      </section>
+    );
+  }
+  // enabled but hidden on the map: the feeds poll in the background (track history), nothing to list
+  if (!trafficShown(summary)) {
+    const running = networkStatuses(summary)
+      .filter((n) => n.enabled)
+      .map((n) => n.network);
+    return (
+      <section className="online-panel">
+        <div className="tile-label">Online · {networkTitle(summary)}</div>
+        <div className="detail">{t("shell.online.hidden", { networks: running.map((n) => NETWORK_LABEL[n]).join(" + ") })}</div>
+        {error && <ErrorNotice error={error} context="settings" compact onDismiss={() => setError(null)} />}
+        <div className="online-actions">
+          <button onClick={() => show(running)}>{t("shell.online.show")}</button>
         </div>
       </section>
     );

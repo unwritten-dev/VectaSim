@@ -175,7 +175,7 @@
     "reset": "Zurücksetzen",
     "folder": "Ordner",
     "savedMark": "✓ gespeichert",
-    "about": "VectaSim {version} · Dein Logbuch liegt nur auf diesem PC – ohne Konto, ohne Cloud. Daten: Karte © OpenStreetMap-Mitwirkende, OpenFreeMap · Flughäfen OurAirports (Public Domain) · Wetter NOAA aviationweather.gov (Ersatz VATSIM) · Online-Verkehr VATSIM · IVAO · Flugpläne SimBrief (Navigraph) · Flugzeugfotos Planespotters.net · Satellitenbild EOxCloudless 2017 von EOX IT Services GmbH (enthält veränderte Copernicus-Sentinel-Daten, CC BY 4.0) · Niederschlagsradar RainViewer · Wolken EUMETSAT (enthält veränderte Meteosat-Daten) · Ländergrenzen Natural Earth (Public Domain) · Danke an npooky für den ersten Flugtest ·",
+    "about": "VectaSim {version} · Dein Logbuch liegt nur auf diesem PC – ohne Konto, ohne Cloud. Daten: Karte © OpenStreetMap-Mitwirkende, OpenFreeMap · Flughäfen und Funkfeuer OurAirports (Public Domain) · Wetter NOAA aviationweather.gov (Ersatz VATSIM) · Online-Verkehr VATSIM · IVAO · Flugpläne SimBrief (Navigraph) · Flugzeugfotos Planespotters.net · Satellitenbild EOxCloudless 2017 von EOX IT Services GmbH (enthält veränderte Copernicus-Sentinel-Daten, CC BY 4.0) · Niederschlagsradar RainViewer · Wolken EUMETSAT (enthält veränderte Meteosat-Daten) · Ländergrenzen Natural Earth (Public Domain) · Danke an npooky für den ersten Flugtest ·",
     "thirdParty": "Lizenzen Dritter",
     "sim": {
       "textLanding": "Landerate im Simulator anzeigen (MSFS)",
@@ -256,7 +256,7 @@
         "help": "Wolkenfreies Sentinel-2-Mosaik (EOxCloudless 2017) statt der gezeichneten Karte, mit Ortsnamen und Grenzen darüber. Gilt für Karte und Track-Karte – dieselbe Wahl wie der Knopf „Satellit“. Die Kacheln lädt die App nur, solange das an ist."
       },
       "online": {
-        "hint": "wie „Verkehr“ auf der Karte · ruft den öffentlichen Feed des Netzes ab",
+        "hint": "Ein eingeschaltetes Netz wird ab App-Start im Hintergrund alle 60 s abgerufen, auch wenn „Verkehr“ auf der Karte ausgeblendet ist – so zeigt ein angeklicktes Flugzeug bis zu zwei Stunden seiner geflogenen Strecke. Verkehrsdaten werden nur geladen, solange das Netz hier eingeschaltet ist.",
         "notOn": "{name} nicht eingeschaltet",
         "notOff": "{name} nicht ausgeschaltet"
       }

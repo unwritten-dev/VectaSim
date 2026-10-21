@@ -310,7 +310,11 @@
       "off": "{name} off",
       "error": "{name} on ({error} – next attempt in {seconds} s)",
       "waiting": "{name} on (waiting for first download …)",
-      "on": "{name} on ({pilots} pilots, {controllers} controllers)"
+      "on": "{name} on ({pilots} pilots, {controllers} controllers)",
+      "map": {
+        "shown": "shown on the map",
+        "hidden": "hidden on the map, polled every {seconds} s in the background"
+      }
     },
     "line": {
       "loading": "Online traffic: loading status …",
@@ -326,6 +330,9 @@
       "rowLabel": "Online {name}",
       "off": "off",
       "on": "on",
+      "shown": "shown on the map",
+      "hidden": "hidden on the map",
+      "background": "background polling every {seconds} s",
       "noFetch": "not downloaded yet",
       "counts": "{pilots} pilots, {controllers} controllers",
       "error": "Error: {error} · next attempt in {seconds} s",
@@ -407,6 +414,8 @@
     "online": {
       "off": "Online traffic is off. You can also pick a network on the map next to “Traffic”.",
       "enable": "Enable {name}",
+      "hidden": "Traffic is hidden on the map – {networks} keeps running in the background (flown track of clicked aircraft up to two hours).",
+      "show": "Show on the map",
       "counts": "{pilots} pilots · {controllers} controllers",
       "nextAttempt": "Next attempt in {seconds} s.",
       "nearby": "Nearby traffic",

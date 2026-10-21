@@ -6,7 +6,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import "./maplibreWorker";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { AircraftInfo, Airport, FlightEvent, Metar, NavFix, OnlineSummary, OnlineView, Pilot, TrackSample } from "../types";
+import type { AircraftInfo, Airport, FlightEvent, Metar, NavFix, OnlineSummary, OnlineView, Pilot, RouteResolution, TrackSample } from "../types";
 import { WAKE_SIZE, icaoFromAtcModel, trafficColors, wakeCategory } from "./aircraftIcons";
 import { Traffic3D } from "./trafficModel";
 import type { TrafficHistoryFix, ViewBox } from "./traffic3d";
@@ -40,12 +40,12 @@ import {
   metarsGeoJson,
   onPilotClick,
   pilotsGeoJson,
-  routeLineGeoJson,
   selectedGeoJson,
   setGroupVisible,
   type OnlineLayerGroup,
 } from "./online";
-import TrafficCard from "./TrafficCard";
+import TrafficCard, { type TrafficRouteState } from "./TrafficCard";
+import { trafficRouteCoords, trafficRouteDraw, trafficRouteGeoJson, type TrafficRouteDraw } from "./trafficRoute";
 import { useTrafficSelection } from "./trafficHooks";
 import { MOVE_REFRESH, boundedDebounce } from "./debounce";
 import { SELECT_TRAFFIC_EVENT, greatCircle, sameTraffic, type SelectTrafficDetail, type TrafficRef } from "./trafficInfo";
@@ -201,8 +201,9 @@ interface Props {
   /** Receives the online traffic/ATC currently in view (for the Online panel). */
   onOnlineView?: (view: OnlineView | null, center: { lat: number; lon: number }) => void;
   /**
-   * Some online feed on (settings `online_vatsim` / `online_ivao`). The "Verkehr" toggle (TrafficToggle) switches the
-   * feeds themselves (online_set_networks), so map toggle and setting can never disagree.
+   * The map shows online traffic: some network enabled (settings `online_vatsim` / `online_ivao`) and shown
+   * (`OnlineSummary.shown`, the "Verkehr" toggle – TrafficToggle, online_set_shown). Hidden, the feeds keep polling in
+   * the background (track history for the curtain); the map then neither queries nor draws traffic or ATC.
    */
   trafficOn?: boolean;
   /** Rendered top left above the map controls (recording status pill). */
@@ -265,6 +266,8 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
   const layersRef = useRef(layers);
   const trafficOnRef = useRef(trafficOn);
   trafficOnRef.current = trafficOn;
+  /** The map effect's (debounced) online refresh, for the show/hide effect below. */
+  const refreshOnlineRef = useRef<() => void>(() => {});
   /** Traffic and ATC need the feed; the stored layer choice only applies while it runs. */
   const groupVisible = (g: OnlineLayerGroup, state: LayerState = layersRef.current) => (g === "weather" ? state.weather : trafficOnRef.current && state[g]);
   const onOnlineViewRef = useRef(onOnlineView);
@@ -285,7 +288,9 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
   const [routeShown, setRouteShown] = useState(false);
   /** Ring position and route line as last drawn, re-drawn after a theme change. */
   const selectedPosRef = useRef<{ lon: number; lat: number } | null>(null);
-  const trafficRouteRef = useRef<Array<[number, number]> | null>(null);
+  const trafficRouteRef = useRef<TrafficRouteDraw | null>(null);
+  /** What the card says under its route button (resolving, n of m resolved, great circle). */
+  const [trafficRoute, setTrafficRoute] = useState<TrafficRouteState | null>(null);
   const setFollowTraffic = (v: boolean) => {
     followTrafficRef.current = v;
     setFollowTrafficState(v);
@@ -576,6 +581,15 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
           // an online:summary before the first style load: no sources yet, the load handler asks again
           if (!readyRef.current) return;
           const c = map.getCenter();
+          // traffic hidden: the feeds poll on in the background (online:summary keeps coming), the
+          // map asks for nothing and drops what it drew; showing it again refreshes at once
+          if (!trafficOnRef.current) {
+            setIfChanged("vatsim-pilots", pilotsGeoJson([]));
+            traffic3d.setPilots([]);
+            setIfChanged("vatsim-atc", atcGeoJson([]));
+            onOnlineViewRef.current?.(null, { lat: c.lat, lon: c.lng });
+            return;
+          }
           invoke<OnlineView>("online_snapshot_in_bbox", { ...viewBbox(map), limit: 1500 })
             .then((v) => {
               setIfChanged("vatsim-pilots", pilotsGeoJson(v.pilots));
@@ -588,6 +602,7 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
         },
         ...MOVE_REFRESH.online,
       );
+      refreshOnlineRef.current = refreshOnline;
 
       // METARs only for the biggest airports in view (<= 40), only when zoomed in and the
       // layer is on; the backend caches each station for 10 min, so re-asking is cheap.
@@ -689,7 +704,7 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
         src("airports")?.setData(airportsGeoJson([...airportsRef.current.values()]));
         src("route")?.setData(routeGeoJson(routeRef.current ?? []));
         src("traffic-selected")?.setData(selectedGeoJson(selectedPosRef.current));
-        src("traffic-route")?.setData(routeLineGeoJson(trafficRouteRef.current));
+        src("traffic-route")?.setData(trafficRouteGeoJson(trafficRouteRef.current));
         drawOwnRef.current();
         refreshOnline();
         refreshMetars();
@@ -815,6 +830,7 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
         window.removeEventListener("resize", resize);
         window.removeEventListener(MAP_VISIBLE_EVENT, resize);
         refreshOnline.cancel();
+        refreshOnlineRef.current = () => {};
         queryMetars.cancel();
         refreshAirportsSoon.cancel();
         syncTraffic3dSoon.cancel();
@@ -978,25 +994,43 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
 
   const dep = sel?.pilot?.departure ?? "";
   const arr = sel?.pilot?.arrival ?? "";
+  const filedRoute = sel?.pilot?.route ?? "";
   useEffect(() => {
     let alive = true;
-    const draw = (points: Array<[number, number]> | null) => {
-      trafficRouteRef.current = points;
+    const draw = (d: TrafficRouteDraw | null) => {
+      trafficRouteRef.current = d;
       const map = mapRef.current;
-      if (map && readyRef.current) (map.getSource("traffic-route") as maplibregl.GeoJSONSource | undefined)?.setData(routeLineGeoJson(points));
+      if (map && readyRef.current) (map.getSource("traffic-route") as maplibregl.GeoJSONSource | undefined)?.setData(trafficRouteGeoJson(d));
     };
     if (!routeShown || !dep || !arr) {
       draw(null);
+      setTrafficRoute(null);
       return;
     }
-    const get = (ident: string) => invoke<{ airport: Airport } | null>("get_airport", { ident }).then((d) => d?.airport ?? null);
-    Promise.all([get(dep), get(arr)])
-      .then(([a, b]) => {
+    setTrafficRoute({ status: "resolving" });
+    // the filed route through the waypoints the backend could place (MSFS, X-Plane, navaids);
+    // if that fails, the great circle between the two airports as before
+    const greatCircleOnly = () => {
+      const get = (ident: string) => invoke<{ airport: Airport } | null>("get_airport", { ident }).then((d) => d?.airport ?? null);
+      return Promise.all([get(dep), get(arr)]).then(([a, b]): TrafficRouteDraw | null =>
+        a && b ? { legs: [{ coords: greatCircle({ lat: a.latitude, lon: a.longitude }, { lat: b.latitude, lon: b.longitude }), bridge: true }], fixes: [] } : null,
+      );
+    };
+    invoke<RouteResolution>("traffic_route_resolve", { dep, arr, route: filedRoute })
+      .then((res) => {
+        if (alive) setTrafficRoute({ status: "done", res });
+        return trafficRouteDraw(res);
+      })
+      .catch(() => {
+        if (alive) setTrafficRoute({ status: "failed" });
+        return greatCircleOnly();
+      })
+      .then((d) => {
         if (!alive) return;
-        const points = a && b ? greatCircle({ lat: a.latitude, lon: a.longitude }, { lat: b.latitude, lon: b.longitude }) : null;
-        draw(points);
+        draw(d);
+        const points = trafficRouteCoords(d);
         const map = mapRef.current;
-        if (map && points) {
+        if (map && points.length >= 2) {
           // both ends in view (unwrapped longitudes keep an antimeridian route in one box)
           const bounds = points.reduce((bb, p) => bb.extend(p), new maplibregl.LngLatBounds(points[0], points[0]));
           suspendOwnFollow();
@@ -1016,7 +1050,7 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
     return () => {
       alive = false;
     };
-  }, [routeShown, dep, arr, routeReady, suspendOwnFollow]);
+  }, [routeShown, dep, arr, filedRoute, routeReady, suspendOwnFollow]);
 
   // the Dispatch panel's online list selects an aircraft: centre it and open its card
   useEffect(() => {
@@ -1074,13 +1108,14 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
     if (g === "weather") window.dispatchEvent(new Event("vectasim:layers"));
   };
 
-  // feed switched (map toggle or elsewhere): show/hide traffic and ATC with it
+  // traffic shown / hidden (map toggle, or the network switched in the settings): traffic and ATC with it
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !readyRef.current) return;
     setGroupVisible(map, "traffic", groupVisible("traffic"));
     setGroupVisible(map, "atc", groupVisible("atc"));
     syncTraffic3dRef.current();
+    refreshOnlineRef.current();
   }, [trafficOn, routeReady]);
 
   const toggle3d = () => {
@@ -1174,6 +1209,7 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
           own={telemetry && Number.isFinite(telemetry.latitude) ? { lat: telemetry.latitude, lon: telemetry.longitude } : null}
           following={followTraffic}
           routeShown={routeShown}
+          route={routeShown ? trafficRoute : null}
           onFollow={toggleFollowTraffic}
           onRoute={() => setRouteShown(!routeShown)}
           onClose={closeTraffic}

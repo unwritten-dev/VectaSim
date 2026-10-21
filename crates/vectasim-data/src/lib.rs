@@ -1,5 +1,6 @@
 //! Airports and runways from OurAirports (public domain), embedded at build
-//! time and indexed in memory. ~49k airports / ~35k runways.
+//! time and indexed in memory. ~49k airports / ~35k runways. Radio navaids (`navaids`) for
+//! placing filed online routes.
 //!
 //! The CSVs in `data/` are the source of truth; `build.rs` precompiles them into a compact binary
 //! index (`binfmt.rs`, strings in one table, grid precomputed) that `load()` opens in a few ms;
@@ -13,6 +14,7 @@
 
 mod binfmt;
 pub mod countries;
+pub mod navaids;
 mod source;
 
 use binfmt::Layout;

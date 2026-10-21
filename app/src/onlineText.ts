@@ -54,6 +54,27 @@ export function networkStatuses(summary: OnlineSummary | null): NetworkStatus[] 
   });
 }
 
+/**
+ * Networks whose traffic the map draws: enabled *and* shown (the map's traffic toggle). Summaries
+ * from older builds have no `shown`: then every enabled network is shown (traffic on = feed on).
+ */
+export function shownChoice(summary: Pick<OnlineSummary, "network" | "shown"> | null): OnlineSummary["network"] {
+  if (!summary) return "off";
+  return summary.shown ?? summary.network;
+}
+
+/** The map shows some online traffic (LiveMap `trafficOn`, the "Verkehr" toggle). */
+export function trafficShown(summary: Pick<OnlineSummary, "network" | "shown"> | null): boolean {
+  return shownChoice(summary) !== "off";
+}
+
+/** Enabled networks that run only in the background (not shown on the map). */
+export function backgroundNetworks(summary: OnlineSummary | null): Network[] {
+  return networkStatuses(summary)
+    .filter((n) => n.enabled && n.shown === false)
+    .map((n) => n.network);
+}
+
 /** Networks that are on, for `online_set_networks` after toggling one of them. */
 export function networksWith(summary: OnlineSummary | null, network: Network, on: boolean): Network[] {
   const enabled = new Set(networkStatuses(summary).filter((n) => n.enabled).map((n) => n.network));
@@ -64,13 +85,21 @@ export function networksWith(summary: OnlineSummary | null, network: Network, on
 
 const noDot = (s: string) => s.replace(/\.\s*$/, "");
 
-/** "VATSIM an (2 176 Piloten, 211 Lotsen)" · "IVAO aus" · "IVAO an (IVAO ist nicht erreichbar – nächster Versuch in 30 s)". */
+/**
+ * "VATSIM an (2 176 Piloten, 211 Lotsen) – auf der Karte angezeigt" · "IVAO aus" ·
+ * "IVAO an (IVAO ist nicht erreichbar – nächster Versuch in 30 s) – auf der Karte ausgeblendet, …".
+ */
 export function networkPart(n: NetworkStatus): string {
   const name = n.label || NETWORK_LABEL[n.network];
   if (!n.enabled) return t("online.part.off", { name });
-  if (n.lastError) return t("online.part.error", { name, error: noDot(userMessage(n.lastError, n.network).title), seconds: n.nextPollS });
-  if (!n.fetchedMs) return t("online.part.waiting", { name });
-  return t("online.part.on", { name, pilots: fmt(n.pilots), controllers: fmt(n.controllers) });
+  const state = n.lastError
+    ? t("online.part.error", { name, error: noDot(userMessage(n.lastError, n.network).title), seconds: n.nextPollS })
+    : !n.fetchedMs
+      ? t("online.part.waiting", { name })
+      : t("online.part.on", { name, pilots: fmt(n.pilots), controllers: fmt(n.controllers) });
+  if (n.shown == null) return state;
+  const map = n.shown ? t("online.part.map.shown") : t("online.part.map.hidden", { seconds: n.backgroundPollS ?? 60 });
+  return `${state} – ${map}`;
 }
 
 /** Status line in Settings → Display: "Online traffic: VATSIM on (…) · IVAO off". */
@@ -110,6 +139,8 @@ export function fmtAgo(seconds: number | null | undefined): string | null {
 export function diagText(n: NetworkStatus): string {
   if (!n.enabled) return t("online.diag.off");
   const parts = [t("online.diag.on")];
+  if (n.shown != null) parts.push(n.shown ? t("online.diag.shown") : t("online.diag.hidden"));
+  if (n.background) parts.push(t("online.diag.background", { seconds: n.backgroundPollS ?? 60 }));
   const host = sourceHost(n.source);
   if (host) parts.push(host);
   parts.push(fmtAgo(n.ageS) ?? t("online.diag.noFetch"));

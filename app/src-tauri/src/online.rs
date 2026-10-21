@@ -6,6 +6,13 @@
 //! (`online_vatsim`, `online_ivao`; IVAO defaults to off, so existing installs keep the
 //! VATSIM-only behaviour) and are restored at startup. Each poll of either feed emits
 //! `online:summary` ([`OnlineSummary`]: totals plus one status per network).
+//!
+//! *Enabled* (Settings → Online, `online_set_networks` / `online_set_enabled`) and *shown on the
+//! map* (the map's traffic toggle, `online_set_shown`, setting `online_shown`) are separate: an
+//! enabled network is polled from app start on – every 15 s while its traffic is shown, every
+//! 60 s in the background (hidden, or the window hidden) – so its track history (the altitude
+//! curtain of a clicked aircraft) covers up to two hours. Hiding never stops a feed; disabling
+//! does and drops its history.
 
 use serde::Serialize;
 use std::collections::HashSet;
@@ -14,10 +21,14 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
 use vectasim_data::{Airport, AirportIndex, haversine_nm};
 use vectasim_online::{Controller, FeedStatus, Metar, MetarClient, NearbyPilot, Network, OnlineFeed, Pilot, TrackFix};
+use vectasim_route::{RouteCache, RouteResolution};
 use vectasim_store::{MetarSlot, Store};
 
 pub const SETTING_VATSIM: &str = "online_vatsim";
 pub const SETTING_IVAO: &str = "online_ivao";
+/// Networks whose traffic the map shows ("vatsim", "ivao", "vatsim,ivao"; "" = hidden). Missing
+/// (installs from before the split): the enabled networks, as the map showed them then.
+pub const SETTING_SHOWN: &str = "online_shown";
 const DEFAULT_PILOT_LIMIT: usize = 1500;
 const CONTROLLER_LIMIT: usize = 300;
 /// The map asks for at most this many airports per view; more would also break the NOAA batch size.
@@ -32,11 +43,13 @@ pub struct OnlineState {
     pub vatsim: OnlineFeed,
     pub ivao: OnlineFeed,
     pub metar: MetarClient,
+    /// Resolved filed routes of clicked traffic, for this app session (`traffic_route_resolve`).
+    pub routes: Arc<RouteCache>,
 }
 
 impl Default for OnlineState {
     fn default() -> Self {
-        Self { vatsim: OnlineFeed::vatsim(), ivao: OnlineFeed::ivao(), metar: MetarClient::new() }
+        Self { vatsim: OnlineFeed::vatsim(), ivao: OnlineFeed::ivao(), metar: MetarClient::new(), routes: Arc::default() }
     }
 }
 
@@ -55,6 +68,30 @@ impl OnlineState {
     /// Totals over the enabled networks plus each network's own status.
     pub fn summary(&self) -> OnlineSummary {
         OnlineSummary::from_statuses(self.feeds().map(|f| f.status()).to_vec(), vectasim_core::now_ms())
+    }
+
+    /// The window is visible (`set_ui_visible`); hidden, the feeds poll at the background rate.
+    pub fn set_ui_visible(&self, visible: bool) {
+        for f in self.feeds() {
+            f.set_ui_visible(visible);
+        }
+    }
+}
+
+/// The stored `online_shown` value: None when the setting was never written.
+pub fn parse_shown(value: Option<&str>) -> Option<Vec<Network>> {
+    value.map(|v| v.split(',').filter_map(|n| Network::from_id(n.trim())).collect())
+}
+
+fn shown_value(networks: &[Network]) -> String {
+    Network::ALL.iter().filter(|n| networks.contains(*n)).map(|n| n.id()).collect::<Vec<_>>().join(",")
+}
+
+fn choice_id(on: &[&FeedStatus]) -> &'static str {
+    match on {
+        [] => "off",
+        [one] => one.network.id(),
+        _ => "both",
     }
 }
 
@@ -82,8 +119,10 @@ pub struct NetworkStatus {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OnlineSummary {
-    /// "off", "vatsim", "ivao" or "both".
+    /// Enabled networks: "off", "vatsim", "ivao" or "both".
     pub network: &'static str,
+    /// Networks enabled *and* shown on the map (what the map draws): "off", "vatsim", "ivao", "both".
+    pub shown: &'static str,
     pub enabled: bool,
     pub pilots: usize,
     pub controllers: usize,
@@ -102,16 +141,14 @@ pub struct OnlineSummary {
 impl OnlineSummary {
     pub fn from_statuses(statuses: Vec<FeedStatus>, now: u64) -> Self {
         let on: Vec<&FeedStatus> = statuses.iter().filter(|s| s.enabled).collect();
-        let network = match on.as_slice() {
-            [] => "off",
-            [one] => one.network.id(),
-            _ => "both",
-        };
+        let network = choice_id(&on);
+        let shown = choice_id(&on.iter().copied().filter(|s| s.shown).collect::<Vec<_>>());
         let failing = on.iter().find(|s| s.last_error.is_some());
         let fetched_ms =
             if on.is_empty() || on.iter().any(|s| s.fetched_ms.is_none()) { None } else { on.iter().filter_map(|s| s.fetched_ms).min() };
         Self {
             network,
+            shown,
             enabled: !on.is_empty(),
             pilots: on.iter().map(|s| s.pilots).sum(),
             controllers: on.iter().map(|s| s.controllers).sum(),
@@ -161,16 +198,22 @@ pub fn start_feed(app: &AppHandle, feed: &OnlineFeed) {
     }));
 }
 
-/// Startup: resume the networks the user had on.
+/// Startup: resume the networks the user had on – polled from now on whether or not their
+/// traffic is shown, so the track history is there when the map shows it.
 pub fn restore(app: &AppHandle, store: &Store) {
     let online = app.state::<OnlineState>();
+    let enabled: Vec<Network> =
+        Network::ALL.into_iter().filter(|n| store.get_setting(setting_key(*n)).ok().flatten().as_deref() == Some("1")).collect();
+    let shown = parse_shown(store.get_setting(SETTING_SHOWN).ok().flatten().as_deref()).unwrap_or_else(|| enabled.clone());
     for network in Network::ALL {
-        let on = store.get_setting(setting_key(network)).ok().flatten().as_deref() == Some("1");
+        let on = enabled.contains(&network);
         if network == Network::Vatsim {
             online.metar.set_vatsim_fallback(on);
         }
+        let feed = online.feed(network);
+        feed.set_shown(shown.contains(&network));
         if on {
-            start_feed(app, online.feed(network));
+            start_feed(app, feed);
         }
     }
 }
@@ -333,7 +376,10 @@ pub fn online_set_enabled(
     Ok(summary)
 }
 
-/// Set exactly these networks on (the map's VATSIM / IVAO / both choice; empty = traffic off).
+/// Set exactly these networks enabled (Settings → Online; empty = no network). Disabling one
+/// stops its poller and drops its snapshot and track history; what the map shows is separate
+/// (`online_set_shown`) – until the map's toggle was first used (`online_shown` never written),
+/// the map shows the enabled networks, as before the split.
 #[tauri::command]
 pub fn online_set_networks(
     networks: Vec<String>,
@@ -342,8 +388,38 @@ pub fn online_set_networks(
     online: State<OnlineState>,
 ) -> Result<OnlineSummary, String> {
     let wanted = networks.iter().map(|n| parse_network(n)).collect::<Result<Vec<_>, _>>()?;
+    let follow_enabled = store.get_setting(SETTING_SHOWN).ok().flatten().is_none();
     for network in Network::ALL {
         apply_enabled(&app, &store, &online, network, wanted.contains(&network))?;
+        if follow_enabled {
+            online.feed(network).set_shown(wanted.contains(&network));
+        }
+    }
+    let summary = online.summary();
+    let _ = app.emit("online:summary", &summary);
+    Ok(summary)
+}
+
+/// The map's traffic toggle: show exactly these networks' traffic (empty = hide the traffic).
+/// Purely visual for enabled networks – hiding only slows their pollers to the background rate
+/// and keeps snapshot and history. Showing a network that is disabled enables it (picking
+/// traffic on the map is the opt-in to download it).
+#[tauri::command]
+pub fn online_set_shown(
+    networks: Vec<String>,
+    app: AppHandle,
+    store: State<Store>,
+    online: State<OnlineState>,
+) -> Result<OnlineSummary, String> {
+    let wanted = networks.iter().map(|n| parse_network(n)).collect::<Result<Vec<_>, _>>()?;
+    store.set_setting(SETTING_SHOWN, &shown_value(&wanted)).map_err(|e| e.to_string())?;
+    for network in Network::ALL {
+        let feed = online.feed(network);
+        let show = wanted.contains(&network);
+        feed.set_shown(show);
+        if show && !feed.is_enabled() {
+            apply_enabled(&app, &store, &online, network, true)?;
+        }
     }
     let summary = online.summary();
     let _ = app.emit("online:summary", &summary);
@@ -367,7 +443,8 @@ pub fn online_snapshot_in_bbox(
     airports: State<Arc<AirportIndex>>,
 ) -> OnlineView {
     let summary = online.summary();
-    let snaps: Vec<_> = online.feeds().iter().filter_map(|f| f.snapshot()).collect();
+    // only what the map shows: a network enabled for its history alone draws nothing
+    let snaps: Vec<_> = online.feeds().iter().filter(|f| f.is_shown()).filter_map(|f| f.snapshot()).collect();
     if snaps.is_empty() {
         return OnlineView { pilots: vec![], pilots_truncated: false, controllers: vec![], enroute: vec![], summary };
     }
@@ -406,12 +483,57 @@ pub fn online_pilot(cid: u64, network: Option<String>, online: State<OnlineState
     })
 }
 
-/// The flown track of one pilot as the feed reported it since the app (or the network) started:
-/// at most two hours / 480 fixes, oldest first (vectasim_online::history). The live map draws the
-/// selected aircraft's altitude curtain from it.
+/// The flown track of one pilot as the feed reported it since the app (or the network) started –
+/// also while the traffic was hidden on the map (background polling): at most two hours / 480
+/// fixes, oldest first (vectasim_online::history). The live map draws the selected aircraft's
+/// altitude curtain from it.
 #[tauri::command]
 pub fn traffic_track(network: String, cid: u64, online: State<OnlineState>) -> Result<Vec<TrackFix>, String> {
     Ok(online.feed(parse_network(&network)?).track(cid))
+}
+
+/// Longest route text resolved (a filed route is a few hundred characters).
+const ROUTE_MAX_CHARS: usize = 2000;
+
+/// The filed route of a clicked aircraft as map points (TrafficCard "Show route"): resolved off
+/// the main thread from the running MSFS (SimConnect facility data, through the provider's own
+/// session), an installed X-Plane's nav data and the bundled OurAirports navaids – see
+/// `vectasim_route`. Cached per (departure, arrival, route text, simulator connected) for the
+/// app session; nothing is sent over the network.
+#[tauri::command]
+pub async fn traffic_route_resolve(
+    dep: String,
+    arr: String,
+    route: String,
+    online: State<'_, OnlineState>,
+    airports: State<'_, Arc<AirportIndex>>,
+) -> Result<RouteResolution, String> {
+    let route: String = route.chars().take(ROUTE_MAX_CHARS).collect();
+    let (dep, arr): (String, String) = (dep.chars().take(8).collect(), arr.chars().take(8).collect());
+    let broker = vectasim_simconnect::facility::global();
+    let key = RouteCache::key(&dep, &arr, &route, broker.available());
+    if let Some(hit) = online.routes.get(&key) {
+        return Ok((*hit).clone());
+    }
+    let (airports, cache) = (airports.inner().clone(), online.routes.clone());
+    tauri::async_runtime::spawn_blocking(move || {
+        let started = std::time::Instant::now();
+        let (r, cacheable) = vectasim_route::resolve_here(&dep, &arr, &route, &airports, broker);
+        log::info!(
+            "route {dep}→{arr}: {} of {} waypoints, {} airways expanded, sources {:?}, {} ms",
+            r.resolved_count,
+            r.total,
+            r.airways_expanded,
+            r.sources,
+            started.elapsed().as_millis()
+        );
+        if cacheable {
+            cache.put(key, Arc::new(r.clone()));
+        }
+        r
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -448,6 +570,17 @@ mod tests {
     }
 
     #[test]
+    fn shown_setting_round_trip() {
+        assert_eq!(parse_shown(None), None);
+        assert_eq!(parse_shown(Some("")), Some(vec![]));
+        assert_eq!(parse_shown(Some("ivao")), Some(vec![Network::Ivao]));
+        assert_eq!(parse_shown(Some("vatsim, ivao,garbage")), Some(vec![Network::Vatsim, Network::Ivao]));
+        assert_eq!(shown_value(&[Network::Ivao, Network::Vatsim]), "vatsim,ivao");
+        assert_eq!(shown_value(&[]), "");
+        assert_eq!(parse_shown(Some(&shown_value(&[Network::Ivao]))), Some(vec![Network::Ivao]));
+    }
+
+    #[test]
     fn summary_off_single_and_both() {
         let off = OnlineSummary::from_statuses(vec![FeedStatus::idle(Network::Vatsim), FeedStatus::idle(Network::Ivao)], 0);
         assert_eq!((off.network, off.enabled, off.pilots, off.fetched_ms), ("off", false, 0, None));
@@ -472,7 +605,27 @@ mod tests {
         let waiting = OnlineSummary::from_statuses(vec![on(Network::Vatsim, 100, Some(20_000), None), on(Network::Ivao, 0, None, None)], 30_000);
         assert_eq!(waiting.fetched_ms, None);
 
+        assert_eq!(both.shown, "off");
+
+        // shown on the map: only enabled networks count (IVAO shown but disabled draws nothing)
+        let shown = |mut s: FeedStatus| {
+            s.shown = true;
+            s
+        };
+        let one = OnlineSummary::from_statuses(
+            vec![shown(on(Network::Vatsim, 100, Some(20_000), None)), shown(FeedStatus::idle(Network::Ivao))],
+            30_000,
+        );
+        assert_eq!((one.network, one.shown), ("vatsim", "vatsim"));
+        let hidden = OnlineSummary::from_statuses(
+            vec![on(Network::Vatsim, 100, Some(20_000), None), shown(on(Network::Ivao, 7, Some(1), None))],
+            30_000,
+        );
+        assert_eq!((hidden.network, hidden.shown), ("both", "ivao"));
+
         let json = serde_json::to_value(&both).unwrap();
+        assert_eq!(json["shown"], "off");
+        assert_eq!(json["networks"][1]["backgroundPollS"], 60);
         assert_eq!(json["networks"][1]["network"], "ivao");
         assert_eq!(json["networks"][1]["label"], "IVAO");
         assert_eq!(json["networks"][0]["ageS"], 10);
