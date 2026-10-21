@@ -865,9 +865,10 @@
 }
 
 .rwe-backdrop {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
+  /* its own modal over the debrief (portal into <body>, after the debrief) */
+  position: fixed;
+  inset: var(--titlebar-h, 0) 0 0; /* the title bar (window controls) stays usable */
+  z-index: 50;
   display: flex;
   align-items: flex-start;
   justify-content: center;

@@ -1178,7 +1178,7 @@ fn opt_lerp(a: Option<f64>, b: Option<f64>, f: f64) -> Option<f64> {
 /// Ground course between neighbour samples, ° true; the heading when (almost) stationary.
 fn course_deg(track: &[ApproachSample], i: usize, lo: usize, hi: usize) -> f64 {
     let (a, b) = (&track[i.saturating_sub(1).max(lo)], &track[(i + 1).min(hi)]);
-    let e = (b.longitude - a.longitude).to_radians() * EARTH_R_M * a.latitude.to_radians().cos();
+    let e = crate::landing::dlon_deg(a.longitude, b.longitude).to_radians() * EARTH_R_M * a.latitude.to_radians().cos();
     let n = (b.latitude - a.latitude).to_radians() * EARTH_R_M;
     if e.hypot(n) < 20.0 { track[i].heading_true_deg } else { e.atan2(n).to_degrees().rem_euclid(360.0) }
 }

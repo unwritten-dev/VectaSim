@@ -35,6 +35,9 @@
 //! contact), `VECTASIM_MOCK=bounce`
 //! selects a variant with one bounce, `VECTASIM_MOCK=goaround` one that goes around
 //! from 300 ft on the first final, flies the circuit again and lands (longer loop).
+//! Every loop after the first starts with a `FlightLoaded` event (the textbook variants park
+//! ~0.8 nm from their departure stand, the demo starts in the air), so each loop is a flight
+//! of its own and the jump back is a reload, not a teleport.
 //!
 //! Discontinuity variants (UI checks of the session reset without a sim; the provider
 //! takes its events from [`MockFlight::step`]):
@@ -842,7 +845,8 @@ impl Builder {
             return (0.0, 0.0);
         }
         let down = (self.p.td_fpm * 0.55).max(150.0);
-        let vs = if tau <= 1.2 { 400.0 * (1.0 - tau / 1.2) } else { -down * ((tau - 1.2) / 2.4).min(1.0) };
+        // the gear pushes the aircraft up over ~0.3 s, not in one 10 Hz step (that read as a 3 g spike)
+        let vs = if tau <= 1.2 { 400.0 * (tau / 0.3).min(1.0) * (1.0 - tau / 1.2) } else { -down * ((tau - 1.2) / 2.4).min(1.0) };
         let agl = prev.agl + (prev.vs_fpm + vs) / 2.0 / 60.0 * dt;
         // never back to the ground on the way up
         if tau <= 1.2 { (agl.max(0.01), vs) } else { (agl, vs) }
@@ -968,9 +972,9 @@ impl MockFlight {
     }
 
     /// Everything the provider sends for the tick at `t_s`: usually one telemetry sample,
-    /// plus the discontinuity events of the teleport / reconnect variants (and the demo's
-    /// `FlightLoaded` at the start of every loop after the first), or nothing while the
-    /// reconnect variant's link is down.
+    /// plus the discontinuity events of the teleport / reconnect variants (and a
+    /// `FlightLoaded` at the start of every loop after the first, all variants but teleport),
+    /// or nothing while the reconnect variant's link is down.
     pub fn step(&mut self, t_s: f64, timestamp_ms: u64) -> Vec<ProviderEvent> {
         let loop_s = self.variant.loop_seconds();
         let n = (t_s / loop_s).floor().max(0.0) as u64;
@@ -978,9 +982,13 @@ impl MockFlight {
         let crossed = |at: f64, last: Option<(u64, f64)>| last.is_some_and(|(ln, l)| ln == n && l < at) && lt >= at;
         let last = self.last_step.replace((n, lt));
         let mut out = Vec::new();
-        if self.variant == MockVariant::Standard && last.is_some_and(|(ln, _)| ln < n) {
-            // the next demo loop starts in the air again: the sim "loads a new flight" first
-            out.push(ProviderEvent::Sim(SimEvent::FlightLoaded { path: "mock/demo-downwind.FLT".into() }));
+        if self.variant != MockVariant::Teleport && last.is_some_and(|(ln, _)| ln < n) {
+            // the next loop starts somewhere else: the demo in the air on the downwind, the
+            // textbook variants back at the departure stand (~0.8 nm from where the last loop
+            // parked) – the sim "loads a new flight" first, so the jump is a reload, never a
+            // teleport. (The teleport variant parks at the departure stand: no jump.)
+            let path = if self.variant == MockVariant::Standard { "mock/demo-downwind.FLT" } else { "mock/stand.FLT" };
+            out.push(ProviderEvent::Sim(SimEvent::FlightLoaded { path: path.into() }));
         }
         match self.variant {
             MockVariant::Teleport if crossed(self.track.teleport_s, last) => {
@@ -1114,7 +1122,8 @@ impl MockFlight {
         let airborne_or_runway = !on_ground || p.on_runway;
         Telemetry {
             timestamp_ms,
-            sim_zulu_time_s: (timestamp_ms / 1000 % 86_400) as f64,
+            // fractional seconds like the sims' ZULU TIME (not whole seconds that stand still for 20 samples)
+            sim_zulu_time_s: (timestamp_ms % 86_400_000) as f64 / 1000.0,
             latitude: lat,
             longitude: lon,
             altitude_msl_ft: msl,
@@ -1296,6 +1305,45 @@ mod tests {
     }
 
     #[test]
+    fn every_sample_is_finite_and_physical() {
+        // plausibility review: units, NaN, impossible values, in every variant
+        for variant in [MockVariant::Standard, MockVariant::Circuit, MockVariant::Bounce, MockVariant::GoAround, MockVariant::Teleport, MockVariant::Reconnect] {
+            let mut f = MockFlight::with_variant(variant);
+            let mut prev: Option<Telemetry> = None;
+            for i in 1..(variant.loop_seconds() * 2.0 * 10.0) as u64 {
+                let ts = 1_700_000_000_000 + i * 100;
+                let t = f.sample(i as f64 / 10.0, ts);
+                let what = format!("{variant:?} at {:.1} s", i as f64 / 10.0);
+                for v in [t.latitude, t.longitude, t.altitude_msl_ft, t.altitude_agl_ft, t.ias_kt, t.ground_speed_kt, t.vertical_speed_fpm, t.pitch_deg, t.bank_deg, t.g_force, t.fuel_total_kg, t.touchdown_vs_fpm] {
+                    assert!(v.is_finite(), "{what}: {t:?}");
+                }
+                assert!((0.0..=250.0).contains(&t.ground_speed_kt) && (0.0..=250.0).contains(&t.ias_kt), "{what}: {} kt", t.ground_speed_kt);
+                assert!(t.ias_kt <= t.tas_kt + 1e-9, "{what}: IAS above TAS");
+                assert!(t.altitude_agl_ft >= 0.0 && t.altitude_agl_ft <= 2_600.0 && (t.altitude_msl_ft - t.altitude_agl_ft - ELEVATION_FT).abs() < 1e-6, "{what}");
+                assert_eq!(t.on_ground, t.altitude_agl_ft <= 0.0, "{what}");
+                assert!(t.vertical_speed_fpm.abs() <= 2_600.0 && t.pitch_deg.abs() < 15.0 && t.bank_deg.abs() < 35.0, "{what}: {t:?}");
+                // (the bounce variant pushes off the gear at ~1.6 g)
+                assert!((0.8..1.8).contains(&t.g_force), "{what}: {} g", t.g_force);
+                assert!((0.0..360.0).contains(&t.heading_true_deg) && (0.0..360.0).contains(&t.heading_mag_deg), "{what}");
+                assert!((0.0..=100.0).contains(&t.gear_pct) && (0..FLAP_POSITIONS).contains(&t.flaps_index), "{what}");
+                assert!(t.touchdown_vs_fpm >= 0.0 && t.fuel_total_kg > 5_000.0 && t.engines_running <= t.num_engines, "{what}");
+                // within ~12 km of EDDF all the way
+                let d = crate::landing::distance_m(t.latitude, t.longitude, EDDF_25C_THRESHOLD.0, EDDF_25C_THRESHOLD.1);
+                assert!(d < 12_000.0, "{what}: {d:.0} m from the threshold");
+                let sim_s = t.sim_zulu_time_s;
+                assert!((sim_s - (ts % 86_400_000) as f64 / 1000.0).abs() < 1e-6, "{what}: sim clock runs with the samples");
+                if let Some(p) = &prev {
+                    // fuel is only burnt, apart from a new loop or the teleport variant's reload
+                    let reload = (i as f64 / 10.0) % variant.loop_seconds() < 0.15 || variant == MockVariant::Teleport;
+                    assert!(t.fuel_total_kg <= p.fuel_total_kg + 1e-9 || reload, "{what}: fuel went up");
+                    assert!(t.sim_zulu_time_s > p.sim_zulu_time_s, "{what}");
+                }
+                prev = Some(t);
+            }
+        }
+    }
+
+    #[test]
     fn variant_names() {
         assert_eq!(MockVariant::parse(" Bounce "), MockVariant::Bounce);
         assert_eq!(MockVariant::parse(""), MockVariant::Standard);
@@ -1363,7 +1411,7 @@ mod tests {
         // the quicker circuit is the demo's only: the other variants fly the circuit as before
         for (variant, td_s, end_s) in [
             (MockVariant::Circuit, 469.4, 557.5),
-            (MockVariant::Bounce, 468.9, 563.0),
+            (MockVariant::Bounce, 468.9, 562.4),
             (MockVariant::GoAround, 857.8, 945.8),
             (MockVariant::Reconnect, 469.4, 557.5),
         ] {

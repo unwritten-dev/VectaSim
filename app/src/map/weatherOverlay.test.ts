@@ -15,6 +15,7 @@ import {
   loadWeatherPrefs,
   protocolUrl,
   radarTileUrl,
+  radarWithoutMagenta,
   saveWeatherPrefs,
   setWeatherMaster,
   weatherBeforeId,
@@ -192,5 +193,34 @@ describe("weatherBeforeId", () => {
 
   it("goes on top when the style has nothing above the basemap", () => {
     expect(weatherBeforeId(base.slice(0, 3), "radar")).toBeUndefined();
+  });
+});
+
+describe("radar colours without magenta (RainViewer Universal Blue)", () => {
+  // the scheme's rain steps from RainViewer's colour table (every 3 dBZ from 16 dBZ), plus snow blues
+  const keep = ["#6cd1eb", "#1baee2", "#0091ca", "#0077aa", "#006295", "#005180", "#004768", "#ffd200", "#ffaa00", "#ff8b00", "#f23600", "#cd0d00", "#8f0000", "#ffffff", "#00ff00", "#b8f8ff", "#7fbfff", "#3f7fff", "#0000ff", "#dacc93", "#857d6a"];
+  const magenta = ["#ffaaff", "#ff9fff", "#ff95ff", "#ff8bff", "#ff81ff", "#ff77ff", "#ff6cff", "#ff62ff", "#ff58ff", "#ff4eff"];
+  const px = (hex: string[], a = 255) => new Uint8ClampedArray(hex.flatMap((h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)).concat(a)));
+
+  it("turns the 55–64 dBZ magenta steps white and keeps their alpha", () => {
+    const p = px(magenta, 200);
+    radarWithoutMagenta(p);
+    for (let i = 0; i < p.length; i += 4) expect([p[i], p[i + 1], p[i + 2], p[i + 3]]).toEqual([255, 255, 255, 200]);
+  });
+
+  it("also the smoothed blend between dark red and magenta", () => {
+    const p = new Uint8ClampedArray([199, 85, 128, 255]);
+    radarWithoutMagenta(p);
+    expect([...p]).toEqual([255, 255, 255, 255]);
+  });
+
+  it("every other colour of the scheme stays as it is; transparent pixels are skipped", () => {
+    const p = px(keep);
+    const before = [...p];
+    radarWithoutMagenta(p);
+    expect([...p]).toEqual(before);
+    const clear = new Uint8ClampedArray([255, 0, 255, 0]);
+    radarWithoutMagenta(clear);
+    expect([...clear]).toEqual([255, 0, 255, 0]);
   });
 });

@@ -1,5 +1,45 @@
-import { describe, expect, it } from "vitest";
-import { localOffsetSpans, mergeColumns } from "./CsvImport";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { localOffsetSpans, mergeColumns, missingRequired, remembering } from "./CsvImport";
+import { setLanguageSetting } from "./i18n";
+import type { CsvColumnMapping } from "./types";
+
+const mapping = (columns: CsvColumnMapping["columns"]): CsvColumnMapping => ({
+  preset: "generic",
+  columns,
+  dateFormat: "iso",
+  utcOffsetMin: 0,
+  localOffsets: [],
+  weightUnit: "kg",
+  durationUnit: "minutes",
+});
+
+beforeEach(() => setLanguageSetting("en"));
+afterEach(() => setLanguageSetting("de"));
+
+describe("CSV required fields", () => {
+  it("names departure, then arrival, then a date column", () => {
+    expect(missingRequired(mapping({}))).toBe("Map the departure airport.");
+    expect(missingRequired(mapping({ dep_icao: 0 }))).toBe("Map the arrival airport.");
+    expect(missingRequired(mapping({ dep_icao: 0, arr_icao: 1 }))).toBe("Map the date or off-block.");
+  });
+  it("any of date, off-block, on-block or take-off is enough", () => {
+    for (const k of ["date", "off_block", "on_block", "takeoff"] as const) expect(missingRequired(mapping({ dep_icao: 0, arr_icao: 1, [k]: 2 }))).toBeNull();
+  });
+});
+
+describe("CSV remembered mapping", () => {
+  it("stores columns by header name and unmapped fields as empty", () => {
+    const r = remembering(mapping({ dep_icao: 0, arr_icao: 1, off_block: 2 }), ["Origin", "Destination", "Out"], "local", true, true);
+    expect(r.columns.dep_icao).toBe("Origin");
+    expect(r.columns.off_block).toBe("Out");
+    expect(r.columns.notes).toBe("");
+    expect(r).toMatchObject({ dateFormat: "iso", zone: "local", weightUnit: "kg", durationUnit: "minutes", dedupe: true });
+  });
+  it("without a header row no column names are remembered", () => {
+    expect(remembering(mapping({ dep_icao: 0 }), ["EDDF"], "utc", false, false).columns).toEqual({});
+  });
+});
+
 
 describe("CSV import helpers", () => {
   it("remembered columns win by header name, cleared ones stay unmapped, unknown names are ignored", () => {

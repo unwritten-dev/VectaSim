@@ -10,11 +10,13 @@ import { flushSync } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import { join } from "@tauri-apps/api/path";
-import { revealItemInDir } from "@tauri-apps/plugin-opener";
+import { revealPath } from "../revealPath";
 import { getPrefs } from "../prefs";
 import { t } from "../i18n";
 import { showToast } from "../ui/Toast";
 import { userMessage } from "../errors";
+import { saveImage } from "../saveImage";
+import { copyErrorToast, errorToast, NoClipboardError } from "../ui/errorToast";
 import LandingCard, { CARD_H, CARD_W, readCardTheme, type CardTheme } from "./LandingCard";
 import { cardFontCss } from "./cardFonts";
 import type { ApproachAnalysis } from "./approachTypes";
@@ -116,13 +118,12 @@ export async function saveCardPng(d: LandingDebriefData, approach: ApproachAnaly
     const path = await save({ defaultPath: cardFileName(d), filters: [{ name: t("landingCard.export.pngFilter"), extensions: ["png"] }] });
     if (!path) return null;
     const blob = await renderCardPng(d, approach);
-    const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
-    await invoke("save_image", { path, bytes });
+    await saveImage(path, blob);
     showToast({ tone: "ok", title: t("landingCard.export.saved"), body: path, durationMs: 3000 });
     return path;
   } catch (e) {
-    const m = userMessage(e, "export");
-    showToast({ id: "card-export", tone: "err", title: t("landingCard.export.notSaved", { title: m.title }), body: `${m.hint}${m.detail ? ` (${m.detail.slice(0, 160)})` : ""}` });
+    // the reason behind "Details" (errorToast), never the raw text in the body
+    showToast({ id: "card-export", tone: "err", ...errorToast(t("landingCard.export.notSaved", { title: userMessage(e, "export").title }), e, "export") });
     return null;
   }
 }
@@ -130,13 +131,13 @@ export async function saveCardPng(d: LandingDebriefData, approach: ApproachAnaly
 /** Copy the PNG to the clipboard. */
 export async function copyCardPng(d: LandingDebriefData, approach: ApproachAnalysis | null = null): Promise<boolean> {
   try {
-    if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") throw new Error(t("landingCard.export.noClipboardImages"));
+    if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") throw new NoClipboardError(t("landingCard.export.noClipboardImages"));
     // the promise keeps the click's user activation while the PNG renders
     await navigator.clipboard.write([new ClipboardItem({ "image/png": renderCardPng(d, approach) })]);
     showToast({ tone: "ok", title: t("landingCard.export.copied"), durationMs: 2500 });
     return true;
   } catch (e) {
-    showToast({ id: "card-copy", tone: "err", title: t("landingCard.export.notCopied"), body: e instanceof Error ? e.message : String(e) });
+    showToast({ id: "card-copy", tone: "err", ...copyErrorToast(t("landingCard.export.notCopied"), e) });
     return false;
   }
 }
@@ -165,8 +166,7 @@ export async function autoSaveCard(flightId: string): Promise<string | null> {
     const path = await join(dir.dir, autoCardFileName(d));
     const approach = landedApproach(approaches);
     const blob = await renderCardPng(d, approach);
-    const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
-    await invoke("save_image", { path, bytes });
+    await saveImage(path, blob);
     // the approach card of the same landing next to it (best effort: the landing card counts)
     let approachName: string | null = null;
     if (approach) {
@@ -174,7 +174,7 @@ export async function autoSaveCard(flightId: string): Promise<string | null> {
         approachName = autoApproachCardFileName(approach);
         const apPath = await join(dir.dir, approachName);
         const apBlob = await renderApproachCardPng(approach, d.flight);
-        await invoke("save_image", { path: apPath, bytes: Array.from(new Uint8Array(await apBlob.arrayBuffer())) });
+        await saveImage(apPath, apBlob);
       } catch {
         approachName = null;
       }
@@ -185,7 +185,7 @@ export async function autoSaveCard(flightId: string): Promise<string | null> {
       title: approachName ? t("landingCard.export.bothSaved") : t("landingCard.export.saved"),
       body: [autoCardFileName(d), approachName].filter(Boolean).join(" · "),
       durationMs: 4000,
-      actions: [{ label: t("landingCard.export.openFolder"), onClick: () => void revealItemInDir(path).catch(() => {}) }],
+      actions: [{ label: t("landingCard.export.openFolder"), onClick: () => void revealPath(path).catch(() => {}) }],
     });
     return path;
   } catch (e) {

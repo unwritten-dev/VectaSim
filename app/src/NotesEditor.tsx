@@ -134,9 +134,10 @@ function TagsField({ flight: f, readOnly }: { flight: FlightRow; readOnly: boole
   const tagsKey = (f.tags ?? []).join("\u0000");
   const tt = useT();
 
+  // follow the stored tags when the flight or its tags change (not on every new row object)
   useEffect(() => {
-    setTags(f.tags ?? []);
-  }, [f.id, tagsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+    setTags(tagsKey ? tagsKey.split("\u0000") : []);
+  }, [f.id, tagsKey]);
 
   const loadAll = () =>
     invoke<TagCount[]>("list_tags")
@@ -366,12 +367,13 @@ function RatingField({ flight: f, readOnly }: { flight: FlightRow; readOnly: boo
             ★
           </button>
         ))}
-        {!readOnly && rating > 0 && (
-          <button type="button" className="link-btn star-clear" onClick={() => void set(0)} title={t("logbook.notes.clearRatingTitle")}>
-            {t("logbook.notes.clearRating")}
-          </button>
-        )}
       </div>
+      {/* outside the radiogroup: a radiogroup holds radios only */}
+      {!readOnly && rating > 0 && (
+        <button type="button" className="link-btn star-clear" onClick={() => void set(0)} title={t("logbook.notes.clearRatingTitle")}>
+          {t("logbook.notes.clearRating")}
+        </button>
+      )}
       <span id={`${id}-d`} className="detail notes-rating-text">
         {shown ? t(RATING_TEXT[shown]) : t("logbook.notes.ratingHint")}
       </span>

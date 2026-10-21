@@ -1,4 +1,4 @@
-//! Einstellungen → Daten: database location, backups (folder, automatic, restore),
+//! Settings → Data: database location, backups (folder, automatic, restore),
 //! Papierkorb and „Alle Daten löschen“, Gesamtexport/-import (`.vectasim`), CSV import from
 //! other logbooks; plus the start-up error dialog of the store and the check of every path the
 //! UI hands in for writing.
@@ -298,6 +298,66 @@ fn path_key(p: &Path) -> String {
     s.trim_end_matches('\\').to_string()
 }
 
+/// A network or device path: UNC (`\\server\share\…`, `//server/…`), `\\?\UNC\…`, `\\.\…`.
+/// Nothing is read from or written to such a path on the webview's word: opening it makes
+/// Windows connect to that host over SMB and offer the user's NTLM login.
+/// `\\?\C:\…` is a drive path and fine. Mapped network drives (`Z:\…`) are the user's own
+/// choice and stay allowed.
+pub fn is_unc(raw: &str) -> bool {
+    let r = raw.trim().replace('/', "\\");
+    if let Some(rest) = r.strip_prefix(r"\\?\") {
+        let b = rest.as_bytes();
+        return !(b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && b[2] == b'\\');
+    }
+    r.starts_with(r"\\")
+}
+
+/// Without the `\\?\` prefix `fs::canonicalize` puts on Windows paths (`\\?\UNC\x` → `\\x`).
+fn plain(p: PathBuf) -> PathBuf {
+    let s = p.to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
+    }
+    match s.strip_prefix(r"\\?\") {
+        Some(rest) if !is_unc(rest) => PathBuf::from(rest),
+        _ => p,
+    }
+}
+
+/// The path as Windows resolves it, for the deny list: every component without
+/// trailing dots and spaces (Win32 drops them, so `C:\Windows.\x` is `C:\Windows\x`), and the
+/// deepest existing folder through `fs::canonicalize` (8.3 names like `C:\PROGRA~1`, junctions,
+/// symbolic links, case). The parts below it that do not exist yet are appended as they are.
+pub fn resolved(p: &Path) -> PathBuf {
+    let mut clean = PathBuf::new();
+    for c in p.components() {
+        match c {
+            Component::Normal(n) => {
+                let s = n.to_string_lossy();
+                let t = s.trim_end_matches(['.', ' ']);
+                clean.push(if t.is_empty() { s.as_ref() } else { t });
+            }
+            other => clean.push(other.as_os_str()),
+        }
+    }
+    let mut base = clean.as_path();
+    let mut rest: Vec<std::ffi::OsString> = Vec::new();
+    loop {
+        if let Ok(real) = std::fs::canonicalize(base) {
+            let mut out = plain(real);
+            out.extend(rest.iter().rev());
+            return out;
+        }
+        match (base.parent(), base.file_name()) {
+            (Some(parent), Some(name)) => {
+                rest.push(name.to_os_string());
+                base = parent;
+            }
+            _ => return clean,
+        }
+    }
+}
+
 fn is_under(p: &Path, root: &Path) -> bool {
     let (p, root) = (path_key(p), path_key(root));
     !root.is_empty() && (p == root || p.starts_with(&format!("{root}\\")))
@@ -317,9 +377,12 @@ pub fn forbidden_roots() -> Vec<PathBuf> {
     roots
 }
 
-/// A path the UI wants written (from a save dialog): (a) absolute, (b) without `..`, (c) with
-/// one of `extensions` (case-insensitive), (d) not inside one of `forbidden`. Anything else is
-/// refused with „Pfad nicht erlaubt“, so a compromised webview cannot write anywhere it likes.
+/// A path the UI wants written (from a save dialog): (a) absolute and not a network path
+/// ([`is_unc`]), (b) without `..` and without `:` past the drive (no alternate data streams),
+/// (c) with one of `extensions` (case-insensitive), (d) not inside one of `forbidden` – compared
+/// on the path as given and as Windows resolves it ([`resolved`]: 8.3 names, trailing dots,
+/// junctions). Anything else is refused with „Pfad nicht erlaubt“, so a compromised webview
+/// cannot write anywhere it likes.
 pub fn check_path(raw: &str, extensions: &[&str], forbidden: &[PathBuf]) -> Result<PathBuf, String> {
     let deny = |why: &str| {
         let p = raw.trim();
@@ -329,6 +392,9 @@ pub fn check_path(raw: &str, extensions: &[&str], forbidden: &[PathBuf]) -> Resu
     let raw = raw.trim();
     if raw.is_empty() {
         return deny(tr("leer", "empty"));
+    }
+    if is_unc(raw) {
+        return deny(tr("Netzwerkpfad", "network path"));
     }
     let p = PathBuf::from(raw);
     if !p.is_absolute() {
@@ -345,10 +411,53 @@ pub fn check_path(raw: &str, extensions: &[&str], forbidden: &[PathBuf]) -> Resu
     if p.file_stem().is_none_or(|s| s.to_string_lossy().trim().is_empty()) {
         return deny(tr("kein Dateiname", "no file name"));
     }
-    if forbidden.iter().any(|root| is_under(&p, root)) {
+    if p.components().any(|c| matches!(c, Component::Normal(n) if n.to_string_lossy().contains(':'))) {
+        return deny(tr("enthält :", "contains :"));
+    }
+    let real = if forbidden.is_empty() { p.clone() } else { resolved(&p) };
+    if forbidden.iter().any(|root| is_under(&p, root) || is_under(&real, root) || is_under(&real, &resolved(root))) {
         return deny(tr("System- oder Programmordner", "system or program folder"));
     }
     Ok(p)
+}
+
+/// What [`reveal_path`] shows in the Explorer: an existing file or folder by its absolute
+/// local path, without `..`, not a network path ([`is_unc`]: Explorer would connect to the
+/// host over SMB and offer the user's login).
+pub fn check_reveal(raw: &str) -> Result<PathBuf, String> {
+    let raw = raw.trim();
+    let deny = |why: &str| Err(trf!("Pfad nicht erlaubt: {raw} ({why})", "Path not allowed: {raw} ({why})"));
+    let tr = crate::lang::tr;
+    if raw.is_empty() {
+        return deny(tr("leer", "empty"));
+    }
+    if is_unc(raw) {
+        return deny(tr("Netzwerkpfad", "network path"));
+    }
+    let p = PathBuf::from(raw);
+    if !p.is_absolute() {
+        return deny(tr("kein vollständiger Pfad", "not a full path"));
+    }
+    if p.components().any(|c| matches!(c, Component::ParentDir)) {
+        return deny(tr("enthält ..", "contains .."));
+    }
+    if !p.exists() {
+        return Err(trf!("Nicht gefunden: {raw}", "Not found: {raw}"));
+    }
+    Ok(p)
+}
+
+/// „Ordner öffnen“ after an export, a backup, the Diagnosepaket or for the database: the
+/// Explorer with the item selected. Replaces the opener plugin's `revealItemInDir`, which checks
+/// no path at all, with the rules of [`check_reveal`].
+#[tauri::command]
+pub async fn reveal_path(path: String, app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let p = check_reveal(&path)?;
+        app.opener().reveal_item_in_dir(&p).map_err(|e| format!("{}: {e}", p.display()))
+    })
+    .await
+    .map_err(err)?
 }
 
 /// [`check_path`] against the folders of this machine.
@@ -672,7 +781,7 @@ mod tests {
         let ok = |p: &str, ext: &[&str]| check_path(p, ext, &forbidden);
         assert_eq!(ok(r"C:\Users\p\Desktop\Flug.GPX", EXPORT_EXTENSIONS).unwrap(), PathBuf::from(r"C:\Users\p\Desktop\Flug.GPX"));
         assert!(ok(r"D:\Backups\VectaSim-Export_2026-10-18.vectasim", BUNDLE_EXTENSIONS).is_ok());
-        assert!(ok(r"\\nas\share\karte.png", IMAGE_EXTENSIONS).is_ok());
+        assert!(ok(r"\\?\D:\Karten\karte.png", IMAGE_EXTENSIONS).is_ok(), "verbatim drive path");
         assert!(ok(r"C:\Program Files Extra\x.zip", DIAG_EXTENSIONS).is_ok(), "only the folder itself, not a name prefix");
         for (p, ext) in [
             ("", EXPORT_EXTENSIONS),
@@ -689,6 +798,20 @@ mod tests {
             (r"\\?\C:\Windows\x.csv", EXPORT_EXTENSIONS),
             (r"C:\Program Files\VectaSim\x.json", EXPORT_EXTENSIONS),
             (r"C:\Users\p\AppData\Local\VectaSim\vectasim.png", IMAGE_EXTENSIONS),
+            // network paths (SMB with the user's NTLM login), also hidden behind \\?\UNC or //
+            (r"\\nas\share\karte.png", IMAGE_EXTENSIONS),
+            (r"//nas/share/karte.png", IMAGE_EXTENSIONS),
+            (r"\\?\UNC\nas\share\karte.png", IMAGE_EXTENSIONS),
+            (r"\\.\C:\x.png", IMAGE_EXTENSIONS),
+            (r"\\192.168.1.5@8080\x\karte.png", IMAGE_EXTENSIONS),
+            // Win32 drops trailing dots and spaces: still the Windows folder
+            (r"C:\Windows.\x.png", IMAGE_EXTENSIONS),
+            (r"C:\Windows. .\System32\x.png", IMAGE_EXTENSIONS),
+            (r"C:\Program Files \VectaSim\x.json", EXPORT_EXTENSIONS),
+            // alternate data streams and trailing dots on the file name
+            (r"C:\Users\p\Desktop\x.png:evil", IMAGE_EXTENSIONS),
+            (r"C:\Users\p\Desktop:evil\x.png", IMAGE_EXTENSIONS),
+            (r"C:\Users\p\Desktop\x.png.", IMAGE_EXTENSIONS),
         ] {
             let e = ok(p, ext).expect_err(p);
             assert!(e.starts_with("Pfad nicht erlaubt"), "{p}: {e}");
@@ -697,6 +820,55 @@ mod tests {
         if let Some(win) = std::env::var_os("WINDIR") {
             let p = PathBuf::from(win).join("vectasim.csv");
             assert!(allowed_target(&p.display().to_string(), EXPORT_EXTENSIONS).is_err());
+        }
+    }
+
+    #[test]
+    fn only_existing_local_items_are_revealed() {
+        let dir = std::env::temp_dir().join(format!("vs-reveal-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("export.csv");
+        std::fs::write(&f, b"x").unwrap();
+        assert_eq!(check_reveal(&f.display().to_string()).unwrap(), f);
+        assert!(check_reveal(&dir.display().to_string()).is_ok(), "a folder");
+        for p in [String::new(), "export.csv".into(), r"\\host\share\x.csv".into(), "//host/share".into(), format!(r"{}\..\x", dir.display()), dir.join("missing.csv").display().to_string()] {
+            assert!(check_reveal(&p).is_err(), "{p}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_deny_list_sees_the_resolved_path() {
+        // 8.3 short names resolve to the long folder (only where the volume has them)
+        if let Some(pf) = std::env::var_os("ProgramFiles").map(PathBuf::from)
+            && let Ok(short) = std::fs::canonicalize(r"C:\PROGRA~1")
+            && plain(short) == std::fs::canonicalize(&pf).map(plain).unwrap_or_default()
+        {
+            let e = check_path(r"C:\PROGRA~1\VectaSim\x.png", IMAGE_EXTENSIONS, &[pf]).expect_err("8.3 name");
+            assert!(e.starts_with("Pfad nicht erlaubt"), "{e}");
+        }
+        // a forbidden folder of its own: other spellings of it are refused, a sibling is fine
+        let dir = std::env::temp_dir().join(format!("vs-deny-{}", std::process::id()));
+        let locked = dir.join("Locked");
+        std::fs::create_dir_all(locked.join("sub")).unwrap();
+        let forbidden = [locked.clone()];
+        let base = dir.display().to_string();
+        for p in [format!(r"{base}\Locked\x.png"), format!(r"{base}\LOCKED.\x.png"), format!(r"{base}\Locked \sub\x.png"), format!(r"{base}\Locked\sub\new\x.png")] {
+            assert!(check_path(&p, IMAGE_EXTENSIONS, &forbidden).is_err(), "{p}");
+        }
+        assert!(check_path(&format!(r"{base}\Open\x.png"), IMAGE_EXTENSIONS, &forbidden).is_ok());
+        assert!(check_path(&format!(r"{base}\Lockedx\x.png"), IMAGE_EXTENSIONS, &forbidden).is_ok());
+        // resolved: canonical, without the \\?\ prefix, missing parts appended
+        let r = resolved(&locked.join("sub.").join("missing").join("x.png"));
+        assert!(!r.to_string_lossy().starts_with(r"\\?\"), "{}", r.display());
+        assert!(r.ends_with(r"sub\missing\x.png"), "{}", r.display());
+        let _ = std::fs::remove_dir_all(&dir);
+        // the UNC rule
+        for p in [r"\\nas\x", r"//nas/x", r"\\?\UNC\nas\x", r"\\.\pipe\x", r" \\nas\x"] {
+            assert!(is_unc(p), "{p}");
+        }
+        for p in [r"C:\x", r"\\?\C:\x", r"Z:\share\x", r"\x"] {
+            assert!(!is_unc(p), "{p}");
         }
     }
 

@@ -94,7 +94,7 @@ VectaSim runs alongside Microsoft Flight Simulator 2020/2024 and X-Plane 12.1.1 
 - **Keyboard:** Ctrl+F searches the logbook, Ctrl+. collapses the map’s side panel, Enter opens the debrief of the selected flight, Del moves it to the trash, Alt+T jumps to the newest notice – the full list is under *Settings → Keyboard*.
 - **Map:** switch between globe and flat map in the map bar or under *Settings → Display*; rotate and tilt the 3D view with the right mouse button or Ctrl + drag.
 - **English and German:** *Settings → Display → Language* – System (follows your Windows display language), Deutsch or English, applies immediately. Notifications, tray menu, Discord status, overlays and the installer follow the same setting; flight phases are always shown in English.
-- **Streamer mode** (Ctrl+Shift+P) hides registrations, callsigns, airline, SimBrief ID and user paths everywhere – including the landing card and the diagnostics package.
+- **Streamer mode** (Ctrl+Shift+P) hides registrations, callsigns, airline, SimBrief ID and user paths everywhere – including the landing card and the diagnostics package; the diagnostics package leaves out your Windows user name even without it.
 - **Landing rate in the sim (MSFS):** a few seconds after touchdown a line at the top of the screen shows rate, band, g, bounces and touchdown point, e.g. “VectaSim · Landed -142 fpm (smooth) · 1.18 g · no bounces · 27L: 412 m past the threshold, 1 m left” (*Settings → Simulator*, on by default; depends on the MSFS version showing SimConnect text).
 - **Integrations** (all optional, off by default except notifications and the tray icon): Discord status with route and phase (off by default, turn it on under *Settings → Integrations*; no Discord app of your own needed – activity sharing must be allowed in Discord), Windows notifications (landing, flight saved, connection, update), an icon in the notification area: minimising or closing the window keeps VectaSim running there (recording included); double-click the icon to open it again, *Quit* in its menu ends the app (switchable under *Settings → Integrations*).
 - **Overlay & API** (off by default): a local server with transparent OBS overlays (HUD, landing, route); open the overlays and start page on a tablet or phone on your Wi-Fi (with token); plus a read-only JSON/WebSocket API for virtual airlines. Overlays accept `?lang=de|en` – endpoints and security in [docs/overlay-api.md](docs/overlay-api.md).
@@ -123,7 +123,7 @@ VectaSim announces updates at startup and installs them after you confirm. More 
 ## Your data & privacy
 
 - Your logbook lives in `%APPDATA%\io.vectasim.app\`; logs and the default backup folder are in `%LOCALAPPDATA%\io.vectasim.app\`.
-- VectaSim only contacts: OpenFreeMap (map tiles), EOX (satellite tiles, only with “Satellite” on), RainViewer and EUMETSAT (radar and clouds, only when turned on), aviationweather.gov (METAR; if it fails, `metar.vatsim.net` – even with VATSIM traffic off), VATSIM and IVAO (traffic, only when turned on), SimBrief (only with your pilot ID), Planespotters.net (aircraft photos, can be turned off), GitHub (updates), Microsoft’s SDK server (only for the SimConnect download) and Discord (only the local Discord client, only with the Discord status on).
+- VectaSim only contacts: OpenFreeMap (map tiles), EOX (satellite tiles, only with “Satellite” on), RainViewer and EUMETSAT (radar and clouds, only when turned on), aviationweather.gov (METAR; if it fails and VATSIM traffic is on, `metar.vatsim.net`), VATSIM and IVAO (traffic, only when turned on; the VATSIM data address is only accepted on vatsim.net), SimBrief (only with your pilot ID), Planespotters.net (aircraft photos, can be turned off), GitHub (updates), Microsoft’s SDK server (only for the SimConnect download) and Discord (only the local Discord client, only with the Discord status on).
 
 ## Uninstall
 
@@ -135,11 +135,12 @@ Windows *Settings → Apps → VectaSim → Uninstall*. Your logbook stays unles
 
 ## Known limitations
 
-- **X-Plane:** 10 values per second, no touchdown value from the sim – the landing rate is “measured” (about ±50–100 fpm), no ILS reference, same PC only.
+- **X-Plane:** 10 values per second, no touchdown value from the sim – the landing rate is “measured” (about ±50–100 fpm), no ILS reference; X-Plane on this PC or in your local network only (public addresses are refused).
 - Imported flights have no track and no landing analysis.
 - Derived runways are accurate to about ±50 m.
 - Flight phases are always shown in English.
 - The installer is not code-signed yet.
+- The precipitation radar comes from RainViewer’s free tier, which RainViewer offers for personal and educational use only (zoom ≤ 7, one colour scheme).
 
 ## Status
 

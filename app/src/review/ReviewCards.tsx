@@ -361,7 +361,7 @@ function Routes({ c, r, outlines }: { c: Ctx; r: YearReview; outlines: CardProps
         const y = top + i * rowH + rowH * 0.4;
         return (
           <g key={i}>
-            <text x={v.x} y={y} fill={t.textFaint} fontSize={34 * L.s} fontWeight={600} style={c.num}>
+            <text x={v.x} y={y} fill={t.textMuted} fontSize={34 * L.s} fontWeight={600} style={c.num}>
               {i + 1}
             </text>
             <text x={v.x + 50 * L.s} y={y} fill={t.text} fontSize={38 * L.s} fontWeight={600} style={c.num}>
@@ -658,14 +658,14 @@ function Months({ c, r }: { c: Ctx; r: YearReview }) {
             <text x={x + bw / 2} y={base + 36 * s} fill={top ? t.text : t.textMuted} fontSize={24 * s} fontWeight={top ? 650 : 400} textAnchor="middle" style={c.sans}>
               {monthShort(m.month, lang).slice(0, L.portrait ? 3 : 1)}
             </text>
-            <text x={x + bw / 2} y={base + 64 * s} fill={t.textFaint} fontSize={20 * s} textAnchor="middle" style={c.num}>
+            <text x={x + bw / 2} y={base + 64 * s} fill={t.textMuted} fontSize={20 * s} textAnchor="middle" style={c.num}>
               {m.blockMs ? `${Math.round(m.blockMs / 3_600_000)}` : ""}
             </text>
           </g>
         );
       })}
       <line x1={v.x} x2={v.x + v.w} y1={base} y2={base} stroke={t.border} strokeWidth={1} />
-      <text x={v.x} y={v.y + chartH + 40 * s} fill={t.textFaint} fontSize={22 * s} style={c.sans}>
+      <text x={v.x} y={v.y + chartH + 40 * s} fill={t.textMuted} fontSize={22 * s} style={c.sans}>
         {tr("review.months.legend")}
       </text>
       {day && (
@@ -744,7 +744,7 @@ function Flags({ c, r }: { c: Ctx; r: YearReview }) {
             <text x={v.x} y={y0 + 40 * s} fill={row.n ? t.text : t.textMuted} fontSize={38 * s} fontWeight={600} style={c.sans}>
               {tr(`review.flags.${row.key}`)}
             </text>
-            <text x={v.x + v.w} y={y0 + 44 * s} fill={row.n ? t.text : t.textFaint} fontSize={52 * s} fontWeight={650} textAnchor="end" style={c.num}>
+            <text x={v.x + v.w} y={y0 + 44 * s} fill={row.n ? t.text : t.textMuted} fontSize={52 * s} fontWeight={650} textAnchor="end" style={c.num}>
               {fmtNum(row.n, 0, lang)}
             </text>
             {row.sub && row.n > 0 && (
@@ -815,7 +815,7 @@ export default function ReviewCard({ id, format, review: r, colors: t, fontCss, 
           <text x={L.M} y={362} fill={t.accent} fontSize={50} fontWeight={600} style={c.sans}>
             {title}
           </text>
-          <text x={W - L.M} y={150} fill={t.textFaint} fontSize={28} textAnchor="end" style={c.num}>
+          <text x={W - L.M} y={150} fill={t.textMuted} fontSize={28} textAnchor="end" style={c.num}>
             {`${idx + 1} / ${total}`}
           </text>
         </>
@@ -827,7 +827,7 @@ export default function ReviewCard({ id, format, review: r, colors: t, fontCss, 
           <text x={L.M} y={110} fill={t.accent} fontSize={34} fontWeight={600} style={c.sans}>
             {title}
           </text>
-          <text x={W - L.M} y={62} fill={t.textFaint} fontSize={16} textAnchor="end" style={c.num}>
+          <text x={W - L.M} y={62} fill={t.textMuted} fontSize={16} textAnchor="end" style={c.num}>
             {`${idx + 1} / ${total}`}
           </text>
         </>

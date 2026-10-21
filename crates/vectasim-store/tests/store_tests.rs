@@ -247,6 +247,143 @@ fn interrupted_flight_is_marked_on_reopen() {
     assert!(flights[0].takeoff_ms.is_some());
 }
 
+/// 30 s of the mock circuit: the aircraft taxis, never takes off; the app dies with the row open.
+fn crash_while_taxiing(path: &std::path::Path) -> String {
+    let store = Store::open(path).unwrap();
+    let mut flight = MockFlight::with_variant(MockVariant::Circuit);
+    let mut session = FlightSession::new();
+    let mut rec = FlightRecorder::new(store.clone(), RecorderContext { provider: "simconnect".into(), ..Default::default() });
+    for i in 1..=(40 * 20) {
+        let t_s = i as f64 / 20.0;
+        let t = flight.sample(t_s, 1_700_000_000_000 + (t_s * 1000.0) as u64);
+        let events = session.update(&t);
+        rec.on_telemetry(&t, session.summary(), &events).unwrap();
+    }
+    let id = rec.current_flight_id().expect("the taxi opened a flight").to_owned();
+    assert!(session.summary().takeoff_ms.is_none());
+    id
+}
+
+#[test]
+fn crash_during_a_ground_session_is_discarded_on_open() {
+    // a taxi-only recording left `active` by a crash came back as an interrupted flight
+    // (visible, and a resume candidate) instead of a discarded ground session
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("vectasim.db");
+    let id = crash_while_taxiing(&path);
+    let store = Store::open(&path).unwrap();
+    assert!(store.list_flights(10, 0).unwrap().is_empty(), "not in the logbook");
+    let trash = store.list_deleted_flights().unwrap();
+    assert_eq!(trash.len(), 1);
+    assert_eq!((trash[0].flight.id.as_str(), trash[0].flight.state.as_str()), (id.as_str(), "discarded"));
+    assert_eq!(store.totals().unwrap().flights, 0);
+    let f = &trash[0].flight;
+    assert!(store.resume_candidate(f.dep_lat.unwrap(), f.dep_lon.unwrap(), 364.0, 1_700_000_050_000).unwrap().is_none());
+}
+
+#[test]
+fn trigger_index_on_runway_landings_exists() {
+    // the v17 trigger deletes by flight_id; without an index every deleted flight scanned the table
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("vectasim.db");
+    drop(Store::open(&path).unwrap());
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute_batch("DROP INDEX user_runway_landings_flight").unwrap();
+    drop(conn);
+    // a file already at the current version gets it on open
+    drop(Store::open(&path).unwrap());
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    let plan: String = conn
+        .query_row("EXPLAIN QUERY PLAN DELETE FROM user_runway_landings WHERE flight_id = 'x'", [], |r| r.get(3))
+        .unwrap();
+    assert!(plan.contains("user_runway_landings_flight"), "{plan}");
+}
+
+#[test]
+fn flight_still_being_recorded_or_ending_cannot_be_deleted() {
+    // a flight whose end could not be written yet ("ending") is no longer the
+    // recorder's current flight, so the app's guard let it be deleted; the store refuses any
+    // `active` row now
+    let store = Store::open_in_memory().unwrap();
+    let mut flight = MockFlight::with_variant(MockVariant::Circuit);
+    let mut session = FlightSession::new();
+    let mut rec = FlightRecorder::new(store.clone(), RecorderContext { provider: "simconnect".into(), ..Default::default() });
+    for i in 1..=(40 * 20) {
+        let t_s = i as f64 / 20.0;
+        let t = flight.sample(t_s, 1_700_000_000_000 + (t_s * 1000.0) as u64);
+        let events = session.update(&t);
+        rec.on_telemetry(&t, session.summary(), &events).unwrap();
+    }
+    let id = rec.current_flight_id().unwrap().to_owned();
+    for r in [store.delete_flight(&id), store.delete_flight_permanently(&id)] {
+        let e = r.unwrap_err();
+        assert!(matches!(&e, StoreError::Invalid(vectasim_store::Invalid::FlightRecording)), "{e}");
+    }
+    assert_eq!(store.list_flights(10, 0).unwrap().len(), 1);
+    // ended: deletable as usual
+    let events = session.interrupt(1_700_000_041_000);
+    rec.on_events(session.summary(), &events, 1_700_000_041_000).unwrap();
+    assert!(store.delete_flight_permanently(&id).unwrap());
+}
+
+#[test]
+fn flight_started_in_the_air_and_interrupted_counts_in_statistics() {
+    // statistics rule: no take-off time and no touchdown, but it flew (ended in an airborne phase)
+    let store = Store::open_in_memory().unwrap();
+    let mut rec = FlightRecorder::new(store.clone(), RecorderContext { provider: "simconnect".into(), ..Default::default() });
+    let mut session = FlightSession::new();
+    let mut last = 0;
+    for i in 0..120u64 {
+        last = 1_700_000_000_000 + i * 1000;
+        let t = vectasim_core::Telemetry {
+            timestamp_ms: last,
+            latitude: 50.0 + i as f64 * 0.001,
+            longitude: 8.0,
+            altitude_msl_ft: 9_000.0,
+            altitude_agl_ft: 8_600.0,
+            ground_speed_kt: 250.0,
+            sim_rate: 1.0,
+            engines_running: 2,
+            num_engines: 2,
+            ..Default::default()
+        };
+        let events = session.update(&t);
+        rec.on_telemetry(&t, session.summary(), &events).unwrap();
+    }
+    let events = session.interrupt(last);
+    rec.on_events(session.summary(), &events, last).unwrap();
+    let f = store.list_flights(10, 0).unwrap().remove(0);
+    assert_eq!((f.state.as_str(), f.takeoff_ms, f.landing_count), ("interrupted", None, 0));
+    assert!(f.counts_in_stats());
+    let t = store.totals().unwrap();
+    assert_eq!(t.flights, 1);
+    assert!(t.distance_nm > 5.0, "{}", t.distance_nm);
+}
+
+#[test]
+fn airborne_start_low_near_an_airport_is_arriving_there() {
+    // a flight loaded on the final got its destination as departure airport
+    use vectasim_core::{FlightEvent, FlightPhase, FlightState, FlightSummary, PhaseTransition, Telemetry};
+    for (agl, dep, arr) in [(800.0, None, Some("EDDF")), (9_000.0, Some("EDDF"), None)] {
+        let store = Store::open_in_memory().unwrap();
+        let mut rec = FlightRecorder::new(store.clone(), RecorderContext { provider: "simconnect".into(), ..Default::default() })
+            .with_resolver(Arc::new(FakeResolver));
+        let t = Telemetry { timestamp_ms: 1_700_000_000_000, latitude: 50.04, longitude: 8.57, altitude_agl_ft: agl, ..Default::default() };
+        let s = FlightSummary {
+            state: FlightState::Active,
+            phase: FlightPhase::Final,
+            off_block_ms: Some(t.timestamp_ms),
+            departure: Some(GeoPoint { latitude: t.latitude, longitude: t.longitude }),
+            ..Default::default()
+        };
+        let tr = PhaseTransition { from: FlightPhase::Preflight, to: FlightPhase::Final, timestamp_ms: t.timestamp_ms, telemetry: t.clone() };
+        let events = [FlightEvent::FlightStarted { timestamp_ms: t.timestamp_ms }, FlightEvent::PhaseChanged(Box::new(tr))];
+        rec.on_telemetry(&t, &s, &events).unwrap();
+        let f = store.list_flights(10, 0).unwrap().remove(0);
+        assert_eq!((f.dep_icao.as_deref(), f.arr_icao.as_deref()), (dep, arr), "{agl} ft");
+    }
+}
+
 #[test]
 fn second_flight_starts_new_record() {
     let store = Store::open_in_memory().unwrap();
@@ -541,7 +678,7 @@ fn approach_analysis_json_is_camel_case() {
     assert_eq!(serde_json::to_value(ApproachOutcome::GoAround).unwrap(), serde_json::json!({"kind": "goAround"}));
 }
 
-// ---- Phase 3: safe migrations, downgrade lock, Papierkorb ---------------------------------
+// ---- Safe migrations, downgrade lock, trash ---------------------------------------------
 
 fn backups_in(dir: &std::path::Path) -> Vec<vectasim_store::BackupEntry> {
     vectasim_store::backup::list_backups(dir).unwrap()
@@ -719,7 +856,7 @@ fn trash_hides_flights_everywhere_and_restores_or_purges_them() {
     assert!(store.get_track(&gone).unwrap().is_none(), "rows go with the purge");
     assert_eq!(store.deleted_count().unwrap(), 0);
 
-    // "Papierkorb leeren" = purge with 0 days; permanent delete of a single flight
+    // "empty trash" = purge with 0 days; permanent delete of a single flight
     assert!(store.delete_flight_at(&kept, t0).unwrap());
     assert_eq!(store.purge_deleted(0, t0).unwrap(), 1);
     assert!(store.list_flights(10, 0).unwrap().is_empty());
@@ -878,7 +1015,8 @@ fn migration_v12_adds_user_runways_and_is_idempotent() {
     {
         let conn = rusqlite::Connection::open(&path).unwrap();
         conn.execute_batch(
-            "DROP TABLE user_runways; DROP TABLE user_runway_landings; ALTER TABLE landing_facts DROP COLUMN runway_source;
+            "DROP TRIGGER IF EXISTS user_runway_landings_follow_flight; DROP TABLE user_runways; DROP TABLE user_runway_landings;
+             ALTER TABLE landing_facts DROP COLUMN runway_source;
              UPDATE schema_version SET version = 11;",
         )
         .unwrap();
@@ -895,6 +1033,51 @@ fn migration_v12_adds_user_runways_and_is_idempotent() {
     assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
     assert_eq!(store.list_user_runways("DX-0001").unwrap()[0].uses, 1);
     assert_eq!(store.list_flights(10, 0).unwrap().len(), 1);
+}
+
+#[test]
+fn counted_runway_landings_go_with_their_flight_v17() {
+    use vectasim_store::RunwayRefinement;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("vectasim.db");
+    const { assert!(SCHEMA_VERSION >= 17) };
+    let landings = |p: &std::path::Path| -> i64 {
+        rusqlite::Connection::open(p).unwrap().query_row("SELECT COUNT(*) FROM user_runway_landings", [], |r| r.get(0)).unwrap()
+    };
+    let id = {
+        let store = Store::open(&path).unwrap();
+        record_mock_flight(&store, 10.0);
+        let id = store.list_flights(10, 0).unwrap()[0].id.clone();
+        store.refine_derived_runway(&runway09_end(0.0, 1200.0, 0.0), true, &id, 0).unwrap();
+        store.refine_derived_runway(&runway09_end(0.0, 1200.0, 0.0), true, "gone", 0).unwrap();
+        id
+    };
+    assert_eq!(landings(&path), 2);
+    // a v16 file: no trigger yet, and a row of a flight deleted for good before the update
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch("DROP TRIGGER user_runway_landings_follow_flight; UPDATE schema_version SET version = 16;").unwrap();
+    }
+    {
+        let store = Store::open(&path).unwrap();
+        assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
+        assert!(std::fs::read_dir(dir.path().join("backups")).unwrap().any(|e| e.unwrap().file_name().to_string_lossy().starts_with("vectasim-pre-v16-")));
+    }
+    // the orphan is gone, the row of the existing flight stays (the trash keeps it too)
+    assert_eq!(landings(&path), 1);
+    let store = Store::open(&path).unwrap();
+    store.delete_flight(&id).unwrap();
+    assert_eq!(landings(&path), 1);
+    let again = store.refine_derived_runway(&runway09_end(0.0, 1200.0, 0.0), true, &id, 0).unwrap();
+    assert!(matches!(again, RunwayRefinement::AlreadyCounted(_)), "{again:?}");
+    // deleted for good: its counted landings go with it, the runway itself stays
+    assert!(store.delete_flight_permanently(&id).unwrap());
+    assert_eq!(landings(&path), 0);
+    assert_eq!(store.list_user_runways("DX-0001").unwrap().len(), 1);
+    // running the step again (version number rolled back) changes nothing
+    drop(store);
+    rusqlite::Connection::open(&path).unwrap().execute("UPDATE schema_version SET version = 16", []).unwrap();
+    assert_eq!(Store::open(&path).unwrap().schema_version().unwrap(), SCHEMA_VERSION);
 }
 
 // ---- Notizen & Tags (schema v14) ------------------------------------------------------
@@ -1000,7 +1183,7 @@ fn list_tags_counts_flights_without_the_trash() {
     assert_eq!(
         store.list_tags().unwrap(),
         vec![TagCount { tag: "VATSIM".into(), count: 2 }, TagCount { tag: "Event".into(), count: 1 }],
-        "case-insensitive, the Papierkorb does not count"
+        "case-insensitive, the trash does not count"
     );
 }
 

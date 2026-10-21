@@ -1,4 +1,4 @@
-// Einstellungen → Overlay & Schnittstelle: switches the local HTTP/WebSocket server
+// Settings → Overlay & API: switches the local HTTP/WebSocket server
 // (crates/vectasim-server via server.rs) and lists the overlay URLs for OBS, a tablet and VAs.
 // Pure parts (URLs, status line, port input) live in serverLinks.ts.
 
@@ -26,6 +26,7 @@ import {
 } from "./serverLinks";
 import "./server.css";
 import { errorToast } from "./ui/errorToast";
+import { userMessage } from "./errors";
 
 /** Client count and "läuft seit" refresh while the panel is open. */
 const POLL_MS = 3000;
@@ -75,7 +76,7 @@ export default function ServerPanel({
   const [revealed, setRevealed] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   /** Port field: inline result (saved / error) instead of a toast, like the simulator address. */
-  const [portNote, setPortNote] = useState<{ tone: "ok" | "err"; text: string } | null>(null);
+  const [portNote, setPortNote] = useState<{ tone: "ok" | "err"; text: string; title?: string } | null>(null);
   /** Which copy button just copied (its label says so for a moment). */
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const timers = useRef<number[]>([]);
@@ -138,7 +139,11 @@ export default function ServerPanel({
       return;
     }
     if (p.port === status.port) return;
-    void run("server_set_options", { options: { port: p.port } }, (e) => setPortNote({ tone: "err", text: `${t("settings.notSaved")}: ${String(e)}` })).then(
+    void run("server_set_options", { options: { port: p.port } }, (e) => {
+      // the next step at the field; the raw backend text only as its tooltip
+      const m = userMessage(e, "settings");
+      setPortNote({ tone: "err", text: `${t("settings.notSaved")}: ${m.hint}`, title: m.detail || undefined });
+    }).then(
       (ok) => {
         if (!ok) return;
         setPortNote({ tone: "ok", text: t("settings.savedMark") });
@@ -189,7 +194,7 @@ export default function ServerPanel({
             aria-describedby="server-port-note"
           />
           {portNote ? (
-            <span id="server-port-note" className={portNote.tone === "ok" ? "ok-text" : "err-text"} role={portNote.tone === "ok" ? "status" : "alert"}>
+            <span id="server-port-note" className={portNote.tone === "ok" ? "ok-text" : "err-text"} role={portNote.tone === "ok" ? "status" : "alert"} title={portNote.title}>
               {portNote.text}
             </span>
           ) : (

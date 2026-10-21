@@ -1,9 +1,19 @@
-//! Who may read: the access rules of the local server (DEVELOPMENT.md → Sicherheit).
+//! Who may read: the access rules of the local server (DEVELOPMENT.md → Security).
 //!
 //! * Without the LAN switch the server listens on `127.0.0.1` only and needs no token.
 //! * With it (`0.0.0.0`) every request from another device needs the token: `?token=…`, the
-//!   header `Authorization: Bearer …` or `X-VectaSim-Token: …`. Requests from this PC stay
-//!   token-free, so the OBS URLs keep working.
+//!   header `Authorization: Bearer …`, `X-VectaSim-Token: …` or the cookie [`cookie_name`]
+//!   (`vectasim_token_<port>`).
+//!   Requests from this PC stay token-free, so the OBS URLs keep working.
+//! * The query form is for the first load (OBS browser sources and WebSockets cannot send
+//!   headers): a request authorised by `?token=` gets the token back as an `HttpOnly`,
+//!   `SameSite=Strict` cookie, and `overlay.js` then takes the token out of the address bar
+//!   (`history.replaceState`), so it does not stay in the browser history or in bookmarks;
+//!   a bookmark without it keeps working through the cookie. A cookie with a token that is
+//!   no longer valid (Regenerate, LAN access off) is deleted by the next answer (`Max-Age=0`).
+//! * The start page (`/`) of an authorised request carries the token in a `<meta>` element
+//!   while LAN access is on, so its copy URLs for OBS on another PC work even when the page
+//!   was opened from a bookmark through the cookie (the JS reads and removes it).
 //! * Token-free means: the peer is a loopback address **and** the `Host` header names the
 //!   loopback (`127.0.0.1`, `localhost`, `[::1]`). A web page that rebinds its own domain to
 //!   127.0.0.1 (DNS rebinding) sends its own `Host` and is refused.
@@ -118,15 +128,85 @@ pub fn origin_allowed(origin: &str, host: Option<&str>) -> bool {
     port_ok && matches!(name, "localhost" | "127.0.0.1" | "[::1]")
 }
 
-/// The token a request carries (query `token`, `Authorization: Bearer`, `X-VectaSim-Token`).
-pub fn request_token<'a>(query: Option<&'a str>, authorization: Option<&'a str>, header: Option<&'a str>) -> Option<&'a str> {
+/// Prefix of the cookie that carries the token after a first load with `?token=` (module doc);
+/// the full name ends in the server's port ([`cookie_name`]).
+pub const TOKEN_COOKIE: &str = "vectasim_token";
+
+/// The cookie name for the server on `port` (`vectasim_token_8095`). Browsers do not tie
+/// cookies to a port (every port of the address gets them sent; nothing on the server side can
+/// change that), so the port in the name at least keeps two VectaSim ports, or a port change,
+/// from reading each other's token, and it lets a new port start without a stale cookie.
+pub fn cookie_name(port: u16) -> String {
+    format!("{TOKEN_COOKIE}_{port}")
+}
+
+/// How long the browser keeps the token cookie (a year; a new token replaces it, a refused
+/// one is cleared, see [`clear_cookie`]).
+pub const TOKEN_COOKIE_MAX_AGE_S: u64 = 365 * 24 * 3600;
+
+/// The `token` parameter of a query string.
+pub fn query_token(query: Option<&str>) -> Option<&str> {
+    query?.split('&').find_map(|kv| kv.strip_prefix("token=")).filter(|t| !t.is_empty())
+}
+
+/// The value of the cookie `name` in a `Cookie` header (exact name match).
+pub fn cookie_token<'a>(cookie: Option<&'a str>, name: &str) -> Option<&'a str> {
+    cookie?
+        .split(';')
+        .find_map(|kv| kv.trim().strip_prefix(name).and_then(|r| r.strip_prefix('=')))
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+}
+
+/// The `Set-Cookie` value that hands `token` to the browser as cookie `name` (only alphabet
+/// characters, see [`valid_token`], so nothing needs quoting). No `Secure`: plain HTTP.
+pub fn token_cookie(name: &str, token: &str) -> String {
+    format!("{name}={token}; Path=/; Max-Age={TOKEN_COOKIE_MAX_AGE_S}; HttpOnly; SameSite=Strict")
+}
+
+/// The `Set-Cookie` value that deletes cookie `name` (a stale token after Regenerate or after
+/// LAN access was switched off, or the port-less cookie of older versions).
+pub fn clear_cookie(name: &str) -> String {
+    format!("{name}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict")
+}
+
+/// The token a request carries: `X-VectaSim-Token`, `Authorization: Bearer`, query `token`,
+/// cookie `cookie_name` – in that order, so a new token in the URL beats a stale cookie.
+pub fn request_token<'a>(
+    query: Option<&'a str>,
+    authorization: Option<&'a str>,
+    header: Option<&'a str>,
+    cookie: Option<&'a str>,
+    cookie_name: &str,
+) -> Option<&'a str> {
     if let Some(h) = header.map(str::trim).filter(|h| !h.is_empty()) {
         return Some(h);
     }
     if let Some(b) = authorization.and_then(|a| a.trim().strip_prefix("Bearer ")).map(str::trim).filter(|b| !b.is_empty()) {
         return Some(b);
     }
-    query?.split('&').find_map(|kv| kv.strip_prefix("token=")).filter(|t| !t.is_empty())
+    query_token(query).or_else(|| cookie_token(cookie, cookie_name))
+}
+
+/// The cookies an answer deletes: the port cookie when it carries a token that is not (or no
+/// longer) the configured one, and the port-less cookie of older versions whenever it is sent.
+/// `expected` is the LAN token, `None` while LAN access is off.
+pub fn stale_cookies(cookie: Option<&str>, name: &str, expected: Option<&str>) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Some(c) = cookie_token(cookie, name)
+        && !expected.is_some_and(|e| token_eq(c, e))
+    {
+        out.push(name.to_string());
+    }
+    if cookie_token(cookie, TOKEN_COOKIE).is_some() {
+        out.push(TOKEN_COOKIE.to_string());
+    }
+    out
+}
+
+/// The request comes from this PC: loopback peer **and** loopback `Host` (module doc).
+pub fn is_local(peer: SocketAddr, host: Option<&str>) -> bool {
+    is_loopback_peer(peer.ip()) && host.is_some_and(is_loopback_host)
 }
 
 /// Why a request is refused.
@@ -182,8 +262,7 @@ pub fn check(req: &RequestInfo<'_>, peer: SocketAddr, token: Option<&str>) -> Re
     {
         return Err(Denied::Origin);
     }
-    let local = is_loopback_peer(peer.ip()) && req.host.is_some_and(is_loopback_host);
-    if local {
+    if is_local(peer, req.host) {
         return Ok(());
     }
     // the CORS preflight carries no credentials; it only reaches here with an allowed Origin
@@ -226,11 +305,38 @@ mod tests {
 
     #[test]
     fn token_sources() {
-        assert_eq!(request_token(Some("scale=2&token=XyZ"), None, None), Some("XyZ"));
-        assert_eq!(request_token(Some("token="), None, None), None);
-        assert_eq!(request_token(None, Some("Bearer abc"), None), Some("abc"));
-        assert_eq!(request_token(Some("token=q"), Some("Bearer b"), Some("h")), Some("h"));
-        assert_eq!(request_token(Some("xtoken=q"), Some("Basic abc"), None), None);
+        let n = cookie_name(8095);
+        let n = n.as_str();
+        assert_eq!(n, "vectasim_token_8095");
+        assert_eq!(request_token(Some("scale=2&token=XyZ"), None, None, None, n), Some("XyZ"));
+        assert_eq!(request_token(Some("token="), None, None, None, n), None);
+        assert_eq!(request_token(None, Some("Bearer abc"), None, None, n), Some("abc"));
+        assert_eq!(request_token(Some("token=q"), Some("Bearer b"), Some("h"), None, n), Some("h"));
+        assert_eq!(request_token(Some("xtoken=q"), Some("Basic abc"), None, None, n), None);
+        // the cookie only when nothing else is there; a token in the URL beats a stale cookie
+        assert_eq!(request_token(None, None, None, Some("a=1; vectasim_token_8095=Ck; b=2"), n), Some("Ck"));
+        assert_eq!(request_token(Some("token=new"), None, None, Some("vectasim_token_8095=old"), n), Some("new"));
+        assert_eq!(request_token(None, None, None, Some("vectasim_token_8095x=no; vectasim_token_8095="), n), None);
+        // the cookie of another port (or the port-less one of older versions) is not ours
+        assert_eq!(request_token(None, None, None, Some("vectasim_token_8096=Other; vectasim_token=Old"), n), None);
+        assert_eq!(token_cookie(n, "abc"), "vectasim_token_8095=abc; Path=/; Max-Age=31536000; HttpOnly; SameSite=Strict");
+        assert_eq!(clear_cookie(n), "vectasim_token_8095=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict");
+    }
+
+    #[test]
+    fn stale_cookies_are_cleared() {
+        let n = "vectasim_token_8095";
+        let tok = "t0k3nt0k3nt0k3nt0k3n";
+        // the right token: nothing to clear
+        assert!(stale_cookies(Some("vectasim_token_8095=t0k3nt0k3nt0k3nt0k3n"), n, Some(tok)).is_empty());
+        // Regenerate: the old cookie goes
+        assert_eq!(stale_cookies(Some("vectasim_token_8095=oldoldoldoldoldold"), n, Some(tok)), [n]);
+        // LAN switched off: the cookie goes too
+        assert_eq!(stale_cookies(Some("vectasim_token_8095=t0k3nt0k3nt0k3nt0k3n"), n, None), [n]);
+        // the port-less cookie of older versions always goes
+        assert_eq!(stale_cookies(Some("vectasim_token=t0k3nt0k3nt0k3nt0k3n"), n, Some(tok)), [TOKEN_COOKIE]);
+        assert!(stale_cookies(None, n, Some(tok)).is_empty());
+        assert!(stale_cookies(Some("other=1"), n, None).is_empty());
     }
 
     #[test]

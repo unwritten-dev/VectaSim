@@ -81,7 +81,7 @@ interface Props {
 }
 
 /**
- * "SimConnect einrichten" card in Einstellungen → Simulator: downloads the official MSFS SDK
+ * "Set up SimConnect" card in Settings → Simulator: downloads the official MSFS SDK
  * from Microsoft and keeps only SimConnect.dll (backend `download_simconnect`). Does not block
  * closing the window; the backend cleans up its scratch folder on its own.
  */

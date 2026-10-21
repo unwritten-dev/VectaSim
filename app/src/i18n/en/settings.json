@@ -234,7 +234,7 @@
       "privacy": {
         "label": "Streamer mode",
         "key": "Ctrl+Shift+P",
-        "help": "Hides registrations (D-••••), callsign and flight number, airline, SimBrief ID and your Windows user name in paths – across the whole interface, on the landing card and in the diagnostics package. Everything stays stored as it is; photo credits remain visible."
+        "help": "Hides registrations (D-••••), callsign and flight number, airline, SimBrief ID in the whole interface and in the diagnostics package (your Windows user name in paths is always hidden there) – on the landing card and in the diagnostics package. Everything stays stored as it is; photo credits remain visible."
       },
       "photos": {
         "label": "Load aircraft photos from Planespotters.net",

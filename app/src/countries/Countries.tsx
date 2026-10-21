@@ -10,6 +10,8 @@ import ErrorNotice from "../ErrorNotice";
 import EmptyState from "../ui/EmptyState";
 import { showToast } from "../ui/Toast";
 import { userMessage } from "../errors";
+import { errorToast } from "../ui/errorToast";
+import { saveImage } from "../saveImage";
 import { navigate } from "../airframes/navigation";
 import { usePrefs } from "../prefs";
 import GlobeToggle from "../map/GlobeToggle";
@@ -151,12 +153,11 @@ export default function Countries() {
       const path = await save({ defaultPath: exportFileName(new Date(), lang), filters: [{ name: t("countries.export.pngFilter"), extensions: ["png"] }] });
       if (!path) return;
       const blob = await renderMapPng(map, t("countries.export.line", { progress: progressLabel(progress), landings: landingsLabel(summary.landings, lang) }), t, lang);
-      const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
-      await invoke("save_image", { path, bytes });
+      await saveImage(path, blob);
       showToast({ tone: "ok", title: t("countries.export.saved"), body: path, durationMs: 3000 });
     } catch (e) {
-      const m = userMessage(e, "export");
-      showToast({ id: "countries-export", tone: "err", title: t("countries.export.failed", { reason: m.title }), body: `${m.hint}${m.detail ? ` (${m.detail.slice(0, 160)})` : ""}` });
+      // the reason behind "Details" (errorToast), never the raw text in the body
+      showToast({ id: "countries-export", tone: "err", ...errorToast(t("countries.export.failed", { reason: userMessage(e, "export").title }), e, "export") });
     } finally {
       setExporting(false);
     }

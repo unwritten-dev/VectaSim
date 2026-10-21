@@ -3,9 +3,22 @@
 //! Cadence is driven by telemetry timestamps, not wall-clock, so the recorder
 //! behaves identically under test and in the app. The 1 Hz sampling and the flush interval
 //! run on a [`MonoClock`] over those timestamps: a system clock set back does not stop
-//! either (the samples keep their wall-clock `t_ms`). The whole track of the
-//! current flight stays in memory (a 10 h flight at 1 Hz is ~4 MB) and is
-//! re-encoded and upserted every `FLUSH_INTERVAL_MS` and on flight end.
+//! either. Track samples carry the wall-clock `t_ms`, and the live track (so the stored one) is
+//! strictly increasing in it – the live map's incremental reload cursors on `t_ms`, replay and
+//! time axes need the order. After a backward step of the system clock a sample at or before
+//! the last one is
+//! - set 1 ms after the last one when the step is small (≤ [`MAX_TRACK_CLAMP_MS`], an NTP
+//!   correction): a second or two of samples a millisecond apart, then wall clock again;
+//! - left out of the track when the step is larger (the clock set back by hand): the track
+//!   resumes when the wall clock has passed its last sample again. Squeezing an hour into
+//!   milliseconds, or shifting the rest of the track away from the event timestamps
+//!   (touchdowns, phases, which stay wall clock), would make the track wrong; the hole only
+//!   makes it shorter.
+//!
+//! Sampling cadence and flushes go on regardless. The whole track of the
+//! current flight stays in memory (a 10 h flight at 1 Hz is ~4 MB) and is upserted every
+//! `FLUSH_INTERVAL_MS` and on flight end; each flush only encodes the samples added since the
+//! last one ([`TrackEncoder`]) and compresses the stream again.
 //!
 //! Failure handling: every event of a sample is handled on its own, so a failed
 //! write (database locked, disk full) never swallows the events after it – least of
@@ -22,7 +35,7 @@
 
 use crate::airframe::{AirframeHint, icao_from_atc_model, merge_hint, normalize_registration, resolve_registration};
 use crate::store::{FlightContext, PlannedFlight};
-use crate::track::{TrackSample, encode_track, subsample};
+use crate::track::{TrackEncoder, TrackSample};
 use crate::{AirportResolver, Result, Store, StoreError};
 use std::sync::{Arc, Mutex, MutexGuard};
 use vectasim_core::flight::{FlightDiscardedEvent, TouchdownOutcomeEvent};
@@ -39,6 +52,28 @@ pub(crate) const PREVIEW_EVERY: usize = 30;
 const RECENTLY_CLOSED: usize = 4;
 /// How far from the nearest airport a start/landing position may be to still count as "at" it.
 const AIRPORT_MATCH_NM: f64 = 3.0;
+
+/// Backward clock steps up to this size keep the samples (1 ms after the last one); larger ones
+/// leave a hole in the track (see the module doc), ms.
+pub const MAX_TRACK_CLAMP_MS: u64 = 10_000;
+
+/// A flight started in the air below this AGL near an airport is arriving there (see
+/// [`low_airborne_start`]), ft.
+const LOW_AIRBORNE_START_AGL_FT: f64 = 3_000.0;
+
+/// The `FlightStarted` in `events` is a start in the air (Preflight/Shutdown straight into an
+/// airborne phase) below [`LOW_AIRBORNE_START_AGL_FT`]: a flight loaded on the approach. The
+/// airport within [`AIRPORT_MATCH_NM`] of that point is then its arrival candidate, not its
+/// departure (a flight loaded on a 2 nm final otherwise "departed" from its destination). A
+/// later landing sets the arrival as usual.
+fn low_airborne_start(events: &[FlightEvent]) -> bool {
+    events.iter().any(|e| {
+        matches!(e, FlightEvent::PhaseChanged(tr)
+            if matches!(tr.from, FlightPhase::Preflight | FlightPhase::Shutdown)
+                && tr.to.is_airborne_phase()
+                && tr.telemetry.altitude_agl_ft < LOW_AIRBORNE_START_AGL_FT)
+    })
+}
 
 /// The current flight's 1 Hz samples, shared with the UI so the live map can draw
 /// the whole track without a round trip through SQLite.
@@ -59,6 +94,64 @@ struct Current {
     pending_touchdowns: Vec<TouchdownReport>,
     /// The flight ended with this state, but writing it has not succeeded yet.
     ending: Option<&'static str>,
+    /// The track encoded so far (see [`Encoded`]).
+    encoded: Encoded,
+}
+
+impl Current {
+    fn new(id: String, summary: FlightSummary, pending_touchdowns: Vec<TouchdownReport>) -> Self {
+        Self {
+            id,
+            last_sample_mono: None,
+            last_flush_mono: None,
+            summary,
+            pending_touchdowns,
+            ending: None,
+            encoded: Encoded::default(),
+        }
+    }
+}
+
+/// Incremental encoding of the live track for the flush: the samples up to `upto` are in the
+/// encoders, a flush only adds the ones after it (copied out of the lock) instead of cloning
+/// and re-encoding the whole buffer every 15 s. The zstd pass over the whole stream remains.
+#[derive(Default)]
+struct Encoded {
+    track: TrackEncoder,
+    /// Every [`PREVIEW_EVERY`]th sample, like [`crate::track::subsample`]; its moving last
+    /// sample is added per flush.
+    preview: TrackEncoder,
+    upto: usize,
+    /// `t_ms` of the first sample and of the last one in `preview`.
+    first_t_ms: Option<u64>,
+    preview_last_t_ms: Option<u64>,
+}
+
+impl Encoded {
+    /// Blobs of the whole buffer `live`; starts over when it is not the buffer encoded so far
+    /// (cleared, replaced).
+    fn update(&mut self, live: &Mutex<Vec<TrackSample>>) -> (usize, Vec<u8>, Vec<u8>) {
+        let (new, last) = {
+            let samples = live.lock().unwrap_or_else(|e| e.into_inner());
+            if samples.len() < self.upto || (self.upto > 0 && samples.first().map(|s| s.t_ms) != self.first_t_ms) {
+                *self = Encoded::default();
+            }
+            (samples[self.upto..].to_vec(), samples.last().cloned())
+        };
+        for s in &new {
+            if self.upto == 0 {
+                self.first_t_ms = Some(s.t_ms);
+            }
+            self.track.push(s);
+            if self.upto.is_multiple_of(PREVIEW_EVERY) {
+                self.preview.push(s);
+                self.preview_last_t_ms = Some(s.t_ms);
+            }
+            self.upto += 1;
+        }
+        let extra = last.filter(|l| self.preview_last_t_ms != Some(l.t_ms));
+        (self.upto, self.track.encode(None), self.preview.encode(extra.as_ref()))
+    }
 }
 
 /// The dispatch plan the next flight should be attached to, shared with the app
@@ -71,6 +164,8 @@ pub struct FlightRecorder {
     current: Option<Current>,
     /// A `FlightStarted` whose flight row could not be written; retried with the next sample.
     pending_start: bool,
+    /// The flight being started began in the air low over the ground (see [`low_airborne_start`]).
+    start_low: bool,
     live: LiveTrack,
     resolver: Option<Arc<dyn AirportResolver>>,
     planned: PlannedSlot,
@@ -104,6 +199,7 @@ impl FlightRecorder {
             ctx,
             current: None,
             pending_start: false,
+            start_low: false,
             live: LiveTrack::default(),
             resolver: None,
             planned: PlannedSlot::default(),
@@ -206,8 +302,24 @@ impl FlightRecorder {
 
         if let Some(c) = self.current.as_mut().filter(|c| c.ending.is_none()) {
             if c.last_sample_mono.is_none_or(|last| mono.saturating_sub(last) >= SAMPLE_INTERVAL_MS) {
+                let mut sample = TrackSample::from(t);
+                let mut live = self.live.lock().unwrap_or_else(|e| e.into_inner());
+                // never backwards (see the module doc)
+                let keep = match live.last() {
+                    Some(last) if sample.t_ms <= last.t_ms => {
+                        if last.t_ms - sample.t_ms <= MAX_TRACK_CLAMP_MS {
+                            sample.t_ms = last.t_ms + 1;
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    _ => true,
+                };
+                if keep {
+                    live.push(sample);
+                }
                 c.last_sample_mono = Some(mono);
-                self.live.lock().unwrap_or_else(|e| e.into_inner()).push(TrackSample::from(t));
             }
             let due = match c.last_flush_mono {
                 Some(last) => mono.saturating_sub(last) >= FLUSH_INTERVAL_MS,
@@ -241,6 +353,7 @@ impl FlightRecorder {
         for ev in events {
             match ev {
                 FlightEvent::FlightStarted { .. } => {
+                    self.start_low = low_airborne_start(events);
                     let r = self.start(summary, now);
                     errs.note("flight start", r);
                 }
@@ -335,21 +448,21 @@ impl FlightRecorder {
         }
         self.pending_start = true;
         let id = uuid::Uuid::new_v4().to_string();
-        let dep = summary.departure.and_then(|p| self.resolve(p.latitude, p.longitude));
+        let here = summary.departure.and_then(|p| self.resolve(p.latitude, p.longitude));
+        // started in the air low near an airport (loaded on the final): that airport is where the
+        // flight is going, not where it came from
+        let (dep, arr) = if self.start_low { (None, here) } else { (here, None) };
         self.store.insert_flight(&id, summary, &self.ctx, dep.as_deref(), now)?;
         self.pending_start = false;
         log::info!("recording flight {id} (dep {})", dep.as_deref().unwrap_or("?"));
         self.samples().clear();
-        self.current = Some(Current {
-            id: id.clone(),
-            last_sample_mono: None,
-            last_flush_mono: None,
-            summary: summary.clone(),
-            pending_touchdowns: Vec::new(),
-            ending: None,
-        });
+        self.current = Some(Current::new(id.clone(), summary.clone(), Vec::new()));
         // the flight row exists: what follows is nice to have, the flight records regardless
         let mut errs = Errors::default();
+        if let Some(arr) = arr {
+            log::info!("flight {id} started in the air low near {arr}: arrival candidate, no departure airport");
+            errs.note("arrival airport", self.store.set_arrival_icao(&id, Some(&arr)));
+        }
         if let Some(plan) = self.planned.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
             errs.note("attach plan", self.store.attach_plan(&id, plan).map(|_| ()));
         }
@@ -359,11 +472,9 @@ impl FlightRecorder {
 
     fn flush(&mut self, summary: &FlightSummary, now: u64) -> Result<()> {
         let Some(c) = self.current.as_mut() else { return Ok(()) };
-        // copy under the lock (a memcpy), encode outside it: the live map and `live_track`
-        // readers do not wait for the zstd encode of a long track
-        let samples = self.live.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        let (count, data, preview) = (samples.len(), encode_track(&samples), encode_track(&subsample(&samples, PREVIEW_EVERY)));
-        drop(samples);
+        // only the samples since the last flush are copied out of the lock and encoded; the live
+        // map and `live_track` readers never wait for the zstd pass
+        let (count, data, preview) = c.encoded.update(&self.live);
         self.store.upsert_track(&c.id, count, &data, &preview, now)?;
         self.store.update_flight(&c.id, summary, "active", now)?;
         Ok(())
@@ -456,14 +567,7 @@ impl FlightRecorder {
         let track = self.store.get_track(flight_id)?.unwrap_or_default();
         *self.samples() = track;
         let pending_touchdowns = self.current.take().map(|c| c.pending_touchdowns).unwrap_or_default();
-        self.current = Some(Current {
-            id: flight_id.to_string(),
-            last_sample_mono: None,
-            last_flush_mono: None,
-            summary: summary.clone(),
-            pending_touchdowns,
-            ending: None,
-        });
+        self.current = Some(Current::new(flight_id.to_string(), summary.clone(), pending_touchdowns));
         self.store.update_flight(flight_id, summary, "active", now)?;
         log::info!("recording flight {flight_id} again (resumed, {} track samples so far)", self.samples().len());
         Ok(())

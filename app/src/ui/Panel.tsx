@@ -25,7 +25,8 @@ export default function Panel({ title, description, actions, collapsible, defaul
       <header className="panel-head">
         <H className="panel-title">
           {collapsible ? (
-            <button className="panel-toggle" aria-expanded={open} aria-controls={bodyId} onClick={() => setOpen(!open)}>
+            // aria-controls only while the body exists (folded, it is not rendered)
+            <button className="panel-toggle" aria-expanded={open} aria-controls={open ? bodyId : undefined} onClick={() => setOpen(!open)}>
               <Chevron open={open} />
               {title}
             </button>

@@ -3,7 +3,7 @@
 //! `Content-Length`, `Transfer-Encoding: chunked` and read-to-close bodies.
 
 use std::io::{self, Read, Write};
-use std::net::{TcpStream, ToSocketAddrs};
+use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::time::{Duration, Instant};
 
 /// Largest response accepted (the full dataref list of X-Plane is ~1 MB). Also the
@@ -20,9 +20,38 @@ pub struct Response {
     pub body: String,
 }
 
+/// `host:port` for a `Host` header or a URL; an IPv6 address goes in brackets (`[fe80::1]:8086`).
+pub fn authority(host: &str, port: u16) -> String {
+    if host.contains(':') && !host.starts_with('[') { format!("[{host}]:{port}") } else { format!("{host}:{port}") }
+}
+
+/// Opens the TCP connection for a request or the WebSocket. Only addresses of this PC or the
+/// local network ([`crate::ip_scope`]) are dialled: a host name that resolves to public
+/// addresses only is refused (the Web API is plain HTTP without a password, never across the
+/// internet). The name is resolved and checked again on every connect and reconnect.
 pub fn connect(host: &str, port: u16, timeout: Duration) -> io::Result<TcpStream> {
+    connect_with(host, port, timeout, |h, p| Ok((h, p).to_socket_addrs()?.collect()))
+}
+
+/// [`connect`] with its own resolver (tests).
+pub fn connect_with(
+    host: &str,
+    port: u16,
+    timeout: Duration,
+    resolve: impl FnOnce(&str, u16) -> io::Result<Vec<SocketAddr>>,
+) -> io::Result<TcpStream> {
+    let all = resolve(host, port)?;
+    let local: Vec<SocketAddr> = all.iter().copied().filter(|a| crate::ip_scope(a.ip()).is_ok()).collect();
+    if local.is_empty()
+        && let Some(first) = all.first()
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("{host} resolves to the public address {} – the X-Plane Web API is unencrypted, only this PC or the local network", first.ip()),
+        ));
+    }
     let mut last = io::Error::new(io::ErrorKind::NotFound, format!("{host}:{port}: no address"));
-    for addr in (host, port).to_socket_addrs()? {
+    for addr in local {
         match TcpStream::connect_timeout(&addr, timeout) {
             Ok(s) => return Ok(s),
             Err(e) => last = e,
@@ -36,7 +65,7 @@ pub fn get(host: &str, port: u16, path: &str, timeout: Duration) -> io::Result<R
     let mut s = connect(host, port, timeout)?;
     s.set_read_timeout(Some(timeout))?;
     s.set_write_timeout(Some(timeout))?;
-    let req = format!("GET {path} HTTP/1.1\r\nHost: {host}:{port}\r\nAccept: application/json\r\nConnection: close\r\n\r\n");
+    let req = format!("GET {path} HTTP/1.1\r\nHost: {}\r\nAccept: application/json\r\nConnection: close\r\n\r\n", authority(host, port));
     s.write_all(req.as_bytes())?;
     let deadline = Instant::now() + timeout * TOTAL_TIMEOUT_FACTOR;
     let mut buf = Vec::with_capacity(8192);

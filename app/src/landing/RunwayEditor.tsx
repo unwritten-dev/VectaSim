@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { fmt, fmtDate, fmtNum } from "../i18n/number";
 import { useT } from "../i18n";
 import { showToast } from "../ui/Toast";
+import { Modal } from "../ui/Modal";
 import { RUNWAY_SOURCE_SHORT, runwaySourceOf } from "./facts";
 import { isDerivedSource, type LandingAnalysis, type UserRunway, type UserRunwayEdit } from "./types";
 
@@ -92,22 +92,17 @@ const num = (s: string): number | null => {
   return Number.isFinite(v) ? v : NaN;
 };
 
-/** Everything focusable inside the editor. */
-const FOCUSABLE = 'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
 /**
  * "Piste korrigieren": a modal over the debrief to set threshold and far end of the matched
  * runway (`save_user_runway`), take over what this landing implies, or forget a remembered
- * runway (`delete_user_runway`, back to OurAirports / derivation). Rendered into the debrief
- * overlay (a sibling of `.debrief`, which is made inert while it is open), so the debrief's
- * focus trap keeps Tab inside it; Esc closes the editor only.
+ * runway (`delete_user_runway`, back to OurAirports / derivation). A modal of its own on the
+ * shared stack (ui/Modal): the debrief below it is inert while it is open, Tab stays inside,
+ * Esc closes the editor only, focus returns to "Piste korrigieren".
  */
 export default function RunwayEditor({ analysis: a, airportIcao, onClose, onChanged }: { analysis: LandingAnalysis; airportIcao: string; onClose: () => void; onChanged: () => void }) {
   const t = useT();
   const rwy = a.runway;
   const titleId = useId();
-  const ref = useRef<HTMLDivElement>(null);
-  const [host, setHost] = useState<HTMLElement | null>(null);
   const [rows, setRows] = useState<UserRunway[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -123,38 +118,6 @@ export default function RunwayEditor({ analysis: a, airportIcao, onClose, onChan
     elevationFt: a.touchdownElevationFt != null ? String(Math.round(a.touchdownElevationFt)) : "",
   }));
   const fromLanding = useMemo(() => geometryFromLanding(a), [a]);
-  // the latest onClose, so the modal setup below runs once
-  const closeRef = useRef(onClose);
-  useEffect(() => {
-    closeRef.current = onClose;
-  }, [onClose]);
-
-  // the overlay hosts the editor; the debrief behind it goes inert
-  useEffect(() => {
-    const before = document.activeElement as HTMLElement | null;
-    const overlay = (before?.closest(".debrief-overlay") ?? document.querySelector(".debrief-overlay")) as HTMLElement | null;
-    const behind = overlay?.querySelector<HTMLElement>(":scope > .debrief") ?? null;
-    behind?.setAttribute("inert", "");
-    setHost(overlay ?? document.body);
-    // capture on document: before the debrief's window handler, which would close the debrief
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !e.defaultPrevented) {
-        e.preventDefault();
-        closeRef.current();
-      }
-    };
-    document.addEventListener("keydown", onKey, true);
-    return () => {
-      document.removeEventListener("keydown", onKey, true);
-      behind?.removeAttribute("inert");
-      if (before?.isConnected) before.focus({ preventScroll: true });
-    };
-  }, []);
-
-  useEffect(() => {
-    if (host) ref.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
-  }, [host]);
-
   const loadRows = useCallback(
     () =>
       invoke<UserRunway[]>("list_user_runways", { icao: airportIcao })
@@ -264,135 +227,131 @@ export default function RunwayEditor({ analysis: a, airportIcao, onClose, onChan
     }
   };
 
-  if (!host) return null;
   const src = runwaySourceOf(rwy);
-  return createPortal(
-    <div className="rwe-backdrop">
-      <div ref={ref} className="rwe" role="dialog" aria-modal="true" aria-labelledby={titleId}>
-        <header className="rwe-head">
-          <h3 id={titleId}>{rwy ? t("runwayEditor.titleRunway", { airport: airportIcao, ident: rwy.ident }) : t("runwayEditor.title", { airport: airportIcao })}</h3>
-          <span className="detail">{t("runwayEditor.now", { source: RUNWAY_SOURCE_SHORT[src] })}</span>
-        </header>
-        <p className="detail rwe-intro">{t("runwayEditor.intro")}</p>
-        <form
-          className="rwe-form"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void save();
-          }}
-        >
-          <label className="af-field rwe-ident">
-            <span className="stat-label">{t("runwayEditor.ident")}</span>
-            <input value={form.ident} onChange={set("ident")} maxLength={4} autoComplete="off" spellCheck={false} />
-          </label>
-          <fieldset className="rwe-pair">
-            <legend className="stat-label">{t("runwayEditor.threshold")}</legend>
-            <label className="af-field">
-              <span className="sr-only">{t("runwayEditor.thresholdLat")}</span>
-              <input value={form.latThr} onChange={set("latThr")} inputMode="decimal" placeholder={t("runwayEditor.lat")} aria-label={t("runwayEditor.thresholdLat")} />
-            </label>
-            <label className="af-field">
-              <span className="sr-only">{t("runwayEditor.thresholdLon")}</span>
-              <input value={form.lonThr} onChange={set("lonThr")} inputMode="decimal" placeholder={t("runwayEditor.lon")} aria-label={t("runwayEditor.thresholdLon")} />
-            </label>
-          </fieldset>
-          <fieldset className="rwe-pair">
-            <legend className="stat-label">{t("runwayEditor.end")}</legend>
-            <label className="af-field">
-              <span className="sr-only">{t("runwayEditor.endLat")}</span>
-              <input value={form.latEnd} onChange={set("latEnd")} inputMode="decimal" placeholder={t("runwayEditor.lat")} aria-label={t("runwayEditor.endLat")} />
-            </label>
-            <label className="af-field">
-              <span className="sr-only">{t("runwayEditor.endLon")}</span>
-              <input value={form.lonEnd} onChange={set("lonEnd")} inputMode="decimal" placeholder={t("runwayEditor.lon")} aria-label={t("runwayEditor.endLon")} />
-            </label>
-          </fieldset>
+  return (
+    <Modal backdropClassName="rwe-backdrop" className="rwe" labelledBy={titleId} aria-busy={busy || undefined} onClose={onClose} closeOnEscape={!busy}>
+      <header className="rwe-head">
+        <h3 id={titleId}>{rwy ? t("runwayEditor.titleRunway", { airport: airportIcao, ident: rwy.ident }) : t("runwayEditor.title", { airport: airportIcao })}</h3>
+        <span className="detail">{t("runwayEditor.now", { source: RUNWAY_SOURCE_SHORT[src] })}</span>
+      </header>
+      <p className="detail rwe-intro">{t("runwayEditor.intro")}</p>
+      <form
+        className="rwe-form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void save();
+        }}
+      >
+        <label className="af-field rwe-ident">
+          <span className="stat-label">{t("runwayEditor.ident")}</span>
+          <input value={form.ident} onChange={set("ident")} maxLength={4} autoComplete="off" spellCheck={false} />
+        </label>
+        <fieldset className="rwe-pair">
+          <legend className="stat-label">{t("runwayEditor.threshold")}</legend>
           <label className="af-field">
-            <span className="stat-label">{t("runwayEditor.width")}</span>
-            <input value={form.widthM} onChange={set("widthM")} inputMode="decimal" placeholder={t("runwayEditor.widthPlaceholder")} />
+            <span className="sr-only">{t("runwayEditor.thresholdLat")}</span>
+            <input value={form.latThr} onChange={set("latThr")} inputMode="decimal" placeholder={t("runwayEditor.lat")} aria-label={t("runwayEditor.thresholdLat")} />
           </label>
           <label className="af-field">
-            <span className="stat-label">{t("runwayEditor.elevation")}</span>
-            <input value={form.elevationFt} onChange={set("elevationFt")} inputMode="decimal" placeholder={t("runwayEditor.elevationPlaceholder")} />
+            <span className="sr-only">{t("runwayEditor.thresholdLon")}</span>
+            <input value={form.lonThr} onChange={set("lonThr")} inputMode="decimal" placeholder={t("runwayEditor.lon")} aria-label={t("runwayEditor.thresholdLon")} />
           </label>
-          <div className="rwe-check detail num" aria-live="polite">
-            {"error" in parsed
-              ? parsed.error
-              : t(lengthEstimated ? "runwayEditor.checkEstimated" : "runwayEditor.check", { length: fmt(parsed.len, 0, "m"), course: fmt(parsed.course, 0, "°") })}
+        </fieldset>
+        <fieldset className="rwe-pair">
+          <legend className="stat-label">{t("runwayEditor.end")}</legend>
+          <label className="af-field">
+            <span className="sr-only">{t("runwayEditor.endLat")}</span>
+            <input value={form.latEnd} onChange={set("latEnd")} inputMode="decimal" placeholder={t("runwayEditor.lat")} aria-label={t("runwayEditor.endLat")} />
+          </label>
+          <label className="af-field">
+            <span className="sr-only">{t("runwayEditor.endLon")}</span>
+            <input value={form.lonEnd} onChange={set("lonEnd")} inputMode="decimal" placeholder={t("runwayEditor.lon")} aria-label={t("runwayEditor.endLon")} />
+          </label>
+        </fieldset>
+        <label className="af-field">
+          <span className="stat-label">{t("runwayEditor.width")}</span>
+          <input value={form.widthM} onChange={set("widthM")} inputMode="decimal" placeholder={t("runwayEditor.widthPlaceholder")} />
+        </label>
+        <label className="af-field">
+          <span className="stat-label">{t("runwayEditor.elevation")}</span>
+          <input value={form.elevationFt} onChange={set("elevationFt")} inputMode="decimal" placeholder={t("runwayEditor.elevationPlaceholder")} />
+        </label>
+        <div className="rwe-check detail num" aria-live="polite">
+          {"error" in parsed
+            ? parsed.error
+            : t(lengthEstimated ? "runwayEditor.checkEstimated" : "runwayEditor.check", { length: fmt(parsed.len, 0, "m"), course: fmt(parsed.course, 0, "°") })}
+        </div>
+        {note && <div className="detail rwe-note">{note}</div>}
+        {error && (
+          <div className="rwe-error" role="alert">
+            {error}
           </div>
-          {note && <div className="detail rwe-note">{note}</div>}
-          {error && (
-            <div className="rwe-error" role="alert">
-              {error}
-            </div>
+        )}
+        <div className="rwe-actions">
+          <button type="button" className="btn-sm" onClick={take} disabled={!fromLanding || busy} title={fromLanding ? t("runwayEditor.takeTitle") : t("runwayEditor.takeNone")}>
+            {t("runwayEditor.take")}
+          </button>
+          {rowOfMatch && (
+            <button type="button" className="btn-sm danger" onClick={() => void forget(rowOfMatch)} disabled={busy} title={t("runwayEditor.resetTitle")}>
+              {t("runwayEditor.reset")}
+            </button>
           )}
-          <div className="rwe-actions">
-            <button type="button" className="btn-sm" onClick={take} disabled={!fromLanding || busy} title={fromLanding ? t("runwayEditor.takeTitle") : t("runwayEditor.takeNone")}>
-              {t("runwayEditor.take")}
-            </button>
-            {rowOfMatch && (
-              <button type="button" className="btn-sm danger" onClick={() => void forget(rowOfMatch)} disabled={busy} title={t("runwayEditor.resetTitle")}>
-                {t("runwayEditor.reset")}
-              </button>
-            )}
-            <span className="spacer" />
-            <button type="button" className="btn-sm" onClick={onClose} disabled={busy}>
-              {t("runwayEditor.cancel")}
-            </button>
-            <button type="submit" className="btn-sm btn-primary" disabled={busy || "error" in parsed}>
-              {busy ? t("runwayEditor.saving") : t("runwayEditor.save")}
-            </button>
-          </div>
-        </form>
+          <span className="spacer" />
+          <button type="button" className="btn-sm" onClick={onClose} disabled={busy}>
+            {t("runwayEditor.cancel")}
+          </button>
+          <button type="submit" className="btn-sm btn-primary" disabled={busy || "error" in parsed}>
+            {busy ? t("runwayEditor.saving") : t("runwayEditor.save")}
+          </button>
+        </div>
+      </form>
 
-        <section className="rwe-list" aria-label={t("runwayEditor.listTitle", { airport: airportIcao })}>
-          <h4 className="stat-label">{t("runwayEditor.listTitle", { airport: airportIcao })}</h4>
-          {rows == null ? (
-            <div className="detail">{t("runwayEditor.listLoading")}</div>
-          ) : rows.length === 0 ? (
-            <div className="detail">{t("runwayEditor.listNone")}</div>
-          ) : (
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th scope="col">{t("runwayEditor.col.runway")}</th>
-                  <th scope="col">{t("runwayEditor.col.source")}</th>
-                  <th scope="col" className="num-col">
-                    {t("runwayEditor.col.landings")}
-                  </th>
-                  <th scope="col" className="num-col">
-                    {t("runwayEditor.col.length")}
-                  </th>
-                  <th scope="col">{t("runwayEditor.col.changed")}</th>
-                  <th scope="col">
-                    <span className="sr-only">{t("runwayEditor.col.action")}</span>
-                  </th>
+      <section className="rwe-list" aria-label={t("runwayEditor.listTitle", { airport: airportIcao })}>
+        <h4 className="stat-label">{t("runwayEditor.listTitle", { airport: airportIcao })}</h4>
+        {rows == null ? (
+          <div className="detail">{t("runwayEditor.listLoading")}</div>
+        ) : rows.length === 0 ? (
+          <div className="detail">{t("runwayEditor.listNone")}</div>
+        ) : (
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th scope="col">{t("runwayEditor.col.runway")}</th>
+                <th scope="col">{t("runwayEditor.col.source")}</th>
+                <th scope="col" className="num-col">
+                  {t("runwayEditor.col.landings")}
+                </th>
+                <th scope="col" className="num-col">
+                  {t("runwayEditor.col.length")}
+                </th>
+                <th scope="col">{t("runwayEditor.col.changed")}</th>
+                <th scope="col">
+                  <span className="sr-only">{t("runwayEditor.col.action")}</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.ident}>
+                  <td className="num">{r.ident}</td>
+                  <td>{r.source === "user" ? t("runwayEditor.sourceUser") : t("runwayEditor.sourceDerived")}</td>
+                  <td className="num num-col">{r.source === "user" ? "–" : fmtNum(r.uses)}</td>
+                  <td className="num num-col">
+                    {r.lengthEstimated ? "≥ " : ""}
+                    {fmt(distanceM(r.latThr, r.lonThr, r.latEnd, r.lonEnd), 0, "m")}
+                  </td>
+                  <td className="num">{fmtDate(r.updatedMs)}</td>
+                  <td>
+                    <button type="button" className="btn-sm" onClick={() => void forget(r)} disabled={busy} aria-label={t("runwayEditor.forgetAria", { ident: r.ident })}>
+                      {t("runwayEditor.forget")}
+                    </button>
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => (
-                  <tr key={r.ident}>
-                    <td className="num">{r.ident}</td>
-                    <td>{r.source === "user" ? t("runwayEditor.sourceUser") : t("runwayEditor.sourceDerived")}</td>
-                    <td className="num num-col">{r.source === "user" ? "–" : fmtNum(r.uses)}</td>
-                    <td className="num num-col">
-                      {r.lengthEstimated ? "≥ " : ""}
-                      {fmt(distanceM(r.latThr, r.lonThr, r.latEnd, r.lonEnd), 0, "m")}
-                    </td>
-                    <td className="num">{fmtDate(r.updatedMs)}</td>
-                    <td>
-                      <button type="button" className="btn-sm" onClick={() => void forget(r)} disabled={busy} aria-label={t("runwayEditor.forgetAria", { ident: r.ident })}>
-                        {t("runwayEditor.forget")}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </section>
-      </div>
-    </div>,
-    host,
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+    </Modal>
   );
 }

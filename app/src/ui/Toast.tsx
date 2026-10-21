@@ -8,8 +8,9 @@
 // is not a live region for NVDA/JAWS). Keyboard: Alt+T (App) focuses the newest toast,
 // Esc in a toast closes it and returns to where the focus was.
 
-import { useEffect, useId, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, useSyncExternalStore, type FocusEvent, type KeyboardEvent, type ReactNode } from "react";
 import { useT } from "../i18n";
+import { toastTimer, type ToastTimer } from "./toastTimer";
 
 export type ToastTone = "info" | "ok" | "warn" | "err";
 export type ToastRegion = "app" | "map";
@@ -173,51 +174,39 @@ export function focusNewestToast(): boolean {
 
 function ToastCard({ item }: { item: ToastItem }) {
   const t = useT();
-  const remaining = useRef<number | null>(item.durationMs ?? null);
-  const started = useRef(Date.now());
-  const timer = useRef<number | undefined>(undefined);
+  const timer = useRef<ToastTimer | null>(null);
 
-  const windowAway = () => document.hidden || !document.hasFocus();
-  const start = () => {
-    if (remaining.current == null) return;
-    if (item.holdWhileUnfocused && windowAway()) return;
-    started.current = Date.now();
-    window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => dismissToast(item.id), remaining.current);
-  };
-  const pause = () => {
-    if (remaining.current == null) return;
-    if (item.holdWhileUnfocused && windowAway()) return;
-    window.clearTimeout(timer.current);
-    remaining.current = Math.max(1500, remaining.current - (Date.now() - started.current));
-  };
   useEffect(() => {
-    remaining.current = item.durationMs ?? null;
-    start();
-    if (!item.holdWhileUnfocused) return () => window.clearTimeout(timer.current);
-    const away = () => {
-      if (remaining.current == null) return;
-      window.clearTimeout(timer.current);
-    };
-    const back = () => {
-      if (windowAway() || remaining.current == null) return;
-      // back from the sim: the full duration again, not what was left
-      remaining.current = item.durationMs ?? null;
-      start();
-    };
+    const windowAway = () => document.hidden || !document.hasFocus();
+    const tm = toastTimer({ durationMs: item.durationMs ?? null, holdWhileUnfocused: item.holdWhileUnfocused, windowAway, onExpire: () => dismissToast(item.id) });
+    timer.current = tm;
+    tm.start();
+    if (!item.holdWhileUnfocused) return () => tm.dispose();
+    const away = () => tm.away();
+    const back = () => tm.back();
     const vis = () => (document.hidden ? away() : back());
     window.addEventListener("blur", away);
     window.addEventListener("focus", back);
     document.addEventListener("visibilitychange", vis);
     return () => {
-      window.clearTimeout(timer.current);
+      tm.dispose();
       window.removeEventListener("blur", away);
       window.removeEventListener("focus", back);
       document.removeEventListener("visibilitychange", vis);
     };
-    // restart only when the toast is replaced (same id, new content)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // restart only when the toast is replaced (same id, new content: new createdMs); id,
+    // duration and hold flag belong to that same toast item
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on createdMs on purpose
   }, [item.createdMs]);
+  const hover = () => timer.current?.pause("hover");
+  const unhover = () => timer.current?.resume("hover");
+  const focus = () => timer.current?.pause("focus");
+  // focus moving between the toast's own buttons, or the window losing focus (the element stays
+  // focused and gets its focus back on return), does not release the hold
+  const blur = (e: FocusEvent<HTMLDivElement>) => {
+    if (e.currentTarget.contains(e.relatedTarget as Node | null) || !document.hasFocus()) return;
+    timer.current?.resume("focus");
+  };
 
   const tone = item.tone ?? "info";
   const titleId = useId();
@@ -240,10 +229,10 @@ function ToastCard({ item }: { item: ToastItem }) {
       aria-labelledby={titleId}
       tabIndex={-1}
       data-created={item.createdMs}
-      onMouseEnter={pause}
-      onMouseLeave={start}
-      onFocus={pause}
-      onBlur={start}
+      onMouseEnter={hover}
+      onMouseLeave={unhover}
+      onFocus={focus}
+      onBlur={blur}
       onKeyDown={onKeyDown}
     >
       <span className="toast-icon" aria-hidden="true">

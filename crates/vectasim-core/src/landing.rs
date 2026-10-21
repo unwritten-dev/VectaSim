@@ -225,6 +225,8 @@ pub fn point_along(lat: f64, lon: f64, toward_lat: f64, toward_lon: f64, dist_m:
 // ---- geometry -------------------------------------------------------------------------
 
 /// Local runway frame: origin at the threshold, x along the runway, y to the right.
+/// Longitude differences are taken the short way round ([`dlon_deg`]), so a runway across
+/// the antimeridian projects like any other.
 #[derive(Clone, Copy, Debug)]
 pub struct RunwayFrame {
     lat0: f64,
@@ -240,7 +242,7 @@ impl RunwayFrame {
     pub fn new(r: &RunwayEnd) -> Self {
         let lat0 = r.threshold_lat;
         let cos_lat0 = lat0.to_radians().cos();
-        let e = (r.end_lon - r.threshold_lon).to_radians() * EARTH_R_M * cos_lat0;
+        let e = dlon_deg(r.threshold_lon, r.end_lon).to_radians() * EARTH_R_M * cos_lat0;
         let n = (r.end_lat - r.threshold_lat).to_radians() * EARTH_R_M;
         let h = e.atan2(n);
         let geo_len = e.hypot(n);
@@ -257,7 +259,7 @@ impl RunwayFrame {
 
     /// (x along, y right of centreline) in metres.
     pub fn project(&self, lat: f64, lon: f64) -> (f64, f64) {
-        let e = (lon - self.lon0).to_radians() * EARTH_R_M * self.cos_lat0;
+        let e = dlon_deg(self.lon0, lon).to_radians() * EARTH_R_M * self.cos_lat0;
         let n = (lat - self.lat0).to_radians() * EARTH_R_M;
         (e * self.sin_h + n * self.cos_h, e * self.cos_h - n * self.sin_h)
     }
@@ -266,8 +268,28 @@ impl RunwayFrame {
     pub fn unproject(&self, x: f64, y: f64) -> (f64, f64) {
         let e = x * self.sin_h + y * self.cos_h;
         let n = x * self.cos_h - y * self.sin_h;
-        (self.lat0 + (n / EARTH_R_M).to_degrees(), self.lon0 + (e / (EARTH_R_M * self.cos_lat0)).to_degrees())
+        (self.lat0 + (n / EARTH_R_M).to_degrees(), wrap_lon(self.lon0 + (e / (EARTH_R_M * self.cos_lat0)).to_degrees()))
     }
+}
+
+/// Longitude difference `to - from` in degrees, taken the short way round (−180…180): a
+/// runway, a track or a blend across the antimeridian (Fiji, Tonga, Chatham Islands) is a
+/// few hundred metres long, not 360° wide. Exact for the ordinary case (|Δ| ≤ 180°).
+pub fn dlon_deg(from: f64, to: f64) -> f64 {
+    let d = to - from;
+    if d > 180.0 {
+        d - 360.0
+    } else if d < -180.0 {
+        d + 360.0
+    } else {
+        d
+    }
+}
+
+/// Longitude back into −180…180 after an offset that may have crossed the antimeridian.
+/// Values already in range are returned unchanged.
+pub fn wrap_lon(lon: f64) -> f64 {
+    if (-180.0..=180.0).contains(&lon) || !lon.is_finite() { lon } else { (lon + 180.0).rem_euclid(360.0) - 180.0 }
 }
 
 pub fn angle_diff_deg(a: f64, b: f64) -> f64 {
@@ -1315,7 +1337,7 @@ pub fn opposite_ident(ident: &str) -> String {
 pub fn offset_point(lat: f64, lon: f64, heading_deg: f64, dist_m: f64) -> (f64, f64) {
     let h = heading_deg.to_radians();
     let (e, n) = (dist_m * h.sin(), dist_m * h.cos());
-    (lat + (n / EARTH_R_M).to_degrees(), lon + (e / (EARTH_R_M * lat.to_radians().cos())).to_degrees())
+    (lat + (n / EARTH_R_M).to_degrees(), wrap_lon(lon + (e / (EARTH_R_M * lat.to_radians().cos())).to_degrees()))
 }
 
 /// Least-squares line through local (east, north) points: unit direction (oriented from
@@ -1366,7 +1388,7 @@ pub fn derive_runway_from_track(samples: &[LandingSample], touchdown: &Touchdown
     let elev = samples[td_idx].altitude_msl_ft;
     let (lat0, lon0) = (touchdown.latitude, touchdown.longitude);
     let cos0 = lat0.to_radians().cos();
-    let enu = |lat: f64, lon: f64| ((lon - lon0).to_radians() * EARTH_R_M * cos0, (lat - lat0).to_radians() * EARTH_R_M);
+    let enu = |lat: f64, lon: f64| (dlon_deg(lon0, lon).to_radians() * EARTH_R_M * cos0, (lat - lat0).to_radians() * EARTH_R_M);
 
     // ground run
     let mut pts = vec![(0.0, 0.0)];
@@ -1477,7 +1499,7 @@ pub fn derive_runway_from_track(samples: &[LandingSample], touchdown: &Touchdown
     let len = length.unwrap_or_else(|| ((d + roll) / 50.0).ceil() * 50.0).max(d + roll);
     let to_ll = |x: f64| {
         let (e, nn) = (c.0 + dir.0 * x, c.1 + dir.1 * x);
-        (lat0 + (nn / EARTH_R_M).to_degrees(), lon0 + (e / (EARTH_R_M * cos0)).to_degrees())
+        (lat0 + (nn / EARTH_R_M).to_degrees(), wrap_lon(lon0 + (e / (EARTH_R_M * cos0)).to_degrees()))
     };
     let (thr_lat, thr_lon) = to_ll(x_td - d);
     let (end_lat, end_lon) = to_ll(x_td - d + len);
@@ -1516,7 +1538,9 @@ pub fn blend_runway(old: &RunwayEnd, old_weight: f64, new: &RunwayEnd) -> Runway
     let t = w + 1.0;
     let (fo, fnew) = (RunwayFrame::new(old), RunwayFrame::new(new));
     let thr_lat = (old.threshold_lat * w + new.threshold_lat) / t;
-    let thr_lon = (old.threshold_lon * w + new.threshold_lon) / t;
+    // averaged as an offset from the old threshold, so two estimates either side of the
+    // antimeridian (179.99° and −179.99°) blend to 180°, not to 0°
+    let thr_lon = wrap_lon(old.threshold_lon + dlon_deg(old.threshold_lon, new.threshold_lon) / t);
     let (ho, hn) = (fo.heading_deg.to_radians(), fnew.heading_deg.to_radians());
     let h = (w * ho.sin() + hn.sin()).atan2(w * ho.cos() + hn.cos()).to_degrees().rem_euclid(360.0);
     let len = fo.length_m.max(fnew.length_m);
@@ -1546,14 +1570,18 @@ mod tests {
 
     fn runway() -> RunwayEnd {
         // threshold at 50°N 8°E, runway 09 (true 090), 3000 m long, 45 m wide
-        let f = RunwayFrame::new(&RunwayEnd { threshold_lat: 50.0, threshold_lon: 8.0, end_lat: 50.0, end_lon: 8.03, ..Default::default() });
-        let (end_lat, end_lon) = f.unproject(3000.0, 0.0);
+        runway_at(50.0, 8.0)
+    }
+
+    /// Runway 09 (true 090), 3000 m long, threshold at (`lat`, `lon`).
+    fn runway_at(lat: f64, lon: f64) -> RunwayEnd {
+        let (end_lat, end_lon) = offset_point(lat, lon, 90.0, 3000.0);
         RunwayEnd {
             airport: "TEST".into(),
             ident: "09".into(),
             opposite_ident: "27".into(),
-            threshold_lat: 50.0,
-            threshold_lon: 8.0,
+            threshold_lat: lat,
+            threshold_lon: lon,
             end_lat,
             end_lon,
             length_m: 3000.0,
@@ -1564,7 +1592,10 @@ mod tests {
     }
 
     fn both_ends() -> Vec<RunwayEnd> {
-        let a = runway();
+        both_ends_of(runway())
+    }
+
+    fn both_ends_of(a: RunwayEnd) -> Vec<RunwayEnd> {
         let b = RunwayEnd {
             ident: "27".into(),
             opposite_ident: "09".into(),
@@ -1581,7 +1612,11 @@ mod tests {
     /// flare at `flare_ft` to −`flare_vs` fpm, touchdown, braking to a stop.
     /// `lateral` metres right of the centreline throughout.
     fn approach(gp_deg: f64, flare_ft: f64, flare_vs: f64, lateral: f64) -> (Vec<LandingSample>, TouchdownReport) {
-        let f = RunwayFrame::new(&runway());
+        approach_on(&runway(), gp_deg, flare_ft, flare_vs, lateral)
+    }
+
+    fn approach_on(rw: &RunwayEnd, gp_deg: f64, flare_ft: f64, flare_vs: f64, lateral: f64) -> (Vec<LandingSample>, TouchdownReport) {
+        let f = RunwayFrame::new(rw);
         let tan = gp_deg.to_radians().tan();
         let gpip = 50.0 * M_PER_FT / 3f64.to_radians().tan();
         let mut x = -6.0 * M_PER_NM;
@@ -2080,5 +2115,80 @@ mod tests {
         assert!((mf.heading_deg - 90.0).abs() < 0.01 && (mf.length_m - 3000.0).abs() < 1.0);
         assert!((m.elevation_ft.unwrap() - 402.5).abs() < 1e-9);
         assert_eq!(m.ident, "09");
+    }
+    #[test]
+    fn longitude_helpers_take_the_short_way_round() {
+        assert_eq!(dlon_deg(8.0, 8.03), 8.03 - 8.0, "ordinary case unchanged");
+        assert!((dlon_deg(179.99, -179.99) - 0.02).abs() < 1e-9);
+        assert!((dlon_deg(-179.99, 179.99) + 0.02).abs() < 1e-9);
+        assert_eq!((wrap_lon(8.03), wrap_lon(180.0), wrap_lon(-180.0)), (8.03, 180.0, -180.0));
+        assert!((wrap_lon(180.02) + 179.98).abs() < 1e-9 && (wrap_lon(-180.02) - 179.98).abs() < 1e-9);
+        let (_, lon) = offset_point(-16.0, 179.99, 90.0, 3000.0);
+        assert!(lon < -179.9, "offset across 180° wraps: {lon}");
+    }
+
+    /// The same landing at 50°N 8°E, across the antimeridian near Fiji (the runway starts west
+    /// of 180° and ends east of it), at 70°N and across 180° at 70°N: the runway maths may
+    /// not depend on where on the globe the runway is.
+    #[test]
+    fn runway_maths_across_the_antimeridian_and_at_high_latitude() {
+        let reference = |rw: &RunwayEnd| {
+            let (track, td) = approach_on(rw, 3.0, 20.0, 250.0, 3.0);
+            let a = analyze(&track, std::slice::from_ref(&td), 0, &both_ends_of(rw.clone()), None, &LandingConfig::default()).unwrap();
+            let tp = a.touchdown_point.clone().expect("touchdown point");
+            let d = derive_runway_from_track(&track, &td, &airport(vec![])).expect("derived");
+            (a, tp, d, track, td)
+        };
+        let (a0, tp0, d0, _, _) = reference(&runway());
+        for (lat, lon) in [(-16.0, 179.98), (70.0, 23.0), (70.0, 179.96), (-16.0, -179.995)] {
+            let rw = runway_at(lat, lon);
+            let f = RunwayFrame::new(&rw);
+            assert!((f.heading_deg - 90.0).abs() < 0.01 && (f.length_m - 3000.0).abs() < 0.01, "{lat} {lon}: {f:?}");
+            if lon > 179.0 {
+                assert!(rw.end_lon < -179.9, "{lat} {lon}: the far end is east of 180°: {}", rw.end_lon);
+            }
+            // a point past 180° projects onto the runway and back
+            let (plat, plon) = f.unproject(2500.0, -12.0);
+            assert!((-180.0..=180.0).contains(&plon));
+            let (x, y) = f.project(plat, plon);
+            assert!((x - 2500.0).abs() < 0.01 && (y + 12.0).abs() < 0.01, "{lat} {lon}: {x} {y}");
+            let ends = both_ends_of(rw.clone());
+            let (i, _) = match_runway(plat, plon, 90.0, &ends, &LandingConfig::default()).expect("matched");
+            assert_eq!(ends[i].ident, "09");
+            assert!((distance_m(rw.threshold_lat, rw.threshold_lon, rw.end_lat, rw.end_lon) - 3000.0).abs() < 1.0);
+
+            // the debrief is the same as at 50°N
+            let (a, tp, d, track, td) = reference(&rw);
+            assert_eq!(a.runway.as_ref().map(|r| r.ident.as_str()), Some("09"), "{lat} {lon}");
+            assert!((tp.distance_m - tp0.distance_m).abs() < 1.0 && (tp.lateral_m - tp0.lateral_m).abs() < 0.2, "{lat} {lon}: {tp:?}");
+            assert!((a.rollout.as_ref().unwrap().distance_m - a0.rollout.as_ref().unwrap().distance_m).abs() < 2.0, "{lat} {lon}");
+            assert!(track.iter().all(|s| (-180.0..=180.0).contains(&s.longitude)));
+            // the runway derived from the track lies on the flown line, also across 180°
+            assert!(angle_diff_deg(d.course_true_deg, d0.course_true_deg) < 0.5, "{lat} {lon}: course {}", d.course_true_deg);
+            assert!((-180.0..=180.0).contains(&d.end.threshold_lon) && (-180.0..=180.0).contains(&d.end.end_lon));
+            let td_x = f.project(td.latitude, td.longitude).0;
+            let (x, y) = f.project(d.end.threshold_lat, d.end.threshold_lon);
+            assert!((x - (td_x - 300.0)).abs() < 5.0 && (y - 3.0).abs() < 1.0, "{lat} {lon}: derived threshold at {x} {y}");
+            let df = RunwayFrame::new(&d.end);
+            assert!((df.length_m - RunwayFrame::new(&d0.end).length_m).abs() < 1.0, "{lat} {lon}: {}", df.length_m);
+
+            // blending two estimates either side of 180°: in between, not on the other side of the globe
+            let (t_lat, t_lon) = f.unproject(40.0, 0.0);
+            let (e_lat, e_lon) = f.unproject(2040.0, 0.0);
+            let b = RunwayEnd { threshold_lat: t_lat, threshold_lon: t_lon, end_lat: e_lat, end_lon: e_lon, length_m: 0.0, ..rw.clone() };
+            let a = RunwayEnd { length_m: 0.0, ..rw.clone() };
+            for (old, new, expect_x) in [(&a, &b, 10.0), (&b, &a, 30.0)] {
+                let m = blend_runway(old, 3.0, new);
+                let (x, y) = f.project(m.threshold_lat, m.threshold_lon);
+                assert!((x - expect_x).abs() < 0.1 && y.abs() < 0.1, "{lat} {lon}: blended threshold at {x} {y}");
+                let mf = RunwayFrame::new(&m);
+                assert!((mf.heading_deg - 90.0).abs() < 0.01 && (mf.length_m - 3000.0).abs() < 1.0, "{lat} {lon}: {mf:?}");
+            }
+        }
+        // a threshold exactly on either side of the line
+        let w = runway_at(-16.0, 179.9999);
+        let e = RunwayEnd { threshold_lon: -179.9999, ..w.clone() };
+        let m = blend_runway(&w, 1.0, &e);
+        assert!(m.threshold_lon.abs() > 179.9999 - 1e-9, "{}", m.threshold_lon);
     }
 }

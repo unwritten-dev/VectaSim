@@ -50,4 +50,34 @@ describe("update toasts follow the UI language", () => {
     await checkForUpdate();
     expect((last() as { title: string }).title).toBe("VectaSim is up to date");
   });
+
+  it("a second install while the first downloads does nothing (no second download or backup)", async () => {
+    setLanguageSetting("en");
+    let finish: () => void = () => {};
+    const downloadAndInstall = vi.fn(() => new Promise<void>((r) => (finish = r)));
+    check.mockResolvedValue({ version: "0.5.0", body: null, date: null, downloadAndInstall });
+    await checkForUpdate({ silent: true });
+    const first = installUpdate();
+    const second = installUpdate();
+    await second;
+    await new Promise((r) => setTimeout(r, 0));
+    expect(downloadAndInstall).toHaveBeenCalledTimes(1);
+    const { invoke } = await import("@tauri-apps/api/core");
+    expect(vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === "create_backup")).toHaveLength(1);
+    finish();
+    await first;
+  });
+
+  it("a failed backup says so with the reason behind Details, not as raw text", async () => {
+    setLanguageSetting("en");
+    const { invoke } = await import("@tauri-apps/api/core");
+    vi.mocked(invoke).mockImplementationOnce(() => Promise.reject(new Error("os error 112: disk full")));
+    check.mockResolvedValue({ version: "0.5.1", body: null, date: null, downloadAndInstall: vi.fn(() => Promise.reject(new Error("stop"))) });
+    await checkForUpdate({ silent: true });
+    await installUpdate();
+    const backup = showToast.mock.calls.map((c) => c[0] as { id?: string; title?: string; body?: unknown; announce?: string }).find((o) => o.id === "update-backup")!;
+    expect(backup.title).toBe("Backup before the update failed – the update goes ahead anyway");
+    expect(typeof backup.body).not.toBe("string");
+    expect(backup.announce).not.toContain("os error");
+  });
 });

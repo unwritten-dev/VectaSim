@@ -295,6 +295,10 @@
       "title": "The file could not be written.",
       "hint": "Pick a different folder or close the file in other programs."
     },
+    "clipboardDenied": {
+      "title": "Clipboard access was refused.",
+      "hint": "Click again while the VectaSim window is in the foreground."
+    },
     "unexpected": {
       "title": "Unexpected error.",
       "titleService": "{service}: unexpected error.",
@@ -467,6 +471,9 @@
       "hiddenTitle": "VectaSim is still running",
       "hiddenBody": "The window is in the notification area. Double-click the icon to open it; “Quit” in its menu closes VectaSim."
     },
+    "store": {
+      "noticeTitle": "Logbook notice"
+    },
     "quit": {
       "title": "Recording in progress – quit anyway?",
       "message": "The flight is aborted and saved in the logbook as interrupted.",
@@ -483,8 +490,7 @@
       "checkFailed": "Update check failed",
       "recordingTitle": "Recording – update after the flight",
       "recordingBody": "Installing restarts VectaSim. Install version {version} after the flight under Settings → Updates.",
-      "backupFailed": "Backup before the update failed",
-      "backupFailedBody": "{error} – the update goes ahead anyway.",
+      "backupFailed": "Backup before the update failed – the update goes ahead anyway",
       "installed": "Update installed",
       "installedBody": "VectaSim is restarting now.",
       "failed": "Update failed"

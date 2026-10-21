@@ -32,6 +32,7 @@ import {
 } from "./trafficInfo";
 import { useTrafficPhoto } from "./trafficHooks";
 import "./trafficCard.css";
+import { useHintIds } from "./hint";
 
 interface Props {
   sel: TrafficSelection;
@@ -59,7 +60,7 @@ function Photo({ pilot }: { pilot: Pilot }) {
   const url = "url" in photo ? (photo.url ?? photo.thumbUrl) : null;
   useEffect(() => setBroken(false), [url]);
   const show = photo.status === "found" && !!url && !broken;
-  // only Planespotters pages are opened (security audit N4: the link comes from the API or an import)
+  // only Planespotters pages are opened: the link comes from the API or from an import
   const link = planespottersLink("link" in photo ? photo.link : null);
   const credit =
     "photographer" in photo && photo.photographer
@@ -117,6 +118,8 @@ export default function TrafficCard({ sel, own, following, routeShown, onFollow,
   const priv = usePrivacy();
   const closeRef = useRef<HTMLButtonElement>(null);
   const [now, setNow] = useState(() => Date.now());
+  /** Descriptions of the action buttons for keyboard and screen-reader users (hint.tsx). */
+  const hints = useHintIds();
   const p = sel.pilot;
   const key = `${sel.network}:${sel.cid}`;
 
@@ -175,6 +178,11 @@ export default function TrafficCard({ sel, own, following, routeShown, onFollow,
   const gone = sel.goneSinceMs != null;
   const closesIn = gone ? Math.max(0, Math.ceil((GONE_CLOSE_MS - (now - sel.goneSinceMs!)) / 1000)) : 0;
   const hasPlan = !!(p.departure || p.arrival);
+  const fullPlan = !!(p.departure && p.arrival);
+  const followTitle = following ? t("map.trafficCard.followingTitle") : t("map.trafficCard.followTitle");
+  const routeTitle = fullPlan ? t("map.trafficCard.routeTitle") : t("map.trafficCard.noFullPlan");
+  const followHint = hints("follow", followTitle);
+  const routeHint = hints("route", routeTitle);
   // IVAO says so; VATSIM has no flag (its altitude stays MSL)
   const ground = p.onGround === true;
 
@@ -209,12 +217,22 @@ export default function TrafficCard({ sel, own, following, routeShown, onFollow,
 
       {/* actions right under the title: reachable without scrolling at any window height */}
       <div className="after-actions traffic-actions">
-        <button className="toggle" aria-pressed={following} onClick={onFollow} disabled={gone} title={following ? t("map.trafficCard.followingTitle") : t("map.trafficCard.followTitle")}>
+        <button className="toggle" aria-pressed={following} onClick={onFollow} disabled={gone} title={followTitle} aria-describedby={followHint.describedBy}>
           {t("map.trafficCard.follow")}
         </button>
-        <button className="toggle" aria-pressed={routeShown} onClick={onRoute} disabled={!p.departure || !p.arrival} title={p.departure && p.arrival ? t("map.trafficCard.routeTitle") : t("map.trafficCard.noFullPlan")}>
+        {followHint.node}
+        {/* aria-disabled without a full plan: stays focusable, the reason is its description */}
+        <button
+          className="toggle"
+          aria-pressed={fullPlan && routeShown}
+          onClick={() => fullPlan && onRoute()}
+          aria-disabled={!fullPlan}
+          title={routeTitle}
+          aria-describedby={routeHint.describedBy}
+        >
           {t("map.trafficCard.showRoute")}
         </button>
+        {routeHint.node}
       </div>
 
       <Collapsible id="traffic.photo" className="traffic-more" headClassName="traffic-more-head" title={t("map.trafficCard.photoTitle")} summary={trafficRegistration(p) ?? undefined}>

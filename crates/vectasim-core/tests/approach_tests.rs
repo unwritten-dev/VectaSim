@@ -830,7 +830,7 @@ fn energy_band_high_when_fast_far_out() {
 
 #[test]
 fn clock_stepping_back_inside_the_approach_does_not_panic() {
-    // audit 0.5.0 N5: track times are wall clock; a backward step inside a go-around lookback
+    // track times are wall clock; a backward step inside a go-around lookback
     // or an exceedance underflowed (panic in debug, a ~10^16 ms "duration" in release)
     for ga in [None, Some(300.0)] {
         let (track, tds) = straight_in(|h, cur| if h > 500.0 { 170.0 } else { (cur - 3.0).max(140.0) }, ga);

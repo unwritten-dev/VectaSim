@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { userMessage } from "./errors";
+import ErrorNotice from "./ErrorNotice";
 import { t as tGlobal, useT } from "./i18n";
 // one port range everywhere (X-Plane Web API and the overlay server)
 import { PORT_MAX, PORT_MIN } from "./serverLinks";
@@ -67,7 +67,7 @@ export function foldXplane(mode: SimMode, xplaneConnected: boolean, invalid: boo
 }
 
 /**
- * Einstellungen → Simulator: which simulator VectaSim connects to and where X-Plane's Web API
+ * Settings → Simulator: which simulator VectaSim connects to and where X-Plane's Web API
  * listens. One save rule like the overlay port: the choice saves on change, host and port when
  * the field is left or with Enter, each with a short "✓ gespeichert" at its row. Saving restarts
  * the connection (not during a flight or a demo/replay).
@@ -80,22 +80,34 @@ export default function SimulatorSelect({ flightActive, xplaneConnected = false 
   const [port, setPort] = useState("");
   /** Short confirmation, shown at the row that saved. */
   const [note, setNote] = useState<{ row: "mode" | "xplane"; text: string } | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  /** Load or save failure; a failed load offers "Retry" (the select stays disabled without settings). */
+  const [error, setError] = useState<{ e: unknown; retry?: () => void } | null>(null);
   const [busy, setBusy] = useState(false);
   /** The user opened/closed the X-Plane fold; null = follow foldXplane(). */
   const [foldOpen, setFoldOpen] = useState<boolean | null>(null);
   const noteTimer = useRef<number | undefined>(undefined);
 
-  useEffect(() => {
+  const alive = useRef(true);
+  const load = () => {
+    setError(null);
     invoke<SimSettings>("get_sim_settings")
       .then((s) => {
+        if (!alive.current) return;
         setSaved(s);
         setMode(s.mode);
         setHost(s.xplaneHost);
         setPort(String(s.xplanePort));
       })
-      .catch((e) => setError(userMessage(e).title));
-    return () => window.clearTimeout(noteTimer.current);
+      .catch((e) => alive.current && setError({ e, retry: load }));
+  };
+  const loadRef = useRef(load);
+  useEffect(() => {
+    alive.current = true;
+    loadRef.current();
+    return () => {
+      alive.current = false;
+      window.clearTimeout(noteTimer.current);
+    };
   }, []);
 
   const portNum = parsePort(port);
@@ -112,7 +124,7 @@ export default function SimulatorSelect({ flightActive, xplaneConnected = false 
         window.clearTimeout(noteTimer.current);
         noteTimer.current = window.setTimeout(() => setNote(null), 4000);
       })
-      .catch((e) => setError(userMessage(e).title + " " + String(e)))
+      .catch((e) => setError({ e }))
       .finally(() => setBusy(false));
   };
 
@@ -217,11 +229,7 @@ export default function SimulatorSelect({ flightActive, xplaneConnected = false 
       )}
       {flightActive && dirty && <div className="detail">{t("settings.simulator.flightActive")}</div>}
       {saved && saved.envOverride.length > 0 && <div className="detail">{t("settings.simulator.envOverride", { vars: saved.envOverride.join(", ") })}</div>}
-      {error && (
-        <div className="detail err-text" role="alert">
-          {error}
-        </div>
-      )}
+      {error && <ErrorNotice error={error.e} context="settings" compact onRetry={error.retry} />}
     </>
   );
 }

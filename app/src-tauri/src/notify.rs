@@ -1,4 +1,4 @@
-//! Windows notifications (Einstellungen → Integrationen → Benachrichtigungen).
+//! Windows notifications (Settings → Integrations → Notifications).
 //!
 //! Settings: `notifications` (master switch, default on) and one per kind – `notify_landing`,
 //! `notify_saved`, `notify_connection`, `notify_update` (each default on). A notification is
@@ -113,11 +113,18 @@ pub fn on_click_focus<R: Runtime>(app: &AppHandle<R>) {
 }
 
 /// "Gelandet · −155 fpm" / "Landed · -155 fpm", plus g-load and bounces.
-pub fn landing_text(lang: Lang, rate_fpm: f64, peak_g: f64, bounces: u32, touch_and_go: bool) -> (String, String) {
-    let n = rate_fpm.round();
-    // real minus in German, ASCII hyphen in English (like i18n/number.ts)
-    let minus = lang.tr("\u{2212}", "-");
-    let rate = if n < 0.0 { format!("{minus}{:.0} fpm", -n) } else { format!("{n:.0} fpm") };
+/// `rate_fpm` is `None` for an unrated touchdown (slewed / fast-forwarded down, or a stream hole
+/// right before it): "Landerate nicht bewertbar" / "landing rate not rated", never "0 fpm".
+pub fn landing_text(lang: Lang, rate_fpm: Option<f64>, peak_g: f64, bounces: u32, touch_and_go: bool) -> (String, String) {
+    let rate = match rate_fpm {
+        Some(r) => {
+            let n = r.round();
+            // real minus in German, ASCII hyphen in English (like i18n/number.ts)
+            let minus = lang.tr("\u{2212}", "-");
+            if n < 0.0 { format!("{minus}{:.0} fpm", -n) } else { format!("{n:.0} fpm") }
+        }
+        None => lang.tr("Landerate nicht bewertbar", "landing rate not rated").to_owned(),
+    };
     let what = if touch_and_go { "Touch-and-go" } else { lang.tr("Gelandet", "Landed") };
     let bounce = match bounces {
         0 => lang.tr("keine Bounces", "no bounces").to_owned(),
@@ -143,7 +150,7 @@ pub fn notify(kind: String, title: String, body: String, app: AppHandle) -> Resu
     Ok(NotifyResult { shown: send(&app, kind, &title, &body) })
 }
 
-/// „Test senden“ in Einstellungen → Integrationen.
+/// "Send test" in Settings → Integrations.
 #[tauri::command]
 pub fn notify_test(app: AppHandle) -> NotifyResult {
     let body = lang::tr("So sehen Benachrichtigungen aus – etwa nach der Landung.", "This is what notifications look like – after a landing, for example.");
@@ -169,12 +176,18 @@ mod tests {
 
     #[test]
     fn landing_text_in_both_languages() {
-        let (t, b) = landing_text(Lang::De, -155.4, 1.234, 0, false);
+        let (t, b) = landing_text(Lang::De, Some(-155.4), 1.234, 0, false);
         assert_eq!(t, "Gelandet · −155 fpm");
         assert_eq!(b, "g-Last 1,23 · keine Bounces");
-        assert_eq!(landing_text(Lang::De, -80.0, 1.1, 2, true).0, "Touch-and-go · −80 fpm");
-        let (t, b) = landing_text(Lang::En, -155.4, 1.234, 1, false);
+        assert_eq!(landing_text(Lang::De, Some(-80.0), 1.1, 2, true).0, "Touch-and-go · −80 fpm");
+        let (t, b) = landing_text(Lang::En, Some(-155.4), 1.234, 1, false);
         assert_eq!(t, "Landed · -155 fpm");
         assert_eq!(b, "g-load 1.23 · 1 Bounce");
+    }
+
+    #[test]
+    fn unrated_landing_has_no_zero_fpm() {
+        assert_eq!(landing_text(Lang::De, None, 1.0, 0, false).0, "Gelandet · Landerate nicht bewertbar");
+        assert_eq!(landing_text(Lang::En, None, 1.0, 0, false).0, "Landed · landing rate not rated");
     }
 }

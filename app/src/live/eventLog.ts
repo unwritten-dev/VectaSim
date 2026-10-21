@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 
-/** One line of the live event list (Karte → Seitenpanel → Flug → Ereignisse). */
+/** One line of the live event list (Map → side panel → Flight → Events). */
 export interface LogLine {
   ms: number;
   text: string;
@@ -53,6 +53,14 @@ function commit(next: Stored) {
 
 export function getEvents(): LogLine[] {
   return state.lines;
+}
+
+/**
+ * One-line summary of a folded event list: the count and the newest line. The list is newest
+ * first, so that is `lines[0]` – the last element is the oldest ("Flug gestartet").
+ */
+export function eventsSummary(lines: readonly LogLine[]): string | undefined {
+  return lines.length ? `${lines.length} · ${lines[0].text}` : undefined;
 }
 
 /** Newest first; beyond `EVENT_LOG_MAX` the oldest line goes. */

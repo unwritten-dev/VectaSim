@@ -1,14 +1,20 @@
-// Texts for the online networks (VATSIM, IVAO) in Einstellungen → Anzeige and → Diagnose.
+// Texts for the online networks (VATSIM, IVAO) in Settings → Display and → Diagnostics.
 // Pure functions over OnlineSummary, so the wording is testable without the app.
 
 import { fmt } from "./i18n/number";
 import { t } from "./i18n";
 import { userMessage } from "./errors";
-import type { Network, NetworkStatus, OnlineSummary } from "./types";
+import type { Facility, Network, NetworkStatus, OnlineSummary } from "./types";
 
 export const NETWORKS: Network[] = ["vatsim", "ivao"];
 
 export const NETWORK_LABEL: Record<Network, string> = { vatsim: "VATSIM", ivao: "IVAO" };
+
+/**
+ * Controller positions as the networks name them. Kept here (MapLibre-free) for the side
+ * panel: importing them from map/online.ts pulled MapLibre into the start chunk.
+ */
+export const FACILITY_LABEL: Record<Facility, string> = { del: "DEL", gnd: "GND", twr: "TWR", app: "APP", atis: "ATIS", ctr: "CTR", fss: "FSS" };
 
 const OFF: Omit<NetworkStatus, "network" | "label"> = {
   enabled: false,
@@ -67,7 +73,7 @@ export function networkPart(n: NetworkStatus): string {
   return t("online.part.on", { name, pilots: fmt(n.pilots), controllers: fmt(n.controllers) });
 }
 
-/** Status line in Einstellungen → Anzeige: "Online-Verkehr: VATSIM an (…) · IVAO aus". */
+/** Status line in Settings → Display: "Online traffic: VATSIM on (…) · IVAO off". */
 export function onlineLine(summary: OnlineSummary | null): string {
   if (!summary) return t("online.line.loading");
   return t("online.line.status", { parts: networkStatuses(summary).map(networkPart).join(" · ") });

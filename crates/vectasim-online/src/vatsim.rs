@@ -161,6 +161,18 @@ pub fn parse_vatsim_json(bytes: &[u8]) -> Result<OnlineSnapshot, OnlineError> {
     Ok(OnlineSnapshot { network: Network::Vatsim, update_timestamp: raw.general.update_timestamp, fetched_ms: now_ms(), pilots, controllers, prefiles })
 }
 
+/// A data URL status.json may hand out: `https://` on `vatsim.net` or a host under it, without
+/// userinfo, port, whitespace or backslashes (the README names VATSIM as the source, so no
+/// other host is asked, whatever status.json says).
+pub(crate) fn is_vatsim_url(u: &str) -> bool {
+    let Some(rest) = u.strip_prefix("https://") else { return false };
+    let host = rest.split(['/', '?', '#']).next().unwrap_or_default().to_ascii_lowercase();
+    let host_ok = !host.is_empty()
+        && host.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
+        && (host == "vatsim.net" || host.ends_with(".vatsim.net"));
+    host_ok && !u.chars().any(|c| c.is_whitespace() || c.is_control() || c == '\\')
+}
+
 /// The data URL from status.json (VATSIM's documented discovery), cached; the
 /// well-known URL if discovery fails so an outage of the status host is harmless.
 pub(crate) async fn data_url(inner: &Inner) -> String {
@@ -179,10 +191,36 @@ pub(crate) async fn data_url(inner: &Inner) -> String {
         let resp = inner.client.get(STATUS_URL).send().await.ok()?;
         let body = crate::read_limited(resp, crate::MAX_SMALL_BYTES).await.ok()?;
         let s: Status = serde_json::from_slice(&body).ok()?;
-        s.data.v3.into_iter().find(|u| u.starts_with("https://"))
+        s.data.v3.into_iter().find(|u| is_vatsim_url(u))
     }
     .await;
     let url = discovered.unwrap_or_else(|| DEFAULT_DATA_URL.to_string());
     *inner.data_url.lock().unwrap_or_else(|e| e.into_inner()) = Some(url.clone());
     url
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn status_json_may_only_point_at_vatsim() {
+        assert!(is_vatsim_url(DEFAULT_DATA_URL));
+        for ok in ["https://data.vatsim.net/v3/vatsim-data.json", "https://vatsim.net/x", "https://Data.VATSIM.net/v3/x.json?a=1"] {
+            assert!(is_vatsim_url(ok), "{ok}");
+        }
+        for bad in [
+            "http://data.vatsim.net/v3/vatsim-data.json",
+            "https://evil.example/vatsim-data.json",
+            "https://data.vatsim.net.evil.example/x",
+            "https://evilvatsim.net/x",
+            "https://user@data.vatsim.net/x",
+            "https://data.vatsim.net:8443/x",
+            "https://data.vatsim.net/x y",
+            "https://",
+            "",
+        ] {
+            assert!(!is_vatsim_url(bad), "{bad}");
+        }
+    }
 }

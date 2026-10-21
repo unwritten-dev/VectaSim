@@ -103,19 +103,34 @@ fn changed(app: &AppHandle, reg: &str) {
     let _ = app.emit("airframes:changed", reg);
 }
 
+/// Only a Planespotters page as the credit link: rows written before the check
+/// came in (lookup cache, earlier imports) may carry any URL, and the UI opens it in the browser.
+/// Checked on every read, so nothing older reaches the webview.
+fn safe(mut a: Airframe) -> Airframe {
+    if a.image_link.as_deref().is_some_and(|l| !vectasim_photos::is_planespotters_link(l)) {
+        a.image_link = None;
+    }
+    a
+}
+
+fn safe_row(mut r: AirframeRow) -> AirframeRow {
+    r.airframe = safe(r.airframe);
+    r
+}
+
 pub fn photos_enabled(store: &Store) -> bool {
     store.get_setting(SETTING_PHOTOS).ok().flatten().as_deref() != Some("0")
 }
 
 #[tauri::command]
 pub fn list_airframes(include_demo: Option<bool>, store: State<Store>) -> Result<Vec<AirframeRow>, String> {
-    store.list_airframes(include_demo.unwrap_or(true)).map_err(err)
+    store.list_airframes(include_demo.unwrap_or(true)).map(|rows| rows.into_iter().map(safe_row).collect()).map_err(err)
 }
 
 /// One airframe with its logbook aggregates.
 #[tauri::command]
 pub fn get_airframe(registration: String, include_demo: Option<bool>, store: State<Store>) -> Result<Option<AirframeRow>, String> {
-    store.get_airframe_row(&registration, include_demo.unwrap_or(true)).map_err(err)
+    store.get_airframe_row(&registration, include_demo.unwrap_or(true)).map(|r| r.map(safe_row)).map_err(err)
 }
 
 #[tauri::command]
@@ -129,7 +144,7 @@ pub fn active_airframe(store: State<Store>) -> Result<Option<Airframe>, String> 
     let Some(id) = store.active_flight_id().map_err(err)? else { return Ok(None) };
     let Some(detail) = store.get_flight(&id).map_err(err)? else { return Ok(None) };
     match detail.flight.airframe_reg {
-        Some(reg) => store.get_airframe(&reg).map_err(err),
+        Some(reg) => store.get_airframe(&reg).map(|a| a.map(safe)).map_err(err),
         None => Ok(None),
     }
 }
@@ -146,7 +161,7 @@ pub fn upsert_airframe(edit: AirframeEdit, app: AppHandle, store: State<Store>) 
     if before.is_some_and(|b| b != (a.vapp_kt, a.landing_flaps)) {
         let _ = app.emit("approach:facts", a.registration.as_str());
     }
-    Ok(a)
+    Ok(safe(a))
 }
 
 /// Re-book a flight (also a past one) onto another airframe; `null` unbooks it.
@@ -170,7 +185,7 @@ pub fn merge_airframes(from: String, into: String, app: AppHandle, store: State<
     let a = store.merge_airframes(&from, &into, now()).map_err(err)?.ok_or(crate::lang::tr("Flugzeug nicht gefunden", "Aircraft not found"))?;
     let _ = app.emit("logbook:changed", ());
     changed(&app, &a.registration);
-    Ok(a)
+    Ok(safe(a))
 }
 
 #[tauri::command]
@@ -197,7 +212,7 @@ pub async fn airframe_photo(
 ) -> Result<Option<Airframe>, String> {
     let reg = reg_or_err(&registration)?;
     let refresh = refresh.unwrap_or(false);
-    let current = store.get_airframe(&reg).map_err(err)?;
+    let current = store.get_airframe(&reg).map_err(err)?.map(safe);
     let Some(current) = current else { return Ok(None) };
     if !photos_enabled(&store) && !refresh {
         return Ok(Some(current));
@@ -229,7 +244,7 @@ pub async fn airframe_photo(
             // the registration only at DEBUG (Streamer-Modus: masked in the Diagnosepaket)
             log::info!("planespotters: {}", if photo.is_some() { "photo found" } else { "no photo" });
             log::debug!("planespotters {reg}: {}", if photo.is_some() { "photo found" } else { "no photo" });
-            store.set_airframe_photo(&reg, photo.as_ref(), now()).map_err(err)?
+            store.set_airframe_photo(&reg, photo.as_ref(), now()).map_err(err)?.map(safe)
         }
         Err(e) => {
             log::warn!("planespotters: {e}");
@@ -320,12 +335,24 @@ pub fn set_airframe_image(registration: String, path: String, app: AppHandle, st
     let photo = AirframePhoto { url: dest_s.clone(), thumb_url: dest_s, credit: "Eigenes Bild".into(), link: String::new(), source: SOURCE_USER.into() };
     let a = store.set_airframe_photo(&reg, Some(&photo), now()).map_err(err)?.ok_or(crate::lang::tr("Registrierung ungültig", "Invalid registration"))?;
     changed(&app, &reg);
-    Ok(a)
+    Ok(safe(a))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stored_credit_links_other_than_planespotters_are_dropped_on_read() {
+        let with = |link: &str| Airframe { registration: "D-AIBL".into(), image_link: Some(link.into()), ..Default::default() };
+        assert_eq!(safe(with("https://www.planespotters.net/photo/1")).image_link.as_deref(), Some("https://www.planespotters.net/photo/1"));
+        for bad in ["https://evil.example/x", "http://www.planespotters.net/photo/1", "https://www.planespotters.net.evil.example/", "file:///C:/x", "javascript:alert(1)"] {
+            assert_eq!(safe(with(bad)).image_link, None, "{bad}");
+        }
+        let row = AirframeRow { airframe: with("https://evil.example/x"), ..Default::default() };
+        assert_eq!(safe_row(row).airframe.image_link, None);
+        assert_eq!(safe(Airframe::default()).image_link, None);
+    }
 
     fn photo() -> Photo {
         Photo { large_url: "https://t.plnspttrs.net/l.jpg".into(), thumb_url: "https://t.plnspttrs.net/t.jpg".into(), photographer: "Jane Doe".into(), link: "https://www.planespotters.net/photo/1".into() }

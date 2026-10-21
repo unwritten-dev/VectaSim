@@ -1,15 +1,12 @@
-import type { FlightPhase, Metar, Wind } from "./types";
+import type { FlightPhase, Metar } from "./types";
 
 /**
- * Display formatting for the whole UI. Conventions (one style everywhere):
- * - numbers: de-DE decimal comma, narrow no-break space as thousands separator ("61 959"),
- *   real minus sign U+2212 ("−112"), narrow no-break space before units ("412 kt");
- * - durations never as m:ss: "43 s", "7 min 43 s", "1 h 05 min", "26 h 30 min";
- * - clock times 24 h, UTC with a "z" suffix by default ("14:30z"), local time when the
- *   `time_local` setting is on (see prefs.ts → setTimeLocal);
- * - one date format: "17.10.2026";
- * - weights and fuel are stored in kg and shown in kg or lb (`weight_unit` setting, see
- *   prefs.ts → setWeightUnit); always through fmtWeight / fmtWeightNum / fmtDeltaKg.
+ * Language-neutral display helpers and the global display settings (time base, weight unit,
+ * Streamer-Modus). Language-aware number, unit, duration, date, altitude, coordinate and METAR
+ * formatting lives in i18n/number.ts (de + en); the former German-only copies here were removed
+ * so a stray import cannot bring German numbers back into English.
+ * Conventions: placeholder "–", 24 h clock with "z" for UTC (fmtClock, used by i18n/number),
+ * weights stored in kg and converted by weightIn.
  * Everything here is pure (no Tauri calls) so it can be unit-tested.
  */
 
@@ -53,78 +50,6 @@ export function isTimeLocal(): boolean {
 
 const isNum = (n: number | undefined | null): n is number => typeof n === "number" && Number.isFinite(n);
 
-/** "61 959", "1,25", "−1 800". */
-export function fmtNum(n: number | undefined | null, digits = 0): string {
-  if (!isNum(n)) return DASH;
-  const fixed = Math.abs(n).toFixed(digits);
-  // -0 and values that round to zero lose their sign
-  const negative = n < 0 && Number(fixed) !== 0;
-  const [int, frac] = fixed.split(".");
-  const grouped = int.replace(/\B(?=(\d{3})+(?!\d))/g, NNBSP);
-  return `${negative ? MINUS : ""}${grouped}${frac ? `,${frac}` : ""}`;
-}
-
-/** Units glued to the number without a gap. */
-const TIGHT_UNITS = new Set(["°", "×", "′", "″"]);
-
-function withUnit(value: string, unit: string): string {
-  const u = unit.trim();
-  if (!u) return value;
-  return TIGHT_UNITS.has(u[0]) ? `${value}${u}` : `${value}${NNBSP}${u}`;
-}
-
-/**
- * Number with optional unit: fmt(61959, 0, "kg") → "61 959 kg", fmt(-1.5, 1) → "−1,5".
- * A leading space in `unit` is ignored (legacy call style " kg").
- */
-export function fmt(n: number | undefined | null, digits = 0, unit = ""): string {
-  if (!isNum(n)) return DASH;
-  return withUnit(fmtNum(n, digits), unit);
-}
-
-/** Always signed ("+4 260 fpm", "−112 fpm", "±0 fpm"); for deltas and rates where the sign matters. */
-export function fmtSigned(n: number | undefined | null, digits = 0, unit = ""): string {
-  if (!isNum(n)) return DASH;
-  const body = fmtNum(Math.abs(n), digits);
-  const zero = Number(Math.abs(n).toFixed(digits)) === 0;
-  return withUnit(`${zero ? "±" : n > 0 ? "+" : MINUS}${body}`, unit);
-}
-
-// ---- durations -----------------------------------------------------------------------
-
-/**
- * Unambiguous duration: "43 s", "7 min 43 s", "1 h 05 min", "26 h 30 min".
- * Under one hour the seconds are shown (unless `seconds: false`, then "7 min");
- * from one hour on only hours and minutes. Values are truncated, never rounded up.
- */
-export function fmtDuration(ms: number | undefined | null, opts: { seconds?: boolean } = {}): string {
-  if (!isNum(ms) || ms < 0) return DASH;
-  const total = Math.floor(ms / 1000);
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  if (h > 0) return `${fmtNum(h)}${NNBSP}h${NNBSP}${String(m).padStart(2, "0")}${NNBSP}min`;
-  if (opts.seconds === false) return `${m}${NNBSP}min`;
-  if (m > 0) return `${m}${NNBSP}min${NNBSP}${String(s).padStart(2, "0")}${NNBSP}s`;
-  return `${s}${NNBSP}s`;
-}
-
-/** Signed minutes delta (actual minus planned): "+7 min", "−12 min", "±0 min", "+1 h 05 min". */
-export function fmtDeltaMin(actualMs: number | null | undefined, plannedMs: number | null | undefined): string {
-  if (!isNum(actualMs) || !isNum(plannedMs)) return DASH;
-  const d = Math.round((actualMs - plannedMs) / 60000);
-  const sign = d > 0 ? "+" : d < 0 ? MINUS : "±";
-  const a = Math.abs(d);
-  const body = a >= 60 ? `${Math.floor(a / 60)}${NNBSP}h${NNBSP}${String(a % 60).padStart(2, "0")}${NNBSP}min` : `${a}${NNBSP}min`;
-  return `${sign}${body}`;
-}
-
-/** Delta in minutes as a number (for thresholds), or null. */
-export function deltaMinutes(actualMs: number | null | undefined, plannedMs: number | null | undefined): number | null {
-  if (!isNum(actualMs) || !isNum(plannedMs)) return null;
-  return Math.round((actualMs - plannedMs) / 60000);
-}
-
 // ---- weights -------------------------------------------------------------------------
 
 export type WeightUnit = "kg" | "lb";
@@ -152,22 +77,6 @@ export function weightIn(kg: number | undefined | null, unit: WeightUnit = weigh
   return unit === "lb" ? kg * LB_PER_KG : kg;
 }
 
-/** Weight number without unit, for a Stat value next to `unit={getWeightUnit()}`: "61 959" / "136 596". */
-export function fmtWeightNum(kg: number | undefined | null, unit: WeightUnit = weightUnit): string {
-  return fmtNum(weightIn(kg, unit), 0);
-}
-
-/** Weight with unit: fmtWeight(61959) → "61 959 kg", with lb → "136 596 lb". */
-export function fmtWeight(kg: number | undefined | null, unit: WeightUnit = weightUnit): string {
-  return fmt(weightIn(kg, unit), 0, unit);
-}
-
-/** Signed weight delta (actual minus planned, both kg) in the display unit: "+120 kg", "−265 lb". */
-export function fmtDeltaKg(actual: number | null | undefined, planned: number | null | undefined, unit: WeightUnit = weightUnit): string {
-  if (!isNum(actual) || !isNum(planned)) return DASH;
-  return fmtSigned(Math.round(weightIn(actual - planned, unit) ?? 0), 0, unit);
-}
-
 // ---- clock & date --------------------------------------------------------------------
 
 const p2 = (n: number) => String(n).padStart(2, "0");
@@ -186,35 +95,7 @@ export function fmtClock(ms: number | undefined | null, opts: { seconds?: boolea
   return `${p2(h)}:${p2(m)}${opts.seconds ? `:${p2(s)}` : ""}${local ? "" : "z"}`;
 }
 
-/** Date "17.10.2026", in UTC or local time like fmtClock. */
-export function fmtDate(ms: number | undefined | null, opts: { local?: boolean } = {}): string {
-  if (!isNum(ms) || ms <= 0) return DASH;
-  const local = opts.local ?? timeLocal;
-  const d = new Date(ms);
-  const day = local ? d.getDate() : d.getUTCDate();
-  const month = (local ? d.getMonth() : d.getUTCMonth()) + 1;
-  const year = local ? d.getFullYear() : d.getUTCFullYear();
-  return `${p2(day)}.${p2(month)}.${year}`;
-}
-
-/** "17.10.2026 14:30z". */
-export function fmtDateTime(ms: number | undefined | null, opts: { local?: boolean } = {}): string {
-  if (!isNum(ms) || ms <= 0) return DASH;
-  return `${fmtDate(ms, opts)} ${fmtClock(ms, opts)}`;
-}
-
-/** Short label for the active time base, e.g. for column headers: "UTC" or "Ortszeit". */
-export function timeBaseLabel(): string {
-  return timeLocal ? "Ortszeit" : "UTC";
-}
-
 // ---- geo -----------------------------------------------------------------------------
-
-/** "50,033° N 8,570° E". */
-export function fmtCoord(lat: number | null | undefined, lon: number | null | undefined, digits = 3): string {
-  if (!isNum(lat) || !isNum(lon)) return DASH;
-  return `${fmtNum(Math.abs(lat), digits)}° ${lat >= 0 ? "N" : "S"} ${fmtNum(Math.abs(lon), digits)}° ${lon >= 0 ? "E" : "W"}`;
-}
 
 /**
  * Transition altitude: above it altitudes read as flight levels. 5000 ft is the common
@@ -223,43 +104,11 @@ export function fmtCoord(lat: number | null | undefined, lon: number | null | un
  */
 export const TRANSITION_ALTITUDE_FT = 5000;
 
-/** Altitude as flight level above the transition altitude, else feet: "FL350", "4 500 ft". */
-export function fmtAltitude(ft: number | null | undefined, transitionAltitudeFt = TRANSITION_ALTITUDE_FT): string {
-  if (!isNum(ft)) return DASH;
-  return ft > transitionAltitudeFt ? `FL${String(Math.round(ft / 100)).padStart(3, "0")}` : fmt(Math.round(ft), 0, "ft");
-}
-
 // ---- weather -------------------------------------------------------------------------
-
-export function fmtWind(w: Wind | null | undefined): string {
-  if (!w) return `Wind ${DASH}`;
-  if (w.speedKt === 0) return "Windstill";
-  const dir = w.directionDeg == null ? "VRB" : `${String(w.directionDeg).padStart(3, "0")}°`;
-  const gust = w.gustKt ? `G${w.gustKt}` : "";
-  const variable = w.variableFromDeg != null && w.variableToDeg != null ? ` (${w.variableFromDeg}–${w.variableToDeg}°)` : "";
-  return `${dir} ${w.speedKt}${gust}${NNBSP}kt${variable}`;
-}
-
-export function fmtVisibility(m: Metar): string {
-  if (m.cavok) return "CAVOK";
-  const v = m.visibilityM;
-  if (v == null) return `Sicht ${DASH}`;
-  if (v >= 10000) return `≥${NNBSP}10${NNBSP}km`;
-  if (v >= 5000) return fmt(v / 1000, 0, "km");
-  return fmt(v, 0, "m");
-}
 
 export function fmtPressure(m: Metar): string {
   if (m.altimeterInhg != null) return `A${m.altimeterInhg.toFixed(2)}`;
   return m.qnhHpa != null ? `Q${m.qnhHpa}` : `QNH ${DASH}`;
-}
-
-/** One-line METAR summary: wind · visibility · QNH · temp/dew · ceiling. */
-export function fmtMetarLine(m: Metar): string {
-  const parts = [fmtWind(m.wind), fmtVisibility(m), fmtPressure(m)];
-  if (m.temperatureC != null) parts.push(`${fmtNum(m.temperatureC)}/${m.dewpointC != null ? fmtNum(m.dewpointC) : DASH}${NNBSP}°C`);
-  if (m.ceilingFt != null) parts.push(`Wolkenbasis ${fmt(m.ceilingFt, 0, "ft")}`);
-  return parts.join(" · ");
 }
 
 export function haversineNm(lat1: number, lon1: number, lat2: number, lon2: number): number {

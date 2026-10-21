@@ -1,25 +1,12 @@
 // Local-time cases need a fixed zone; Node re-reads TZ when it is assigned.
 (globalThis as unknown as { process: { env: Record<string, string> } }).process.env.TZ = "Europe/Berlin";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   MINUS,
   NNBSP,
-  deltaMinutes,
-  fmt,
-  fmtAltitude,
   TRANSITION_ALTITUDE_FT,
   fmtClock,
-  fmtCoord,
-  fmtDate,
-  fmtDateTime,
-  fmtDeltaKg,
-  fmtDeltaMin,
-  fmtDuration,
-  fmtNum,
-  fmtSigned,
-  fmtWeight,
-  fmtWeightNum,
   getWeightUnit,
   isWeightUnit,
   setTimeLocal,
@@ -35,6 +22,12 @@ import {
   privacy,
   setPrivacyMode,
 } from "./format";
+// The German number/duration/date conventions below are now checked against i18n/number.ts
+// (the German-only copies in format.ts were removed); en output: i18n/number.test.ts.
+import { fmt, fmtAltitude, fmtCoord, fmtDate, fmtDateTime, fmtDeltaKg, fmtDeltaMin, fmtDuration, fmtNum, fmtSigned, fmtWeight, fmtWeightNum } from "./i18n/number";
+import { setLanguageSetting } from "./i18n/lang";
+
+beforeEach(() => setLanguageSetting("de"));
 
 /** Write expectations with plain spaces / "-"; compare against the typographic output. */
 const t = (s: string) => s.replace(/ /g, NNBSP).replace(/-/g, MINUS);
@@ -187,10 +180,6 @@ describe("deltas", () => {
     expect(fmtDeltaMin(78 * MIN + 20 * S, 78 * MIN)).toBe(t("±0 min"));
     expect(fmtDeltaMin(2 * H + 5 * MIN, H)).toBe(t("+1 h 05 min"));
     expect(fmtDeltaMin(null, H)).toBe("–");
-  });
-  it("deltaMinutes for thresholds", () => {
-    expect(deltaMinutes(95 * MIN, 80 * MIN)).toBe(15);
-    expect(deltaMinutes(undefined, 80 * MIN)).toBeNull();
   });
   it("kilograms with thousands", () => {
     expect(fmtDeltaKg(4200, 5434)).toBe(t("-1 234 kg"));

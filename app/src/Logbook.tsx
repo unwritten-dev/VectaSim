@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { save } from "@tauri-apps/plugin-dialog";
@@ -16,12 +16,14 @@ import EmptyState from "./ui/EmptyState";
 import { showToast } from "./ui/Toast";
 import { userMessage } from "./errors";
 import { isDebriefOpen, openDebrief } from "./landing/debriefStore";
+import { isModalOpen } from "./ui/modalStack";
 import type { ApproachFactsResult } from "./landing/approachTypes";
 import { stripFactsFrom, type LandingStripFact } from "./stripFacts";
 import { mergeHint, mergeKey } from "./resume";
 import { loadFlightDetail, sleep } from "./logbookDetail";
 import { latestOnly } from "./latest";
 import { handleMenuKey, menuItems } from "./ui/menu";
+import { useDebouncedValue } from "./ui/useDebouncedValue";
 
 /** Merge hints dismissed with "Ignorieren" (per viewer, best effort). */
 const MERGE_IGNORED_KEY = "vectasim.mergeIgnored";
@@ -71,9 +73,22 @@ const BOOK_ICON = (
 const STRIP_HINT_ID = "logbook-strip-hint";
 
 /** Chip „Tags“ with a dropdown of the logbook's tags (multiple choice: at least one must match). */
-function TagFilter({ tags, selected, disabled, onChange }: { tags: Array<{ tag: string; count: number }>; selected: string[]; disabled?: boolean; onChange: (next: string[]) => void }) {
+export function TagFilter({
+  tags,
+  selected,
+  disabled,
+  onChange,
+  defaultOpen = false,
+}: {
+  tags: Array<{ tag: string; count: number }>;
+  selected: string[];
+  disabled?: boolean;
+  onChange: (next: string[]) => void;
+  /** Tests: render the list open. */
+  defaultOpen?: boolean;
+}) {
   const tr = useT();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   const ref = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -90,42 +105,55 @@ function TagFilter({ tags, selected, disabled, onChange }: { tags: Array<{ tag: 
   const isOn = (t: string) => selected.some((s) => s.toLowerCase() === t.toLowerCase());
   const toggle = (t: string) => onChange(isOn(t) ? selected.filter((s) => s.toLowerCase() !== t.toLowerCase()) : [...selected, t]);
   const active = !disabled && selected.length > 0;
+  const hasTags = tags.length > 0;
+  const hintId = useId();
+  // the item under the focus goes with the filter: close and give the focus to the trigger
+  const clearAll = () => {
+    onChange([]);
+    setOpen(false);
+    triggerRef.current?.focus();
+  };
   return (
     <div
       className="export-menu tag-filter"
       ref={ref}
       onKeyDown={(e) => handleMenuKey(e, open, listRef.current, triggerRef.current, () => setOpen(false))}
     >
+      {/* one semantic: a menu button (the count in its label says whether a filter is on); no
+          tags yet: a plain button showing a hint, no empty role="menu" */}
       <button
         ref={triggerRef}
         className={`chip${active ? " active" : ""}`}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-pressed={active}
+        aria-haspopup={hasTags ? "menu" : undefined}
+        aria-expanded={hasTags ? open : undefined}
+        aria-describedby={!hasTags && open ? hintId : undefined}
         onClick={() => setOpen((o) => !o)}
         title={tags.length ? tr("logbook.tagFilter.titleSome") : tr("logbook.tagFilter.titleNone")}
       >
         {active ? tr("logbook.tagFilter.buttonCount", { count: selected.length }) : tr("logbook.tagFilter.button")} ▾
       </button>
-      {open && (
+      {open && !hasTags && (
+        <div className="export-menu-list tag-filter-list">
+          <span className="detail tag-filter-empty" id={hintId}>
+            {tr("logbook.tagFilter.empty")}
+          </span>
+        </div>
+      )}
+      {open && hasTags && (
         <div ref={listRef} className="export-menu-list tag-filter-list" role="menu" aria-label={tr("logbook.tagFilter.menu")}>
-          {tags.length === 0 ? (
-            <span className="detail tag-filter-empty">{tr("logbook.tagFilter.empty")}</span>
-          ) : (
-            tags.map((t) => (
-              <button key={t.tag} role="menuitemcheckbox" aria-checked={isOn(t.tag)} onClick={() => toggle(t.tag)}>
-                <span className="tag-filter-check" aria-hidden="true">
-                  {isOn(t.tag) ? "✓" : ""}
-                </span>
-                {t.tag}
-                <span className="detail num">{t.count}</span>
-              </button>
-            ))
-          )}
+          {tags.map((t) => (
+            <button key={t.tag} role="menuitemcheckbox" aria-checked={isOn(t.tag)} onClick={() => toggle(t.tag)}>
+              <span className="tag-filter-check" aria-hidden="true">
+                {isOn(t.tag) ? "✓" : ""}
+              </span>
+              {t.tag}
+              <span className="detail num">{t.count}</span>
+            </button>
+          ))}
           {selected.length > 0 && (
             <>
               <div className="export-menu-sep" role="separator" />
-              <button role="menuitem" onClick={() => onChange([])}>
+              <button role="menuitem" onClick={clearAll}>
                 {tr("logbook.tagFilter.clear")}
               </button>
             </>
@@ -141,6 +169,10 @@ export default function Logbook({ active = true, focus, onGoLive }: Props) {
   const [flights, setFlights] = useState<FlightRow[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [latestList] = useState(latestOnly);
+  // the side loads overlap the same way on every logbook:changed: only the newest answer counts
+  const [latestFacts] = useState(latestOnly);
+  const [latestTrash] = useState(latestOnly);
+  const [latestMerge] = useState(latestOnly);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [track, setTrack] = useState<TrackSample[]>([]);
@@ -168,6 +200,7 @@ export default function Logbook({ active = true, focus, onGoLive }: Props) {
 
   /** Landing + approach facts for the strips (best effort: the strips work without them). */
   const loadFacts = useCallback(() => {
+    const isLatest = latestFacts();
     const landings = invoke<{ facts: LandingStripFact[] }>("landing_facts_recent", { limit: LIST_LIMIT, includeDemo: true })
       .then((r) => r.facts)
       .catch(() => null);
@@ -176,20 +209,22 @@ export default function Logbook({ active = true, focus, onGoLive }: Props) {
       .then((r) => r.facts)
       .catch(() => null);
     // both failed (e.g. backend busy): keep what the strips show
-    Promise.all([landings, approaches]).then(([l, a]) => (l || a) && setFacts(stripFactsFrom(l ?? [], a ?? [])));
-  }, []);
+    Promise.all([landings, approaches]).then(([l, a]) => isLatest() && (l || a) && setFacts(stripFactsFrom(l ?? [], a ?? [])));
+  }, [latestFacts]);
 
   const loadTrash = useCallback(() => {
+    const isLatest = latestTrash();
     invoke<DeletedFlight[]>("list_deleted_flights")
-      .then(setDeleted)
+      .then((d) => isLatest() && setDeleted(d))
       .catch(() => {});
-  }, []);
+  }, [latestTrash]);
 
   const loadMergeCandidates = useCallback(() => {
+    const isLatest = latestMerge();
     invoke<MergeCandidate[]>("list_merge_candidates")
-      .then(setMergeCandidates)
+      .then((m) => isLatest() && setMergeCandidates(m))
       .catch(() => {});
-  }, []);
+  }, [latestMerge]);
 
   const refresh = useCallback(() => {
     loadFacts();
@@ -234,7 +269,7 @@ export default function Logbook({ active = true, focus, onGoLive }: Props) {
   useEffect(() => {
     if (!active) return;
     const onKey = (e: globalThis.KeyboardEvent) => {
-      if (e.ctrlKey && !e.altKey && e.key.toLowerCase() === "f" && !isDebriefOpen()) {
+      if (e.ctrlKey && !e.altKey && e.key.toLowerCase() === "f" && !isDebriefOpen() && !isModalOpen()) {
         e.preventDefault();
         searchRef.current?.focus();
         searchRef.current?.select();
@@ -267,16 +302,34 @@ export default function Logbook({ active = true, focus, onGoLive }: Props) {
   );
   /** Tags of the flights the list can show (demo setting respected), for the „Tags“ dropdown. */
   const allTags = useMemo(() => tagCounts(showDemo ? flights : flights.filter((f) => !isDemoRow(f))), [flights, showDemo]);
-  const shown = rows.slice(0, LIST_LIMIT);
+  const shown = useMemo(() => rows.slice(0, LIST_LIMIT), [rows]);
   const ids = useMemo(() => shown.map((r) => r.id), [shown]);
+  /** List head: count (or trash/loading/error state); a polite live region repeats it debounced. */
+  const headText =
+    loaded && trash
+      ? t("logbook.list.headTrash", { shown: rows.length, total: deleted.length, days: TRASH_DAYS })
+      : loaded
+        ? [
+            t("logbook.list.headCount", { shown: rows.length, total: flights.length }),
+            rows.length > LIST_LIMIT ? t("logbook.list.headLimited", { limit: LIST_LIMIT }) : null,
+            !showDemo && demoCount > 0 ? t("logbook.list.headDemoHidden", { count: demoCount }) : null,
+          ]
+            .filter(Boolean)
+            .join(" · ")
+        : error
+          ? t("logbook.list.headError")
+          : t("logbook.list.headLoading");
+  const headAnnounce = useDebouncedValue(headText, 800);
   const selectedRow = source.find((f) => f.id === selectedId) ?? null;
   const selectedHidden = !!selectedId && !!selectedRow && !ids.includes(selectedId);
 
   // external selection request (landing notice)
+  // (`n` repeats a request for the same flight; the effect only needs the id)
+  const focusId = focus?.id;
+  const focusN = focus?.n;
   useEffect(() => {
-    if (!focus) return;
-    setSelectedId(focus.id);
-  }, [focus?.id, focus?.n]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (focusId) setSelectedId(focusId);
+  }, [focusId, focusN]);
 
   // nothing selected (first visit, filter change): take the newest visible flight
   useEffect(() => {
@@ -302,7 +355,7 @@ export default function Logbook({ active = true, focus, onGoLive }: Props) {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `detail` is read once to keep the drawn track of the same flight; as a dependency every loaded detail would start a new load
   }, [selectedId, selectedUpdated, detailAttempt]);
 
   const select = (id: string | null, focusRow = false) => {
@@ -558,23 +611,11 @@ export default function Logbook({ active = true, focus, onGoLive }: Props) {
 
       <div className="master-detail">
         <div className="master">
-          <div className="master-head detail num" aria-live="polite">
-            {loaded && trash ? (
-              <>
-                {t("logbook.list.headTrash", { shown: rows.length, total: deleted.length, days: TRASH_DAYS })}
-              </>
-            ) : loaded ? (
-              <>
-                {t("logbook.list.headCount", { shown: rows.length, total: flights.length })}
-                {rows.length > LIST_LIMIT && ` · ${t("logbook.list.headLimited", { limit: LIST_LIMIT })}`}
-                {!showDemo && demoCount > 0 && ` · ${t("logbook.list.headDemoHidden", { count: demoCount })}`}
-              </>
-            ) : error ? (
-              t("logbook.list.headError")
-            ) : (
-              t("logbook.list.headLoading")
-            )}
-          </div>
+          <div className="master-head detail num">{headText}</div>
+          {/* the count is announced once typing in the search pauses, not on every key */}
+          <span className="sr-only" aria-live="polite">
+            {headAnnounce}
+          </span>
           {!trash && visibleMerges.length > 0 && (
             <div className="merge-hints" role="group" aria-label={t("logbook.list.mergeGroup")}>
               {visibleMerges.slice(0, MERGE_HINTS_MAX).map((c) => {

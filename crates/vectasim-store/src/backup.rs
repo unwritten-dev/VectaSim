@@ -341,24 +341,43 @@ fn stage_restore(db: &Path, src: &Path) -> Result<()> {
 /// there – is set aside as `.restore-failed` and the current logbook opens, instead of every
 /// start failing the same way. True when a restore was applied.
 pub fn apply_pending_restore(db: &Path) -> Result<bool> {
+    Ok(apply_pending_restore_outcome(db)? == RestoreOutcome::Applied)
+}
+
+/// What [`apply_pending_restore_outcome`] did with a staged restore.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RestoreOutcome {
+    /// Nothing was staged.
+    NothingStaged,
+    /// The restored backup is the logbook now.
+    Applied,
+    /// The staged copy was set aside as `.restore-failed` and the current logbook opens:
+    /// the pilot asked for a restore and did not get it (see [`crate::StoreNotice`]).
+    SetAside { detail: String },
+}
+
+/// [`apply_pending_restore`] with the reason when the staged copy had to be set aside. The
+/// failure is logged at ERROR and, on top, [`Store::open`] keeps it as a notice
+/// ([`Store::take_notices`]) the app shows once.
+pub fn apply_pending_restore_outcome(db: &Path) -> Result<RestoreOutcome> {
     let pending = pending_restore_path(db);
     if !pending.is_file() {
-        return Ok(false);
+        return Ok(RestoreOutcome::NothingStaged);
     }
     if let Err(e) = inspect(&pending) {
         log::error!("staged restore {} is unusable, keeping the current logbook: {e}", pending.display());
         let _ = std::fs::rename(&pending, sibling(db, ".restore-failed"));
-        return Ok(false);
+        return Ok(RestoreOutcome::SetAside { detail: e.to_string() });
     }
     match put_restore_in_place(db, &pending) {
-        Ok(()) => Ok(true),
+        Ok(()) => Ok(RestoreOutcome::Applied),
         // the current logbook is still there: open it, the restore can be repeated from the backup
         Err(e) if db.is_file() => {
             log::error!("staged restore {} could not be applied, keeping the current logbook: {e}", pending.display());
             if let Err(e) = std::fs::rename(&pending, sibling(db, ".restore-failed")) {
                 log::error!("staged restore {} could not be set aside either: {e}", pending.display());
             }
-            Ok(false)
+            Ok(RestoreOutcome::SetAside { detail: e.to_string() })
         }
         Err(e) => Err(e),
     }

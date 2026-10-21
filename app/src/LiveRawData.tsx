@@ -12,7 +12,7 @@ const yesNo = (b: boolean | null | undefined) => (b ? tNow("live.raw.yes") : tNo
 const secs = (ms: number | null | undefined) => (ms == null ? "–" : `${fmtNum(ms / 1000, 1)} s`);
 
 /**
- * Einstellungen → Diagnose → Live-Rohdaten: every raw definition (SimConnect, X-Plane) with raw and converted
+ * Settings → Diagnostics → Live raw data: every raw definition (SimConnect, X-Plane) with raw and converted
  * values, the event log, engine internals and connection info. Mounted only while the section
  * is open; the backend streams `diag:raw` at 2 Hz only for as long as this view exists.
  */

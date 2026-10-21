@@ -33,8 +33,9 @@ import MapStyleToggle from "./MapStyleToggle";
 import { followSatellite } from "./satellite";
 import { altToCurtainM } from "./trackChunks";
 import { pointsBounds } from "./geo";
-import { addLayerOnce, addSourceOnce, replaceCustomLayer } from "./styleOnce";
+import { addLayerOnce, addSourceOnce, removeCustomLayers, replaceCustomLayer } from "./styleOnce";
 import MapUnavailable from "./MapUnavailable";
+import { useHintIds } from "./hint";
 
 /** First draw of a long track: this many points at most; the full line follows once idle. */
 const QUICK_POINTS = 1500;
@@ -161,6 +162,9 @@ export default function TrackMap({ samples, touchdowns, departure, arrival, airc
         void loadBasemapStyle().then((next) => {
           if (mySeq !== themeSeq || mapRef.current !== map) return;
           readyRef.current = false;
+          // free the curtain's and the model's GL resources now (setStyle drops them without onRemove)
+          removeCustomLayers(map);
+          modelRef.current = null;
           map.setStyle(withProjection(next, globeRef.current, COLOR.bg), { diff: false });
         });
       };
@@ -369,22 +373,29 @@ export default function TrackMap({ samples, touchdowns, departure, arrival, airc
     setPitched(map, next);
   };
 
+  // toolbar explanations for keyboard and screen-reader users (hint.tsx)
+  const hints = useHintIds();
+  const followHint = hints("follow", t("map.toolbar.followTitle"));
+  const view3dHint = hints("3d", view3d ? t("map.toolbar.flatten") : t("map.toolbar.tilt"));
   return (
     <div className="track-map-wrap">
       <div ref={containerRef} className="map track-map" />
       {mapFailed && <MapUnavailable />}
       <div className="map-toolbar track-map-toolbar">
-        <button className="toggle" onClick={toggleFollow} aria-pressed={follow} title={t("map.toolbar.followTitle")}>
+        <button className="toggle" onClick={toggleFollow} aria-pressed={follow} title={t("map.toolbar.followTitle")} aria-describedby={followHint.describedBy}>
           {t("map.toolbar.follow")}
         </button>
+        {followHint.node}
         <button
           className="toggle"
           onClick={toggle3d}
           aria-pressed={view3d}
           title={view3d ? t("map.toolbar.flatten") : t("map.toolbar.tilt")}
+          aria-describedby={view3dHint.describedBy}
         >
           3D
         </button>
+        {view3dHint.node}
         <GlobeToggle />
         <MapStyleToggle />
       </div>

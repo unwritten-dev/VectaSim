@@ -17,6 +17,7 @@
 import { useSyncExternalStore } from "react";
 import * as maplibregl from "maplibre-gl";
 import { getMapTheme } from "../theme";
+import { remapTile } from "./tileRemapClient";
 
 export type WeatherKind = "radar" | "clouds";
 export interface WeatherPrefs {
@@ -51,7 +52,7 @@ export const CLOUDS_TIME_URL = "https://view.eumetsat.int/geoserver/msg_fes/ir10
 export const CLOUDS_MAX_ZOOM = 6;
 export const CLOUDS_ATTRIBUTION = '<a href="https://view.eumetsat.int" target="_blank" rel="noopener">Contains modified EUMETSAT Meteosat data</a>';
 
-/** MapLibre protocols: the handlers fetch the https URL behind them (radar as is, clouds recoloured). */
+/** MapLibre protocols: the handlers fetch the https URL behind them (radar without its magenta step, clouds recoloured). */
 export const RADAR_PROTOCOL = "vectasim-radar";
 export const CLOUDS_PROTOCOL = "vectasim-clouds";
 
@@ -211,32 +212,8 @@ export function fromProtocolUrl(url: string): { https: string; scheme: "dark" | 
   return { https: `https://${rest}`, scheme: "dark" };
 }
 
-/**
- * Cloud opacity (0–255) for an IR grey value: warm ground and low cloud (dark) transparent,
- * cold high cloud tops (bright) opaque, a smooth ramp in between.
- */
-export function cloudAlpha(grey: number, lo = 105, hi = 205): number {
-  if (grey <= lo) return 0;
-  if (grey >= hi) return 255;
-  const x = (grey - lo) / (hi - lo);
-  return Math.round(x * x * (3 - 2 * x) * 255);
-}
-
-/** Cloud colour per map scheme: white on the dark maps, slate on paper. */
-export const CLOUD_RGB: Record<"dark" | "light", [number, number, number]> = { dark: [238, 242, 246], light: [84, 98, 116] };
-
-/** Recolours an RGBA IR image in place into clouds (pure on the pixel array). */
-export function irToClouds(px: Uint8ClampedArray, scheme: "dark" | "light") {
-  const [r, g, b] = CLOUD_RGB[scheme];
-  for (let i = 0; i < px.length; i += 4) {
-    const grey = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
-    const a = (px[i + 3] * cloudAlpha(grey)) / 255;
-    px[i] = r;
-    px[i + 1] = g;
-    px[i + 2] = b;
-    px[i + 3] = a;
-  }
-}
+// the pixel recolouring lives in tileRemap.ts (shared with the tile worker, no MapLibre import there)
+export { CLOUD_RGB, cloudAlpha, irToClouds, radarWithoutMagenta } from "./tileRemap";
 
 // ---- tile protocols -----------------------------------------------------------------------
 
@@ -257,15 +234,10 @@ async function loadTile(url: string, abort: AbortController): Promise<{ data: Im
     const r = await fetch(https, { signal: abort.signal });
     if (!r.ok) return { data: await empty() };
     const bitmap = await createImageBitmap(await r.blob());
-    if (!url.startsWith(`${CLOUDS_PROTOCOL}://`)) return { data: bitmap };
-    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return { data: bitmap };
-    ctx.drawImage(bitmap, 0, 0);
-    bitmap.close();
-    const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    irToClouds(img.data, scheme);
-    return { data: await createImageBitmap(img) };
+    // clouds: IR grey → cloud colour; radar: the colour scheme's magenta step → white – off the
+    // main thread (a pixel loop plus a GPU read-back per 256² tile, 1–3 ms each: a pan over many
+    // tiles stuttered), on it only where no worker can be started
+    return { data: await remapTile(bitmap, url.startsWith(`${CLOUDS_PROTOCOL}://`), scheme) };
   } catch (e) {
     if (isAbort(e)) throw e;
     // blocked, rate-limited, offline, undecodable: an empty tile, the legend shows the state

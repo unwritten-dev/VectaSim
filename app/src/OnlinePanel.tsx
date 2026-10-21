@@ -4,7 +4,7 @@ import type { Controller, LocatedController, Network, OnlineSummary, OnlineView 
 import { haversineNm } from "./format";
 import { fmt, fmtAltitude } from "./i18n/number";
 import { useT } from "./i18n";
-import { FACILITY_LABEL, NETWORK_LABEL } from "./map/online";
+import { FACILITY_LABEL, NETWORK_LABEL } from "./onlineText";
 import { userMessage } from "./errors";
 import ErrorNotice from "./ErrorNotice";
 import Collapsible from "./ui/Collapsible";

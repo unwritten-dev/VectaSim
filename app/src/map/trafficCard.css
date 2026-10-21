@@ -245,3 +245,13 @@
   text-underline-offset: 2px;
   cursor: help;
 }
+
+/* "Route" without a full flight plan: aria-disabled (focusable, the reason is its description),
+   drawn like a disabled button */
+.traffic-actions button[aria-disabled="true"] {
+  background: transparent;
+  color: var(--text-faint);
+  border-color: var(--border);
+  box-shadow: none;
+  cursor: not-allowed;
+}

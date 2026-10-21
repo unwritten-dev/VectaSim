@@ -29,7 +29,8 @@ const FACTS_MAX_LIMIT: u32 = 200;
 const FACTS_SCAN_MAX: u32 = 200;
 
 /// Every approach of a flight, in time order. `live` is the recorder's buffer of the running
-/// flight; it replaces the stored track when it is longer (the store is flushed once a minute).
+/// flight; it replaces the stored track when it is longer (the store is flushed every 15 s,
+/// `FLUSH_INTERVAL_MS` in the recorder, so the live buffer is up to date and the stored one not).
 pub(crate) fn analyze(store: &Store, airports: &AirportIndex, flight_id: &str, live: Option<Vec<TrackSample>>) -> Result<Vec<ApproachAnalysis>, String> {
     let detail = store.get_flight(flight_id).map_err(|e| e.to_string())?.ok_or("Flug nicht gefunden")?;
     let mut track = store.get_track(flight_id).map_err(|e| e.to_string())?.unwrap_or_default();

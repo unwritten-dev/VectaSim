@@ -1,5 +1,5 @@
 //! Shared recorder: one per process, fed by the SimConnect session thread, controlled
-//! from the app (switch in Einstellungen → Diagnose, "Dump jetzt speichern").
+//! from the app (switch in Settings → Diagnostics, "save dump now").
 //!
 //! Two outputs, both fed from the same serialised line:
 //! * a file per SimConnect session (`<dir>/<start>.vsdump`) while the switch is on, or a

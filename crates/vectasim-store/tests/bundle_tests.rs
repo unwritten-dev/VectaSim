@@ -350,6 +350,44 @@ fn remembered_runways_travel_with_the_bundle_and_merge() {
 }
 
 #[test]
+fn merge_does_not_count_the_runway_landing_of_a_skipped_duplicate() {
+    // the same flight under another id is skipped as a duplicate; its runway landing was added
+    // anyway (an orphan row) and counted a second time into the runway's mean
+    let dir = tempfile::tempdir().unwrap();
+    let a = Store::open(&dir.path().join("a.db")).unwrap();
+    record_mock_flight(&a, T0);
+    let id = all_ids(&a).remove(0);
+    a.refine_derived_runway(&east_end("EDXA", "09", 50.0, 8.0, 0.02), true, &id, 0).unwrap();
+    let first = dir.path().join("first.vectasim");
+    a.export_bundle(&first, &all_opts()).unwrap();
+    drop(a);
+    {
+        // the other PC: the same flight and landing under a new id
+        let conn = rusqlite::Connection::open(dir.path().join("a.db")).unwrap();
+        conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
+        conn.execute("UPDATE flights SET id = 'other-' || id", []).unwrap();
+        conn.execute("UPDATE user_runway_landings SET flight_id = 'other-' || flight_id", []).unwrap();
+    }
+    let a = Store::open(&dir.path().join("a.db")).unwrap();
+    let second = dir.path().join("second.vectasim");
+    a.export_bundle(&second, &all_opts()).unwrap();
+
+    let b = Store::open(&dir.path().join("b.db")).unwrap();
+    let images = dir.path().join("img");
+    b.import_bundle(&first, &merge(&images)).unwrap();
+    assert_eq!(b.list_user_runways("EDXA").unwrap()[0].uses, 1);
+    let r = b.import_bundle(&second, &merge(&images)).unwrap();
+    assert_eq!((r.flights_added, r.flights_skipped_duplicate), (0, 1), "{r:?}");
+    assert_eq!(b.list_user_runways("EDXA").unwrap()[0].uses, 1, "the landing counts once");
+    drop(b);
+    let conn = rusqlite::Connection::open(dir.path().join("b.db")).unwrap();
+    let orphans: i64 = conn
+        .query_row("SELECT COUNT(*) FROM user_runway_landings WHERE flight_id NOT IN (SELECT id FROM flights)", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(orphans, 0);
+}
+
+#[test]
 fn notes_tags_rating_and_corrections_travel_with_the_bundle() {
     use vectasim_store::FlightUserEdit;
     let dir = tempfile::tempdir().unwrap();
@@ -428,4 +466,41 @@ fn crafted_registrations_cannot_write_outside_the_picture_folder() {
     assert!(images.join("D_EVIL.png").exists());
     let files: Vec<_> = std::fs::read_dir(&images).unwrap().map(|e| e.unwrap().file_name()).collect();
     assert_eq!(files.len(), 1, "{files:?}");
+}
+
+/// Security: the picture credit link is opened in the browser – from a bundle only a
+/// Planespotters page is taken, anything else is dropped (the picture itself stays).
+#[test]
+fn imported_credit_links_are_planespotters_pages_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let line = |reg: &str, link: &str| {
+        serde_json::json!({
+            "airframe": { "registration": reg, "image_url": "https://t.plnspttrs.net/1.jpg", "image_link": link,
+                          "image_source": "planespotters", "created_ms": 1, "updated_ms": 1 },
+        })
+        .to_string()
+    };
+    let lines = [
+        line("D-GOOD", "https://www.planespotters.net/photo/1/d-good"),
+        line("D-EVIL", "https://www.planespotters.net.evil.example/photo/1"),
+        line("D-HTTP", "http://www.planespotters.net/photo/1"),
+    ]
+    .join("\n");
+    let manifest = r#"{"format":1,"app":"VectaSim","appVersion":"9","schemaVersion":16,"createdMs":0,"createdUtc":"","flights":0,"flightsDeleted":0,"tracks":0,"airframes":3,"images":0,"trackEncoding":"vstk1"}"#;
+    let p = dir.path().join("links.vectasim");
+    let mut z = zip::ZipWriter::new(std::fs::File::create(&p).unwrap());
+    for (n, body) in [("manifest.json", manifest.as_bytes()), ("airframes.jsonl", lines.as_bytes())] {
+        z.start_file(n, zip::write::SimpleFileOptions::default()).unwrap();
+        std::io::Write::write_all(&mut z, body).unwrap();
+    }
+    z.finish().unwrap();
+
+    let b = Store::open_in_memory().unwrap();
+    let r = b.import_bundle(&p, &merge(&dir.path().join("img"))).unwrap();
+    assert_eq!(r.airframes_added, 3, "{r:?}");
+    let link = |reg: &str| b.get_airframe(reg).unwrap().unwrap().image_link;
+    assert_eq!(link("D-GOOD").as_deref(), Some("https://www.planespotters.net/photo/1/d-good"));
+    assert_eq!(link("D-EVIL"), None);
+    assert_eq!(link("D-HTTP"), None);
+    assert_eq!(b.get_airframe("D-EVIL").unwrap().unwrap().image_url.as_deref(), Some("https://t.plnspttrs.net/1.jpg"));
 }

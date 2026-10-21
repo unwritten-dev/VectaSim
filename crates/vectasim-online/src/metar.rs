@@ -1,5 +1,9 @@
 //! METAR fetching (aviationweather.gov, VATSIM fallback) and a small decoder.
 //!
+//! The VATSIM fallback (`metar.vatsim.net`) is only asked while the app has the VATSIM network
+//! switched on ([`MetarClient::set_vatsim_fallback`], off by default): with VATSIM off, VectaSim
+//! contacts no VATSIM server at all, and a failing aviationweather.gov leaves stale or no reports.
+//!
 //! aviationweather.gov asks clients to stay below 100 requests per minute and
 //! to send a descriptive User-Agent. METARs are issued every 30–60 min, so a
 //! 10-minute cache per ICAO loses nothing and lets the map re-ask for the same
@@ -8,6 +12,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::OnlineError;
@@ -383,6 +388,8 @@ pub struct MetarClient {
     client: reqwest::Client,
     cache: Mutex<HashMap<String, CacheEntry>>,
     requests: Mutex<VecDeque<Instant>>,
+    /// Ask `metar.vatsim.net` when aviationweather.gov fails (follows the VATSIM switch).
+    vatsim_fallback: AtomicBool,
 }
 
 impl Default for MetarClient {
@@ -399,7 +406,17 @@ fn normalize(icao: &str) -> Option<String> {
 impl MetarClient {
     pub fn new() -> Self {
         let client = crate::client(Duration::from_secs(15));
-        Self { client, cache: Mutex::new(HashMap::new()), requests: Mutex::new(VecDeque::new()) }
+        Self { client, cache: Mutex::new(HashMap::new()), requests: Mutex::new(VecDeque::new()), vatsim_fallback: AtomicBool::new(false) }
+    }
+
+    /// Whether `metar.vatsim.net` may be asked when aviationweather.gov fails; the app ties it to
+    /// the VATSIM switch (module doc). Off by default.
+    pub fn set_vatsim_fallback(&self, on: bool) {
+        self.vatsim_fallback.store(on, Ordering::Relaxed);
+    }
+
+    pub fn vatsim_fallback(&self) -> bool {
+        self.vatsim_fallback.load(Ordering::Relaxed)
     }
 
     /// Insert a report as if fetched now (tests, or callers that already have one).
@@ -475,10 +492,11 @@ impl MetarClient {
         let ids = chunk.join(",");
         match self.fetch_noaa(&ids).await {
             Ok(list) => Ok(list),
-            Err(e) => {
+            Err(e) if self.vatsim_fallback() => {
                 log::info!("aviationweather.gov unavailable ({e}), trying VATSIM METAR");
                 self.fetch_vatsim(&ids).await
             }
+            Err(e) => Err(e),
         }
     }
 

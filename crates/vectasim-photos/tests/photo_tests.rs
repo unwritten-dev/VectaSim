@@ -1,4 +1,4 @@
-use vectasim_photos::{HIT_TTL_MS, MISS_TTL_MS, Photo, is_fresh, parse_photos};
+use vectasim_photos::{HIT_TTL_MS, MISS_TTL_MS, Photo, is_fresh, is_planespotters_link, parse_photos};
 
 const FIXTURE: &str = include_str!("fixtures/planespotters_reg.json");
 
@@ -17,16 +17,37 @@ fn empty_and_partial_responses() {
     assert_eq!(parse_photos(r#"{"photos":[]}"#).unwrap(), None);
     assert_eq!(parse_photos(r#"{}"#).unwrap(), None);
     // a photo without thumbnail_large falls back to the small one
-    let p = parse_photos(r#"{"photos":[{"thumbnail":{"src":"s.jpg"},"link":"l","photographer":" A "}]}"#).unwrap().unwrap();
-    assert_eq!(p, Photo { large_url: "s.jpg".into(), thumb_url: "s.jpg".into(), photographer: "A".into(), link: "l".into() });
+    let p = parse_photos(r#"{"photos":[{"thumbnail":{"src":"s.jpg"},"link":"https://www.planespotters.net/photo/1","photographer":" A "}]}"#).unwrap().unwrap();
+    assert_eq!(p, Photo { large_url: "s.jpg".into(), thumb_url: "s.jpg".into(), photographer: "A".into(), link: "https://www.planespotters.net/photo/1".into() });
     // a photo without any image is skipped
     let p = parse_photos(r#"{"photos":[{"link":"x"},{"thumbnail_large":{"src":"b.jpg"},"link":"y","photographer":""}]}"#)
         .unwrap()
         .unwrap();
-    assert_eq!((p.large_url.as_str(), p.link.as_str()), ("b.jpg", "y"));
+    // a credit link that is no Planespotters page is dropped (it would be opened in the browser)
+    assert_eq!((p.large_url.as_str(), p.link.as_str()), ("b.jpg", ""));
     assert_eq!(p.credit_line(), "© Planespotters.net");
     assert!(parse_photos(r#"{"error":"invalid registration"}"#).is_err());
     assert!(parse_photos("<html>").is_err());
+}
+
+#[test]
+fn only_planespotters_pages_are_credit_links() {
+    assert!(is_planespotters_link("https://www.planespotters.net/photo/1512345/d-aina"));
+    assert!(is_planespotters_link("https://www.planespotters.net"));
+    for bad in [
+        "",
+        "y",
+        "http://www.planespotters.net/photo/1",
+        "https://planespotters.net/photo/1",
+        "https://www.planespotters.net.evil.example/photo/1",
+        "https://www.planespotters.net@evil.example/",
+        "https://www.planespotters.net:8443/photo/1",
+        "https://www.planespotters.net/photo/1 x",
+        r"https://www.planespotters.net/\evil.example",
+        "javascript:alert(1)",
+    ] {
+        assert!(!is_planespotters_link(bad), "{bad}");
+    }
 }
 
 #[test]

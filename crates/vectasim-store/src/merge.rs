@@ -1,6 +1,6 @@
 //! After a crash: continue an interrupted flight (`resume_*`, used by the recorder when the
-//! pilot accepts "Flug fortsetzen?") or join it with the flight that followed it
-//! (`merge_flights`, Logbuch → "Zusammenführen").
+//! pilot accepts "resume flight?") or join it with the flight that followed it
+//! (`merge_flights`, logbook → "merge").
 //!
 //! Criteria (see the constants):
 //! - resume offer: the newest interrupted flight whose last track sample is at most 30 min
@@ -201,7 +201,15 @@ impl Store {
             "discarded" => FlightState::Discarded,
             _ => FlightState::Idle,
         };
-        let landing_rate_fpm = d.touchdowns.iter().rev().find(|t| !t.touch_and_go).map(|t| t.landing_rate_fpm);
+        // the last full stop's rate, unless it is unrated (slewed / fast-forwarded down): like
+        // `FlightSession`, never a 0 fpm that would show and count as the flight's rate
+        let landing_rate_fpm = d
+            .touchdowns
+            .iter()
+            .rev()
+            .find(|t| !t.touch_and_go)
+            .filter(|t| t.landing_rate_source.is_rated())
+            .map(|t| t.landing_rate_fpm);
         Ok(Some(FlightSummary {
             state,
             phase: f.phase,

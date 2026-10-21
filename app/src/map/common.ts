@@ -158,10 +158,14 @@ export function addCurtainLayers(
   replaceCustomLayer(map, layer, before);
 }
 
-/** The track (and the aircraft's position now as its head: null clears, undefined keeps it) for the curtain `id`. */
+/**
+ * The track (and the aircraft's position now as its head: null clears, undefined keeps it) for the
+ * curtain `id`. Nothing while its layer is removed (between removeCustomLayers and the next style
+ * load): the per-frame callers (the selected traffic's loop) kept syncing an orphaned instance.
+ */
 export function drawCurtainTrack(map: maplibregl.Map, id: string, points: readonly TrackPoint[], head?: TrackPoint | null) {
   const entry = curtains.get(map)?.get(id);
-  if (!entry) return;
+  if (!entry || entry.layer.removed) return;
   entry.layer.sync(points, head);
   entry.latest = { points, head: head === undefined ? (entry.latest?.head ?? null) : head };
   // the extrusion has no incremental path: at most one rebuild per second

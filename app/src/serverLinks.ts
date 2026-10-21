@@ -1,4 +1,4 @@
-// Einstellungen → Overlay & Schnittstelle: pure helpers of ServerPanel.tsx (URLs, status line,
+// Settings → Overlay & API: pure helpers of ServerPanel.tsx (URLs, status line,
 // port input), unit-tested in serverLinks.test.ts. The server itself is the Rust crate
 // crates/vectasim-server, switched by app/src-tauri/src/server.rs.
 

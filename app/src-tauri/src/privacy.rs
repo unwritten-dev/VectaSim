@@ -115,32 +115,44 @@ pub fn mask_json(v: &mut Value) {
 // ---- Kennungen ausblenden (Diagnosepaket im Streamer-Modus) ---------------------------------
 
 /// Registrations and callsigns to hide from a text: every word of `[A-Za-z0-9_-]` (and each
-/// `_`/`-` part of it) that is one of them, in any case and with `_` for `-` or no dash at all
-/// (`D-AIBL`, `d_aibl`, `DAIBL`), becomes `***`. Linear in the text, whatever the number of words.
+/// `_`/`-` part of it) that is one of them becomes `***` – in any case and whatever the dashes:
+/// words are compared without `-`/`_`, so `D-AIBL` in the list also hides `DAIBL`, `d_aibl`, and
+/// `DAIBL` in the list (an MSFS ATC ID) also hides `D-AIBL`. Two words with one space between
+/// them are tried as one (`D AIBL`, `DLH 4AB`). Linear in the text: a run of `-`-parts is
+/// at most [`Redactor::max_parts`] long (4000 dashes took 55 s when every run was tried).
+/// IATA forms of a callsign (`LH4AB` for `DLH4AB`) are not derived (no airline table here).
 #[derive(Debug, Default, Clone)]
 pub struct Redactor {
     words: std::collections::HashSet<String>,
+    /// Most `-`-parts a hit can span: the most parts of a list entry, plus one for a dash a
+    /// dashless entry may have in the text (`DAIBL` → `D-AIBL`).
+    max_parts: usize,
 }
 
+/// Comparison key: upper case, without `-` and `_`.
 fn redact_key(w: &str) -> String {
-    w.to_ascii_uppercase().replace('_', "-")
+    w.chars().filter(|&c| c != '-' && c != '_').map(|c| c.to_ascii_uppercase()).collect()
 }
 
 impl Redactor {
     pub fn new<I: IntoIterator<Item = S>, S: AsRef<str>>(words: I) -> Self {
         let mut set = std::collections::HashSet::new();
+        let mut max_parts = 0;
         for w in words {
-            let w = redact_key(w.as_ref().trim());
-            // shorter values (or pure numbers like a flight number) would hit ordinary words
-            if w.len() < 3 || !w.chars().any(|c| c.is_ascii_alphabetic()) || !w.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+            // a list entry with spaces or `_` (`D AIBL`) counts like the dashed form
+            let w = w.as_ref().trim().replace([' ', '_'], "-");
+            if !w.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
                 continue;
             }
-            if w.contains('-') {
-                set.insert(w.replace('-', ""));
+            let key = redact_key(&w);
+            // shorter values (or pure numbers like a flight number) would hit ordinary words
+            if key.len() < 3 || !key.chars().any(|c| c.is_ascii_alphabetic()) {
+                continue;
             }
-            set.insert(w);
+            max_parts = max_parts.max(w.split('-').filter(|p| !p.is_empty()).count() + 1);
+            set.insert(key);
         }
-        Redactor { words: set }
+        Redactor { words: set, max_parts }
     }
 
     fn hit(&self, w: &str) -> bool {
@@ -148,7 +160,7 @@ impl Redactor {
     }
 
     /// One word: whole, else each `_`-part, else the longest runs of `-`-parts that are a hit
-    /// (`X-D-AIBL` → `X-***`).
+    /// (`X-D-AIBL` → `X-***`). A run has at most `max_parts` non-empty parts.
     fn mask_word(&self, w: &str, out: &mut String) {
         if self.hit(w) {
             out.push_str("***");
@@ -162,11 +174,24 @@ impl Redactor {
         } else if w.contains('-') {
             let parts: Vec<&str> = w.split('-').collect();
             let mut i = 0;
+            let mut key = String::new();
             while i < parts.len() {
                 if i > 0 {
                     out.push('-');
                 }
-                match (i..parts.len()).rev().find(|&j| self.hit(&parts[i..=j].join("-"))) {
+                // the longest hit among parts[i..=j], j < i + max_parts, built up part by part
+                key.clear();
+                let mut best = None;
+                for (j, part) in parts.iter().enumerate().skip(i).take(self.max_parts) {
+                    if part.is_empty() {
+                        break;
+                    }
+                    key.extend(part.chars().map(|c| c.to_ascii_uppercase()));
+                    if self.words.contains(&key) {
+                        best = Some(j);
+                    }
+                }
+                match best {
                     Some(j) => {
                         out.push_str("***");
                         i = j + 1;
@@ -187,23 +212,46 @@ impl Redactor {
             return text.to_string();
         }
         let is_word = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_';
-        let mut out = String::with_capacity(text.len());
+        // the words, as byte ranges
+        let mut spans: Vec<(usize, usize)> = Vec::new();
         let mut start: Option<usize> = None;
         for (i, c) in text.char_indices() {
             match (is_word(c), start) {
                 (true, None) => start = Some(i),
                 (false, Some(s)) => {
-                    self.mask_word(&text[s..i], &mut out);
+                    spans.push((s, i));
                     start = None;
-                    out.push(c);
                 }
-                (false, None) => out.push(c),
-                (true, Some(_)) => {}
+                _ => {}
             }
         }
         if let Some(s) = start {
-            self.mask_word(&text[s..], &mut out);
+            spans.push((s, text.len()));
         }
+        let mut out = String::with_capacity(text.len());
+        let mut copied = 0;
+        let mut k = 0;
+        while k < spans.len() {
+            let (s, e) = spans[k];
+            out.push_str(&text[copied..s]);
+            // `D AIBL`: this word, one space and the next word as one
+            if let Some(&(s2, e2)) = spans.get(k + 1)
+                && s2 == e + 1
+                && text.as_bytes()[e] == b' '
+                && !self.hit(&text[s..e])
+                && !self.hit(&text[s2..e2])
+                && self.words.contains(&(redact_key(&text[s..e]) + &redact_key(&text[s2..e2])))
+            {
+                out.push_str("***");
+                copied = e2;
+                k += 2;
+                continue;
+            }
+            self.mask_word(&text[s..e], &mut out);
+            copied = e;
+            k += 1;
+        }
+        out.push_str(&text[copied..]);
         out
     }
 
@@ -281,7 +329,7 @@ fn check_dir(raw: &str, forbidden: &[PathBuf]) -> Result<PathBuf, String> {
 }
 
 /// The landing card folder; `create` makes sure it exists (before an automatic save), `open`
-/// also creates it and opens it in the Explorer (Einstellungen → Anzeige → „Öffnen“).
+/// also creates it and opens it in the Explorer (Settings → Display → “Open”).
 #[tauri::command]
 pub async fn get_card_dir(create: Option<bool>, open: Option<bool>, app: AppHandle, store: State<'_, Store>) -> Result<CardDirInfo, String> {
     let store = store.inner().clone();
@@ -359,6 +407,48 @@ mod tests {
         let mut v = json!({ "a": ["x D-AIBL y", 1], "b": { "c": "DLH4AB" } });
         r.mask_json(&mut v);
         assert_eq!(v, json!({ "a": ["x *** y", 1], "b": { "c": "***" } }));
+    }
+
+    #[test]
+    fn redactor_finds_every_spelling() {
+        // stored without the dash (MSFS ATC ID), written with it in a log – and the other way round
+        let r = Redactor::new(["DAIBL", "N-12345", "dlh4ab"]);
+        assert_eq!(r.mask("planespotters D-AIBL: ok, d-aibl, DAIBL, d_aibl"), "planespotters ***: ok, ***, ***, ***");
+        assert_eq!(r.mask("N12345 n-12345 X-N12345"), "*** *** X-***");
+        // spaced forms
+        assert_eq!(r.mask("reg D AIBL, cs DLH 4AB, N 12345."), "reg ***, cs ***, ***.");
+        assert_eq!(r.mask("D  AIBL"), "D  AIBL", "two spaces are two words");
+        // lower case and mixed dashes
+        assert_eq!(r.mask("ofp dlh4ab / Dlh4Ab"), "ofp *** / ***");
+        // list entries with spaces or underscores count like the dashed form
+        assert_eq!(Redactor::new(["D AIBL"]).mask("D-AIBL DAIBL"), "*** ***");
+        // ordinary words and parts of words stay
+        assert_eq!(r.mask("D AIBLX DAIBLE a b c 12345"), "D AIBLX DAIBLE a b c 12345");
+        // the text around is copied as is, also non-ASCII
+        assert_eq!(r.mask("Jörg: D AIBL → ok"), "Jörg: *** → ok");
+    }
+
+    #[test]
+    fn redactor_is_linear_on_long_dash_words() {
+        // 4000 dashes once took 55 s (cubic in the number of parts)
+        let r = Redactor::new(["D-AIBL", "DLH4AB", "N-123-AB"]);
+        let dashes = "-".repeat(4000);
+        let a_dash = "a-".repeat(4000);
+        let mixed = "D-AIBL-".repeat(2000);
+        for text in [dashes.as_str(), a_dash.as_str(), mixed.as_str()] {
+            // the best of five runs, so a busy machine (parallel tests, a debug build) does not fail it
+            let (took, out) = (0..5)
+                .map(|_| {
+                    let started = std::time::Instant::now();
+                    let out = r.mask(text);
+                    (started.elapsed(), out)
+                })
+                .min_by_key(|(t, _)| *t)
+                .unwrap();
+            assert!(took < std::time::Duration::from_millis(50), "{} chars took {took:?}", text.len());
+            assert!(!out.contains("D-AIBL") && !out.contains("AIBL"), "hits inside long words are still found");
+        }
+        assert_eq!(r.mask(&dashes), dashes);
     }
 
     #[test]

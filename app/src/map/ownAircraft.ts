@@ -153,3 +153,34 @@ export function addOwnAircraftLayers(map: maplibregl.Map, sourceId = "aircraft")
     paint: { "icon-opacity": haloOpacity(1) },
   });
 }
+
+/**
+ * Would the own symbol look different with `next` than with `prev` (both from ownAircraftGeoJson)?
+ * Position and raised height against half a pixel (`metersPerPx`), heading against one degree
+ * (≈ half a pixel at the tips of the ~30 px symbol), any other property always. While the 3D model
+ * draws the aircraft (`m: 1`) the symbol is transparent: only `m` (model failed, 3D toggled) or the
+ * class count then. The live map re-sent the symbol on every 10 Hz sample: each setData
+ * re-tiles the source in the worker and renders the map – with the pitched 3D view about 50 frames
+ * per second while following, although the model hides the symbol there. Now an unchanged look
+ * sends nothing.
+ */
+export function ownSymbolChanged(prev: GeoJSON.FeatureCollection | null, next: GeoJSON.FeatureCollection, metersPerPx: number): boolean {
+  if (!prev || prev.features.length !== next.features.length) return true;
+  const a = prev.features[0];
+  const b = next.features[0];
+  if (!a || !b) return false;
+  const pa = (a.geometry as GeoJSON.Point).coordinates;
+  const pb = (b.geometry as GeoJSON.Point).coordinates;
+  const A = a.properties ?? {};
+  const B = b.properties ?? {};
+  if (A.cat !== B.cat || A.sizeFactor !== B.sizeFactor || A.m !== B.m) return true;
+  if (B.m === 1) return false;
+  const lim = 0.5 * (Number.isFinite(metersPerPx) && metersPerPx > 0 ? metersPerPx : 0);
+  const dLon = ((((pb[0] - pa[0]) % 360) + 540) % 360) - 180;
+  const dx = dLon * 111_320 * Math.cos((pa[1] * Math.PI) / 180);
+  const dy = (pb[1] - pa[1]) * 111_320;
+  if (Math.hypot(dx, dy) >= lim || Math.abs((B.hM ?? 0) - (A.hM ?? 0)) >= lim) return true;
+  const hA = Number.isFinite(A.heading) ? A.heading : 0;
+  const hB = Number.isFinite(B.heading) ? B.heading : 0;
+  return Math.abs(((((hB - hA) % 360) + 540) % 360) - 180) >= 1 || Number.isFinite(A.heading) !== Number.isFinite(B.heading);
+}

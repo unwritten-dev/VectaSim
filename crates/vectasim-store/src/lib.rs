@@ -30,7 +30,7 @@ pub mod store;
 pub mod track;
 
 pub use backup::{BackupEntry, BackupKind, RestoreCheck};
-pub use bundle::{BundleManifest, ExportOptions, ExportReport, ImportMode, ImportOptions, ImportReport};
+pub use bundle::{BundleManifest, ExportOptions, ExportReport, ImportMode, ImportOptions, ImportReport, is_planespotters_link};
 pub use airframe::{
     Airframe, AirframeEdit, AirframePhoto, AirframeRow, VAPP_MAX_KT, VAPP_MIN_KT, icao_from_atc_model, normalize_registration, resolve_registration,
 };
@@ -42,9 +42,9 @@ pub use recorder::{FlightRecorder, LiveTrack, PlannedSlot, RecorderContext};
 pub use store::{
     g_load_from_track,
     APPROACH_FACTS_VERSION, ApproachFactDetail, ApproachFactRow, DeletedFlight, FlightCounts, FlightDetail, FlightRow, FlightUserEdit, MetarSlot, PhaseEventRow, PlannedFlight,
-    NOTES_MAX_CHARS, RecentApproaches, RunwayRefinement, SCHEMA_VERSION, Store, TAG_MAX_CHARS, TAGS_MAX, TRASH_RETENTION_DAYS, TagCount, Totals, UserRunway, UserRunwayEdit, UserRunwaySource, normalize_tags,
+    NOTES_MAX_CHARS, RecentApproaches, RunwayRefinement, SCHEMA_VERSION, Store, StoreNotice, TAG_MAX_CHARS, TAGS_MAX, TRASH_RETENTION_DAYS, TagCount, Totals, UserRunway, UserRunwayEdit, UserRunwaySource, normalize_tags,
 };
-pub use track::{RecordedApproachData, TrackSample, decode_track, encode_track, recorded_approach_data};
+pub use track::{RecordedApproachData, TrackEncoder, TrackSample, decode_track, encode_track, recorded_approach_data};
 
 /// Names the airport a position belongs to. Implemented by the app over the
 /// embedded OurAirports index; kept as a trait so the store does not depend on it.

@@ -45,6 +45,9 @@ describe("Collapsible", () => {
     const controls = /aria-controls="([^"]+)"/.exec(html)?.[1];
     expect(controls).toBeTruthy();
     expect(html).toContain(`id="${controls}"`);
+    // no landmark by default; opt-in via `region`
+    expect(html).not.toContain('role="region"');
+    expect(renderToStaticMarkup(<Collapsible id="t.region" region title="Z">x</Collapsible>)).toContain('role="region"');
   });
 
   it("a stored fold wins over the default; folded it shows the summary and no body", () => {
@@ -58,6 +61,8 @@ describe("Collapsible", () => {
     expect(html).toContain("10:00");
     expect(html).not.toContain("Inhalt");
     expect(html).toContain("is-collapsed");
+    // the body is not rendered, so the toggle must not point at it
+    expect(html).not.toContain("aria-controls");
     // defaultOpen=false without a stored choice: folded too
     expect(renderToStaticMarkup(<Collapsible id="t.closedDefault" defaultOpen={false} title="X" />)).toContain('aria-expanded="false"');
   });

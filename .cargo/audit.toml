@@ -1,13 +1,6 @@
 # cargo audit (CI job "audit"): advisories that are accepted, each with the reason.
-# Re-check whenever the named dependency is updated; remove the entry once fixed.
+# Empty on purpose: an entry needs the advisory ID and a comment why it does not apply, and it is
+# removed as soon as the affected dependency is fixed. deny.toml ([advisories] ignore) is kept in
+# step with this list.
 [advisories]
-ignore = [
-    # zip 4.6 (via tauri-plugin-updater and the Diagnose-Paket in src-tauri): extraction may
-    # keep SUID/SGID bits, follow symlinks or create symlinks outside the target directory.
-    # VectaSim itself only writes zips (diagpack.rs); the updater extracts only a package
-    # whose minisign signature it has verified first, and the app ships for Windows only.
-    # The fix needs zip >= 9, which tauri-plugin-updater 2.14 does not allow yet.
-    "RUSTSEC-2026-0367",
-    "RUSTSEC-2026-0368",
-    "RUSTSEC-2026-0369",
-]
+ignore = []

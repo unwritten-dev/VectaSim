@@ -1,4 +1,4 @@
-import { type ComponentProps, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type ComponentProps, Suspense, lazy, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { UserAttentionType, getCurrentWindow } from "@tauri-apps/api/window";
@@ -6,7 +6,6 @@ import "./App.css";
 import "./flows.css";
 import "./a11y.css";
 import Activities from "./Activities";
-import Countries from "./countries/Countries.tsx";
 import ErrorNotice from "./ErrorNotice";
 import Fleet from "./Fleet";
 import { onNavigate } from "./airframes/navigation";
@@ -14,14 +13,13 @@ import Logbook from "./Logbook";
 import Settings from "./Settings";
 import LiveView from "./live/LiveView";
 import { clearEvents, pushEvent, replaceEvent, syncEventProvider } from "./live/eventLog";
-import { describeFlightEvent, discardedToast, isFlightEndedLine, noteDiscarded, wasDiscarded } from "./flightEvents";
+import { describeFlightEvent } from "./flightEvents";
+import { afterFlightOf, onFlightDiscarded, onFlightEnded, type FlightEndDeps } from "./flightEndFlow";
 import { isRated, rateText } from "./landing/rated";
 import { useStoredState } from "./live/hooks";
 import { Tabs } from "./ui/Tabs";
 import Landings from "./Landings";
-import YearReview from "./review/YearReview";
 import { matchRunway } from "./live/progress";
-import LandingDebrief from "./landing/LandingDebrief";
 import { isDebriefOpen, openDebrief, useDebrief } from "./landing/debriefStore";
 import { G_HARD } from "./landing/facts";
 import { autoSaveCard, saveCardPng } from "./landing/exportCard";
@@ -31,6 +29,7 @@ import { fmt, fmtDuration } from "./i18n/number";
 import { t, t as tGlobal, useT, type TKey } from "./i18n";
 import { getPrefs, initZoom, loadPrefs, setZoom, stepZoom } from "./prefs";
 import { userMessage } from "./errors";
+import { errorToast } from "./ui/errorToast";
 import { isDemo, recordingStatus } from "./status";
 import type { AfterFlight } from "./live/AfterFlightCard";
 import StatusButton, { type LastError } from "./ui/StatusButton";
@@ -38,7 +37,8 @@ import { getLiveState, resetLive, setFlight, setTelemetry, startTelemetryListene
 import TitleBar from "./ui/TitleBar";
 import { rich } from "./ui/richText";
 import { connToastAction } from "./connToast";
-import { isModalOpen } from "./ui/modalStack";
+import { isModalOpen, noteScrollView } from "./ui/modalStack";
+import { watchUiVisibility, type VisibilityWindowApi } from "./uiVisibility";
 import { ToastAnnouncer, ToastViewport, dismissToast, focusNewestToast, hasToast, showToast, type ToastOptions } from "./ui/Toast";
 import { checkForUpdate, setRecordingCheck } from "./updater";
 import { RESUME_TOAST_MS, resumeCandidate } from "./resume";
@@ -59,6 +59,13 @@ import type {
   StatusSnapshot,
   TouchdownReport,
 } from "./types";
+
+// Rarely opened views load on first use (own chunks: year review cards, country map + outlines),
+// keeping them out of the start bundle
+const YearReview = lazy(() => import("./review/YearReview"));
+const Countries = lazy(() => import("./countries/Countries.tsx"));
+// the landing debrief (charts, replay, runway editor) loads with its first opening
+const LandingDebrief = lazy(() => import("./landing/LandingDebrief"));
 
 type View = "live" | "logbook" | "countries" | "settings";
 /** Sections of the logbook: flights, aircraft (fleet), airports, landings, year in review. */
@@ -88,18 +95,6 @@ const AFTER_FLIGHT_RESTORE_MS = 6 * 3600_000;
 /** The OFP is fetched by itself at most this often (start, reconnects). */
 const OFP_AUTO_MIN_INTERVAL_MS = 5 * 60_000;
 
-function afterFlightOf(row: FlightRow): AfterFlight | null {
-  if (row.state !== "completed" || !row.onBlockMs) return null;
-  return {
-    flightId: row.id,
-    depIcao: row.depIcao,
-    arrIcao: row.arrIcao,
-    landingRateFpm: row.landingVsFpm,
-    blockMs: row.offBlockMs ? row.onBlockMs - row.offBlockMs : null,
-    onBlockMs: row.onBlockMs,
-  };
-}
-
 /** Taskbar flashes once (Windows) / dock bounces (macOS) – the pilot is in the sim. */
 function requestAttention() {
   getCurrentWindow()
@@ -110,7 +105,7 @@ function requestAttention() {
 
 /**
  * Windows notification for a toast the pilot cannot see (window in the background). The backend
- * checks the settings (Einstellungen → Integrationen) and the focus once more; landing, flight
+ * checks the settings (Settings → Integrations) and the focus once more; landing, flight
  * saved and connection notices come from the backend itself.
  */
 function notifyUnfocused(kind: NotifyKind, title: string, body: string) {
@@ -143,10 +138,8 @@ function offerResume(c: ResumeCandidate, demo: boolean) {
           answer();
           invoke("resume_flight", { flightId: c.flightId })
             .then(() => showToast({ id: p.id, tone: "ok", title: t("shell.resume.resumed"), body: t("shell.resume.resumedBody") }))
-            .catch((e) => {
-              const m = userMessage(e, "logbook");
-              showToast({ id: p.id, tone: "warn", title: t("shell.resume.failed"), body: m.detail || m.hint, durationMs: 8000 });
-            });
+            // the reason behind "Details", never the raw backend text as the body
+            .catch((e) => showToast({ id: p.id, tone: "warn", ...errorToast(t("shell.resume.failed"), e, "logbook"), durationMs: 8000 }));
         },
       },
       { label: t("shell.resume.newFlight"), onClick: answer },
@@ -246,6 +239,8 @@ export default function App() {
   const [logbookFocus, setLogbookFocus] = useState<{ id: string; n: number } | null>(null);
   const mainRef = useRef<HTMLElement>(null);
   const statusRef = useRef<StatusSnapshot | null>(null);
+  /** Lets the tray hide (which reports "not visible" itself) reset the visibility watcher. */
+  const forgetUiVisibleRef = useRef<(() => void) | null>(null);
   const viewRef = useRef<View>("live");
   viewRef.current = view;
   const debriefOpen = useDebrief() != null;
@@ -262,6 +257,9 @@ export default function App() {
     const m = mainRef.current;
     if (m && !restoring.current) scrollPos.current[scrollKeyRef.current] = m.scrollTop;
   };
+  // a modal that switched the view does not restore the old view's position into it (layout
+  // effect: runs before the closing modal's cleanup in the same commit)
+  useLayoutEffect(() => noteScrollView(scrollKey), [scrollKey]);
   useLayoutEffect(() => {
     const m = mainRef.current;
     if (!m) return;
@@ -425,6 +423,8 @@ export default function App() {
           event.preventDefault();
           await win.hide().catch(() => {});
           void invoke("set_ui_visible", { visible: false }).catch(() => {});
+          // back from the tray (show = a resize) the watcher reports "visible" again
+          forgetUiVisibleRef.current?.();
           if (takeTrayHint())
             void invoke("notify", { kind: "tray", title: tGlobal("shell.tray.hiddenTitle"), body: tGlobal("shell.tray.hiddenBody") }).catch(() => {});
           return;
@@ -446,11 +446,20 @@ export default function App() {
   }, []);
 
   // Hidden or minimised window: the backend throttles telemetry emits to 1 Hz (recording is unaffected).
+  // WebView2 keeps document.hidden false when minimised: Tauri's isMinimized after each resize decides too.
   useEffect(() => {
-    const push = () => void invoke("set_ui_visible", { visible: !document.hidden }).catch(() => {});
-    document.addEventListener("visibilitychange", push);
-    push();
-    return () => document.removeEventListener("visibilitychange", push);
+    let win: VisibilityWindowApi | undefined;
+    try {
+      win = getCurrentWindow();
+    } catch {
+      win = undefined; // browser preview without Tauri: visibilitychange alone
+    }
+    const watch = watchUiVisibility((visible) => void invoke("set_ui_visible", { visible }).catch(() => {}), document, win);
+    forgetUiVisibleRef.current = watch.forget;
+    return () => {
+      forgetUiVisibleRef.current = null;
+      watch.stop();
+    };
   }, []);
 
   // Quiet update check shortly after start; a dev build (vite) has no updater endpoint and just logs the error.
@@ -471,17 +480,48 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, []);
 
+  const flightEndDeps: FlightEndDeps = {
+    latestFlight: () => invoke<FlightRow[]>("list_flights", { limit: 1 }).then((rows) => rows[0]),
+    wait: (ms) => new Promise((resolve) => window.setTimeout(resolve, ms)),
+    pushEvent,
+    replaceEvent,
+    requestAttention,
+    setAfterFlight,
+    autoSaveCard: (id) => void autoSaveCard(id),
+    showToast: (o) => void showToast(o),
+    dismissToast,
+    toastMs: LANDING_TOAST_MS,
+    // on the map the card says it; elsewhere a toast points to it
+    savedToast: (done) =>
+      viewRef.current === "live"
+        ? null
+        : {
+            id: "flight-saved",
+            tone: "ok",
+            title: tGlobal("shell.flightSaved", {
+              dep: done.depIcao ?? "····",
+              arr: done.arrIcao ?? "····",
+              block: fmtDuration(done.blockMs, { seconds: false }),
+            }),
+            durationMs: LANDING_TOAST_MS,
+            holdWhileUnfocused: true,
+            actions: done.landingRateFpm != null ? [{ label: tGlobal("shell.landing.debrief"), onClick: () => openDebrief(done.flightId, null) }] : undefined,
+          },
+  };
+  const flightEndDepsRef = useRef(flightEndDeps);
+  flightEndDepsRef.current = flightEndDeps;
+
   const onFlightEvent = useCallback(
     async (e: FlightEvent) => {
       const line = describeFlightEvent(e);
       if (e.kind === "flightDiscarded") {
         // a ground session, no flight: its "Flug gespeichert" line goes, no card, no saved toast
-        noteDiscarded(e.timestampMs);
-        if (line && !replaceEvent(isFlightEndedLine, line)) pushEvent(line);
-        setAfterFlight(null);
-        dismissToast("flight-saved");
-        dismissToast("landing");
-        showToast(discardedToast(LANDING_TOAST_MS));
+        onFlightDiscarded(e, line, flightEndDepsRef.current);
+        return;
+      }
+      if (e.kind === "flightEnded") {
+        // either order of flightEnded / flightDiscarded, and a slow list_flights (flightEndFlow.ts)
+        await onFlightEnded(e, line, flightEndDepsRef.current);
         return;
       }
       if (line) pushEvent(line);
@@ -491,40 +531,6 @@ export default function App() {
       }
       if (e.kind === "flightStarted") {
         setAfterFlight(null);
-        return;
-      }
-      if (e.kind === "flightEnded") {
-        // a ground session's flightDiscarded follows right after (same timestamp)
-        if (wasDiscarded(e.timestampMs)) return;
-        try {
-          const rows = await invoke<FlightRow[]>("list_flights", { limit: 1 });
-          // the discarded session is in the Papierkorb: rows[0] would be an older flight
-          if (wasDiscarded(e.timestampMs)) return;
-          requestAttention();
-          const done = rows[0] ? afterFlightOf(rows[0]) : null;
-          if (!done) return;
-          setAfterFlight(done);
-          // optional: the landing card goes to the pictures folder by itself (setting card_autosave)
-          if (done.landingRateFpm != null) void autoSaveCard(done.flightId);
-          // the card carries the landing now; one notice is enough
-          dismissToast("landing");
-          // on the map the card says it; elsewhere a toast points to it
-          if (viewRef.current !== "live")
-            showToast({
-              id: "flight-saved",
-              tone: "ok",
-              title: tGlobal("shell.flightSaved", {
-                dep: done.depIcao ?? "····",
-                arr: done.arrIcao ?? "····",
-                block: fmtDuration(done.blockMs, { seconds: false }),
-              }),
-              durationMs: LANDING_TOAST_MS,
-              holdWhileUnfocused: true,
-              actions: done.landingRateFpm != null ? [{ label: tGlobal("shell.landing.debrief"), onClick: () => openDebrief(done.flightId, null) }] : undefined,
-            });
-        } catch {
-          /* logbook not readable right now: the event line under Details → Ereignisse remains */
-        }
         return;
       }
       if (e.kind !== "touchdown") return;
@@ -628,6 +634,10 @@ export default function App() {
     loadPrefs()
       .then(() => autoLoadOfpRef.current())
       .catch((e) => setAppError(String(e)));
+    // one-off notices from opening the logbook (e.g. a backup restore that could not be applied)
+    invoke<{ code: string; message: string }[]>("store_notices")
+      .then((list) => list.forEach((n) => showToast({ id: n.code, tone: "warn", title: tGlobal("shell.store.noticeTitle"), body: n.message, durationMs: null })))
+      .catch(() => {});
     invoke<StatusSnapshot>("get_status")
       .then((s) => {
         statusRef.current = s;
@@ -757,8 +767,16 @@ export default function App() {
             {view === "logbook" && logbookTab === "aircraft" && <Fleet focus={fleetFocus} />}
             {view === "logbook" && logbookTab === "airports" && <Activities />}
             {view === "logbook" && logbookTab === "landings" && <Landings />}
-            {view === "logbook" && logbookTab === "year" && <YearReview />}
-            {view === "countries" && <Countries />}
+            {view === "logbook" && logbookTab === "year" && (
+              <Suspense fallback={null}>
+                <YearReview />
+              </Suspense>
+            )}
+            {view === "countries" && (
+              <Suspense fallback={null}>
+                <Countries />
+              </Suspense>
+            )}
             {view === "settings" && (
               <LiveSettings providers={providers} onProvider={selectProvider} online={online} status={status} ofp={ofp} />
             )}
@@ -781,8 +799,12 @@ export default function App() {
           </main>
         </div>
       </div>
-      {/* outside .shell: the debrief makes .shell-body inert, toasts stay reachable above it */}
-      <LandingDebrief />
+      {/* a modal (portal into <body>): makes .shell-body inert; toasts (z-index 55) stay reachable above it */}
+      {debriefOpen && (
+        <Suspense fallback={null}>
+          <LandingDebrief />
+        </Suspense>
+      )}
       <ToastViewport regions={live && !debriefOpen ? ["app"] : ["app", "map"]} placement="bottom-right" />
       <ToastAnnouncer />
     </>

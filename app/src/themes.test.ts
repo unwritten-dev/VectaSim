@@ -239,7 +239,7 @@ describe("information colours (M4: --text-faint never carries information)", () 
       }
     }
     expect(offenders).toEqual([]);
-    // the three spots from the 0.5.0 audit read in muted text now
+    // the three spots that used faint text for information read in muted text now
     const trends = readFileSync(new URL("./landing/trends.css", import.meta.url), "utf8");
     expect(trends).toMatch(/\.hist-n \{\s*color: var\(--text-muted\)/);
     expect(trends).toMatch(/\.tr-unit \{\s*fill: var\(--text-muted\)/);

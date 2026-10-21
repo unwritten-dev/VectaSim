@@ -2,7 +2,7 @@
 //! uses, so a bug seen on the sim PC can be reproduced (and fixed, and regression-tested)
 //! on a machine without a simulator.
 //!
-//! Configuration (also settable from Einstellungen → Diagnose → Replay):
+//! Configuration (also settable from Settings → Diagnostics → Replay):
 //! `VECTASIM_PROVIDER=replay`, `VECTASIM_REPLAY=<file>`, `VECTASIM_REPLAY_SPEED=10`
 //! (default 1; `0` = as fast as possible), `VECTASIM_REPLAY_LOOP=1`.
 //!

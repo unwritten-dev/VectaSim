@@ -707,6 +707,14 @@ fn write_image(images_dir: &Path, reg: &str, entry: &str, bytes: &[u8]) -> Resul
     Ok(dest)
 }
 
+/// An https page on `www.planespotters.net` (no other host, port, scheme or userinfo, no
+/// whitespace or control characters) – the only picture credit link the app opens.
+pub fn is_planespotters_link(link: &str) -> bool {
+    const ORIGIN: &str = "https://www.planespotters.net";
+    let Some(rest) = link.strip_prefix(ORIGIN) else { return false };
+    (rest.is_empty() || rest.starts_with('/')) && !link.chars().any(|c| c.is_whitespace() || c.is_control() || c == '\\')
+}
+
 fn has_image(a: &Map<String, Value>) -> bool {
     str_of(a, "image_url").is_some_and(|u| !u.is_empty()) && str_of(a, "image_source") != Some("none")
 }
@@ -731,7 +739,15 @@ fn image_values<R: Read + Seek>(
     if !has_image(a) {
         return Ok(None);
     }
-    let field = |k: &'static str| (k, a.get(k).map(json_to_sql).unwrap_or(SqlValue::Null));
+    let field = |k: &'static str| {
+        let v = a.get(k).map(json_to_sql).unwrap_or(SqlValue::Null);
+        // the credit link is opened in the browser: only a Planespotters page, never an arbitrary URL
+        let v = match v {
+            SqlValue::Text(link) if k == "image_link" && !is_planespotters_link(&link) => SqlValue::Null,
+            v => v,
+        };
+        (k, v)
+    };
     if str_of(a, "image_source") != Some(SOURCE_USER) {
         return Ok(Some((IMAGE_COLS.iter().copied().map(field).collect(), false)));
     }
@@ -872,10 +888,16 @@ fn invalidate_airport(tx: &Transaction<'_>, icao: &str) -> Result<()> {
 }
 
 /// Add the landings of a bundle runway that are not counted here; returns how many were new.
-fn add_runway_landings(tx: &Transaction<'_>, icao: &str, ident: &str, landings: &[Map<String, Value>]) -> Result<i64> {
+/// Landings of `skip` (bundle flights a merge leaves out as duplicates of a flight here under
+/// another id) are not added: their flight never arrives, the row would be an orphan and the
+/// landing would count twice in the runway's mean.
+fn add_runway_landings(tx: &Transaction<'_>, icao: &str, ident: &str, landings: &[Map<String, Value>], skip: &HashSet<String>) -> Result<i64> {
     let mut added = 0;
     for l in landings {
         let (Some(flight), Some(index)) = (str_of(l, "flight_id"), i64_of(l, "touchdown_index")) else { continue };
+        if skip.contains(flight) {
+            continue;
+        }
         added += tx.execute(
             "INSERT OR IGNORE INTO user_runway_landings (airport_icao, ident, flight_id, touchdown_index, added_ms) VALUES (?1, ?2, ?3, ?4, ?5)",
             params![icao, ident, flight, index, i64_of(l, "added_ms").unwrap_or(0)],
@@ -889,7 +911,14 @@ fn add_runway_landings(tx: &Transaction<'_>, icao: &str, ident: &str, landings: 
 /// ones become their mean weighted by landings, where the bundle only weighs with the landings
 /// not yet counted here (none new: unchanged). An end that is only a lower bound gives way to
 /// a known one.
-fn import_runways(tx: &Transaction<'_>, cols: &Cols, lines: &[RunwayLine], report: &mut ImportReport, lang: Lang) -> Result<()> {
+fn import_runways(
+    tx: &Transaction<'_>,
+    cols: &Cols,
+    lines: &[RunwayLine],
+    skip: &HashSet<String>,
+    report: &mut ImportReport,
+    lang: Lang,
+) -> Result<()> {
     let mut touched: HashSet<String> = HashSet::new();
     for line in lines {
         let r = &line.runway;
@@ -906,7 +935,7 @@ fn import_runways(tx: &Transaction<'_>, cols: &Cols, lines: &[RunwayLine], repor
             }
             let keys = [("airport_icao", SqlValue::Text(icao.clone())), ("ident", SqlValue::Text(ident.clone()))];
             insert_row(tx, "user_runways", &cols.user_runways, r, &[], &keys)?;
-            add_runway_landings(tx, &icao, &ident, &line.landings)?;
+            add_runway_landings(tx, &icao, &ident, &line.landings, skip)?;
             report.runways_added += 1;
             touched.insert(icao);
             continue;
@@ -949,7 +978,7 @@ fn import_runways(tx: &Transaction<'_>, cols: &Cols, lines: &[RunwayLine], repor
                 true
             }
             (false, false) => {
-                let new_landings = add_runway_landings(tx, &icao, &ident, &line.landings)?;
+                let new_landings = add_runway_landings(tx, &icao, &ident, &line.landings, skip)?;
                 let listed = line.landings.len() as i64;
                 // landings the bundle counted but did not list (older rows) count as new too
                 let weight = if listed == 0 { theirs.uses } else { new_landings + (theirs.uses - listed).max(0) };
@@ -1014,7 +1043,60 @@ fn run_import(store: &Store, path: &Path, opts: &ImportOptions) -> Result<Import
     // Replace: one transaction for everything – the old logbook goes only if the new one is
     // complete. Merge: batches, so the recorder is not held up for the whole file.
     let size = if opts.mode == ImportMode::Replace { usize::MAX } else { MERGE_BATCH };
-    let mut flights = parsed.flights.into_iter().peekable();
+    // a merge skips duplicates kept here under another id: their runway landings too
+    let skip = if opts.mode == ImportMode::Merge { duplicates_under_other_ids(&store.conn(), &parsed.flights)? } else { HashSet::new() };
+    let bundle_ids: Vec<String> = parsed.flights.iter().filter_map(|l| str_of(&l.flight, "id").map(str::to_owned)).collect();
+    let imported = import_flights(store, &mut zip, parsed.flights, &parsed.airframes, &parsed.runways, &skip, size, opts, &mut report);
+    if imported.is_err() {
+        // a later batch failed: the runway landings of bundle flights that never arrived go
+        drop_orphaned_runway_landings(&store.conn(), &bundle_ids);
+    }
+    imported.map(|()| report)
+}
+
+/// Bundle flights that a merge will skip as duplicates of a flight here under another id.
+fn duplicates_under_other_ids(conn: &Connection, flights: &[FlightLine]) -> Result<HashSet<String>> {
+    let mut skip = HashSet::new();
+    for line in flights {
+        let f = &line.flight;
+        let Some(id) = str_of(f, "id") else { continue };
+        let here: bool = conn.query_row("SELECT EXISTS (SELECT 1 FROM flights WHERE id = ?1)", params![id], |r| r.get(0))?;
+        if !here
+            && let Some(off) = i64_of(f, "off_block_ms")
+            && route_near(conn, str_of(f, "dep_icao"), str_of(f, "arr_icao"), off)?
+        {
+            skip.insert(id.to_owned());
+        }
+    }
+    Ok(skip)
+}
+
+/// Best effort after a failed import: runway landings of these (bundle) flights without a flight row.
+fn drop_orphaned_runway_landings(conn: &Connection, ids: &[String]) {
+    for id in ids {
+        if let Err(e) = conn.execute(
+            "DELETE FROM user_runway_landings WHERE flight_id = ?1 AND NOT EXISTS (SELECT 1 FROM flights WHERE id = ?1)",
+            params![id],
+        ) {
+            log::warn!("import: orphaned runway landings of {id} not removed: {e}");
+            return;
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn import_flights(
+    store: &Store,
+    zip: &mut ZipArchive<File>,
+    flights: Vec<FlightLine>,
+    airframes: &[AirframeLine],
+    runways: &[RunwayLine],
+    skip: &HashSet<String>,
+    size: usize,
+    opts: &ImportOptions,
+    report: &mut ImportReport,
+) -> Result<()> {
+    let mut flights = flights.into_iter().peekable();
     let mut first = true;
     while first || flights.peek().is_some() {
         let mut conn = store.conn();
@@ -1033,8 +1115,8 @@ fn run_import(store: &Store, path: &Path, opts: &ImportOptions) -> Result<Import
                 tx.execute("DELETE FROM user_runways", [])?;
                 tx.execute("DELETE FROM user_runway_landings", [])?;
             }
-            import_airframes(&tx, &mut zip, &cols, &parsed.airframes, opts, &mut report)?;
-            import_runways(&tx, &cols, &parsed.runways, &mut report, opts.lang)?;
+            import_airframes(&tx, zip, &cols, airframes, opts, report)?;
+            import_runways(&tx, &cols, runways, skip, report, opts.lang)?;
             first = false;
         }
         for line in flights.by_ref().take(size) {
@@ -1046,7 +1128,7 @@ fn run_import(store: &Store, path: &Path, opts: &ImportOptions) -> Result<Import
                 fill_g_load(&tx, &cols, &line.flight)?;
                 continue;
             }
-            let track = prepare_track(&mut zip, &line, &mut report.warnings, opts.lang)?;
+            let track = prepare_track(zip, &line, &mut report.warnings, opts.lang)?;
             let p = Prepared { line, track };
             insert_flight(&tx, &cols, &p)
                 .map_err(|e| invalid(Invalid::FlightImport { flight_id: str_of(&p.line.flight, "id").unwrap_or_default().to_string(), source: Box::new(e) }))?;
@@ -1054,7 +1136,7 @@ fn run_import(store: &Store, path: &Path, opts: &ImportOptions) -> Result<Import
         }
         tx.commit()?;
     }
-    Ok(report)
+    Ok(())
 }
 
 impl Store {

@@ -6,7 +6,7 @@
 //!
 //! Level: `RUST_LOG` (a level and/or `target=level` pairs, like env_logger) wins; otherwise
 //! the `log_level` setting (default `info`), which can change at runtime. The Debug-Modus
-//! (Einstellungen → Diagnose) raises every `vectasim*` target to at least `debug` on top of
+//! (Settings → Diagnostics) raises every `vectasim*` target to at least `debug` on top of
 //! that, without touching the setting – switching it off restores the previous level.
 
 use log::LevelFilter;

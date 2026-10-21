@@ -4,7 +4,7 @@
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 use vectasim_core::{FlightPhase, FlightState, LandingRateSource, TouchdownReport};
 use vectasim_server::api::{Aircraft, Flight, Landing, LogbookEntry, Snapshot, Status, Telemetry};
@@ -15,6 +15,8 @@ const TOKEN: &str = "TestTokenTestTokenTest24";
 #[derive(Default)]
 struct Fake {
     privacy: AtomicBool,
+    /// Every snapshot read takes this long (a busy server).
+    delay_ms: AtomicU64,
 }
 
 fn aircraft() -> Aircraft {
@@ -28,6 +30,7 @@ fn aircraft() -> Aircraft {
 
 impl Source for Fake {
     fn snapshot(&self) -> Snapshot {
+        std::thread::sleep(Duration::from_millis(self.delay_ms.load(Ordering::Relaxed)));
         Snapshot {
             status: Status { version: "0.3.0".into(), provider: "mock".into(), connection: "connected".into(), ..Default::default() },
             flight: Some(Flight {
@@ -205,6 +208,103 @@ fn lan_mode_needs_the_token() {
 }
 
 #[test]
+fn first_load_with_the_token_hands_out_a_cookie() {
+    let (server, _) = start(true);
+    let port = server.local_addr().port();
+    let lan_host = format!("192.168.1.5:{port}");
+    let host = [("Host", lan_host.as_str())];
+    // ?token= on the first load: the answer carries it as an HttpOnly, SameSite=Strict cookie
+    let first = request(port, "GET", &format!("/overlay/hud?token={TOKEN}"), &host);
+    assert_eq!(first.status, 200);
+    let cookie = header(&first, "set-cookie").expect("cookie").to_string();
+    // the cookie name carries the port
+    assert!(cookie.starts_with(&format!("vectasim_token_{port}={TOKEN};")), "{cookie}");
+    assert!(cookie.contains("HttpOnly") && cookie.contains("SameSite=Strict") && cookie.contains("Path=/"), "{cookie}");
+    // the bookmark without the token works through the cookie, and no new cookie is handed out
+    let jar = format!("vectasim_token_{port}={TOKEN}");
+    let again = request(port, "GET", "/api/v1/status", &[("Host", lan_host.as_str()), ("Cookie", jar.as_str())]);
+    assert_eq!(again.status, 200);
+    assert_eq!(header(&again, "set-cookie"), None);
+    // a stale cookie (Regenerate) is refused and deleted, with the connection closed
+    let stale_jar = format!("vectasim_token_{port}=wrongwrongwrongwrong");
+    let stale = request(port, "GET", "/api/v1/status", &[("Host", lan_host.as_str()), ("Cookie", stale_jar.as_str())]);
+    assert_eq!(stale.status, 401);
+    let cleared = format!("vectasim_token_{port}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict");
+    assert_eq!(header(&stale, "set-cookie"), Some(cleared.as_str()));
+    assert_eq!(header(&stale, "connection"), Some("close"));
+    // the cookie of another port is not ours
+    let other = format!("vectasim_token_{}={TOKEN}", port.wrapping_add(1));
+    assert_eq!(request(port, "GET", "/api/v1/status", &[("Host", lan_host.as_str()), ("Cookie", other.as_str())]).status, 401);
+    // a wrong ?token= gets no cookie
+    let wrong = request(port, "GET", "/api/v1/status?token=wrongwrongwrongwrong", &host);
+    assert_eq!((wrong.status, header(&wrong, "set-cookie")), (401, None));
+    // the port-less cookie of older versions is deleted (a new one is handed out alongside)
+    let legacy = request(port, "GET", &format!("/overlay/hud?token={TOKEN}"), &[("Host", lan_host.as_str()), ("Cookie", "vectasim_token=old")]);
+    let cookies: Vec<&str> = legacy.head.lines().filter(|l| l.to_ascii_lowercase().starts_with("set-cookie:")).collect();
+    assert_eq!(cookies.len(), 2, "{cookies:?}");
+    assert!(cookies.iter().any(|c| c.contains("vectasim_token=; Path=/; Max-Age=0")), "{cookies:?}");
+    // header auth and this PC: no cookie
+    assert_eq!(header(&request(port, "GET", "/overlay/hud", &[("Host", lan_host.as_str()), ("X-VectaSim-Token", TOKEN)]), "set-cookie"), None);
+    assert_eq!(header(&get(port, &format!("/overlay/hud?token={TOKEN}")), "set-cookie"), None);
+    server.stop();
+}
+
+#[test]
+fn lan_off_clears_the_cookie() {
+    // LAN switched off after a device got its cookie: the answers delete it
+    let (server, _) = start(false);
+    let port = server.local_addr().port();
+    let jar = format!("vectasim_token_{port}={TOKEN}");
+    let r = request(port, "GET", "/api/v1/status", &[("Cookie", jar.as_str())]);
+    assert_eq!(r.status, 200);
+    assert!(header(&r, "set-cookie").is_some_and(|c| c.contains("Max-Age=0")), "{}", r.head);
+    server.stop();
+}
+
+#[test]
+fn the_start_page_carries_the_token_for_obs_links() {
+    let (server, _) = start(true);
+    let port = server.local_addr().port();
+    let meta = format!(r#"<meta name="vectasim-token" content="{TOKEN}">"#);
+    // opened from a bookmark on the tablet: authorised by the cookie alone
+    let lan_host = format!("192.168.1.5:{port}");
+    let jar = format!("vectasim_token_{port}={TOKEN}");
+    let page = request(port, "GET", "/", &[("Host", lan_host.as_str()), ("Cookie", jar.as_str())]);
+    assert_eq!(page.status, 200);
+    assert!(page.body.contains(&meta), "token for the copy URLs");
+    // this PC (opened from the app) gets it as well
+    assert!(get(port, "/").body.contains(&meta));
+    // no token, no page; the overlays themselves never carry it
+    assert!(!request(port, "GET", "/", &[("Host", lan_host.as_str())]).body.contains(TOKEN));
+    assert!(!get(port, "/overlay/hud").body.contains(TOKEN));
+    assert!(get(port, "/overlay/overlay.js").body.contains("vectasim-token"));
+    server.stop();
+    // LAN off: the element stays empty
+    let (server, _) = start(false);
+    let port = server.local_addr().port();
+    assert!(get(port, "/").body.contains(r#"<meta name="vectasim-token" content="">"#));
+    server.stop();
+}
+
+#[test]
+fn refused_loopback_requests_close_the_connection() {
+    let (server, _) = start(false);
+    let port = server.local_addr().port();
+    // a page rebinding its name to 127.0.0.1 cannot park keep-alive connections
+    let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+    s.write_all(b"GET /api/v1/status HTTP/1.1\r\nHost: evil.example\r\n\r\n").unwrap();
+    let started = std::time::Instant::now();
+    let mut raw = Vec::new();
+    let _ = s.read_to_end(&mut raw);
+    let text = String::from_utf8_lossy(&raw);
+    assert!(text.starts_with("HTTP/1.1 403"), "{text}");
+    assert!(text.to_ascii_lowercase().contains("connection: close"), "{text}");
+    assert!(started.elapsed() < Duration::from_secs(2), "connection kept open");
+    server.stop();
+}
+
+#[test]
 fn streamer_mode_masks_every_answer() {
     let (server, fake) = start(false);
     let port = server.local_addr().port();
@@ -306,24 +406,43 @@ fn a_silent_connection_is_closed_after_the_header_timeout() {
 }
 
 #[test]
-fn connections_beyond_the_limit_wait_for_a_free_slot() {
-    let limits = Limits { max_connections: 2, ..Limits::default() };
-    let server = Server::start_with_limits(Config { port: 0, lan: false, token: String::new() }, Arc::new(Fake::default()), limits).unwrap();
+fn idle_local_connections_give_way_to_a_new_request() {
+    // 70 idle loopback connections (pool: 64) – a local GET still answers at once
+    let server = Server::start(Config { port: 0, lan: false, token: String::new() }, Arc::new(Fake::default())).unwrap();
     let port = server.local_addr().port();
-    let idle: Vec<TcpStream> = (0..2).map(|_| TcpStream::connect(("127.0.0.1", port)).unwrap()).collect();
-    std::thread::sleep(Duration::from_millis(100));
-    // a third connection is accepted by the OS but not served while both slots are taken
-    let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
-    s.set_read_timeout(Some(Duration::from_millis(400))).unwrap();
-    s.write_all(format!("GET /api/v1/status HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n").as_bytes()).unwrap();
-    let mut b = [0u8; 16];
-    assert!(s.read(&mut b).is_err(), "served beyond the limit");
-    // a slot frees up: the waiting request is answered
+    let idle: Vec<TcpStream> = (0..70).map(|_| TcpStream::connect(("127.0.0.1", port)).unwrap()).collect();
+    std::thread::sleep(Duration::from_millis(300));
+    for _ in 0..3 {
+        let started = std::time::Instant::now();
+        let r = get(port, "/api/v1/status");
+        assert_eq!(r.status, 200, "{}", r.head);
+        assert!(started.elapsed() < Duration::from_secs(1), "answered after {:?}", started.elapsed());
+    }
     drop(idle);
-    s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-    let mut raw = Vec::new();
-    let _ = s.read_to_end(&mut raw);
-    assert!(String::from_utf8_lossy(&raw).starts_with("HTTP/1.1 200"), "{}", String::from_utf8_lossy(&raw));
+    server.stop();
+}
+
+#[test]
+fn a_busy_pool_answers_503_after_a_bounded_wait() {
+    let limits = Limits { max_connections: 2, local_slot_wait: Duration::from_millis(300), ..Limits::default() };
+    let fake = Arc::new(Fake::default());
+    let server = Server::start_with_limits(Config { port: 0, lan: false, token: String::new() }, fake.clone(), limits).unwrap();
+    let port = server.local_addr().port();
+    fake.delay_ms.store(2000, Ordering::Relaxed);
+    // two requests in flight hold both slots (nothing idle to close)
+    let busy: Vec<_> = (0..2).map(|_| std::thread::spawn(move || get(port, "/api/v1/status").status)).collect();
+    std::thread::sleep(Duration::from_millis(300));
+    let started = std::time::Instant::now();
+    let r = get(port, "/api/v1/status");
+    assert_eq!(r.status, 503, "{}", r.head);
+    assert_eq!(header(&r, "connection"), Some("close"));
+    assert!(started.elapsed() < Duration::from_millis(1500), "refused after {:?}", started.elapsed());
+    fake.delay_ms.store(0, Ordering::Relaxed);
+    for b in busy {
+        assert_eq!(b.join().unwrap(), 200);
+    }
+    // slots free again
+    assert_eq!(get(port, "/api/v1/status").status, 200);
     server.stop();
 }
 

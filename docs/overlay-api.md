@@ -11,7 +11,7 @@ Code: `crates/vectasim-server` (server, overlays under `overlay/`), app integrat
 | URL | OBS size | Content |
 |---|---|---|
 | `/overlay/hud` | 1920 × 120 | phase, altitude, speed, V/S, heading, remaining distance, ETA |
-| `/overlay/landing` | 900 × 260 | appears for 20 s after touchdown: landing rate, g, bounces, band (smooth/normal/firm/hard), runway, touchdown point |
+| `/overlay/landing` | 900 × 260 | appears for 20 s after touchdown: landing rate, g, bounces, band (smooth/normal/firm/hard, or “unrated” without a sim touchdown value), runway, touchdown point |
 | `/overlay/route` | 700 × 200 | route, block time, aircraft, phase bar |
 
 OBS: *Sources → + → Browser → paste URL → width/height as above*. The background is transparent. URL parameters:
@@ -19,7 +19,7 @@ OBS: *Sources → + → Browser → paste URL → width/height as above*. The ba
 - `?scale=1.5` – font size (0.25–4)
 - `?preview=1` – sample data for positioning the source
 - `?local=1` – local time instead of UTC
-- `?token=…` – only for access from other devices (LAN mode)
+- `?token=…` – only for access from other devices (LAN mode), and only on the first load: the server then sets a cookie and the page removes the token from the address bar (see *Access and security*)
 - `?lang=de` / `?lang=en` – language of the overlay texts and the start page (default: the app language, setting `language`; anything unknown → default). The server sets `<html lang>`, and `overlay.js` picks its texts from it (its own small DE/EN table); numbers as in the app (`1 500 ft` / `1,500 ft`), flight phases stay in English. The overlay translates the landing band itself from `band`.
 
 The overlays connect via WebSocket and reconnect on their own after a disconnect (app closed, port changed), with an increasing delay. They only set text and classes, never HTML from the data.
@@ -31,7 +31,7 @@ All responses are `application/json` with `Cache-Control: no-store`. Field names
 ### `GET /api/v1/status`
 
 ```json
-{"apiVersion":1,"app":"VectaSim","version":"0.5.1","provider":"mock","connection":"connected","detail":"Demo","simName":"Demo","simVersion":null,"recording":true,"streamerMode":false,"serverTimeMs":1792342722583,"lang":"de"}
+{"apiVersion":1,"app":"VectaSim","version":"0.5.2","provider":"mock","connection":"connected","detail":"Demo","simName":"Demo","simVersion":null,"recording":true,"streamerMode":false,"serverTimeMs":1792342722583,"lang":"de"}
 ```
 
 `lang`: the app language (`de` | `en`) – the language of `bandLabel` and the default for the overlay pages.
@@ -72,7 +72,7 @@ The most recent flights, `limit` 1–50 (default 10; not a number → 400).
 
 ### `WS /api/v1/ws`
 
-Server → client only (messages from the client are ignored, at most 16 simultaneous connections). Every message is a JSON object with `type`:
+Server → client only (messages from the client are ignored). At most 16 connections from this PC and, with LAN access, 16 from other devices (at most 4 per device), so a tablet can never push the OBS overlays off the stream. Every message is a JSON object with `type`:
 
 | `type` | When | Content |
 |---|---|---|
@@ -98,7 +98,10 @@ ws.onmessage = (m) => console.log(JSON.parse(m.data));
 ## Access and security
 
 - **Off** until you turn it on; then only on `127.0.0.1` – other devices cannot reach it.
-- **Reachable on the network (with token)** binds `0.0.0.0`. Other devices then need the random token (24 characters, ~119 bits): `?token=…`, header `Authorization: Bearer …` or `X-VectaSim-Token: …`. On this PC it still works without a token (the OBS URLs stay the same). *Regenerate* invalidates old LAN links. Windows asks for firewall permission the first time.
+- **Reachable on the network (with token)** binds `0.0.0.0`. Other devices then need the random token (24 characters, ~119 bits): `?token=…`, header `Authorization: Bearer …`, header `X-VectaSim-Token: …` or the cookie `vectasim_token_<port>` (e.g. `vectasim_token_8095`). On this PC it still works without a token (the OBS URLs stay the same). Windows asks for firewall permission the first time.
+- **Token in the URL only once (browsers):** a request from another device that is let in by a valid `?token=` gets the token back as a cookie (`Set-Cookie: vectasim_token_8095=…; Path=/; Max-Age=31536000; HttpOnly; SameSite=Strict`, no `Secure` because the server speaks plain HTTP; the port is part of the name, because browsers send a cookie to every port of an address). The overlay pages and the start page then remove `token` from the address bar (`history.replaceState`), so it stays out of the browser history and out of bookmarks; a bookmark without the token keeps working through the cookie for a year. The pages keep the token for the open tab (`sessionStorage`) for their WebSocket URL and the links on the start page; the start page shows the copy URLs with the token even when it was opened from a bookmark. Clients that are not browsers send a header instead.
+- **Order:** a request carries exactly one token, picked in this order: `X-VectaSim-Token` → `Authorization: Bearer` → `?token=` → cookie. The first one present counts, even if it is wrong – a stale header beats a valid cookie, and a new token in the URL beats an old cookie (and replaces it). Empty values are skipped.
+- **Regenerate** (*Settings → Overlay & API*) makes the old token invalid everywhere: old LAN links, headers and the cookies already handed out are answered with 401, and the stale cookie is deleted with that answer. Load a URL with the new `?token=` once on each device; bookmarks without a token work again from then on.
 - No token is needed only if the peer is loopback **and** the `Host` header names `127.0.0.1`/`localhost`/`[::1]` (protection against DNS rebinding).
 - **CORS / Origin:** only the server’s own origin, `http://localhost:*`, `http://127.0.0.1:*`, `http://[::1]:*` and OBS (`http://absolute`) are allowed; other websites get 403 – also during the WebSocket handshake.
 - **Read-only:** GET/HEAD (and OPTIONS for the CORS preflight), everything else 405.

@@ -7,9 +7,10 @@
 //! |-------------------------|--------------------------------------------------------|-------|
 //! | Preflight → airborne    | start in the air (see below)                           | 0     |
 //! | Preflight → Pushback    | 0.5–8 kt, engines off, parking brake released          | 2 s   |
+//! | Pushback → Shutdown     | < 1 kt, engines off, parking brake set (push aborted)   | 30 s  |
 //! | Preflight → TaxiOut     | > 1 kt, engines running                                | 2 s   |
 //! | ground → Takeoff        | > 40 kt with engines running or airborne, or airborne above 50 ft AGL | 1 s |
-//! | Takeoff → Climb         | airborne and (> 1 500 ft AGL or airborne > 45 s)       | 0     |
+//! | Takeoff → Climb         | airborne and (> 1 500 ft AGL or airborne > 45 s and qualified) | 0 |
 //! | Takeoff → TaxiOut/TaxiIn| rejected: back below 40 kt without having flown (back to where it came from) | 3 s |
 //! | TaxiOut → Shutdown      | < 1 kt and all engines off (back on the stand)          | 30 s  |
 //! | Climb → Cruise          | \|V/S\| < 300 fpm (not below 4 000 ft AGL in a circuit) | 60 s  |
@@ -18,7 +19,8 @@
 //! | Descent → Approach      | < 4 000 ft AGL                                          | 5 s   |
 //! | Approach → Final        | < 1 500 ft AGL                                          | 3 s   |
 //! | Approach/Final → Climb  | go-around: V/S > +500 fpm                              | 10 s  |
-//! | airborne → Landing      | on ground after having been airborne (> 500 ft or 60 s)| 0     |
+//! | airborne → Landing      | on ground after having been airborne (qualified, see below) | 0 |
+//! | airborne → TaxiIn       | on ground below 35 kt without a qualified flight (ground exit) | 5 s |
 //! | Landing → TaxiIn        | < 35 kt                                                | 3 s   |
 //! | Landing → Climb         | touch-and-go: airborne again and > 50 ft AGL           | 10 s  |
 //! | TaxiIn → Shutdown       | < 1 kt and all engines off                              | 5 s   |
@@ -41,6 +43,18 @@
 //! change; the lift-off time comes from the first airborne sample either way. Paused, slewed
 //! and time-accelerated samples (MSFS pause, slew, active pause) drop the candidate like any
 //! other dwell; the ESC menu's sim stop resets the context.
+//!
+//! Qualified (`airborne_qualified`, gates Landing): > 500 ft AGL, 60 s of air time, or a
+//! confirmed lift-off – [`MS_LIFT_OFF_QUALIFIES`] (5 s) continuously above 50 ft AGL. When only
+//! the first two counted, a helicopter hop or a STOL hop between near
+//! strips (30 s at 200 ft) was a rejected take-off and its flight a discarded ground session.
+//! Such a hop now lands like any flight (Takeoff → Landing, the lift-off is the take-off time).
+//! [`PhaseEngine::lifted_off`] also reports a hop that stayed lower but was airborne for 10 s
+//! out of the Takeoff phase: the session counts that flight as flown. Takeoff → Climb on air
+//! time waits for the qualification, and an airborne phase that finds itself on the ground
+//! below 35 kt without one (a start in the air that touched down at once, a stretch the
+//! qualification never covered) leaves through TaxiIn instead of staying "Cruise" on the ground
+//! for good.
 //!
 //! Circuits: a go-around or touch-and-go (Approach/Final/Landing → Climb) starts a circuit.
 //! The highest altitude for the "descending" test is taken from there instead of from the
@@ -89,7 +103,7 @@
 
 use crate::Telemetry;
 use crate::clock::MonoClock;
-use crate::touchdown::{MS_REQUALIFY_AFTER_RESET, ground_contact_corroborated};
+use crate::touchdown::{LIFT_OFF_AGL_FT, MS_LIFT_OFF_QUALIFIES, MS_REQUALIFY_AFTER_RESET, ground_contact_corroborated};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -155,8 +169,12 @@ const FT_LIFT_OFF: f64 = 50.0;
 const MS_LIFT_OFF_CONFIRM: u64 = 1_000;
 /// Start in the air: only when the first sample is above this AGL (or faster than 40 kt).
 const FT_AIRBORNE_START: f64 = 100.0;
-/// TaxiOut → Shutdown: stopped with all engines off this long.
+/// TaxiOut → Shutdown (and an aborted Pushback): stopped with all engines off this long.
 const MS_TAXI_OUT_SHUTDOWN: u64 = 30_000;
+/// Airborne this long out of the Takeoff phase (at any height) is a lift-off that flew.
+const MS_TAKEOFF_HOP_FLOWN: u64 = 10_000;
+/// Ground exit of an airborne phase without a qualified flight: on the ground this long.
+const MS_GROUND_EXIT: u64 = 5_000;
 const FT_AIRBORNE_QUALIFIED: f64 = 500.0;
 const MS_AIRBORNE_QUALIFIED: u64 = 60_000;
 const MS_TAKEOFF_COMPLETE: u64 = 45_000;
@@ -195,6 +213,16 @@ pub struct PhaseEngine {
     seen_ground: bool,
     /// The current flight began in the air (see the module doc).
     started_airborne: bool,
+    /// Since when the current airborne stretch is continuously above 50 ft AGL (shifted by pauses).
+    above_lift_off_since: Option<u64>,
+    /// Lift-off of the take-off in progress (first airborne sample after ground contact in or
+    /// just before the Takeoff phase); survives a context reset, unlike `lift_off`.
+    takeoff_lift_off: Option<u64>,
+    /// The airborne tracking is continuous since the last ground contact (false after a context
+    /// reset: the next airborne sample is no new lift-off).
+    continuous: bool,
+    /// The latest sample showed a confirmed lift-off (see [`PhaseEngine::lifted_off`]).
+    lifted_off: bool,
 }
 
 impl Default for PhaseEngine {
@@ -221,6 +249,10 @@ impl PhaseEngine {
             clock: MonoClock::new(),
             seen_ground: false,
             started_airborne: false,
+            above_lift_off_since: None,
+            takeoff_lift_off: None,
+            continuous: true,
+            lifted_off: false,
         }
     }
 
@@ -239,6 +271,9 @@ impl PhaseEngine {
         self.lift_off = None;
         self.airborne_qualified = false;
         self.last_skip = None;
+        self.above_lift_off_since = None;
+        self.lifted_off = false;
+        self.continuous = false;
         self.qualify_ms = if resume_airborne { MS_REQUALIFY_AFTER_RESET } else { MS_AIRBORNE_QUALIFIED };
     }
 
@@ -255,6 +290,9 @@ impl PhaseEngine {
         if let Some(s) = self.airborne_since.as_mut() {
             *s = s.saturating_add(ms);
         }
+        if let Some(s) = self.above_lift_off_since.as_mut() {
+            *s = s.saturating_add(ms);
+        }
         if let Some((_, since)) = self.candidate.as_mut() {
             *since = since.saturating_add(ms);
         }
@@ -263,6 +301,21 @@ impl PhaseEngine {
     /// Time of the first airborne sample of the current airborne stretch (lift-off).
     pub fn airborne_since(&self) -> Option<u64> {
         self.lift_off.map(|m| self.clock.to_wall(m))
+    }
+
+    /// Lift-off of the take-off in progress or just flown (wall clock): the first airborne
+    /// sample of the last airborne stretch that began from the ground in the Takeoff phase.
+    /// Unlike [`PhaseEngine::airborne_since`] it survives a context reset in the air and the
+    /// touchdown of a hop.
+    pub fn takeoff_lift_off(&self) -> Option<u64> {
+        self.takeoff_lift_off.map(|m| self.clock.to_wall(m))
+    }
+
+    /// The latest evaluated sample shows a confirmed lift-off: [`MS_LIFT_OFF_QUALIFIES`]
+    /// continuously above 50 ft AGL, or 10 s airborne out of the Takeoff phase (see the module
+    /// doc). The session latches "flown" on it.
+    pub fn lifted_off(&self) -> bool {
+        self.lifted_off
     }
 
     /// Backward steps of the wall clock this engine has absorbed.
@@ -343,17 +396,35 @@ impl PhaseEngine {
     }
 
     fn track_airborne(&mut self, t: &Telemetry, now: u64) {
+        self.lifted_off = false;
         if ground_contact_corroborated(t) {
             self.airborne_since = None;
             self.lift_off = None;
+            self.above_lift_off_since = None;
             self.seen_ground = true;
+            self.continuous = true;
         } else {
-            self.lift_off.get_or_insert(now);
+            if self.lift_off.is_none() && self.continuous && self.phase == FlightPhase::Takeoff {
+                // a new airborne stretch out of the take-off roll (a flicker frame is overwritten
+                // by the real lift-off, which starts a stretch of its own)
+                self.takeoff_lift_off = Some(now);
+            }
+            let lift_off = *self.lift_off.get_or_insert(now);
             let since = *self.airborne_since.get_or_insert(now);
-            if t.altitude_agl_ft > FT_AIRBORNE_QUALIFIED || now.saturating_sub(since) > self.qualify_ms {
+            // NaN AGL counts as "not above"
+            let above_ms = if t.altitude_agl_ft > LIFT_OFF_AGL_FT {
+                now.saturating_sub(*self.above_lift_off_since.get_or_insert(now))
+            } else {
+                self.above_lift_off_since = None;
+                0
+            };
+            let confirmed = above_ms >= MS_LIFT_OFF_QUALIFIES;
+            if t.altitude_agl_ft > FT_AIRBORNE_QUALIFIED || now.saturating_sub(since) > self.qualify_ms || confirmed {
                 self.airborne_qualified = true;
                 self.qualify_ms = MS_AIRBORNE_QUALIFIED;
             }
+            self.lifted_off = confirmed
+                || self.phase == FlightPhase::Takeoff && self.continuous && now.saturating_sub(lift_off) >= MS_TAKEOFF_HOP_FLOWN;
             self.max_altitude_msl_ft = self.max_altitude_msl_ft.max(t.altitude_msl_ft);
         }
     }
@@ -368,6 +439,8 @@ impl PhaseEngine {
         }
         match phase {
             FlightPhase::Takeoff => {
+                // entered on real air under the wheels: that stretch began with the lift-off
+                self.takeoff_lift_off = self.lift_off.filter(|_| self.continuous);
                 self.max_altitude_msl_ft = t.altitude_msl_ft;
                 self.started_airborne = false;
                 self.circuit = false;
@@ -422,6 +495,11 @@ impl PhaseEngine {
         }
         // From a ground phase: a take-off roll, or real air under the wheels (see the module doc).
         let taking_off = gs > KT_TAKEOFF && (engines_on || airborne) || airborne && t.altitude_agl_ft > FT_LIFT_OFF;
+        // An airborne phase on the ground without a qualified flight (the Landing gate above is
+        // shut): rolled out, so it is taxiing (see the module doc).
+        if on_ground && self.phase.is_airborne_phase() && gs < KT_ROLLOUT_DONE {
+            return TaxiIn;
+        }
 
         match self.phase {
             Preflight if airborne && !self.seen_ground && (t.altitude_agl_ft > FT_AIRBORNE_START || gs > KT_TAKEOFF) => {
@@ -443,6 +521,9 @@ impl PhaseEngine {
                     Takeoff
                 } else if engines_on && gs > KT_STOPPED {
                     TaxiOut
+                } else if gs < KT_STOPPED && !engines_on && t.parking_brake {
+                    // push aborted: parked again without an engine start
+                    Shutdown
                 } else {
                     Pushback
                 }
@@ -460,7 +541,11 @@ impl PhaseEngine {
                 }
             }
             Takeoff => {
-                if airborne && (t.altitude_agl_ft > FT_TAKEOFF_COMPLETE || airborne_ms > MS_TAKEOFF_COMPLETE) {
+                // on air time only once qualified: a hop back on the ground before that must
+                // not be left in Climb (see the module doc)
+                if airborne
+                    && (t.altitude_agl_ft > FT_TAKEOFF_COMPLETE || airborne_ms > MS_TAKEOFF_COMPLETE && self.airborne_qualified)
+                {
                     Climb
                 } else if !airborne && gs < KT_TAKEOFF && !self.airborne_qualified {
                     self.takeoff_from // rejected takeoff: taxiing out again (or in)
@@ -548,7 +633,8 @@ impl PhaseEngine {
             (_, Takeoff) => MS_LIFT_OFF_CONFIRM,
             (Takeoff, Climb) => 0,
             (Takeoff, TaxiOut) | (Takeoff, TaxiIn) => 3_000,
-            (TaxiOut, Shutdown) => MS_TAXI_OUT_SHUTDOWN,
+            (TaxiOut, Shutdown) | (Pushback, Shutdown) => MS_TAXI_OUT_SHUTDOWN,
+            (from, TaxiIn) if from.is_airborne_phase() => MS_GROUND_EXIT,
             (Climb, Cruise) | (Descent, Cruise) => 60_000,
             (Climb, Descent) | (Cruise, Descent) | (Cruise, Climb) | (Descent, Climb) => 30_000,
             (Descent, Approach) => 5_000,

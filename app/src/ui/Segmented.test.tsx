@@ -24,5 +24,8 @@ describe("Segmented", () => {
     expect(radioKeyIndex("Home", 2, 3)).toBe(0);
     expect(radioKeyIndex("End", 0, 3)).toBe(2);
     expect(radioKeyIndex("Enter", 0, 3)).toBeNull();
+    // no selection (e.g. the approach picker before its data): → the first, ← the last
+    expect(radioKeyIndex("ArrowRight", -1, 3)).toBe(0);
+    expect(radioKeyIndex("ArrowLeft", -1, 3)).toBe(2);
   });
 });

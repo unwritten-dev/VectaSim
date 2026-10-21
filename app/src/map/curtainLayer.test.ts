@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  BUILD_CHUNK,
   COMMIT_POINTS,
   CURTAIN_FLOATS,
   CurtainGeometry,
+  CurtainLayer,
+  MAX_CONTROL,
   MAX_SEG_M,
   SUB_BENT,
   curveThrough,
@@ -353,5 +356,123 @@ describe("projection tile", () => {
     // ref = the tile's origin in the track's own world: the track sits right at the centre
     expect(0.02 - t.refX).toBeGreaterThanOrEqual(0);
     expect(0.02 - t.refX).toBeLessThan(1 / 2 ** t.z);
+  });
+});
+
+/** The 10 h flight of the CurtainGeometry test. */
+function longHaul(n = 36_000): TrackPoint[] {
+  const pts: TrackPoint[] = [];
+  let lon = 8.5;
+  let lat = 50;
+  for (let i = 0; i < n; i++) {
+    const t = i / n;
+    const alt = t < 0.05 ? (t / 0.05) * 35_000 : t > 0.93 ? ((1 - t) / 0.07) * 35_000 : 35_000 + (t > 0.5 ? 2000 : 0);
+    const hdg = 1.2 + 0.3 * Math.sin(i / 3000);
+    lon += (250 / 111_320 / Math.cos((lat * Math.PI) / 180)) * Math.sin(hdg);
+    lat += (250 / 111_320) * Math.cos(hdg) * 0.2;
+    pts.push({ lon, lat, altFt: alt, hFt: alt });
+  }
+  return pts;
+}
+
+/** A layer whose build steps wait in a queue until the test runs them (no GL, no map). */
+function queuedLayer() {
+  const queue: Array<() => void> = [];
+  const layer = new CurtainLayer("c", RAMP, (fn) => {
+    queue.push(fn);
+    return 0 as unknown as ReturnType<typeof setTimeout>;
+  });
+  const drain = () => {
+    let steps = 0;
+    while (queue.length) {
+      queue.shift()!();
+      steps++;
+    }
+    return steps;
+  };
+  return { layer, queue, drain };
+}
+
+describe("CurtainLayer: large rebuilds run in chunks (late 3D switch, logbook, re-thinning)", () => {
+  it("a whole long-haul track is built in BUILD_CHUNK steps and equals a one-go build", () => {
+    const pts = longHaul();
+    const { layer, drain } = queuedLayer();
+    layer.sync(pts, null);
+    // nothing heavy ran yet: the (empty) drawn geometry stays until the build is complete
+    expect(layer.rebuilding).toBe(true);
+    expect(layer.geo.vertexCount).toBe(0);
+    expect(drain()).toBe(Math.ceil(pts.length / BUILD_CHUNK));
+    expect(layer.rebuilding).toBe(false);
+    const once = new CurtainGeometry(RAMP);
+    once.sync(pts, null);
+    expect(layer.geo.ctrl.length).toBe(once.ctrl.length);
+    expect(layer.geo.vertexCount).toBe(once.vertexCount);
+  });
+
+  it("samples arriving during the build go to the drawn curtain and into the build; the head is kept", () => {
+    const pts = longHaul(12_000);
+    const live = pts.slice(0, 10_000);
+    const { layer, queue, drain } = queuedLayer();
+    layer.sync(live, null);
+    queue.shift()!(); // one chunk
+    for (let i = 10_000; i < 12_000; i++) {
+      live.push(pts[i]);
+      layer.sync(live, { ...pts[i], lon: pts[i].lon + 1e-4 });
+    }
+    drain();
+    expect(layer.geo.consumedCount).toBe(12_000);
+    const once = new CurtainGeometry(RAMP);
+    once.sync(pts, { ...pts[11_999], lon: pts[11_999].lon + 1e-4 });
+    expect(layer.geo.vertexCount).toBe(once.vertexCount);
+  });
+
+  it("a new list during a build clears the drawn curtain and builds the new one; a short list syncs at once", () => {
+    const { layer, drain } = queuedLayer();
+    layer.sync(circuit(), null);
+    expect(layer.rebuilding).toBe(false);
+    expect(layer.geo.vertexCount).toBeGreaterThan(0);
+    layer.sync(longHaul(), null);
+    expect(layer.geo.vertexCount).toBe(0);
+    layer.sync([], null);
+    expect(layer.rebuilding).toBe(false);
+    drain(); // the cancelled step finds no build
+    expect(layer.geo.vertexCount).toBe(0);
+  });
+
+  it("re-thinning at MAX_CONTROL happens in the background, coarser, while the curtain stays drawn", () => {
+    // a zig-zag: every sample is a corner, Douglas-Peucker keeps them all
+    const pts: TrackPoint[] = Array.from({ length: MAX_CONTROL + 2000 }, (_, i) => ({ lon: 8 + i * 0.002, lat: 50 + (i % 2) * 0.002, altFt: 5000, hFt: 5000 }));
+    const { layer, drain } = queuedLayer();
+    const live: TrackPoint[] = [];
+    for (let i = 0; i < pts.length; i += 1000) {
+      live.push(...pts.slice(i, i + 1000));
+      layer.sync(live, null);
+    }
+    expect(layer.rebuilding).toBe(true);
+    // the drawn geometry kept growing instead of rebuilding synchronously
+    expect(layer.geo.tolScale).toBe(1);
+    expect(layer.geo.vertexCount).toBeGreaterThan(0);
+    drain();
+    expect(layer.rebuilding).toBe(false);
+    expect(layer.geo.tolScale).toBeGreaterThan(1);
+    expect(layer.geo.consumedCount).toBe(pts.length);
+  });
+});
+
+describe("H-7: a removed curtain layer takes no sync calls", () => {
+  it("after onRemove (theme change, context loss) sync does nothing; a new onAdd takes them again", () => {
+    const { layer, queue } = queuedLayer();
+    const gl = { deleteBuffer() {}, deleteProgram() {} } as never;
+    layer.onAdd({ triggerRepaint() {} } as never);
+    layer.onRemove({} as never, gl);
+    expect(layer.removed).toBe(true);
+    layer.sync(longHaul(), null);
+    layer.sync(circuit(), null);
+    expect(layer.rebuilding).toBe(false);
+    expect(queue).toHaveLength(0);
+    expect(layer.geo.vertexCount).toBe(0);
+    layer.onAdd({ triggerRepaint() {} } as never);
+    layer.sync(circuit(), null);
+    expect(layer.geo.vertexCount).toBeGreaterThan(0);
   });
 });

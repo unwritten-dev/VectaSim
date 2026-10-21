@@ -73,3 +73,13 @@
   color: var(--accent);
   background: var(--accent-soft);
 }
+
+/* ATC without traffic (LiveMap): aria-disabled instead of disabled, so it stays focusable and
+   keyboard / screen-reader users reach its reason; it looks like the toolbar's disabled buttons */
+.map-toolbar button[aria-disabled="true"] {
+  background: transparent;
+  color: var(--text-faint);
+  border-color: transparent;
+  box-shadow: none;
+  cursor: not-allowed;
+}

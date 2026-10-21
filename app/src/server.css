@@ -1,4 +1,4 @@
-/* Einstellungen → Overlay & Schnittstelle (ServerPanel.tsx). Colours come from the theme tokens. */
+/* Settings → Overlay & API (ServerPanel.tsx). Colours come from the theme tokens. */
 .server-panel {
   display: grid;
   gap: var(--sp-2);

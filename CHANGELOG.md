@@ -4,6 +4,72 @@ Entries are in English from 2026-10-18 on; earlier entries were translated.
 
 ## Unreleased
 
+## 0.5.2 – 2026-10-21 (Beta)
+
+Second audit round: flight detection corrected again (reconnect gaps, short hops), a faster start, the overlay server hardened further, every dialog on one focus module, and the map lighter on the GPU while following.
+
+### Recording
+
+- After a sim restart at the gate or a reconnect gap longer than a minute, the flight ends as interrupted with the resume offer instead of being saved as completed with a landing at the reconnect time; a long ESC menu on short final (sim clock frozen, aircraft in place) still keeps the landing.
+- Short helicopter and STOL hops (at least 5 s above 50 ft, or 10 s airborne out of the take-off roll) are recorded as flights with a landing instead of being discarded as ground sessions; a hop that touches down before the usual airborne qualification no longer leaves the flight stuck in “Climb” on the ground.
+- The Windows notification, the in-sim landing text, the KML export and a resumed flight’s summary say “landing rate not rated” instead of “0 fpm (smooth)” for an unrated touchdown; a landing right after a short stream hole is rated with the vertical speed from just before the hole.
+- An aborted pushback (parked again, brake set, engines off) ends the recording; time acceleration no longer sets the teleport flag; a reconnect during the initial climb keeps the take-off time; a taxi-only recording left open by a crash is discarded on the next start; a flight whose end is still being saved cannot be deleted; a flight loaded low on the approach gets that airport as arrival, not departure; a flight started in the air and interrupted before landing counts in the statistics; merging a bundle no longer double-counts runway landings of duplicate flights.
+- The live map track no longer freezes after the system clock is set back; long flights use less CPU while recording (incremental track encoding); if a backup restore could not be applied, VectaSim says so after the start (the previous logbook stays open).
+
+### Map
+
+- After the window returns from the tray, the map draws the skipped frame right away instead of freezing until the next sample; following near a pole or across the date line no longer throws or jumps; clicking a traffic aircraft hidden under the card while “Follow” is on brings it into view; 3D traffic models are hidden behind the globe’s horizon; radar and cloud tiles are recoloured off the main thread; the follow loops sleep between frames and reuse their buffers.
+
+### Interface
+
+- Faster start: the landing debrief and the maps load on first use, cutting the start bundle from 2.30 MB to 1.07 MB (gzip 673 kB to 335 kB).
+- Collapsible sections no longer reference a body that is not rendered and are not landmarks; the folded “Events” section shows the newest event; the debrief’s landing pager and the logbook tag filter keep keyboard focus; closing nested dialogs together returns focus to the opener; the runway editor cannot be closed with Esc while saving; installing an update twice at once is ignored; a focused toast keeps its countdown; the “connection lost” notice goes away when the flight ends; telemetry throttling no longer stays at 1 Hz after a quick minimise and restore.
+- When a ground session is discarded, VectaSim no longer flashes the taskbar or re-saves an older flight’s landing card, whatever order the events arrive in; failed exports, a failed pre-update backup, a failed resume and a port that could not be saved show a plain next step with the reason behind “Details”.
+- “Show in folder” goes through a checked backend command that opens only existing local items.
+
+### Privacy and security
+
+- The overlay start page shows the OBS copy links with the token even when opened from a bookmark through the cookie; the token cookie is bound to the port and outdated cookies are deleted by the next answer.
+- Idle local connections can no longer block the overlay server (a new local request takes an idle slot, waits at most 2 s, then gets 503); other devices’ WebSockets have a quota of their own (16, at most 4 per device), so the local OBS overlays keep their connections; every refused request closes its connection.
+- The streamer-mode redaction finds registrations written without a dash, in lower case or with a space, and no longer hangs on long lines of dashes; the “no airport near” position message is logged at debug level only.
+- An X-Plane host name is resolved on every connection and refused when it points only to public addresses; network paths (`\\server\share`) are refused for exports, imports, the landing card folder and the SimConnect.dll choice; saving a landing card accepts only PNG images up to 32 MB; SimConnect.dll is no longer searched in the SDK’s drive-root folders on its own; links opened from the app are limited to the sites it links to; the VATSIM data address is only accepted on vatsim.net; diagnostics start `reg.exe` by its full path.
+- Dependencies: the TLS certificate libraries were updated past published advisories (RUSTSEC-2026-0381/0382/0383).
+
+### Recording
+
+- Runway matching, derived runways and the landing debrief work for runways across the antimeridian (Fiji, Tonga, Chukotka) instead of seeing them as pointing the wrong way; the nearest-airport lookup is exact at high latitudes (Scandinavia, Svalbard, Alaska, Antarctica) and across the date line.
+- A flight you delete permanently no longer keeps counting as a landing on a runway VectaSim learnt from your tracks; leftovers of flights deleted earlier are cleaned up once (with the usual backup before the logbook is updated).
+- Every round of the demo flight is a flight of its own; the bouncing demo landing no longer shows an unrealistic 3 g spike.
+
+### Map
+
+- The live map leaves more of the graphics card to the simulator: VectaSim’s own map updates (following the aircraft, the 3D model, traffic) are capped at 30 fps, at 15 fps while another window such as the simulator has the focus, and nothing is drawn while VectaSim is minimised, with or without the tray icon (the live data in the background slows down as well). Dragging, zooming and rotating and the map’s own camera animations stay at full rate; camera steps too small to see draw nothing, and labels appear without fading in. Restoring the window draws at once and the camera glides back to the aircraft. Measured in 3D follow mode: about 25 frames per second with VectaSim focused, 14 unfocused and 0 minimised (before: 32, 32 and 10).
+- Switching the theme frees the graphics memory of the 3D layers right away; switching 3D on late in a long flight or opening a long logbook track no longer freezes the map while the altitude curtain is built; 3D traffic in busy areas costs less time per update.
+- Weather radar: RainViewer’s magenta step (55–64 dBZ) is shown in white; the missing “circle-11” basemap icon is no longer requested.
+- Map toolbar and traffic-card buttons expose their explanations to screen readers; “ATC” without traffic and “Route” without a full flight plan stay focusable and say why they are unavailable.
+
+### Interface
+
+- All dialogs (landing debrief, year-review lightbox, CSV import, runway editor) behave the same: Tab and Shift+Tab stay inside the dialog and wrap around, Esc closes only the topmost one, nothing behind it can be clicked or reached with the keyboard, focus returns to where you were and the background keeps its scroll position, the fade-in respects “reduce motion”, and Ctrl+F / Ctrl+. are blocked while a dialog is open, like Ctrl+1…4.
+- Saving landing, approach, year-review and country-map images is much faster: “Save all” and the year-review stack no longer stall on large images.
+- At 125–150 % in-app zoom in a small window the live side panel lies over the map and the logbook stacks list above detail; totals and filter chips wrap instead of being cut off.
+- A failed copy to the clipboard explains what to do instead of showing the raw browser error; simulator settings that fail to load offer “Retry”; exported year-review cards print ranks, legends, page numbers and zero values in the readable muted colour.
+- The year review and the countries view load on first use (smaller start bundle); the airports tab looks up each airport only once per session; the logbook result count is announced to screen readers once typing pauses.
+
+### Privacy and security
+
+- Overlay server: a tablet or second PC needs the token in the link only once – the browser then keeps it in a cookie and the overlay pages remove it from the address bar, so it stays out of the browser history and bookmarks; bookmarks without the token keep working until you regenerate the token.
+- The diagnostics package always replaces the Windows user name in file paths, not only in streamer mode.
+- The VATSIM METAR fallback (metar.vatsim.net) is only used while VATSIM is switched on; with VATSIM off, VectaSim contacts no VATSIM server.
+- The X-Plane address setting now checks the host: this PC, an address in your local network (IPv6 included) or a host name; a public IP address is refused, because the X-Plane Web API is unencrypted.
+- Photo credit links are now also checked when they come from an imported `.vectasim` file: only links to www.planespotters.net are kept; the app opens only https links and the local overlay server; SimConnect.dll is no longer picked up from the current folder or other folders on the Windows search path, only from the known locations, the app folder and System32.
+- Dependencies: the ZIP library was updated past published security advisories, and the updater no longer contains an unpacking feature it never used.
+
+### Release
+
+- Releases are only built from a commit that passes every CI check: the release workflow runs the full CI first; CI checks Rust dependencies with cargo deny (licences, bans, sources, advisories) and that the English and German READMEs have the same structure and valid links.
+- New SECURITY.md: security problems can be reported privately through GitHub; README lists RainViewer’s terms under Known limitations; the sim-PC checklist covers the take-off rule, discarded ground sessions, scenery switches, the ESC menu on short final and the in-sim line for unrated touchdowns.
+
 ## 0.5.1 – 2026-10-19 (Beta)
 
 Fixes from a full audit of 0.5.0: flight detection (false take-offs, ground sessions, scenery switches, landings lost on reconnect), SimBrief v2, map robustness, privacy, security and release hygiene; plus the altitude curtain and smooth motion for selected online traffic.

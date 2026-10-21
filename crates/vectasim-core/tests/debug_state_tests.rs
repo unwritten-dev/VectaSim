@@ -1,4 +1,4 @@
-//! `FlightSession::debug_state` (Einstellungen → Diagnose → Live-Rohdaten): engine internals
+//! `FlightSession::debug_state` (Settings → Diagnostics → live raw values): engine internals
 //! follow the mock flight.
 
 use vectasim_core::{FlightPhase, FlightSession, MockFlight};

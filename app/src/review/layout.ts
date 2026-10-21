@@ -1,4 +1,4 @@
-// Grid of the story-card previews (Logbuch → Jahr) and the keys of the single-card view.
+// Grid of the story-card previews (Logbook → Year) and the keys of the single-card view.
 // Pure functions, so the sizing rule and the keyboard navigation are testable without a DOM.
 import { FORMAT_SIZE, type CardFormat } from "./text";
 

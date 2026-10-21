@@ -1,7 +1,7 @@
 // In-app updates via tauri-plugin-updater: the app polls latest.json on GitHub
 // Releases (signed with the key in tauri.conf.json → plugins.updater.pubkey),
 // downloads the NSIS installer and relaunches. State lives in a tiny module
-// store so Einstellungen and the start-up toast share one source of truth.
+// store so the settings and the start-up toast share one source of truth.
 
 import { useSyncExternalStore } from "react";
 import { check, type Update } from "@tauri-apps/plugin-updater";
@@ -9,6 +9,7 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { invoke } from "@tauri-apps/api/core";
 import { showToast } from "./ui/Toast";
 import { userMessage } from "./errors";
+import { errorToast } from "./ui/errorToast";
 import { t } from "./i18n";
 
 export type UpdatePhase = "idle" | "checking" | "none" | "available" | "downloading" | "ready" | "error";
@@ -91,6 +92,9 @@ export function setRecordingCheck(fn: () => boolean): void {
 /** Download the pending update, install it and relaunch – never in the middle of a recorded flight. */
 export async function installUpdate(): Promise<void> {
   if (!pending) return;
+  // one install at a time: the toast action and the settings button pressed together must not start a
+  // second download and a second backup
+  if (state.phase === "downloading" || state.phase === "ready") return;
   if (recordingActive()) {
     showToast({
       id: "update",
@@ -104,7 +108,7 @@ export async function installUpdate(): Promise<void> {
   let total = 0;
   let got = 0;
   set({ phase: "downloading", progress: 0 });
-  // safety copy of the logbook first (Einstellungen → Daten); a failure does not stop the update –
+  // safety copy of the logbook first (Settings → Data); a failure does not stop the update –
   // a new schema version makes its own copy before migrating at the next start
   try {
     await invoke("create_backup", { kind: "update" });
@@ -112,8 +116,8 @@ export async function installUpdate(): Promise<void> {
     showToast({
       id: "update-backup",
       tone: "warn",
-      title: t("shell.update.backupFailed"),
-      body: t("shell.update.backupFailedBody", { error: String(e) }),
+      // the reason behind "Details", never the raw backend text as the body
+      ...errorToast(t("shell.update.backupFailed"), e, "logbook"),
       durationMs: 8000,
     });
   }

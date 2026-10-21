@@ -70,6 +70,18 @@ describe("userMessage", () => {
   });
 });
 
+describe("userMessage for clipboard errors", () => {
+  it("a refused clipboard write gets a next step, the raw text stays in the detail", () => {
+    const e = new Error("Document is not focused.");
+    e.name = "NotAllowedError";
+    const m = userMessage(e, "export");
+    expect(m.title).toBe("Zwischenablage nicht freigegeben.");
+    expect(m.hint).toMatch(/Vordergrund/);
+    expect(m.detail).toBe("Document is not focused.");
+    expect(userMessage("NotAllowedError: The request is not allowed by the user agent.").title).toBe("Zwischenablage nicht freigegeben.");
+  });
+});
+
 describe("userMessage in English", () => {
   it("translates title and hint, keeps the raw detail", () => {
     setLanguageSetting("en");

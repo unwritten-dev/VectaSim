@@ -9,6 +9,7 @@ import { useEffect, useState, type RefObject } from "react";
 import type * as maplibregl from "maplibre-gl";
 import { useT } from "../i18n";
 import { GLOBE_FLAT_FROM_ZOOM, useGlobe } from "./projection";
+import { useHint } from "./hint";
 
 /** Current zoom of a map, updated on zoomend; null until the map exists. */
 export function useMapZoom(mapRef: RefObject<maplibregl.Map | null>, ready: boolean): number | null {
@@ -43,9 +44,19 @@ export default function GlobeToggle({ zoom, className = "toggle" }: Props) {
   const [globe, setGlobe] = useGlobe();
   const dormant = globeDormant(globe, zoom);
   const title = !globe ? t("map.toolbar.globeOn") : dormant ? t("map.toolbar.globeDormant", { zoom: GLOBE_FLAT_FROM_ZOOM }) : t("map.toolbar.globeOff");
+  const hint = useHint(title);
   return (
-    <button className={`${className} globe-toggle${globe ? " active" : ""}${dormant ? " globe-dormant" : ""}`} onClick={() => setGlobe(!globe)} aria-pressed={globe} title={title}>
-      {t("map.toolbar.globe")}
-    </button>
+    <>
+      <button
+        className={`${className} globe-toggle${globe ? " active" : ""}${dormant ? " globe-dormant" : ""}`}
+        onClick={() => setGlobe(!globe)}
+        aria-pressed={globe}
+        title={title}
+        aria-describedby={hint.describedBy}
+      >
+        {t("map.toolbar.globe")}
+      </button>
+      {hint.node}
+    </>
   );
 }

@@ -20,6 +20,7 @@
 // fly to the aircraft themselves.
 
 import type * as maplibregl from "maplibre-gl";
+import { unwrapLon } from "./geo";
 
 /** Event-data flag of the follow camera's own moves. */
 export const FOLLOW_EVENT = { vectasimFollow: true } as const;
@@ -136,15 +137,21 @@ export function isMultiTouch(e: Event | undefined | null): boolean {
 /** Longitude difference b − a in −180..180. */
 const dLon = (a: number, b: number) => ((((b - a) % 360) + 540) % 360) - 180;
 
+/** Highest latitude of a camera centre (Web Mercator's limit; LngLat throws beyond ±90). */
+export const MAX_CENTER_LAT = 85.05;
+
+const clampLat = (lat: number) => Math.max(-MAX_CENTER_LAT, Math.min(MAX_CENTER_LAT, lat));
+
 /**
  * One step of a per-frame follow: the camera centre from `cur` towards `target` by `k`
- * (CameraGuard.catchUp; 1 = locked on). Longitudes the short way round.
+ * (CameraGuard.catchUp; 1 = locked on). Longitudes the short way round and *not* wrapped back to
+ * ±180: the result stays in the world copy of `cur` (the camera centre, which MapLibre's eases
+ * leave beyond ±180 on the short way over the date line) – a centre wrapped back jumped by a whole
+ * world copy and re-tiled.
  */
 export function stepTowards(cur: { lon: number; lat: number; elev: number }, target: { lon: number; lat: number; elev: number }, k: number) {
-  let lon = cur.lon + dLon(cur.lon, target.lon) * k;
-  if (lon > 180) lon -= 360;
-  if (lon < -180) lon += 360;
-  return { lon, lat: cur.lat + (target.lat - cur.lat) * k, elev: cur.elev + (target.elev - cur.elev) * k };
+  const lon = cur.lon + dLon(cur.lon, target.lon) * k;
+  return { lon, lat: clampLat(cur.lat + (target.lat - cur.lat) * k), elev: cur.elev + (target.elev - cur.elev) * k };
 }
 
 /**
@@ -160,14 +167,33 @@ export interface FollowAnchor {
   shift?: { dLon: number; dLat: number; atZoom: number };
 }
 
-/** The camera centre that keeps the anchor's aircraft in its place at `zoom`. */
-export function anchorCenter(a: FollowAnchor, zoom: number): { lon: number; lat: number } {
-  if (!a.shift) return { lon: a.lon, lat: a.lat };
-  const k = 2 ** (a.shift.atZoom - zoom);
-  let lon = a.lon - a.shift.dLon * k;
-  if (lon > 180) lon -= 360;
-  if (lon < -180) lon += 360;
-  return { lon, lat: a.lat - a.shift.dLat * k };
+/**
+ * Largest shift (degrees, either axis) still taken: the shift is measured at one zoom and scaled
+ * linearly; zoomed out by many levels since (a strong wheel zoom near a pole) the extrapolation
+ * means nothing any more and the aircraft is simply centred.
+ */
+const MAX_SHIFT_DEG = 60;
+
+/**
+ * The camera centre that keeps the anchor's aircraft in its place at `zoom`, in the world copy of
+ * `nearLon` (the camera centre; absent = −180..180). The latitude stays within ±MAX_CENTER_LAT:
+ * a shift scaled up by a strong zoom-out near a pole went past ±90 and MapLibre's LngLat threw
+ * inside the gesture frame.
+ */
+export function anchorCenter(a: FollowAnchor, zoom: number, nearLon?: number): { lon: number; lat: number } {
+  let lon = a.lon;
+  let lat = a.lat;
+  if (a.shift) {
+    const k = 2 ** (a.shift.atZoom - zoom);
+    const sx = a.shift.dLon * k;
+    const sy = a.shift.dLat * k;
+    if (Math.abs(sx) <= MAX_SHIFT_DEG && Math.abs(sy) <= MAX_SHIFT_DEG) {
+      lon -= sx;
+      lat -= sy;
+    }
+  }
+  lon = unwrapLon(lon, nearLon != null && Number.isFinite(nearLon) ? nearLon : 0);
+  return { lon, lat: clampLat(lat) };
 }
 
 type CameraNext = Parameters<maplibregl.CameraUpdateTransformFunction>[0];
@@ -187,8 +213,58 @@ export function followCameraUpdate(
   return (next) => {
     const a = anchor();
     if (!a || !guard.userMoving()) return {};
-    const c = anchorCenter(a, next.zoom);
+    // in the world copy the frame is in (an ease over the date line leaves the centre beyond ±180)
+    const c = anchorCenter(a, next.zoom, next.center?.lng);
     if (![c.lon, c.lat].every(Number.isFinite)) return {};
     return a.elev != null && Number.isFinite(a.elev) ? { center: lngLat(c.lon, c.lat), elevation: a.elev } : { center: lngLat(c.lon, c.lat) };
   };
+}
+
+/** A camera position of the follow glide: centre and (3D) centre height in metres. */
+export interface GlidePoint {
+  lon: number;
+  lat: number;
+  elev: number;
+}
+
+/** Longest glide towards a new sample (ms); the telemetry runs at ~10 Hz, the model blends as long (aircraftModel.ts). */
+export const FOLLOW_GLIDE_MAX_MS = 250;
+
+/**
+ * The own-aircraft follow camera's path between two samples: from where the camera is towards
+ * the new position, linearly over the time since the previous sample (at most
+ * FOLLOW_GLIDE_MAX_MS) – like the model's pose blend, so the model stays centred. The live map
+ * steps along it with jumpTo at the follow frame rate (frameCap.ts) instead of a MapLibre easeTo,
+ * which rendered every display frame.
+ */
+export class FollowGlide {
+  private from: GlidePoint | null = null;
+  private to: GlidePoint | null = null;
+  private start = 0;
+  private dur = 0;
+
+  /** `to` is taken in the world copy of `from` (the camera centre): no jump by 360° at the end of the glide. */
+  set(from: GlidePoint, to: GlidePoint, nowMs: number, durMs: number) {
+    this.from = from;
+    this.to = { ...to, lon: unwrapLon(to.lon, from.lon), lat: clampLat(to.lat) };
+    this.start = nowMs;
+    this.dur = Number.isFinite(durMs) ? Math.max(0, Math.min(FOLLOW_GLIDE_MAX_MS, durMs)) : 0;
+  }
+
+  clear() {
+    this.from = this.to = null;
+  }
+
+  /** Where the camera should be at `nowMs`; null without a target. */
+  at(nowMs: number): GlidePoint | null {
+    if (!this.to) return null;
+    if (!this.from || this.dur <= 0) return this.to;
+    const f = Math.min(1, Math.max(0, (nowMs - this.start) / this.dur));
+    return f >= 1 ? this.to : stepTowards(this.from, this.to, f);
+  }
+
+  /** The glide has reached its target (or has none). */
+  done(nowMs: number): boolean {
+    return !this.to || this.dur <= 0 || nowMs - this.start >= this.dur;
+  }
 }

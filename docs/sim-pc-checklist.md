@@ -37,10 +37,12 @@ UI labels are given as they appear in the English UI (*Settings → Display → 
 ## Step 3 – GA circuit with touch-and-go (30 min) → dump “ga-pattern”
 
 - [ ] Taxi → phase *Taxi out*. Takeoff → *Takeoff* → *Climb*.
+- [ ] **Take-off rule (since 0.5.1):** *Takeoff* needs a take-off roll (> 40 kt with engines running) or more than 50 ft AGL, held for 1 s. Check that *Takeoff* appears during the roll, a few seconds after passing 40 kt, and not at lift-off; that a fast taxi below 40 kt, a bumpy grass taxiway or a hard turn on one gear leg never shows *Takeoff*; and that the logbook's take-off time is the lift-off. Note the GS at which the phase changed.
 - [ ] Circuit at ~1000 ft AGL, **touch-and-go**: landing report with touch-and-go, phase *Landing* → *Climb*.
 - [ ] Second circuit: **pause (P) in the middle of the base leg** for 60 s → resume. Is the phase stable? Pause count/duration in the flight? Do frames keep arriving during the pause (watch the counter)? Also test **Active Pause** once and the **ESC menu** once, and note which events arrive.
+- [ ] **ESC menu events (MSFS):** open and close the ESC menu once on the ground and once in flight. Does the event list show *Simulation stopped (menu)* / *Simulation running* (SimConnect `SimStop`/`SimStart`) each time, or nothing? Since 0.5.1 VectaSim keeps the flight across such a stop when the position continues; the phase must stay as it was (taxi goes on, no new flight).
 - [ ] Full-stop landing. Compare the app’s landing rate with a second tool (Landing Inspector, FLARE, Volanta) and with the sim’s raw value; note sign and magnitude.
-- [ ] **In-sim landing line** (*Settings → Simulator → Show the landing rate in the simulator*, on by default): a few seconds after touchdown, once the rollout is slow, does MSFS show “VectaSim · Landed … fpm …” at the top of the screen, in which colour and for how long? Note MSFS 2020 and 2024 separately (also in VR if available). Also check after the touch-and-go above. If nothing appears: search the log for `SimConnect_Text` (rejected or missing export) and note it – the recording must be unaffected.
+- [ ] **In-sim landing line** (*Settings → Simulator → Show the landing rate in the simulator*, on by default): a few seconds after touchdown, once the rollout is slow, does MSFS show “VectaSim · Landed … fpm …” at the top of the screen, in which colour and for how long? Note MSFS 2020 and 2024 separately (also in VR if available). Also check after the touch-and-go above. If nothing appears: search the log for `SimConnect_Text` (rejected or missing export) and note it – the recording must be unaffected. After the slew touchdown in step 5 (an “unrated” landing), note what the line says – it must not claim a rated 0 fpm. X-Plane shows no line (SimConnect only).
 - [ ] Vacate, park, engine off → *Taxi in* → *Shutdown* → flight in the logbook, distance plausible. Open the debrief and the approach section.
 
 ## Step 4 – Airliner ILS (45–60 min; first a default airliner, then an add-on) → dump “airliner-ils”
@@ -50,6 +52,7 @@ UI labels are given as they appear in the English UI (*Settings → Display → 
 - [ ] Phases: *Climb* → *Cruise* (60 s level) → *Descent* → *Approach* → *Final* → *Landing* → *Taxi in* → *Shutdown*.
 - [ ] Landing report: landing rate, g, bounces, runway assignment, touchdown distance. Approach: gates, “stable from”, note the flap settings for each lever position.
 - [ ] Add-on (Fenix/PMDG/FBW): note registration, parking brake, lights, flap index, fuel, engines, touchdown value.
+- [ ] **ESC menu on short final** (second approach or a repeat of the ILS): open the ESC menu for ~5 s at about 300 ft AGL, close it and land. Expected since 0.5.1: the flight goes on, the landing is recorded with a rate (not “interrupted”, no second flight starting from the rollout). Note the events and whether the rate came from the sim or from the samples. → **dump “esc-final”**
 
 ## Step 4b – Check approach data (track v2) (during step 4, per aircraft) → dump “approach-v2”
 
@@ -85,7 +88,9 @@ New since track v2: a separate 1 Hz definition `APPROACH` (wind, NAV 1/ILS, AP b
 
 ## Step 5 – Edge cases and abuse (30 min) → one dump each
 
-- [ ] **Slew** (Y) in flight and across the airfield, also close to the ground: no touchdown, flag “Slew”.
+- [ ] **Slew** (Y) in flight and across the airfield, also close to the ground: no touchdown, flag “Slew”. Slew down onto the runway once: if a touchdown is recorded, it is “unrated” (not 0 fpm) and stays out of the averages.
+- [ ] **Ground session:** load a flight at a gate, start the engine, taxi for a minute, stop and shut down without taking off. Expected: the notice “Ground session discarded”, the recording in the trash as *discarded (ground session)*, nothing in the logbook counters.
+- [ ] **Scenery switch:** load a flight at airport A, taxi a bit, then load a new flight at airport B (main menu or world map) and fly a circuit there. Expected: A ends as a discarded ground session, the logbook shows a flight from B only – not A → B. Repeat once without going through the main menu (MSFS 2024 world-map teleport) and note what happens.
 - [ ] **Time acceleration** 4× in cruise: flag for time acceleration, no phase changes.
 - [ ] **End the flight in mid-air → main menu → load a new flight at a different airport at the gate.** Observe closely and dump – the most important reproduction case.
 - [ ] MSFS 2024: teleport via the world map, fast travel, start “in the air”.
@@ -105,6 +110,8 @@ New since track v2: a separate 1 Hz definition `APPROACH` (wind, NAV 1/ILS, AP b
 
 ## Step 8 – X-Plane 12 (Web API, 45 min; first the default C172, then an airliner) → dump “xplane”
 
+- [ ] **Ground-contact flicker on grass or rough taxiways (10 Hz):** taxi over grass and a bumpy taxiway for a minute and take a dump; afterwards check how long `on_ground` drops out at a stretch. VectaSim tolerates patterns of up to ~5 s (off, off, on …) without a false take-off; longer gaps would need the threshold raised. → **dump “xp-ground-flicker”**
+
 Beforehand: X-Plane 12.1.1 or newer, *Settings → Network* without “Disable Incoming Traffic”. In VectaSim, test *Settings → Simulator* once with “X-Plane 12” and once with “Automatic”; raw dump on.
 
 - [ ] Connection: VectaSim running before X-Plane → status “Waiting for simulator”, the log shows `sim not reachable (X-Plane Web API localhost:8086 …)` every 5 s. Start X-Plane → “connected” after loading, Diagnostics: source `X-Plane Web API localhost:8086`, version (e.g. `12.1.4`), `Web API v2`, data rate ≈ 10/s. Search the log for `dataref … not found` / `rejected the subscription` and note every message.
@@ -118,6 +125,17 @@ Beforehand: X-Plane 12.1.1 or newer, *Settings → Network* without “Disable I
 - [ ] **Aircraft change** on the ground (default C172 → A330): the new aircraft (title, ICAO, registration) appears, no false flight/landing is created. Note an add-on’s registration/ICAO field if it is empty.
 - [ ] Quit X-Plane during a flight → “interrupted”, after restarting and loading the same spot “Resume flight?”. Kill X-Plane hard (Task Manager) → connection gone within ≤ 15 s.
 - [ ] Play back the dump at the end (*Diagnostics → Replay*): flight and landing as live.
+
+## Step 9 – Changes since 0.5.1 (30 min; MSFS or X-Plane, a second device on the same Wi-Fi)
+
+These can only be checked on the real sim PC. Note every measured value in the log table.
+
+- [ ] **Sim frame rate with the map's frame cap (30 / 15 / 0 fps).** Fly a stable cruise or hold in 3D follow mode with the 3D model on, sim frame counter visible (MSFS: developer mode → *Display FPS*; X-Plane: *Settings → Data Output* → “Frame rate”, shown in the cockpit). Note the sim fps for 60 s each: (a) VectaSim closed, (b) VectaSim on the second screen and focused, (c) VectaSim visible but the sim focused, (d) VectaSim minimised, (e) VectaSim closed to the tray. Expected: (d) and (e) almost like (a); (c) clearly better than (b). In Task Manager → *GPU*, note the share of `msedgewebview2.exe` in (b)–(e) (should be ≈ 0 in (d) and (e)). While dragging or zooming the map it may run at full rate – check that the sim does not stutter visibly while you do.
+- [ ] **Back from minimised / tray:** after (d) and (e), restore the window: the map draws at once (no frozen picture, no black area) and the camera glides back to the aircraft within about a second; the live panel shows current values.
+- [ ] **Tablet overlay with the cookie.** *Settings → Overlay & API*: local server on, *Reachable on the network (with token)* on (allow the Windows firewall prompt for private networks). On the tablet/phone: open the LAN link with `?token=…` from the panel → the page loads and the address bar no longer shows the token. Bookmark the page, close the tab, open the bookmark → works without the token. `/overlay/hud` and `/overlay/landing` update live during the flight. Then *Regenerate*: the bookmark now shows the 401 message; opening the new link with the token once makes the bookmark work again. On the sim PC, OBS/browser URLs without a token keep working throughout.
+- [ ] **Recording while the window is in the tray:** during a flight, minimise to the tray and close with X (tray on, *close to tray*): recording continues, the landing toast/notification arrives, the flight is saved. *Quit* from the tray menu during a flight asks first.
+- [ ] **X-Plane host in the LAN** (only if X-Plane runs on another PC and its Web API is reachable there): *Settings → Simulator → Adjust X-Plane address …* with the LAN address (e.g. `192.168.1.20`) → connects, Diagnostics shows `X-Plane Web API 192.168.1.20:8086`, the log has the warning that the Web API is spoken unencrypted. A public address (e.g. `8.8.8.8`) is refused in the dialog with the “unencrypted” message. `VECTASIM_XPLANE_HOST=8.8.8.8` → log warning “ignored … using localhost”, connection to this PC. Note whether X-Plane itself answers requests from another PC at all.
+- [ ] **METAR with VATSIM off:** *Settings → Display*: VATSIM and IVAO off. Fly or pan the map over a few airports with the METAR layer on; search `vectasim.log` (log level *Verbose*) for `metar.vatsim.net` → no hit. Optional: block `aviationweather.gov` (hosts file) → still no request to `metar.vatsim.net`; VATSIM on → now the fallback is used.
 
 ## Afterwards
 

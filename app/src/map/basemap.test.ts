@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { StyleSpecification } from "maplibre-gl";
-import { labelTextField, localizeLabels, patchBasemapStyle } from "./basemap";
+import { labelTextField, localizeLabels, patchBasemapStyle, referencesMissingIcon } from "./basemap";
 import { themeById } from "../themes";
 
 const style = {
@@ -93,5 +93,31 @@ describe("basemap labels in the UI language (UX 1.11 / 5.2)", () => {
     localizeLabels({ getStyle: () => ({ layers: named.layers as never }), setLayoutProperty: (id: string, _n: string, v: unknown) => calls.push([id, v]) }, "en");
     expect(calls.map((c) => c[0])).toEqual(["place_country_major", "poi_label"]);
     expect(calls[0][1]).toEqual(labelTextField("en"));
+  });
+});
+
+describe("missing sprite icon (Image \"circle-11\" could not be loaded)", () => {
+  const withDot = {
+    version: 8,
+    sources: {},
+    layers: [
+      { id: "place_town", type: "symbol", source: "o", layout: { "icon-image": ["step", ["zoom"], "circle-11", 9, ""], "text-field": "{name}" } },
+      { id: "road_oneway", type: "symbol", source: "o", layout: { "icon-image": "oneway" } },
+    ],
+  } as unknown as StyleSpecification;
+
+  it("finds the id in a plain value and inside an expression", () => {
+    expect(referencesMissingIcon("circle-11")).toBe(true);
+    expect(referencesMissingIcon(["step", ["zoom"], "circle-11", 9, ""])).toBe(true);
+    expect(referencesMissingIcon("circle_11")).toBe(false);
+    expect(referencesMissingIcon(undefined)).toBe(false);
+  });
+
+  it("drops only that icon-image; other icons and the label stay", () => {
+    const out = patchBasemapStyle(withDot, themeById("nachtcockpit"));
+    expect(layerOf(out, "place_town")!.layout?.["icon-image"]).toBeUndefined();
+    expect(layerOf(out, "place_town")!.layout?.["text-field"]).toBeDefined();
+    // the input is untouched
+    expect((withDot.layers[0] as unknown as L).layout?.["icon-image"]).toBeDefined();
   });
 });

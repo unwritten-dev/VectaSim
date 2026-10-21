@@ -86,7 +86,7 @@ export default function ReplayBar() {
         <button className="btn-sm replay-step" onClick={() => store.step(-1)} aria-label={tr("replay.back")} title={tr("replay.backTitle")}>
           −1{NNBSP}s
         </button>
-        <button className="btn-sm replay-play" onClick={() => store.toggle()} aria-label={playing ? tr("replay.pause") : tr("replay.play")} aria-pressed={playing} title={tr("replay.playTitle")}>
+        <button className="btn-sm replay-play" onClick={() => store.toggle()} aria-label={playing ? tr("replay.pause") : tr("replay.play")} title={tr("replay.playTitle")}>
           <span aria-hidden="true">{playing ? "⏸" : "▶"}</span>
         </button>
         <button className="btn-sm replay-step" onClick={() => store.step(1)} aria-label={tr("replay.forward")} title={tr("replay.forwardTitle")}>

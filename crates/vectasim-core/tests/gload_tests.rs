@@ -133,7 +133,7 @@ fn interrupted_flight_keeps_the_held_back_seconds() {
 
 #[test]
 fn stray_on_ground_flag_at_altitude_keeps_the_g_peak() {
-    // audit 0.5.0 N3: the tracker took the raw flag, so a spurious "on ground" in the cruise
+    // the tracker took the raw flag, so a spurious "on ground" in the cruise
     // dropped the 3 s before it as a touchdown window
     let mut sim = Sim::new();
     sim.run(5.0, 0.0, gs(12.0, 0.0));

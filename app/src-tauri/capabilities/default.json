@@ -22,7 +22,35 @@
     "core:tray:default",
     "core:webview:allow-set-webview-zoom",
     "window-state:default",
-    "opener:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        { "url": "https://www.planespotters.net" },
+        { "url": "https://www.planespotters.net/*" },
+        { "url": "https://github.com/unwritten-dev/*" },
+        { "url": "https://docs.flightsimulator.com" },
+        { "url": "https://docs.flightsimulator.com/*" },
+        { "url": "https://cloudless.eox.at" },
+        { "url": "https://cloudless.eox.at/*" },
+        { "url": "https://www.rainviewer.com" },
+        { "url": "https://www.rainviewer.com/*" },
+        { "url": "https://view.eumetsat.int" },
+        { "url": "https://view.eumetsat.int/*" },
+        { "url": "https://openfreemap.org" },
+        { "url": "https://openfreemap.org/*" },
+        { "url": "https://www.openmaptiles.org" },
+        { "url": "https://www.openmaptiles.org/*" },
+        { "url": "https://www.openstreetmap.org" },
+        { "url": "https://www.openstreetmap.org/*" },
+        { "url": "https://maplibre.org" },
+        { "url": "https://maplibre.org/*" },
+        { "url": "http://127.0.0.1:[0-9]*/*" }
+      ],
+      "deny": [
+        { "url": "http://*@*" },
+        { "url": "https://*@*" }
+      ]
+    },
     "dialog:default",
     "dialog:allow-open",
     "dialog:allow-ask",

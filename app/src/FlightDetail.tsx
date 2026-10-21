@@ -9,7 +9,7 @@ import { t as tr, useLanguage, useT, type TFunction, type TKey } from "./i18n";
 import { handleMenuKey, menuItems } from "./ui/menu";
 import { ON_TIME_THRESHOLD_MIN, actualFromRow, buildPirep, fmtPunctuality, fmtPvaDelta, fmtPvaValue, integrityIssues, parseOfp, pirepFileName, planFromRow, planVsActual, type PirepApproach } from "./pirep";
 import { usePrefs } from "./prefs";
-import TrackMap from "./map/TrackMap";
+import { TrackMap } from "./lazyMaps";
 import ProfileChart from "./ProfileChart";
 import ReplayBar from "./landing/ReplayBar";
 import { logbookReplay, type ReplayMarker } from "./landing/replayStore";
@@ -466,7 +466,7 @@ function rateTitle(t: TFunction, td: TouchdownReport): string {
       : td.bounces
         ? "logbook.detail.sourceMeasuredBounces"
         : "logbook.detail.sourceMeasured";
-  const hard = td.landingRateFpm <= -HARD_FPM ? t("logbook.detail.hardLanding", { limit: fmt(HARD_FPM, 0, "fpm") }) : null;
+  const hard = isRated(td) && td.landingRateFpm <= -HARD_FPM ? t("logbook.detail.hardLanding", { limit: fmt(HARD_FPM, 0, "fpm") }) : null;
   return [hard, t(source), t("logbook.detail.clickDebrief")].filter(Boolean).join(" ");
 }
 

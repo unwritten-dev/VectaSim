@@ -12,9 +12,10 @@
 // Labels and the click target stay MapLibre symbols (online.ts `traffic-3d-sym`) at the model's
 // height via `symbol-height-offset`, fed at 1 Hz with the dead-reckoned positions (the selected
 // aircraft's at 10 Hz from its own source); the 2D symbols of the aircraft drawn in 3D are filtered
-// out meanwhile. Repaints are throttled to 5 Hz while anything moves – every frame while the
-// selected aircraft moves (Traffic3D.selectedLoop); nothing is redrawn while the traffic stands
-// still and the camera does not move.
+// out meanwhile. Repaints are throttled to 5 Hz while anything moves – every follow frame while
+// the selected aircraft moves (Traffic3D.selectedLoop, asleep in between); nothing is redrawn while
+// the traffic stands still and the camera does not move. The per-frame render reuses its buffers
+// (InstanceBuffers, bufferSubData) and hides a model behind the globe's horizon like the own one.
 
 import * as maplibregl from "maplibre-gl";
 import type { Airport, Pilot } from "../types";
@@ -23,25 +24,26 @@ import { GROUND_UNIT_M, LIGHT_GLSL, MESH_FLOOR, MODEL_PX, VERTEX_FLOATS, metersP
 import { altToCurtainM } from "./trackChunks";
 import {
   FIELD_RADIUS_NM,
+  FieldIndex,
   INSTANCE_FLOATS,
+  InstanceBuffers,
   TRAFFIC3D_DETAIL_ZOOM,
   TrafficTracks,
-  buildInstances,
   fieldsOf,
   fixOf,
   historyPoints,
+  mercatorX,
+  mercatorY,
   pickTraffic,
-  tileUnits,
-  trafficRefTile,
+  trafficRefTileFlat,
   traffic3dActive,
-  type FieldRef,
-  type InstanceInput,
   type TrafficHistoryFix,
   type TrafficPose,
   type ViewBox,
 } from "./traffic3d";
 import { addCurtainLayers, drawCurtainTrack, pointFeature, setCurtainVisible, type TrackPoint } from "./common";
 import { replaceCustomLayer } from "./styleOnce";
+import { FRAME_SLACK_MS, followFrameMs, frameAfter, windowAway } from "./frameCap";
 
 /** Traffic models relative to the own model's size (the 2D traffic symbol peaks at ~0.62 × own). */
 export const TRAFFIC_MODEL_SCALE = 0.62;
@@ -67,10 +69,18 @@ export const TRAFFIC_3D_SYMBOLS = "traffic-3d-sym";
 /** One-feature source of the selected aircraft's label (online.ts `traffic-3d-sel-sym`), fed at 10 Hz. */
 export const TRAFFIC_3D_SEL_SOURCE = "traffic-3d-sel";
 const SEL_LABEL_MS = 100;
+/**
+ * New feed data redraws the labels at most this often (the 1 Hz re-filter while following sent
+ * the same pilots again and again; each setData re-tiles the source and renders the map).
+ * A changed set of models redraws them at once.
+ */
+const LABEL_MIN_MS = 1000;
 /** Curtain layer id of the selected aircraft's flown track. */
 export const TRAFFIC_CURTAIN = "traffic-curtain";
 /** 2D layers that hide the aircraft drawn as models. */
 const FLAT_LAYERS = ["vatsim-pilots", "vatsim-pilots-label"];
+/** The selected loop's check while the window is away or the layer is being replaced (ms). */
+const IDLE_POLL_MS = 250;
 
 function rgb(hex: string): [number, number, number] {
   const h = hex.replace("#", "");
@@ -94,6 +104,7 @@ out vec3 v_normal;
 out float v_tone;
 out float v_hi;
 out float v_local;
+out float v_clip;
 void main() {
   float s = i_b.x;
   float c = cos(i_a.w);
@@ -104,6 +115,16 @@ void main() {
   v_tone = a_tone;
   v_hi = i_b.y;
   float h = i_a.z;
+#ifdef GLOBE
+  // like the own model (aircraftModel.ts): behind the globe's horizon the whole aircraft, its
+  // shadow and plumb line are hidden, judged at its reference point (projectTileFor3D keeps the
+  // depth, and the model writes its own)
+  v_clip = u_projection_transition > 0.2
+    ? dot(projectToSphere(i_a.xy, i_a.xy) * (1.0 + h / GLOBE_RADIUS), u_projection_clipping_plane.xyz) + u_projection_clipping_plane.w
+    : 1.0;
+#else
+  v_clip = 1.0;
+#endif
   // shadow and plumb line only below DETAIL_MAX_M: a line from cruise level crosses the whole view
   if (u_mode > 0.5 && h > ${DETAIL_MAX_M.toFixed(1)}) {
     gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
@@ -132,6 +153,7 @@ in vec3 v_normal;
 in float v_tone;
 in float v_hi;
 in float v_local;
+in float v_clip;
 uniform vec2 u_depth_range;
 uniform float u_mode;
 uniform vec3 u_color;
@@ -144,6 +166,7 @@ uniform float u_shade;
 out vec4 fragColor;
 ${LIGHT_GLSL}
 void main() {
+  if (v_clip < 0.0) discard;
   vec3 base = mix(u_color, u_accent, v_hi);
   vec3 c = u_shade > 0.5 ? shadeModel(base, u_dark, v_normal, u_view, v_tone, u_light_scheme) : base;
   fragColor = vec4(c * u_alpha, u_alpha);
@@ -188,6 +211,8 @@ interface KindGl {
   mesh: WebGLBuffer;
   count: number;
   inst: WebGLBuffer;
+  /** Floats the instance buffer has room for on the GPU (grown with bufferData, filled with bufferSubData). */
+  instCap: number;
   /** VAOs per program variant (attribute locations may differ between Mercator and globe). */
   vao: Map<string, { model: WebGLVertexArrayObject; line: WebGLVertexArrayObject }>;
 }
@@ -230,6 +255,13 @@ export class TrafficModelLayer implements maplibregl.CustomLayerInterface {
   private lightScheme: number;
   private depthRange: [number, number] = [0, 1];
   private depthRangeAt = -Infinity;
+  /** Per-frame scratch, kept between frames: instance data per class, Mercator positions, world copies, the classes drawn. */
+  private readonly instances = new InstanceBuffers();
+  private merc = new Float64Array(0);
+  private wraps = new Float64Array(0);
+  private readonly drawn: Array<{ k: KindGl; v: { model: WebGLVertexArrayObject; line: WebGLVertexArrayObject }; count: number }> = [];
+  /** Removed from its map (theme change, context loss): the owner stops feeding it. */
+  removed = false;
   readonly perf: TrafficPerf = { frames: 0, ms: 0, instances: 0, drawCalls: 0 };
 
   constructor(
@@ -242,6 +274,7 @@ export class TrafficModelLayer implements maplibregl.CustomLayerInterface {
 
   onAdd(map: maplibregl.Map, gl: WebGL2RenderingContext | WebGLRenderingContext) {
     this.map = map;
+    this.removed = false;
     this.lineVbo = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this.lineVbo);
     // in the mesh layout: ground (z 0) to the aircraft (z 1)
@@ -262,7 +295,9 @@ export class TrafficModelLayer implements maplibregl.CustomLayerInterface {
     if (this.lineVbo) gl.deleteBuffer(this.lineVbo);
     for (const p of this.programs.values()) gl.deleteProgram(p.prog);
     this.programs.clear();
+    this.drawn.length = 0;
     this.map = null;
+    this.removed = true;
   }
 
   private program(gl: WebGL2RenderingContext, shader: maplibregl.CustomRenderMethodInput["shaderData"]): Program | null {
@@ -315,7 +350,7 @@ export class TrafficModelLayer implements maplibregl.CustomLayerInterface {
       const mesh = gl.createBuffer()!;
       gl.bindBuffer(gl.ARRAY_BUFFER, mesh);
       gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
-      k = { mesh, count: data.length / VERTEX_FLOATS, inst: gl.createBuffer()!, vao: new Map() };
+      k = { mesh, count: data.length / VERTEX_FLOATS, inst: gl.createBuffer()!, instCap: 0, vao: new Map() };
       this.kinds.set(kind, k);
     }
     return k;
@@ -379,21 +414,34 @@ export class TrafficModelLayer implements maplibregl.CustomLayerInterface {
     // one reference tile around the map centre; every instance in the world copy nearest to it.
     // On the globe a vertex beyond ±32767 tile units is pulled to a pole: a coarser tile when
     // the picked aircraft reach that far (tilted view, zoom ≥ 8: spikes towards the pole otherwise)
+    // (no allocation per instance: positions and instance data go into buffers kept between frames)
     const zoom = map.getZoom();
     const c = map.getCenter();
-    const cm = maplibregl.MercatorCoordinate.fromLngLat(c);
-    const wraps = frame.items.map((it) => Math.round(cm.x - (it.lon + 180) / 360));
-    const merc = frame.items.map((it, i) => {
-      const m = maplibregl.MercatorCoordinate.fromLngLat([it.lon, Math.max(-85.0511, Math.min(85.0511, it.lat))]);
-      return [m.x + wraps[i], m.y] as const;
-    });
-    const { tx, ty, tz } = trafficRefTile(cm.x, cm.y, zoom, merc);
+    const cx = mercatorX(c.lng);
+    const cy = mercatorY(c.lat);
+    const items = frame.items;
+    const count = items.length;
+    if (this.wraps.length < count) {
+      this.wraps = new Float64Array(count * 2);
+      this.merc = new Float64Array(count * 4);
+    }
+    const wraps = this.wraps;
+    const merc = this.merc;
+    for (let i = 0; i < count; i++) {
+      const it = items[i];
+      const mx = mercatorX(it.lon);
+      wraps[i] = Math.round(cx - mx);
+      merc[2 * i] = mx + wraps[i];
+      merc[2 * i + 1] = mercatorY(it.lat);
+    }
+    const { tx, ty, tz } = trafficRefTileFlat(cx, cy, zoom, merc, count);
     const n = 2 ** tz;
-    const inputs: InstanceInput[] = frame.items.map((it, i) => {
-      const [x, y] = tileUnits(it.lon, it.lat, tx, ty, tz, wraps[i]);
-      return { kind: it.kind, x, y, altM: altToCurtainM(it.hFt), headingDeg: it.headingDeg, size: it.size, selected: it.selected };
-    });
-    const instances = buildInstances(inputs);
+    const instances = this.instances;
+    instances.reset();
+    for (let i = 0; i < count; i++) {
+      const it = items[i];
+      instances.push(it.kind, (merc[2 * i] * n - tx) * EXTENT, (merc[2 * i + 1] * n - ty) * EXTENT, altToCurtainM(it.hFt), it.headingDeg, it.size, it.selected);
+    }
     const data = args.getProjectionData({ tileID: { canonical: { x: tx, y: ty, z: tz }, wrap: 0 }, applyGlobeMatrix: true });
 
     const px = MODEL_PX * TRAFFIC_MODEL_SCALE;
@@ -432,15 +480,30 @@ export class TrafficModelLayer implements maplibregl.CustomLayerInterface {
 
     const detail = zoom >= TRAFFIC3D_DETAIL_ZOOM;
     let calls = 0;
-    const kinds: Array<{ k: KindGl; v: { model: WebGLVertexArrayObject; line: WebGLVertexArrayObject }; count: number }> = [];
+    // instance buffers: re-allocated on the GPU only when they grow, else overwritten in place
+    const kinds = this.drawn;
+    let used = 0;
     for (const kind of MODEL_KINDS) {
-      const buf = instances.get(kind);
-      if (!buf) continue;
+      const m = instances.count(kind);
+      const buf = instances.array(kind);
+      if (!m || !buf) continue;
       const k = this.kind(gl, kind);
       gl.bindBuffer(gl.ARRAY_BUFFER, k.inst);
-      gl.bufferData(gl.ARRAY_BUFFER, buf, gl.DYNAMIC_DRAW);
-      kinds.push({ k, v: this.vaos(gl, p, args.shaderData.variantName, k), count: buf.length / INSTANCE_FLOATS });
+      if (k.instCap < buf.length) {
+        gl.bufferData(gl.ARRAY_BUFFER, buf.byteLength, gl.DYNAMIC_DRAW);
+        k.instCap = buf.length;
+      }
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, buf, 0, m * INSTANCE_FLOATS);
+      const v = this.vaos(gl, p, args.shaderData.variantName, k);
+      const slot = kinds[used];
+      if (slot) {
+        slot.k = k;
+        slot.v = v;
+        slot.count = m;
+      } else kinds.push({ k, v, count: m });
+      used++;
     }
+    kinds.length = used;
 
     // 1. ground shadow + plumb line (zoomed in only): translucent, no depth
     if (detail) {
@@ -488,7 +551,7 @@ export class TrafficModelLayer implements maplibregl.CustomLayerInterface {
 
     this.perf.frames++;
     this.perf.ms += performance.now() - t0;
-    this.perf.instances = inputs.length;
+    this.perf.instances = count;
     this.perf.drawCalls = calls;
   }
 }
@@ -528,7 +591,8 @@ export class Traffic3D {
   /** Called every animation frame while the selected aircraft is drawn as a model (the follow camera). */
   onSelectedFrame?: (nowMs: number) => void;
   private pilots: Pilot[] = [];
-  private fields: FieldRef[] = [];
+  /** Airports around the view, grid-indexed (nearest-field lookups per pilot). */
+  private fields = new FieldIndex([]);
   private fieldBox: ViewBox | null = null;
   private fieldSeq = 0;
   private selected: string | null = null;
@@ -537,10 +601,19 @@ export class Traffic3D {
   private map: maplibregl.Map | null = null;
   layer: TrafficModelLayer | null = null;
   private timer: number | undefined;
-  private raf: number | undefined;
+  /** Cancels the selected loop's next frame (undefined: the loop is not running). */
+  private loopCancel: (() => void) | undefined;
   private ticks = 0;
+  /** The frame handed to the layer, reused every frame (items and their objects). */
+  private readonly frameData: TrafficFrame = { items: [] };
   private filterKey = "";
   private selLabelAt = -Infinity;
+  private labelsAt = -Infinity;
+  /** The label sources hold no feature: an empty update is not sent again. */
+  private labelsEmpty = false;
+  private selEmpty = false;
+  /** Last frame of the selected loop (performance.now clock). */
+  private selFrameAt = -Infinity;
   /** History of the selected aircraft (raw fixes) and the curtain points built from it. */
   private history: { key: string; fixes: TrafficHistoryFix[] } | null = null;
   private curtainPoints: TrackPoint[] = [];
@@ -560,6 +633,9 @@ export class Traffic3D {
     this.map = map;
     this.filterKey = "";
     this.curtainShown = false;
+    // a new style: new, empty label sources
+    this.labelsEmpty = this.selEmpty = false;
+    this.labelsAt = -Infinity;
     const layer = new TrafficModelLayer(colors, () => this.frame());
     layer.onFail = () => {
       this.active = false;
@@ -581,8 +657,8 @@ export class Traffic3D {
   dispose() {
     window.clearInterval(this.timer);
     this.timer = undefined;
-    if (this.raf !== undefined) cancelAnimationFrame(this.raf);
-    this.raf = undefined;
+    this.loopCancel?.();
+    this.loopCancel = undefined;
     this.map = null;
     this.layer = null;
   }
@@ -658,7 +734,7 @@ export class Traffic3D {
     this.fetchAirports(box)
       .then((list) => {
         if (seq !== this.fieldSeq) return;
-        this.fields = fieldsOf(list);
+        this.fields = new FieldIndex(fieldsOf(list));
         // recompute the heights of the current fixes (unchanged reports keep their timing) and the curtain
         if (this.history) this.curtainPoints = historyPoints(this.history.fixes, this.fields);
         this.setPilots(this.pilots);
@@ -736,7 +812,7 @@ export class Traffic3D {
         map.setPaintProperty("traffic-selected", "circle-stroke-opacity", this.selectedDrawn() ? 0 : 1);
       }
     }
-    if (changed || labels) {
+    if (changed || (labels && performance.now() - this.labelsAt >= LABEL_MIN_MS)) {
       this.drawLabels();
       this.drawSelectedLabel();
     }
@@ -754,6 +830,9 @@ export class Traffic3D {
         if (f) features.push(f);
       }
     }
+    this.labelsAt = nowMs;
+    if (!features.length && this.labelsEmpty) return;
+    this.labelsEmpty = !features.length;
     src.setData({ type: "FeatureCollection", features });
   }
 
@@ -763,27 +842,47 @@ export class Traffic3D {
     if (!src) return;
     this.selLabelAt = nowMs;
     const f = this.selectedDrawn() ? labelFeature(this.tracks, this.selected!, nowMs) : null;
+    if (!f && this.selEmpty) return;
+    this.selEmpty = !f;
     src.setData({ type: "FeatureCollection", features: f ? [f] : [] });
   }
 
-  /** What the layer draws now. */
+  /** What the layer draws now (one object, rewritten every frame: no allocation per aircraft and frame). */
   frame(nowMs = performance.now()): TrafficFrame | null {
     if (!this.active) return null;
-    const items: TrafficFrame["items"] = [];
+    const items = this.frameData.items;
+    let n = 0;
     for (const k of this.picked) {
       const f = this.tracks.get(k);
       const pose = this.tracks.poseAt(k, nowMs);
       if (!f || !pose) continue;
       const sel = k === this.selected;
-      items.push({ lon: pose.lon, lat: pose.lat, hFt: pose.hFt, headingDeg: pose.headingDeg, size: f.size * (sel ? SELECTED_SCALE : 1), kind: f.kind, selected: sel });
+      const size = f.size * (sel ? SELECTED_SCALE : 1);
+      const it = items[n];
+      if (it) {
+        it.lon = pose.lon;
+        it.lat = pose.lat;
+        it.hFt = pose.hFt;
+        it.headingDeg = pose.headingDeg;
+        it.size = size;
+        it.kind = f.kind;
+        it.selected = sel;
+      } else items.push({ lon: pose.lon, lat: pose.lat, hFt: pose.hFt, headingDeg: pose.headingDeg, size, kind: f.kind, selected: sel });
+      n++;
     }
-    return { items };
+    items.length = n;
+    return this.frameData;
+  }
+
+  /** The model layer is on the map (not removed for a theme change / lost context, waiting for attach). */
+  private layerOn(): boolean {
+    return !!this.layer && !this.layer.removed;
   }
 
   /** 5 Hz while anything drawn moves: repaint; every second the labels follow. */
   private tick() {
     const map = this.map;
-    if (!map || !this.active || document.hidden || map.getCanvas().clientWidth === 0) return;
+    if (!map || !this.active || !this.layerOn() || windowAway() || map.getCanvas().clientWidth === 0) return;
     const now = performance.now();
     if (!this.tracks.moving(now, this.picked)) return;
     map.triggerRepaint();
@@ -792,21 +891,40 @@ export class Traffic3D {
 
   /** Starts the per-frame loop of the selected aircraft (no-op while it runs or nothing is selected). */
   private kick() {
-    if (this.raf === undefined && this.map && this.selectedDrawn()) this.raf = requestAnimationFrame((t) => this.selectedLoop(t));
+    if (this.loopCancel === undefined && this.map && this.selectedDrawn()) this.loopNext(0);
+  }
+
+  private loopNext(delayMs: number) {
+    this.loopCancel = frameAfter(delayMs, (t) => this.selectedLoop(t));
   }
 
   /**
-   * Every animation frame while the selected aircraft is a model: repaint (it moves smoothly next
+   * Every follow frame (frameCap.ts) while the selected aircraft is a model: repaint (it moves smoothly next
    * to the own model instead of in 5 Hz steps), the curtain's head on the model, the label at
-   * 10 Hz, the follow camera. Stops by itself when the selection closes or leaves 3D.
+   * 10 Hz, the follow camera. Asleep between those frames (frameAfter), not woken at the display
+   * rate. Stops by itself when the selection closes or leaves 3D.
    */
   private selectedLoop(_t: number) {
-    this.raf = undefined;
+    this.loopCancel = undefined;
     const map = this.map;
     if (!map || !this.selectedDrawn()) return;
-    this.raf = requestAnimationFrame((t) => this.selectedLoop(t));
-    if (document.hidden || map.getCanvas().clientWidth === 0) return;
+    // hidden or minimised (frameCap.windowAway), or the layer removed until the next style load
+    // (theme change, lost context: its curtain and label sources are gone as well): nothing to
+    // draw, look again a little later
+    if (windowAway() || map.getCanvas().clientWidth === 0 || !this.layerOn()) {
+      this.loopNext(IDLE_POLL_MS);
+      return;
+    }
     const now = performance.now();
+    // at the follow frame rate (30 fps, 15 without window focus), not the display's (frameCap.ts)
+    const frameMs = followFrameMs();
+    const wait = this.selFrameAt + frameMs - FRAME_SLACK_MS - now;
+    if (wait > 0) {
+      this.loopNext(wait);
+      return;
+    }
+    this.loopNext(frameMs);
+    this.selFrameAt = now;
     this.onSelectedFrame?.(now);
     if (!this.tracks.moving(now, [this.selected!])) return;
     map.triggerRepaint();

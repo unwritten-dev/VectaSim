@@ -1,11 +1,9 @@
 import { useEffect, useId, useRef, type CSSProperties, type ReactNode, type Ref } from "react";
-import { createPortal } from "react-dom";
 import { useT } from "../i18n";
 import { FORMAT_SIZE, type CardFormat } from "./text";
 import { lightboxKey } from "./layout";
-import { acquireModal } from "../ui/modalStack";
-
-const FOCUSABLE = "button:not([disabled]), [tabindex]:not([tabindex=\"-1\"])";
+import { Modal } from "../ui/Modal";
+import { keepStepFocus } from "../ui/modalStack";
 
 export interface LightboxProps {
   /** Card titles in display order. */
@@ -20,24 +18,14 @@ export interface LightboxProps {
   actions: ReactNode;
 }
 
-type Focusable = { focus: (o?: FocusOptions) => void };
-
-/**
- * After a step: when ‹/› just got disabled under the focus (first/last card), Chromium drops the
- * focus to <body> and a screen reader loses its place – move it to the arrow that is still
- * enabled, else to "Schließen". Focus elsewhere (a toast via Alt+T, another control) stays.
- */
+/** keepStepFocus (ui/modalStack) for the lightbox arrows. */
 export function keepLightboxFocus(
-  root: { contains: (n: Node | null) => boolean; querySelector: (sel: string) => Focusable | null },
-  active: (Element & { disabled?: boolean }) | null,
+  root: Parameters<typeof keepStepFocus>[0],
+  active: Parameters<typeof keepStepFocus>[1],
   body: Element | null,
-  close: Focusable | null,
-): Focusable | null {
-  const lost = !active || active === body || (root.contains(active) && active.disabled === true);
-  if (!lost) return null;
-  const target = root.querySelector(".review-lightbox-nav:not(:disabled)") ?? close;
-  target?.focus({ preventScroll: true });
-  return target;
+  close: Parameters<typeof keepStepFocus>[4],
+) {
+  return keepStepFocus(root, active, body, ".review-lightbox-nav:not(:disabled)", close);
 }
 
 /** Inner part of the single-card view, without portal and effects (also rendered by the tests). */
@@ -75,78 +63,42 @@ export function LightboxBody({ titles, index, format, onIndex, onClose, children
 }
 
 /**
- * One story card large, fitted to the window height: a modal over the app (the shell behind
- * it is inert, the title bar stays usable). Arrow keys step through the cards, Esc or a click
- * next to the card closes, Tab stays inside; focus returns to the opening card afterwards.
+ * One story card large, fitted to the window height: a modal over the app (ui/Modal: the shell
+ * behind it is inert, the title bar stays usable, Tab stays inside, Esc closes, focus returns to
+ * the opening card). Arrow keys step through the cards, a click next to the card closes.
  */
 export default function ReviewLightbox(props: LightboxProps) {
   const { index, titles, onIndex, onClose } = props;
   const titleId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
-  // latest values for the one window listener
-  const state = useRef({ index, count: titles.length, onIndex, onClose });
-  state.current = { index, count: titles.length, onIndex, onClose };
 
-  useEffect(() => {
-    const before = document.activeElement as HTMLElement | null;
-    const modal = acquireModal();
-    closeRef.current?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (!modal.isTop()) return;
-      if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
-      if (e.key === "Tab") {
-        const root = rootRef.current;
-        if (!root) return;
-        const items = Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE));
-        if (!items.length) return;
-        const active = document.activeElement;
-        const first = items[0];
-        const last = items[items.length - 1];
-        if (e.shiftKey && (active === first || !root.contains(active))) {
-          e.preventDefault();
-          last.focus();
-        } else if (!e.shiftKey && (active === last || !root.contains(active))) {
-          e.preventDefault();
-          first.focus();
-        }
-        return;
-      }
-      const s = state.current;
-      const r = lightboxKey(e.key, s.index, s.count);
-      if (r == null) return;
-      e.preventDefault();
-      if (r === "close") s.onClose();
-      else s.onIndex(r.index);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      modal.release();
-      if (before && before.isConnected) before.focus({ preventScroll: true });
-    };
-  }, []);
+  // the modal's extra keys: arrows / Page / Home / End (Esc and Tab are the modal's own)
+  const onKey = (e: KeyboardEvent) => {
+    if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.key === "Escape") return;
+    const r = lightboxKey(e.key, index, titles.length);
+    if (r == null || r === "close") return;
+    e.preventDefault();
+    onIndex(r.index);
+  };
 
   useEffect(() => {
     const root = rootRef.current;
     if (root) keepLightboxFocus(root, document.activeElement, document.body, closeRef.current);
   }, [index]);
 
-  return createPortal(
-    <div
-      ref={rootRef}
+  return (
+    <Modal
       className="review-lightbox"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby={titleId}
-      onClick={(e) => {
-        // a click next to the card (backdrop, empty stage) closes; the card and the buttons do not
-        const el = e.target as HTMLElement;
-        if (el === e.currentTarget || el.classList.contains("review-lightbox-stage") || el.classList.contains("review-lightbox-inner")) onClose();
-      }}
+      labelledBy={titleId}
+      dialogRef={rootRef}
+      onClose={onClose}
+      initialFocus={closeRef}
+      onKeyDown={onKey}
+      // a click next to the card (backdrop, empty stage) closes; the card and the buttons do not
+      closeOnBackdrop={(el) => el.classList.contains("review-lightbox-stage") || el.classList.contains("review-lightbox-inner")}
     >
       <LightboxBody {...props} titleId={titleId} closeRef={closeRef} />
-    </div>,
-    document.body,
+    </Modal>
   );
 }

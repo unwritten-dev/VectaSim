@@ -4,13 +4,14 @@
 // The radar and cloud layers themselves live in weatherOverlay.ts; WeatherLegend shows the
 // time of the images on the map.
 
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { Fragment, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useT, type TKey } from "../i18n";
 import { saveWeatherPrefs, setWeatherMaster, useWeatherState, zuluLabel, type WeatherPrefs, type WeatherState } from "./weatherOverlay";
 import "./trafficToggle.css";
 import { CATEGORY_COLOR } from "../theme";
 import type { FlightCategory } from "../types";
 import "./weatherToggle.css";
+import { useHintIds } from "./hint";
 
 const ITEMS: Array<{ id: keyof WeatherPrefs; labelKey: TKey; titleKey: TKey }> = [
   { id: "metar", labelKey: "map.weather.metar", titleKey: "map.weather.metarTitle" },
@@ -91,9 +92,11 @@ export default function WeatherToggle({ on, onToggle, metarZoom }: Props) {
     if (next[id] && !on) onToggle();
   };
 
+  const hints = useHintIds();
+  const mainTitle = t(on ? "map.weather.offTitle" : "map.weather.onTitle", { zoom: metarZoom });
   return (
     <span className={on ? "traffic-toggle traffic-split weather-split on" : "traffic-toggle traffic-split weather-split"} ref={wrapRef} role="group" aria-label={t("map.weather.groupLabel")}>
-      <button className="toggle traffic-main" onClick={onToggle} aria-pressed={on} title={t(on ? "map.weather.offTitle" : "map.weather.onTitle", { zoom: metarZoom })}>
+      <button className="toggle traffic-main" onClick={onToggle} aria-pressed={on} title={mainTitle} aria-describedby={hints("main", mainTitle).describedBy}>
         {t("map.toolbar.weather")}
       </button>
       <button
@@ -110,6 +113,7 @@ export default function WeatherToggle({ on, onToggle, metarZoom }: Props) {
         aria-expanded={open}
         aria-label={t("map.weather.menu")}
         title={t("map.weather.menuTitle")}
+        aria-describedby={hints("menu", t("map.weather.menuTitle")).describedBy}
       >
         <span className="traffic-net-caret" aria-hidden="true">
           ▾
@@ -129,6 +133,7 @@ export default function WeatherToggle({ on, onToggle, metarZoom }: Props) {
               className={wx.prefs[item.id] ? "active" : undefined}
               onClick={() => flip(item.id)}
               title={t(item.titleKey, { zoom: metarZoom })}
+              aria-describedby={hints(item.id, t(item.titleKey, { zoom: metarZoom })).describedBy}
             >
               <span className="weather-check" aria-hidden="true">
                 {wx.prefs[item.id] ? "✓" : ""}
@@ -137,8 +142,13 @@ export default function WeatherToggle({ on, onToggle, metarZoom }: Props) {
             </button>
           ))}
           <div className="weather-menu-note">{t("map.weather.note")}</div>
+          {ITEMS.map((item) => (
+            <Fragment key={item.id}>{hints(item.id, t(item.titleKey, { zoom: metarZoom })).node}</Fragment>
+          ))}
         </div>
       )}
+      {hints("main", mainTitle).node}
+      {hints("menu", t("map.weather.menuTitle")).node}
     </span>
   );
 }

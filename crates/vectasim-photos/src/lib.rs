@@ -117,8 +117,18 @@ pub fn parse_photos(body: &str) -> Result<Option<Photo>, PhotoError> {
         let large = p.thumbnail_large.map(|i| i.src).filter(|s| !s.is_empty());
         let small = p.thumbnail.map(|i| i.src).filter(|s| !s.is_empty());
         let large_url = large.clone().or_else(|| small.clone())?;
-        Some(Photo { thumb_url: small.unwrap_or_else(|| large_url.clone()), large_url, photographer: p.photographer.trim().into(), link: p.link })
+        // the credit link is opened in the browser: only a Planespotters page, else none
+        let link = if is_planespotters_link(&p.link) { p.link } else { String::new() };
+        Some(Photo { thumb_url: small.unwrap_or_else(|| large_url.clone()), large_url, photographer: p.photographer.trim().into(), link })
     }))
+}
+
+/// An https page on `www.planespotters.net` (no other host, port, scheme or userinfo, no
+/// whitespace or control characters); same rule as `vectasim_store::is_planespotters_link`.
+pub fn is_planespotters_link(link: &str) -> bool {
+    const ORIGIN: &str = "https://www.planespotters.net";
+    let Some(rest) = link.strip_prefix(ORIGIN) else { return false };
+    (rest.is_empty() || rest.starts_with('/')) && !link.chars().any(|c| c.is_whitespace() || c.is_control() || c == '\\')
 }
 
 /// Whether a cached lookup is still good. `source` is what the airframe row says

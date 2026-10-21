@@ -234,7 +234,7 @@
       "privacy": {
         "label": "Streamer-Modus",
         "key": "Strg+Umschalt+P",
-        "help": "Blendet Kennzeichen (D-••••), Rufzeichen und Flugnummer, Airline, SimBrief-ID und deinen Windows-Benutzernamen in Pfaden aus – in der ganzen Oberfläche, auf der Landekarte und im Diagnosepaket. Gespeichert bleibt alles wie es ist; Foto-Credits bleiben sichtbar."
+        "help": "Blendet Kennzeichen (D-••••), Rufzeichen und Flugnummer, Airline, SimBrief-ID aus – in der ganzen Oberfläche und im Diagnosepaket (dein Windows-Benutzername in Pfaden ist dort immer ausgeblendet), auf der Landekarte und im Diagnosepaket. Gespeichert bleibt alles wie es ist; Foto-Credits bleiben sichtbar."
       },
       "photos": {
         "label": "Flugzeugfotos von Planespotters.net laden",

@@ -137,6 +137,29 @@ export function followLanguage(map: LabelTarget): () => void {
   });
 }
 
+/**
+ * Icons the OpenFreeMap style asks for that its sprite does not have: the town / city dot below
+ * zoom 9 is `circle-11`, the sprite (ofm_f384) only has `circle_11`. MapLibre drew nothing for it
+ * anyway and warned `Image "circle-11" could not be loaded` on every start; the patch drops the
+ * icon, so the labels look exactly as before and the warning is gone.
+ */
+export const MISSING_SPRITE_ICONS: ReadonlySet<string> = new Set(["circle-11"]);
+
+/** Does an `icon-image` value (a string or an expression) reference one of MISSING_SPRITE_ICONS? */
+export function referencesMissingIcon(iconImage: unknown): boolean {
+  if (typeof iconImage === "string") return MISSING_SPRITE_ICONS.has(iconImage);
+  return Array.isArray(iconImage) && iconImage.some(referencesMissingIcon);
+}
+
+/** The layer without an `icon-image` that only points at a missing sprite icon (same object when there is none). */
+function withoutMissingIcon(layer: LayerSpecification): LayerSpecification {
+  const layout = (layer as { layout?: Layout }).layout;
+  if (!layout || !referencesMissingIcon(layout["icon-image"])) return layer;
+  const rest: Layout = { ...layout };
+  delete rest["icon-image"];
+  return { ...layer, layout: rest } as LayerSpecification;
+}
+
 /** Applies a theme's patch table to the raw style (pure; returns a new object, unknown layers untouched). */
 export function patchBasemapStyle(style: StyleSpecification, t: ThemeDef = activeTheme(), lang: Language = getLanguage()): StyleSpecification {
   const table = patchTable(t);
@@ -155,7 +178,7 @@ export function patchBasemapStyle(style: StyleSpecification, t: ThemeDef = activ
     if (p.layout || p.hidden || named) next.layout = layout;
     if (p.minzoom != null) next.minzoom = Math.max(p.minzoom, layer.minzoom ?? 0);
     return next as LayerSpecification;
-  });
+  }).map(withoutMissingIcon);
   const sources = { ...style.sources };
   if (t.map.grid) {
     sources["vectasim-graticule"] = { type: "geojson", data: graticule(1) };

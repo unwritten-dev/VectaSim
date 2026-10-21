@@ -100,3 +100,26 @@ describe("trackHeightAt (3D replay cursor)", () => {
     expect(trackHeightAt(samples, 3000)).toBeNull();
   });
 });
+
+describe("own symbol: only a change that shows is sent (ownSymbolChanged)", async () => {
+  const { ownAircraftGeoJson, ownSymbolChanged } = await import("./ownAircraft");
+  const { metersPerPixel } = await import("./aircraftModel");
+  const pose = { lon: 8, lat: 50, headingDeg: 90, altFt: 3000, cat: "medium" as const };
+  const at = (p: Partial<typeof pose>, view3d = false, model = false) => ownAircraftGeoJson({ ...pose, ...p }, view3d, model);
+  it("a sub-pixel step zoomed out is not sent; zoomed in it is", () => {
+    const step = at({ lon: 8.0002 });
+    expect(ownSymbolChanged(at({}), step, metersPerPixel(50, 9))).toBe(false);
+    expect(ownSymbolChanged(at({}), step, metersPerPixel(50, 15))).toBe(true);
+  });
+  it("heading from one degree, the first data, a removed aircraft and the 3D flag always", () => {
+    const mpp = metersPerPixel(50, 9);
+    expect(ownSymbolChanged(at({}), at({ headingDeg: 90.5 }), mpp)).toBe(false);
+    expect(ownSymbolChanged(at({}), at({ headingDeg: 91.2 }), mpp)).toBe(true);
+    expect(ownSymbolChanged(null, at({}), mpp)).toBe(true);
+    expect(ownSymbolChanged(at({}), ownAircraftGeoJson(null, false), mpp)).toBe(true);
+    expect(ownSymbolChanged(at({}, true, false), at({}, true, true), mpp)).toBe(true);
+  });
+  it("while the 3D model draws the aircraft the transparent symbol is not re-sent", () => {
+    expect(ownSymbolChanged(at({}, true, true), at({ lon: 9, headingDeg: 200 }, true, true), metersPerPixel(50, 15))).toBe(false);
+  });
+});

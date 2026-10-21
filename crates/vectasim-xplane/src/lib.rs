@@ -83,10 +83,15 @@ impl XPlaneConfig {
         Self::from_lookup(|k| std::env::var(k).ok())
     }
 
+    /// Host and port from `env` (environment or settings); a host [`check_host`] refuses
+    /// (bad syntax, a public IP address) is ignored with a warning and localhost is used.
     pub fn from_lookup(env: impl Fn(&str) -> Option<String>) -> Self {
         let mut c = Self::default();
         if let Some(h) = env(ENV_HOST).map(|h| h.trim().to_owned()).filter(|h| !h.is_empty()) {
-            c.host = h;
+            match check_host(&h) {
+                Ok(_) => c.host = h,
+                Err(e) => log::warn!("X-Plane host {h:?} ignored ({e}), using {DEFAULT_HOST}"),
+            }
         }
         if let Some(p) = env(ENV_PORT).and_then(|p| p.trim().parse::<u16>().ok()).filter(|p| *p > 0) {
             c.port = p;
@@ -94,9 +99,100 @@ impl XPlaneConfig {
         c
     }
 
-    /// `X-Plane Web API localhost:8086` (Diagnose → Quelle).
+    /// `X-Plane Web API localhost:8086` (Settings → Diagnostics → Source).
     pub fn source_label(&self) -> String {
         format!("X-Plane Web API {}:{}", self.host, self.port)
+    }
+}
+
+/// Where an accepted X-Plane host points ([`check_host`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HostScope {
+    /// This PC (`localhost`, 127.0.0.0/8, `::1`).
+    Loopback,
+    /// An address of the local network: private (RFC 1918), link-local, shared/CGNAT
+    /// (100.64.0.0/10, e.g. Tailscale), IPv6 unique-local or link-local.
+    Local,
+    /// A host name (`simpc`, `simpc.local`); where it points is only known when it resolves –
+    /// [`http::connect`] checks every resolved address with [`ip_scope`] on each connect.
+    Name,
+}
+
+/// Why [`check_host`] refused a host.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HostError {
+    /// Not an IP address and not a valid host name (spaces, `/`, `:` with a port, `_`, …).
+    Syntax,
+    /// An IP address outside this PC and the local network: the Web API is plain HTTP without
+    /// a password, so it is never spoken across the internet.
+    Public,
+}
+
+impl std::fmt::Display for HostError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            HostError::Syntax => "not an IP address or host name",
+            HostError::Public => "public address – the X-Plane Web API is unencrypted, only this PC or the local network",
+        })
+    }
+}
+
+/// Where an IP address points: this PC, the local network, or `Err(Public)` (also `0.0.0.0`,
+/// `::`, NAT64 and IPv4-mapped public addresses).
+pub fn ip_scope(ip: std::net::IpAddr) -> Result<HostScope, HostError> {
+    use std::net::{IpAddr, Ipv4Addr};
+    let v4_scope = |a: Ipv4Addr| {
+        let [o1, o2, ..] = a.octets();
+        if a.is_loopback() {
+            Ok(HostScope::Loopback)
+        } else if a.is_private() || a.is_link_local() || (o1 == 100 && (64..128).contains(&o2)) {
+            Ok(HostScope::Local)
+        } else {
+            Err(HostError::Public)
+        }
+    };
+    match ip {
+        IpAddr::V4(a) => v4_scope(a),
+        IpAddr::V6(a) => {
+            let seg0 = a.segments()[0];
+            if a.is_loopback() {
+                Ok(HostScope::Loopback)
+            } else if let Some(v4) = a.to_ipv4_mapped() {
+                v4_scope(v4)
+            } else if (seg0 & 0xfe00) == 0xfc00 || (seg0 & 0xffc0) == 0xfe80 {
+                Ok(HostScope::Local)
+            } else {
+                Err(HostError::Public)
+            }
+        }
+    }
+}
+
+/// Checks an X-Plane host setting: an IPv4/IPv6 address of this PC or the local network, or a
+/// host name (RFC 1123 labels, not all-numeric). The X-Plane Web API is plain HTTP without
+/// authentication, so public IP addresses are refused. A name is accepted here; where it points
+/// is checked on every connect ([`http::connect`]: only loopback/LAN addresses are dialled, a
+/// name that resolves to public addresses only is refused).
+pub fn check_host(host: &str) -> Result<HostScope, HostError> {
+    let h = host.trim();
+    if h.is_empty() || h.len() > 253 {
+        return Err(HostError::Syntax);
+    }
+    if let Ok(ip) = h.parse::<std::net::IpAddr>() {
+        return ip_scope(ip);
+    }
+    let name = h.strip_suffix('.').unwrap_or(h);
+    let labels: Vec<&str> = name.split('.').collect();
+    let label_ok = |l: &&str| {
+        (1..=63).contains(&l.len()) && l.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') && !l.starts_with('-') && !l.ends_with('-')
+    };
+    if !labels.iter().all(label_ok) || labels.last().is_some_and(|l| l.bytes().all(|b| b.is_ascii_digit())) {
+        return Err(HostError::Syntax);
+    }
+    if name.eq_ignore_ascii_case("localhost") {
+        Ok(HostScope::Loopback)
+    } else {
+        Ok(HostScope::Name)
     }
 }
 
@@ -133,7 +229,7 @@ pub struct XPlaneProvider {
     pub config: XPlaneConfig,
     /// Raw recorder (session files / RAM ring); `None` records nothing.
     pub dump: Option<Arc<DumpRecorder>>,
-    /// Raw-value diagnostics (Einstellungen → Diagnose → Live-Rohdaten).
+    /// Raw-value diagnostics (Settings → Diagnostics → Live raw data).
     pub diag: SharedRawDiag,
 }
 
@@ -264,7 +360,7 @@ fn connect(c: &XPlaneConfig) -> Result<Conn, String> {
     let stream = http::connect(&c.host, c.port, c.timeout).map_err(|e| e.to_string())?;
     stream.set_read_timeout(Some(c.timeout.max(Duration::from_secs(2)))).map_err(|e| e.to_string())?;
     let _ = stream.set_nodelay(true);
-    let url = format!("ws://{}:{}/api/{api}", c.host, c.port);
+    let url = format!("ws://{}/api/{api}", http::authority(&c.host, c.port));
     let (ws, _) = tungstenite::client::client_with_config(url.as_str(), stream, Some(ws_config())).map_err(|e| format!("WebSocket {url}: {e}"))?;
     ws.get_ref().set_read_timeout(Some(READ_SLICE)).map_err(|e| e.to_string())?;
     Ok(Conn { ws, api, xplane_version: caps.xplane_version.unwrap_or_else(|| "12".into()), ids, unresolved })

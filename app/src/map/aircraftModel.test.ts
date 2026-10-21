@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GROUND_UNIT_M, MESH_FLOOR, applyMat3, groundLiftM, lerpPose, metersPerPixel, modelRotation, verticalScaleM, VERTEX_FLOATS, type ModelPose } from "./aircraftModel";
+import { AircraftModelLayer, GROUND_UNIT_M, MESH_FLOOR, applyMat3, groundLiftM, lerpPose, metersPerPixel, modelRotation, poseChangeVisible, verticalScaleM, VERTEX_FLOATS, type ModelPose } from "./aircraftModel";
 import { MESH_RADIUS } from "./trafficModel";
 import { altToCurtainM } from "./trackChunks";
 import { MESH_TRI_BUDGET, MODEL_KINDS, kindOfWake, meshFor, meshParts, modelKind, modelSize, triangleCount } from "./aircraftMeshes";
@@ -197,5 +197,39 @@ describe("modelKind", () => {
   });
   it("same size factor as the 2D symbol", () => {
     for (const c of ["light", "medium", "heavy", "super"] as const) expect(modelSize(c)).toBe(WAKE_SIZE[c]);
+  });
+});
+
+describe("invisible pose changes (no blend, no frame)", () => {
+  const base: ModelPose = { lon: 8, lat: 50, headingDeg: 90, pitchDeg: 2, bankDeg: 0, altFt: 35_000, size: 1, kind: "narrowbody" };
+  it("a 10 Hz cruise step zoomed out is below half a pixel; zoomed in it shows", () => {
+    // 450 kt for 0.1 s ≈ 23 m east
+    const next = { ...base, lon: base.lon + 23 / (111_320 * Math.cos((50 * Math.PI) / 180)) };
+    expect(poseChangeVisible(base, next, metersPerPixel(50, 7))).toBe(false);
+    expect(poseChangeVisible(base, next, metersPerPixel(50, 14))).toBe(true);
+  });
+  it("attitude, height, shape and size count; across ±180 the short way", () => {
+    const mpp = metersPerPixel(50, 6);
+    expect(poseChangeVisible(base, { ...base, headingDeg: 90.6 }, mpp)).toBe(true);
+    expect(poseChangeVisible(base, { ...base, bankDeg: 0.2 }, mpp)).toBe(false);
+    expect(poseChangeVisible(base, { ...base, altFt: base.altFt + 3000 }, mpp)).toBe(true);
+    expect(poseChangeVisible(base, { ...base, kind: "widebody" }, mpp)).toBe(true);
+    expect(poseChangeVisible({ ...base, lon: 179.9999 }, { ...base, lon: -179.9999 }, mpp)).toBe(false);
+    expect(poseChangeVisible(null, base, mpp)).toBe(true);
+  });
+  it("the layer takes an invisible step without asking for a frame", () => {
+    let repaints = 0;
+    const layer = new AircraftModelLayer("m", { body: "#ffd54a", dark: "#000000" });
+    const map = { getZoom: () => 6, triggerRepaint: () => repaints++ };
+    layer.onAdd(map as never, { createBuffer: () => ({}), bindBuffer() {}, bufferData() {}, ARRAY_BUFFER: 1, STATIC_DRAW: 1 } as never);
+    layer.setEnabled(true);
+    layer.setPose(base, 0);
+    // what the last frame showed (render needs GL; the field is what render sets)
+    (layer as unknown as { drawn: ModelPose }).drawn = base;
+    const before = repaints;
+    layer.setPose({ ...base, lon: base.lon + 0.0001 }, 100);
+    expect(repaints).toBe(before);
+    layer.setPose({ ...base, lon: base.lon + 0.5 }, 200);
+    expect(repaints).toBe(before + 1);
   });
 });

@@ -222,7 +222,7 @@ export default function YearReview() {
   const countryNames = useMemo(() => new Map((stat?.countries ?? []).map((c) => [c.iso2, countryName(c, lang)])), [stat, lang]);
   const src: CardSource | null = useMemo(() => (review ? { review, outlines: stat?.outlines ?? null, countryNames } : null), [review, stat, countryNames]);
   // concrete colours of the active theme (re-read when it changes)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- `theme` is the trigger: readCardTheme() reads the CSS variables the theme switch has set
   const colors = useMemo(() => readCardTheme(), [theme]);
   const hideReg = privacyMode || cardHideReg;
   const demoOut = data ? demoLeftOut(data.flights, showDemo) : 0;

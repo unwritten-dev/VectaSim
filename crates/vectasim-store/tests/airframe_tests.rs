@@ -207,7 +207,9 @@ fn existing_flights_are_booked_by_the_v6_migration() {
             run(&mut rec, 30.0);
         }
     }
-    let ids: Vec<String> = Store::open(&path).unwrap().list_flights(10, 0).unwrap().into_iter().map(|f| f.id).collect();
+    // 30 s of taxiing left open: on reopening they are ground sessions in the trash
+    let ids: Vec<String> = Store::open(&path).unwrap().list_deleted_flights().unwrap().into_iter().map(|d| d.flight.id).collect();
+    assert_eq!(ids.len(), 3);
     // back to a v5 logbook: one flight with an OFP registration, one with only the sim id, one with a placeholder
     {
         let conn = rusqlite::Connection::open(&path).unwrap();

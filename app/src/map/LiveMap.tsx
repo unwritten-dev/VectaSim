@@ -10,9 +10,10 @@ import type { AircraftInfo, Airport, FlightEvent, Metar, NavFix, OnlineSummary, 
 import { WAKE_SIZE, icaoFromAtcModel, trafficColors, wakeCategory } from "./aircraftIcons";
 import { Traffic3D } from "./trafficModel";
 import type { TrafficHistoryFix, ViewBox } from "./traffic3d";
-import { CameraGuard, FOLLOW_EVENT, GLIDE_EVENT, anchorCenter, followCameraUpdate, isMultiTouch, stepTowards, type FollowAnchor } from "./followCamera";
-import { OWN_LAYERS, PULSE_MIN, addOwnAircraftLayers, haloOpacity, keepOwnOnTop, ownAircraftGeoJson, prefersReducedMotion, pulseOpacity } from "./ownAircraft";
-import { AircraftModelLayer } from "./aircraftModel";
+import { CameraGuard, FOLLOW_EVENT, FollowGlide, GLIDE_EVENT, anchorCenter, followCameraUpdate, isMultiTouch, stepTowards, type FollowAnchor, type GlidePoint } from "./followCamera";
+import { FRAME_SLACK_MS, capRenders, followFrameMs, frameAfter, watchWindow, windowAway } from "./frameCap";
+import { OWN_LAYERS, PULSE_MIN, addOwnAircraftLayers, haloOpacity, keepOwnOnTop, ownAircraftGeoJson, ownSymbolChanged, prefersReducedMotion, pulseOpacity } from "./ownAircraft";
+import { AircraftModelLayer, metersPerPixel } from "./aircraftModel";
 import { modelKind, type ModelKind } from "./aircraftMeshes";
 import {
   addAirportLayers,
@@ -46,7 +47,7 @@ import {
 } from "./online";
 import TrafficCard from "./TrafficCard";
 import { useTrafficSelection } from "./trafficHooks";
-import { boundedDebounce } from "./debounce";
+import { MOVE_REFRESH, boundedDebounce } from "./debounce";
 import { SELECT_TRAFFIC_EVENT, greatCircle, sameTraffic, type SelectTrafficDetail, type TrafficRef } from "./trafficInfo";
 import { addAirportDiagramLayers } from "./airportDiagram";
 import AirportReadout from "./AirportReadout";
@@ -59,10 +60,12 @@ import { followSatellite } from "./satellite";
 import { attachWeather, getWeatherState } from "./weatherOverlay";
 import { useTelemetry } from "../telemetryStore";
 import { useT } from "../i18n";
-import { queryBox, viewBbox } from "./geo";
+import { queryBox, unwrapLon, viewBbox } from "./geo";
 import { sequence } from "./sequence";
 import { replaceCustomLayer } from "./styleOnce";
+import { attachStyleLifecycle } from "./styleLifecycle";
 import MapUnavailable from "./MapUnavailable";
+import { useHintIds } from "./hint";
 
 const TRACK_POINT_INTERVAL_MS = 1000;
 const AIRPORT_LIMIT = 600;
@@ -79,8 +82,8 @@ const VIEW3D_STORAGE_KEY = "vectasim.map3d";
 /** The own aircraft's 3D model (custom layer) and the stack kept above every other layer. */
 const MODEL_LAYER = "aircraft-model";
 const OWN_STACK = [...OWN_LAYERS, MODEL_LAYER];
-/** Follow mode re-centres only when the aircraft moved at least this far on screen. */
-const FOLLOW_MIN_PX = 1;
+/** Follow mode moves the camera only when the aircraft moved at least this far on screen… */
+const FOLLOW_MIN_PX = 0.5;
 /** …or when its height (3D view) changed by this much. */
 const FOLLOW_MIN_ELEVATION_M = 2;
 /** Fired by the shell when a kept-mounted, CSS-hidden map becomes visible again. */
@@ -125,6 +128,26 @@ export function pointFree(p: { x: number; y: number }, i: MapInsets, w: number, 
   return p.x >= i.left && p.x <= w - i.right && p.y >= i.top && p.y <= h - i.bottom;
 }
 
+/** The part of a MapLibre map revealTraffic needs (a fake in the tests). */
+export type RevealMap = Pick<maplibregl.Map, "project" | "easeTo"> & { getCanvas(): { clientWidth: number; clientHeight: number } };
+
+/**
+ * First position of a newly selected aircraft (a click on the map): when it lies under the
+ * traffic card, the HUD or the toolbar, the camera eases it into the free area. That move takes
+ * the camera, so - as with a selection from the online list - the own aircraft is not followed any
+ * more (`suspendOwnFollow`, back when the card closes), and the ease is one of our glides
+ * (GLIDE_EVENT): as a plain move, the follow hook (followCameraUpdate) put the own aircraft back
+ * into the centre on every frame of it and the selected one stayed hidden. Returns whether the
+ * camera moves.
+ */
+export function revealTraffic(map: RevealMap, pos: { lon: number; lat: number }, insets: MapInsets, suspendOwnFollow: () => void): boolean {
+  const canvas = map.getCanvas();
+  if (pointFree(map.project([pos.lon, pos.lat]), insets, canvas.clientWidth, canvas.clientHeight)) return false;
+  suspendOwnFollow();
+  map.easeTo({ center: [pos.lon, pos.lat], offset: insetOffset(insets), duration: 500 }, GLIDE_EVENT);
+  return true;
+}
+
 /**
  * The ground vector from the canvas centre to the screen point `off` px away (the free area's
  * centre), at the current zoom: a follow anchor's shift (followCamera.ts anchorCenter).
@@ -138,6 +161,14 @@ function groundShift(map: maplibregl.Map, [ox, oy]: [number, number]): FollowAnc
   const b = map.unproject([cx + ox, cy + oy]);
   const shift = { dLon: b.lng - a.lng, dLat: b.lat - a.lat, atZoom: map.getZoom() };
   return Number.isFinite(shift.dLon) && Number.isFinite(shift.dLat) ? shift : undefined;
+}
+
+/** Would moving the camera centre to `to` show (≥ FOLLOW_MIN_PX on screen or FOLLOW_MIN_ELEVATION_M of centre height)? */
+export function cameraMoveVisible(map: Pick<maplibregl.Map, "getCenterElevation" | "getCenter" | "project">, to: GlidePoint): boolean {
+  if (Math.abs(map.getCenterElevation() - to.elev) >= FOLLOW_MIN_ELEVATION_M) return true;
+  const a = map.project(map.getCenter());
+  const b = map.project([to.lon, to.lat]);
+  return Math.hypot(b.x - a.x, b.y - a.y) >= FOLLOW_MIN_PX;
 }
 
 function load3d(): boolean {
@@ -361,14 +392,69 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
     const anchor: FollowAnchor = { lon: pose.lon, lat: pose.lat, elev: altToCurtainM(pose.hFt), shift: groundShift(map, followInsetRef.current.off) };
     trafficAnchorRef.current = anchor;
     if (guard.busy()) return;
-    const target = { ...anchorCenter(anchor, map.getZoom()), elev: anchor.elev ?? 0 };
-    if (![target.lon, target.lat].every(Number.isFinite)) return;
     const c = map.getCenter();
+    // in the camera centre's world copy (an ease over the date line leaves it beyond ±180)
+    const target = { ...anchorCenter(anchor, map.getZoom(), c.lng), elev: anchor.elev ?? 0 };
+    if (![target.lon, target.lat].every(Number.isFinite)) return;
     const next = stepTowards({ lon: c.lng, lat: c.lat, elev: map.getCenterElevation() }, target, guard.catchUp(now));
-    map.jumpTo({ center: [next.lon, next.lat], elevation: next.elev }, FOLLOW_EVENT);
+    // not half a pixel: no camera move, no frame (frameCap.ts)
+    if (cameraMoveVisible(map, next)) map.jumpTo({ center: [next.lon, next.lat], elevation: next.elev }, FOLLOW_EVENT);
   };
   const followTrafficFrameRef = useRef(followTrafficFrame);
   followTrafficFrameRef.current = followTrafficFrame;
+  /**
+   * Own-aircraft follow: per sample a glide from the camera towards the aircraft (FollowGlide),
+   * stepped with jumpTo at the follow frame rate (30 fps, 15 fps without window focus) and only
+   * when the step shows – a 150 ms easeTo per sample rendered at the display's full rate.
+   */
+  const glideRef = useRef(new FollowGlide());
+  /** Cancels the scheduled glide step (undefined: no step scheduled). */
+  const glideCancelRef = useRef<(() => void) | undefined>(undefined);
+  const glideStepAtRef = useRef(-Infinity);
+  const lastSampleAtRef = useRef(0);
+  /** The next glide step on the first frame `delayMs` from now - asleep in between, not woken at the display rate. */
+  const scheduleGlide = (delayMs: number) => {
+    glideCancelRef.current = frameAfter(delayMs, (t) => followStepRef.current(t));
+  };
+  const followStep = (now: number) => {
+    glideCancelRef.current = undefined;
+    const map = mapRef.current;
+    const glide = glideRef.current;
+    // minimised (requestAnimationFrame keeps running in WebView2): no camera steps; the first
+    // sample after it glides from where the camera stopped
+    if (!map || !followRef.current || windowAway()) {
+      glide.clear();
+      return;
+    }
+    const frameMs = followFrameMs();
+    const wait = glideStepAtRef.current + frameMs - FRAME_SLACK_MS - now;
+    if (wait > 0) {
+      scheduleGlide(wait);
+      return;
+    }
+    const target = glide.at(now);
+    // never while the user rotates / pitches / zooms (every camera command resets the gesture handlers)
+    if (target && !guardRef.current?.busy() && map.getCanvas().clientWidth > 0) {
+      // in the camera centre's world copy: no jump by a whole world after an ease over the date line
+      const to = { ...target, lon: unwrapLon(target.lon, map.getCenter().lng) };
+      if (cameraMoveVisible(map, to)) {
+        glideStepAtRef.current = now;
+        map.jumpTo({ center: [to.lon, to.lat], elevation: to.elev }, FOLLOW_EVENT);
+      }
+    }
+    if (!glide.done(now)) scheduleGlide(frameMs);
+  };
+  const followStepRef = useRef(followStep);
+  followStepRef.current = followStep;
+  useEffect(
+    () => () => {
+      glideCancelRef.current?.();
+      glideCancelRef.current = undefined;
+    },
+    [],
+  );
+  /** The symbol data last sent to the "aircraft" source (null: send the next one in any case). */
+  const ownSentRef = useRef<GeoJSON.FeatureCollection | null>(null);
   /** Symbol data and model pose from the latest sample (each sample, theme change, 3D toggle). */
   const drawOwn = () => {
     const map = mapRef.current;
@@ -387,7 +473,13 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
             cat: ownCatRef.current,
           }
         : null;
-    (map.getSource("aircraft") as maplibregl.GeoJSONSource | undefined)?.setData(ownAircraftGeoJson(pose, view3dRef.current, modelOn));
+    // only a change that shows is sent: every setData re-tiles the source and renders a frame
+    const data = ownAircraftGeoJson(pose, view3dRef.current, modelOn);
+    const src = map.getSource("aircraft") as maplibregl.GeoJSONSource | undefined;
+    if (src && ownSymbolChanged(ownSentRef.current, data, metersPerPixel(pose?.lat ?? 0, map.getZoom()))) {
+      src.setData(data);
+      ownSentRef.current = data;
+    }
     model?.setPose(t && pose ? { ...pose, pitchDeg: t.pitchDeg, bankDeg: t.bankDeg, size: WAKE_SIZE[pose.cat], kind: ownKindRef.current } : null);
   };
   const drawOwnRef = useRef(drawOwn);
@@ -413,7 +505,7 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
       if (timer !== undefined) return;
       timer = window.setInterval(() => {
         const map = mapRef.current;
-        if (!map || !readyRef.current || document.hidden || map.getCanvas().clientWidth === 0) return;
+        if (!map || !readyRef.current || windowAway() || map.getCanvas().clientWidth === 0) return;
         if (map.getLayer(OWN_LAYERS[0])) map.setPaintProperty(OWN_LAYERS[0], "icon-opacity", haloOpacity(pulseOpacity(performance.now())));
       }, 66);
     };
@@ -434,6 +526,10 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
         attributionControl: { compact: true },
         // the 3D follow camera looks at the aircraft's height (no terrain: otherwise clamped to 0)
         centerClampedToGround: false,
+        // no 300 ms label fade: with moving traffic and the follow camera the placement changes
+        // several times a second, and every fade kept MapLibre rendering at the display's full
+        // rate (measured in 3D follow: ~52 → ~27 frames/s from this alone; frameCap.ts)
+        fadeDuration: 0,
       });
       map.addControl(new maplibregl.NavigationControl({ showCompass: true, visualizePitch: true }), "top-right");
       map.addControl(new maplibregl.ScaleControl({ unit: "nautical" }), "bottom-left");
@@ -444,6 +540,10 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
       // follow cameras wait while the user (or another animation) has the camera (map/followCamera.ts)
       const guard = new CameraGuard(map);
       guardRef.current = guard;
+      // every frame outside gestures and camera animations at the follow frame rate, none while
+      // minimised; the window's focus and minimised state from Tauri (frameCap.ts)
+      const renderCap = capRenders(map, () => guard.busy() || map.isMoving());
+      const unwatchWindow = watchWindow();
       // zooming / rotating while following: every frame keeps the followed aircraft in place,
       // zoom, bearing and pitch stay the user's (no snap back after the zoom)
       map.setTransformCameraUpdate(followCameraUpdate(guard, () => followAnchorRef.current(), (lon, lat) => new maplibregl.LngLat(lon, lat)));
@@ -486,8 +586,7 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
             // filters the cached snapshot locally; feed errors surface via online:summary.lastError
             .catch(warnOnce("online refresh"));
         },
-        250,
-        1000,
+        ...MOVE_REFRESH.online,
       );
 
       // METARs only for the biggest airports in view (<= 40), only when zoomed in and the
@@ -506,8 +605,7 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
             // map badges are best effort; the flight bar shows METAR errors for the relevant station
             .catch(warnOnce("METAR refresh"));
         },
-        600,
-        1500,
+        ...MOVE_REFRESH.metars,
       );
       const refreshMetars = () => {
         if (map.getZoom() < METAR_MIN_ZOOM || !layersRef.current.weather || !getWeatherState().prefs.metar) {
@@ -527,8 +625,12 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
         invoke<Airport[]>("airports_in_bbox", { ...viewBbox(map), limit: AIRPORT_LIMIT })
           .then((list) => {
             if (!isLatest() || mapRef.current !== map) return;
-            const src = map.getSource("airports") as maplibregl.GeoJSONSource | undefined;
-            src?.setData(airportsGeoJson(list));
+            // the same airports as last time (following: 2 lookups a second): no re-tiling, no frame
+            const key = list.map((a) => a.ident).join(",");
+            if (key !== sentKeys.get("airports")) {
+              sentKeys.set("airports", key);
+              (map.getSource("airports") as maplibregl.GeoJSONSource | undefined)?.setData(airportsGeoJson(list));
+            }
             airportsRef.current = new Map(list.map((a) => [a.ident, a]));
             refreshMetars();
           })
@@ -536,7 +638,7 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
           .catch(warnOnce("airport refresh"));
       };
       // on moveend: the 3D follow camera ends a move several times a second while airborne
-      const refreshAirportsSoon = boundedDebounce(refreshAirports, 150, 500);
+      const refreshAirportsSoon = boundedDebounce(refreshAirports, ...MOVE_REFRESH.airports);
 
       // Our layers on top of the basemap. Runs on every style load: the first one, a theme
       // change (setStyle drops every source, layer and image) and a WebGL context restore;
@@ -580,6 +682,8 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
       const restoreData = () => {
         const src = (id: string) => map.getSource(id) as maplibregl.GeoJSONSource | undefined;
         sentKeys.clear();
+        // a new style has a new, empty "aircraft" source
+        ownSentRef.current = null;
         drawTrack(map, trackRef.current, true);
         if (view3dRef.current) drawCurtain(map, trackRef.current);
         src("airports")?.setData(airportsGeoJson([...airportsRef.current.values()]));
@@ -612,53 +716,32 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
       };
       // One handler for every style load, serialised by a generation counter: a theme change
       // before the first load (or two in a row) used to run the layer setup twice on one style
-      // ("Source already exists"), and the aborted first-load path never set routeReady.
-      let styleGen = 0;
-      let initialised = false;
-      map.on("style.load", async () => {
-        const gen = ++styleGen;
-        const isCurrent = () => gen === styleGen && mapRef.current === map;
-        readyRef.current = false;
-        // style URL fallback (offline) carries no projection: set it here
-        applyProjection(map, globeRef.current);
-        try {
-          if (!(await addOwnLayers(isCurrent)) || !isCurrent()) return;
-        } catch (e) {
-          console.warn("live map: layer setup failed", e);
-          return;
-        }
-        readyRef.current = true;
-        restoreData();
-        if (!initialised) {
-          initialised = true;
-          firstReady();
-        }
-      });
-      // theme change (and a WebGL context restore): a fresh basemap in the current colours; the
-      // style.load handler above re-adds our layers and restores their data
-      let themeSeq = 0;
-      const reloadStyle = () => {
-        const mySeq = ++themeSeq;
-        void loadBasemapStyle().then((style) => {
-          if (mySeq !== themeSeq || mapRef.current !== map) return;
+      // ("Source already exists"), and the aborted first-load path never set routeReady. A theme
+      // change and a WebGL context restore load a fresh basemap the same way (styleLifecycle.ts).
+      const lifecycle = attachStyleLifecycle(map, {
+        setup: (isCurrent) => {
+          // style URL fallback (offline) carries no projection: set it here
+          applyProjection(map, globeRef.current);
+          return addOwnLayers(isCurrent);
+        },
+        ready: (first) => {
+          readyRef.current = true;
+          restoreData();
+          if (first) firstReady();
+        },
+        unready: () => {
           readyRef.current = false;
-          // a layer setup still running for the old style stops at its next check
-          styleGen++;
-          map.setStyle(withProjection(style, globeRef.current, COLOR.bg), { diff: false });
-        });
-      };
-      window.addEventListener("theme:changed", reloadStyle);
-      // WebGL context lost (GPU reset, WebView2's GPU process restarted next to the sim): MapLibre
-      // drops the style with every custom layer and re-applies the serialized style on restore –
-      // without our WebGL layers (curtain, own model, traffic models) and with whatever imagery
-      // state the old style had. A fresh style load re-adds all of it, exactly like a theme change.
-      map.on("webglcontextlost", () => {
-        readyRef.current = false;
-        styleGen++;
+        },
         // the model is gone: the flat symbol must not stay hidden for it (`m: 1`, ownAircraft.ts)
-        modelRef.current = null;
+        dropped: () => {
+          modelRef.current = null;
+        },
+        loadStyle: () => loadBasemapStyle().then((style) => withProjection(style, globeRef.current, COLOR.bg)),
+        alive: () => mapRef.current === map,
+        onError: (e) => console.warn("live map: style setup failed", e),
       });
-      map.on("webglcontextrestored", reloadStyle);
+      const reloadStyle = lifecycle.reload;
+      window.addEventListener("theme:changed", reloadStyle);
       // basemap names follow the UI language (map/basemap.ts)
       const offLang = followLanguage(map);
       // Karte / Satellit and the radar / cloud overlay (map/satellite.ts, map/weatherOverlay.ts)
@@ -685,7 +768,7 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
       map.on("moveend", refreshOnline);
       // zoom threshold and the picked <= 200 follow the camera (the follow cameras end a move up to
       // every frame: a few re-picks per second are plenty)
-      const syncTraffic3dSoon = boundedDebounce(() => syncTraffic3dRef.current(), 100, 300);
+      const syncTraffic3dSoon = boundedDebounce(() => syncTraffic3dRef.current(), ...MOVE_REFRESH.traffic3d);
       map.on("moveend", syncTraffic3dSoon);
       // dragging takes the camera: neither the own aircraft nor a selected one is followed;
       // a two-finger pinch (which pans too) only zooms
@@ -707,7 +790,8 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
         if (container.clientWidth === 0 || container.clientHeight === 0) return;
         map.resize();
         const t = telemetryRef.current;
-        if (followRef.current && t && Number.isFinite(t.latitude) && Number.isFinite(t.longitude)) map.jumpTo({ center: [t.longitude, t.latitude] });
+        if (followRef.current && t && Number.isFinite(t.latitude) && Number.isFinite(t.longitude))
+          map.jumpTo({ center: [unwrapLon(t.longitude, map.getCenter().lng), t.latitude] });
       };
       const ro = new ResizeObserver(resize);
       ro.observe(container);
@@ -734,6 +818,9 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
         queryMetars.cancel();
         refreshAirportsSoon.cancel();
         syncTraffic3dSoon.cancel();
+        unwatchWindow();
+        renderCap.dispose();
+        lifecycle.dispose();
         guard.dispose();
         guardRef.current = null;
         window.removeEventListener("vectasim:layers", onLayersChanged);
@@ -825,15 +912,18 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
     // zoomed in at cruise level the model would otherwise sit far above the screen
     const elev3d = altToCurtainM(trackRef.current.heightFor({ altFt: telemetry.altitudeMslFt, aglFt: telemetry.altitudeAglFt, onGround: telemetry.onGround }));
     ownAnchorRef.current = { lon, lat, elev3d };
-    // hidden (CSS display:none) or not moved by a pixel: no camera animation
-    if (followRef.current && map.getCanvas().clientWidth > 0) {
-      const target = map.project([lon, lat]);
-      const here = map.project(map.getCenter());
-      const elevation = view3dRef.current ? elev3d : 0;
-      const climbed = Math.abs(map.getCenterElevation() - elevation) >= FOLLOW_MIN_ELEVATION_M;
-      // never while the user rotates / pitches / zooms (every easeTo resets the gesture handlers)
-      if ((Math.hypot(target.x - here.x, target.y - here.y) >= FOLLOW_MIN_PX || climbed) && !guardRef.current?.busy())
-        map.easeTo({ center: [lon, lat], elevation, duration: 150, easing: (t) => t }, FOLLOW_EVENT);
+    // hidden (CSS display:none) or not moved by half a pixel: no camera move (followStep)
+    const now = performance.now();
+    const gap = now - lastSampleAtRef.current;
+    lastSampleAtRef.current = now;
+    if (followRef.current && !windowAway() && map.getCanvas().clientWidth > 0) {
+      const to = { lon, lat, elev: view3dRef.current ? elev3d : 0 };
+      if (cameraMoveVisible(map, to)) {
+        const c = map.getCenter();
+        // over the time since the previous sample (a long gap or the first sample: at once)
+        glideRef.current.set({ lon: c.lng, lat: c.lat, elev: map.getCenterElevation() }, to, now, gap > 0 && gap < 2000 ? gap : 0);
+        if (glideCancelRef.current === undefined) scheduleGlide(0);
+      }
     }
   }, [telemetry, ownCat, ownKind]);
 
@@ -876,11 +966,9 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
     const key = selKeyRef.current;
     if (key && revealedRef.current !== key) {
       revealedRef.current = key;
-      const canvas = map.getCanvas();
-      if (!pointFree(map.project([pos.lon, pos.lat]), insets, canvas.clientWidth, canvas.clientHeight))
-        map.easeTo({ center: [pos.lon, pos.lat], offset: insetOffset(insets), duration: 500 });
+      revealTraffic(map, pos, insets, suspendOwnFollow);
     }
-  }, [selLon, selLat, routeReady]);
+  }, [selLon, selLat, routeReady, suspendOwnFollow]);
 
   // the selected aircraft: accent colour and always among the 3D models
   const selKey = trafficRef ? `${trafficRef.network}:${trafficRef.cid}` : null;
@@ -941,8 +1029,12 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
       suspendOwnFollow();
       // the card opens in the same frame: centre the aircraft in the free area beside it
       revealedRef.current = `${p.network ?? "vatsim"}:${p.cid}`;
+      // our glide (GLIDE_EVENT), like the reveal of a click on the map (revealTraffic)
       requestAnimationFrame(() =>
-        map.easeTo({ center: [p.longitude, p.latitude], zoom: Math.max(map.getZoom(), 7), offset: insetOffset(measureInsets(wrapRef.current)), duration: 500 }),
+        map.easeTo(
+          { center: [p.longitude, p.latitude], zoom: Math.max(map.getZoom(), 7), offset: insetOffset(measureInsets(wrapRef.current)), duration: 500 },
+          GLIDE_EVENT,
+        ),
       );
     };
     window.addEventListener(SELECT_TRAFFIC_EVENT, onSelect);
@@ -1017,6 +1109,11 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
     map.easeTo({ center: [telemetry.longitude, telemetry.latitude], zoom: Math.max(map.getZoom(), 9), duration: 400 }, GLIDE_EVENT);
   };
 
+  // toolbar explanations for keyboard and screen-reader users (hint.tsx); `title` stays for the mouse
+  const hints = useHintIds();
+  const followHint = hints("follow", t("map.toolbar.followTitle"));
+  const view3dHint = hints("3d", view3d ? t("map.toolbar.flatten") : t("map.toolbar.tilt"));
+  const atcHint = hints("atc", trafficOn ? t("map.toolbar.atcTitle") : t("map.toolbar.atcNeedsTraffic"));
   return (
     <div className="map-wrap" ref={wrapRef}>
       <div ref={containerRef} className="map" />
@@ -1024,9 +1121,10 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
       <div className="map-topleft">
       {overlay}
       <div className="map-toolbar">
-        <button className="toggle" onClick={() => setFollow(!follow)} title={t("map.toolbar.followTitle")} aria-pressed={follow}>
+        <button className="toggle" onClick={() => setFollow(!follow)} title={t("map.toolbar.followTitle")} aria-pressed={follow} aria-describedby={followHint.describedBy}>
           {t("map.toolbar.follow")}
         </button>
+        {followHint.node}
         <button className="map-toolbar-icon" onClick={center} title={t("map.toolbar.center")} aria-label={t("map.toolbar.center")} disabled={!telemetry}>
           {/* SVG crosshair like the other map controls (the ⌖ glyph fell back to a substitute font) */}
           <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
@@ -1040,23 +1138,28 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
           onClick={toggle3d}
           aria-pressed={view3d}
           title={view3d ? t("map.toolbar.flatten") : t("map.toolbar.tilt")}
+          aria-describedby={view3dHint.describedBy}
         >
           3D
         </button>
+        {view3dHint.node}
         <GlobeToggle zoom={zoom} />
         <MapStyleToggle />
         <div className="map-toggle-group" role="group" aria-label={t("map.toolbar.layers")}>
           {/* Verkehr + VATSIM / IVAO / beide; turning traffic on also re-shows a hidden traffic layer */}
           <TrafficToggle on={trafficOn} onEnable={() => !layersRef.current.traffic && toggleLayer("traffic")} />
+          {/* aria-disabled instead of disabled: stays focusable, so keyboard users reach the reason (needs traffic) */}
           <button
             className="toggle"
-            onClick={() => toggleLayer("atc")}
-            disabled={!trafficOn}
+            onClick={() => trafficOn && toggleLayer("atc")}
+            aria-disabled={!trafficOn}
             aria-pressed={trafficOn && layers.atc}
             title={trafficOn ? t("map.toolbar.atcTitle") : t("map.toolbar.atcNeedsTraffic")}
+            aria-describedby={atcHint.describedBy}
           >
             ATC
           </button>
+          {atcHint.node}
           {/* Wetter + METAR / Radar / Wolken (WeatherToggle.tsx) */}
           <WeatherToggle on={layers.weather} onToggle={() => toggleLayer("weather")} metarZoom={METAR_MIN_ZOOM} />
         </div>

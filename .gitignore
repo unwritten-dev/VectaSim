@@ -31,3 +31,5 @@ Thumbs.db
 *.vsdump
 !crates/*/tests/fixtures/*.vsdump
 *.zip
+# full exports (a ZIP with the whole logbook and your own images)
+*.vectasim

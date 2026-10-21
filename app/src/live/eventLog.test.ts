@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { EVENT_LOG_MAX, clearEvents, getEvents, pushEvent, resetEventLogForTests, subscribeEvents, syncEventProvider } from "./eventLog";
+import { EVENT_LOG_MAX, clearEvents, eventsSummary, getEvents, pushEvent, resetEventLogForTests, subscribeEvents, syncEventProvider } from "./eventLog";
 
 /** sessionStorage of one webview tab: survives a reload of the page, not the app. */
 function fakeStorage() {
@@ -101,5 +101,14 @@ describe("eventLog", () => {
     resetEventLogForTests();
     pushEvent("Flug begonnen (Off-Block)");
     expect(getEvents()).toHaveLength(1);
+  });
+
+  it("the folded summary shows the count and the newest line, not the oldest", () => {
+    expect(eventsSummary([])).toBeUndefined();
+    resetEventLogForTests();
+    pushEvent("Flug begonnen (Off-Block)", 1);
+    pushEvent("Phase: Vorbereitung → Rollen", 2);
+    pushEvent("Phase: Rollen → Start", 3);
+    expect(eventsSummary(getEvents())).toBe("3 · Phase: Rollen → Start");
   });
 });

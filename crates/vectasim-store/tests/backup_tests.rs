@@ -170,6 +170,15 @@ fn unusable_staged_restore_is_set_aside_and_the_logbook_stays() {
     assert_eq!(count(&store), 1);
     assert!(!backup::pending_restore_path(&db).exists());
     assert!(dir.path().join("vectasim.db.restore-failed").is_file());
+    // the pilot asked for a restore and did not get it: a notice the app shows once
+    let notices = store.take_notices();
+    assert_eq!(notices.len(), 1, "{notices:?}");
+    assert_eq!(notices[0].code(), "store.restore_failed");
+    assert!(matches!(&notices[0], vectasim_store::StoreNotice::RestoreFailed { detail } if !detail.is_empty()));
+    assert!(notices[0].message(vectasim_core::Lang::De).contains("nicht wiederhergestellt"));
+    assert!(store.take_notices().is_empty(), "handed out once");
+    drop(store);
+    assert!(Store::open(&db).unwrap().take_notices().is_empty(), "a normal start has none");
 }
 
 /// The configured backup folder is unreachable (USB stick pulled, NAS offline): the copy before

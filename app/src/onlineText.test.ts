@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { fmt } from "./format";
+import { fmt } from "./i18n/number";
 import { diagText, fmtAgo, networkStatuses, networksWith, onlineDiagRows, onlineLine, onlineTone, sourceHost } from "./onlineText";
 import type { NetworkStatus, OnlineSummary } from "./types";
 import { setLanguageSetting } from "./i18n";

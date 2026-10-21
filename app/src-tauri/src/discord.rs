@@ -1,4 +1,4 @@
-//! Discord Rich Presence (Einstellungen → Integrationen, opt-in: setting `discord_presence` = "1").
+//! Discord Rich Presence (Settings → Integrations, opt-in: setting `discord_presence` = "1").
 //!
 //! A thread of its own looks at the manager's status every [`TICK`]: with the setting off it
 //! clears the activity and closes the pipe; with it on it connects to the local Discord client
@@ -41,7 +41,7 @@ const LANDED_FOR: Duration = Duration::from_secs(60);
 /// Departure airport looked up around the off-block position.
 const DEP_SEARCH_NM: f64 = 5.0;
 
-/// What Einstellungen → Integrationen shows.
+/// What Settings → Integrations shows.
 #[derive(Clone, Debug, Default, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DiscordStatus {
@@ -356,7 +356,7 @@ fn run(app: AppHandle) {
     }
 }
 
-/// Einstellungen → Integrationen → Discord.
+/// Settings → Integrations → Discord.
 #[tauri::command]
 pub fn discord_status(state: tauri::State<'_, DiscordState>) -> DiscordStatus {
     state.status()

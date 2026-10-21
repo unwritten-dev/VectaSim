@@ -4,7 +4,7 @@ import { NNBSP, fmt, fmtClock, fmtDateTime, fmtNum, fmtSigned, fmtWind } from ".
 import { useT, type TFunction } from "../i18n";
 import { usePrivacy } from "../prefs";
 import { rawText, userMessage } from "../errors";
-import TrackMap from "../map/TrackMap";
+import { TrackMap } from "../lazyMaps";
 import Panel from "../ui/Panel";
 import { KV } from "../ui/Stat";
 import type { FlightRow, TrackSample } from "../types";
@@ -62,7 +62,8 @@ import type { LandingAnalysis, LandingDebriefData } from "./types";
 import HistoryPanel from "./HistoryPanel";
 import "./landing.css";
 import { gLoadProtocol } from "../gload";
-import { acquireModal } from "../ui/modalStack";
+import { Modal } from "../ui/Modal";
+import { keepStepFocus } from "../ui/modalStack";
 import { Segmented } from "../ui/Segmented";
 
 /** "0,3 Dots" / "0.3 dots", "1 Dot" / "1 dot". */
@@ -76,44 +77,6 @@ function sideOfCentreline(t: TFunction, lateralM: number): string {
   if (a < 0.5) return t("debrief.hero.onCentreline");
   const dist = `${fmtNum(a, 0)}${NNBSP}m`;
   return lateralM > 0 ? t("debrief.hero.rightOfCentreline", { dist }) : t("debrief.hero.leftOfCentreline", { dist });
-}
-
-/** Everything that can take keyboard focus inside the dialog, in DOM order and visible. */
-const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
-
-function focusables(root: HTMLElement): HTMLElement[] {
-  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => el.getClientRects().length > 0 && !el.closest("[inert]"));
-}
-
-/**
- * Tab / Shift+Tab cycle inside the dialog. Focus outside of it (a toast: the toast viewport
- * stays usable above the debrief) keeps the normal order.
- */
-function trapTab(e: KeyboardEvent, root: HTMLElement | null) {
-  if (!root) return;
-  const active = document.activeElement;
-  const inside = !!active && root.contains(active);
-  if (active && !inside && active !== document.body) return;
-  const items = focusables(root);
-  if (items.length === 0) {
-    e.preventDefault();
-    return;
-  }
-  const first = items[0];
-  const last = items[items.length - 1];
-  if (e.shiftKey && (!inside || active === first)) {
-    e.preventDefault();
-    last.focus();
-  } else if (!e.shiftKey && (!inside || active === last)) {
-    e.preventDefault();
-    first.focus();
-  }
-}
-
-/** Back to where the debrief was opened from; that element may be gone (a toast button). */
-function restoreFocus(before: HTMLElement | null) {
-  const target = before && before.isConnected && before !== document.body && !before.closest("[inert]") ? before : document.querySelector<HTMLElement>("main.layout");
-  target?.focus({ preventScroll: true });
 }
 
 /** Full-window landing debrief for one touchdown; rendered once by App, outside `.shell`. */
@@ -201,29 +164,6 @@ function DebriefModal({ target }: { target: DebriefTarget }) {
     };
   }, [target.flightId, attempt, runwayRev]);
 
-  // A real modal: everything behind it is inert (the title bar stays usable for the window
-  // controls), Tab cycles inside, Esc closes, focus moves in and back to where it came from.
-  useEffect(() => {
-    const before = document.activeElement as HTMLElement | null;
-    const modal = acquireModal();
-    closeRef.current?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (!modal.isTop()) return;
-      // bubble phase on window: an open popover inside (source chip) gets Esc first on
-      // document and stops it there, so Esc closes the innermost layer only
-      if (e.key === "Escape" && !e.defaultPrevented) {
-        e.preventDefault();
-        closeDebrief();
-      } else if (e.key === "Tab") trapTab(e, dialogRef.current);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      modal.release();
-      restoreFocus(before);
-    };
-  }, []);
-
   const list = approaches && "list" in approaches ? approaches.list : null;
   const shownIndex = data?.analysis.touchdownIndex ?? index ?? 0;
   const count = data?.touchdownCount ?? 0;
@@ -251,9 +191,19 @@ function DebriefModal({ target }: { target: DebriefTarget }) {
     setIndex(i);
   };
   const showPicker = list != null && list.length > 1;
+  // ‹/› at the first/last landing: the arrow under the focus is disabled now – keep the focus
+  // on the other arrow (or Close) instead of losing it to <body>
+  useEffect(() => {
+    const root = dialogRef.current;
+    if (root) keepStepFocus(root, document.activeElement, document.body, ".debrief-pager-btn:not(:disabled)", closeRef.current);
+  }, [shownIndex]);
 
   return (
-    <div ref={dialogRef} className="debrief-overlay" role="dialog" aria-modal="true" aria-labelledby={`${kickerId} ${titleId}`}>
+    // A real modal (ui/Modal): everything behind it is inert (the title bar stays usable for the
+    // window controls), Tab cycles inside, Esc closes, focus moves in and back to where it came
+    // from (main.layout when that is gone, e.g. a toast button). An open popover inside (source
+    // chip) gets Esc first and stops it, so Esc closes the innermost layer only.
+    <Modal className="debrief-overlay" labelledBy={`${kickerId} ${titleId}`} onClose={closeDebrief} initialFocus={closeRef} dialogRef={dialogRef}>
       <div className="debrief">
         <div className="debrief-bar">
           <span className="debrief-kicker" id={kickerId}>{isGoAround ? t("debrief.bar.kickerApproach") : t("debrief.bar.kickerLanding")}</span>
@@ -272,11 +222,11 @@ function DebriefModal({ target }: { target: DebriefTarget }) {
           ) : (
             count > 1 && (
               <span className="debrief-pager" role="group" aria-label={t("debrief.bar.pickLanding")}>
-                <button className="btn-sm" disabled={shownIndex <= 0} onClick={() => pickTouchdown(shownIndex - 1)} aria-label={t("debrief.bar.prevLanding")}>
+                <button className="btn-sm debrief-pager-btn" disabled={shownIndex <= 0} onClick={() => pickTouchdown(shownIndex - 1)} aria-label={t("debrief.bar.prevLanding")}>
                   ‹
                 </button>
                 <span className="detail num">{t("debrief.bar.landingOf", { n: shownIndex + 1, count })}</span>
-                <button className="btn-sm" disabled={shownIndex >= count - 1} onClick={() => pickTouchdown(shownIndex + 1)} aria-label={t("debrief.bar.nextLanding")}>
+                <button className="btn-sm debrief-pager-btn" disabled={shownIndex >= count - 1} onClick={() => pickTouchdown(shownIndex + 1)} aria-label={t("debrief.bar.nextLanding")}>
                   ›
                 </button>
               </span>
@@ -325,7 +275,7 @@ function DebriefModal({ target }: { target: DebriefTarget }) {
           <DebriefBody d={data} approach={landingApproach} titleId={titleId} onRunwayChanged={runwayChanged} />
         )}
       </div>
-    </div>
+    </Modal>
   );
 }
 

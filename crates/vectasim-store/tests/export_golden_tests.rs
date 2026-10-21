@@ -205,6 +205,17 @@ fn kml_matches_golden() {
 }
 
 #[test]
+fn kml_says_unrated_instead_of_zero_fpm() {
+    // an unrated touchdown (slewed / fast-forwarded down) was described as "0 fpm"
+    let mut d = detail();
+    d.touchdowns[0].landing_rate_fpm = 0.0;
+    d.touchdowns[0].landing_rate_source = LandingRateSource::Unrated;
+    let kml = export_flight(ExportFormat::Kml, &d, &samples()).unwrap();
+    assert!(kml.contains("<description>Landerate nicht bewertbar · 1.21 g"), "{kml}");
+    assert!(!kml.contains("0 fpm"));
+}
+
+#[test]
 fn json_matches_golden() {
     let json = export_flight(ExportFormat::Json, &detail(), &samples()).unwrap();
     check("flight.json", &json);

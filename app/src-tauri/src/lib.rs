@@ -27,16 +27,31 @@ use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
 use std::sync::Mutex;
 use vectasim_data::{Airport, AirportIndex, NearestAirport, Runway};
 use vectasim_simbrief::{Ofp, SimbriefError, User};
+/// Notices the store collected while opening (a staged restore that could not be applied):
+/// fetched once by the UI after start, shown as a toast, then gone.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StoreNoticeOut {
+    code: &'static str,
+    message: String,
+}
+
+#[tauri::command]
+fn store_notices(store: State<'_, Store>) -> Vec<StoreNoticeOut> {
+    let lang = lang::current();
+    store.take_notices().into_iter().map(|n| StoreNoticeOut { code: n.code(), message: n.message(lang) }).collect()
+}
+
 use vectasim_store::{AirportResolver, ExportFormat, FlightCounts, FlightDetail, FlightRow, MergeCandidate, MergeReport, PlannedFlight, Store, Totals, TrackSample, export};
 
 const SETTING_SIMBRIEF_USER: &str = "simbrief_user";
-/// SimConnect.dll chosen in Einstellungen → Simulator; empty = automatic search.
+/// SimConnect.dll chosen in Settings → Simulator; empty = automatic search.
 const SETTING_SIMCONNECT_DLL: &str = "simconnect_dll_path";
 /// Read by the SimConnect loader first (`vectasim_simconnect::ffi::candidate_paths`).
 const ENV_SIMCONNECT_DLL: &str = "VECTASIM_SIMCONNECT_DLL";
-/// Einstellungen → Diagnose → „Roh-Dump aufzeichnen“: one `.vsdump` per SimConnect session.
+/// Settings → Diagnostics → “Record raw dump”: one `.vsdump` per SimConnect session.
 const SETTING_RAW_DUMP: &str = "raw_dump";
-/// Einstellungen → Diagnose → „Debug-Modus“: `debug` for vectasim_*, raw dump and `diag:raw` on,
+/// Settings → Diagnostics → “Debug mode”: `debug` for vectasim_*, raw dump and `diag:raw` on,
 /// on top of the settings above (which stay untouched, so switching it off restores them).
 const SETTING_DEBUG_MODE: &str = "debug_mode";
 /// The variable as the user's environment had it at start, restored on "Zurücksetzen".
@@ -46,6 +61,14 @@ static ORIGINAL_DLL_ENV: std::sync::OnceLock<Option<std::ffi::OsString>> = std::
 fn apply_dll_setting(store: &Store) {
     let original = ORIGINAL_DLL_ENV.get_or_init(|| std::env::var_os(ENV_SIMCONNECT_DLL));
     let chosen = store.get_setting(SETTING_SIMCONNECT_DLL).ok().flatten().filter(|p| !p.trim().is_empty());
+    // a network path stored by an older version is not loaded
+    let chosen = chosen.filter(|p| {
+        let unc = data::is_unc(p);
+        if unc {
+            log::warn!("SimConnect.dll setting ignored: network paths are not loaded ({})", p.trim());
+        }
+        !unc
+    });
     // SAFETY: Windows' environment block is synchronised by the OS; the only other reader is the
     // provider loader, which reads it once per (re)connect attempt.
     unsafe {
@@ -57,10 +80,12 @@ fn apply_dll_setting(store: &Store) {
     }
     if let Some(dll) = find_simconnect_dll() {
         let system_root = std::env::var_os("SystemRoot").map(std::path::PathBuf::from);
-        if dll_in_shared_folder(&dll, system_root.as_deref()) {
+        // compared as Windows resolves it (8.3 names, trailing dots, junctions)
+        let real = data::resolved(&dll);
+        if dll_in_shared_folder(&real, system_root.as_deref().map(data::resolved).as_deref()) {
             log::warn!(
                 "SimConnect.dll will be loaded from {} ({}): a folder that other Windows accounts may write to \
-                 (drive root or PATH). Prefer the in-app download (Einstellungen → Simulator).",
+                 (drive root or PATH). Prefer the in-app download (Settings → Simulator).",
                 dll.display(),
                 vectasim_simconnect::ffi::dll_source(&dll).label()
             );
@@ -90,11 +115,16 @@ fn dll_in_shared_folder(dll: &std::path::Path, system_root: Option<&std::path::P
     !matches!(first.as_deref(), Some("program files" | "program files (x86)" | "windows" | "users"))
 }
 
-/// What `set_simconnect_dll` accepts from the webview: an absolute path without `..` to an
+/// What `set_simconnect_dll` accepts from the webview: an absolute local path without `..` to an
 /// existing file named `SimConnect.dll`. The webview cannot write such a file itself, so even a
-/// script injected there could not make VectaSim load a DLL of its choosing.
+/// script injected there could not make VectaSim load a DLL of its choosing. Network paths
+/// (`\\host\share\SimConnect.dll`, also `\\?\UNC\…`) are refused – as written and as
+/// Windows resolves the path.
 fn check_dll_choice(raw: &str) -> Result<std::path::PathBuf, String> {
     let file = std::path::Path::new(raw);
+    if data::is_unc(raw) {
+        return Err(trf!("Netzwerkpfade werden nicht geladen: {raw}", "Network paths are not loaded: {raw}"));
+    }
     if !file.is_absolute() || file.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
         return Err(trf!("Ungültiger Pfad: {raw}", "Invalid path: {raw}"));
     }
@@ -106,6 +136,10 @@ fn check_dll_choice(raw: &str) -> Result<std::path::PathBuf, String> {
     }
     if !file.is_file() {
         return Err(trf!("Datei nicht gefunden: {raw}", "File not found: {raw}"));
+    }
+    // a junction or symbolic link to a share
+    if std::fs::canonicalize(file).is_ok_and(|real| data::is_unc(&real.to_string_lossy())) {
+        return Err(trf!("Netzwerkpfade werden nicht geladen: {raw}", "Network paths are not loaded: {raw}"));
     }
     Ok(file.to_path_buf())
 }
@@ -190,7 +224,7 @@ pub(crate) fn find_simconnect_dll_where(accept: &dyn Fn(&std::path::Path) -> boo
     None
 }
 
-/// Version, data paths and integration checks for Settings → Diagnose.
+/// Version, data paths and integration checks for Settings → Diagnostics.
 #[tauri::command]
 fn app_info(app: AppHandle) -> AppInfo {
     let data_dir = app.path().app_data_dir().map(|d| d.display().to_string()).unwrap_or_default();
@@ -229,7 +263,7 @@ fn select_provider(
     let leaving_demo = is_demo(&manager.snapshot().provider) && !is_demo(&kind);
     apply_dll_setting(&store);
     // "simconnect" from the UI ("Demo beenden", "Mit Simulator verbinden") means the simulator
-    // chosen in Einstellungen → Simulator (automatic, MSFS or X-Plane)
+    // chosen in Settings → Simulator (automatic, MSFS or X-Plane)
     let kind = if kind == "simconnect" { "sim".to_string() } else { kind };
     manager.start(app.clone(), store.inner().clone(), Arc::new(IndexResolver(airports.inner().clone())), &kind)?;
     if leaving_demo {
@@ -414,7 +448,7 @@ fn dump_now(app: AppHandle, manager: State<ProviderManager>) -> Result<String, S
     }
 }
 
-/// Einstellungen → Diagnose → Live-Rohdaten (one-shot; `diag:raw` streams the same).
+/// Settings → Diagnostics → Live raw data (one-shot; `diag:raw` streams the same).
 #[tauri::command]
 fn diagnostics_snapshot(manager: State<ProviderManager>) -> DiagSnapshot {
     manager.diagnostics()
@@ -440,7 +474,7 @@ fn get_replay(manager: State<ProviderManager>) -> ReplaySettings {
     ReplaySettings { path: c.path.map(|p| p.display().to_string()), speed: c.speed, repeat: c.loop_ }
 }
 
-/// What `select_provider("replay")` plays next (Diagnose → Replay; env `VECTASIM_REPLAY*` is the default).
+/// What `select_provider("replay")` plays next (Settings → Diagnostics → Replay; env `VECTASIM_REPLAY*` is the default).
 #[tauri::command]
 fn set_replay(path: Option<String>, speed: f64, repeat: bool, manager: State<ProviderManager>) -> Result<(), String> {
     let path = path.map(|p| p.trim().to_string()).filter(|p| !p.is_empty()).map(std::path::PathBuf::from);
@@ -678,10 +712,60 @@ async fn save_export(id: String, format: String, path: String, store: State<'_, 
     blocking(move || write_export(&target, format, &render_export(&id, format, &store)?)).await
 }
 
-/// Binary file from the UI (Touchdown Card PNG), written to the path from the save dialog.
-#[tauri::command]
-async fn save_image(path: String, bytes: Vec<u8>) -> Result<(), String> {
+/// Header of [`save_image`] with the target path (`encodeURIComponent` of the save-dialog path).
+const SAVE_IMAGE_PATH_HEADER: &str = "x-vectasim-path";
+
+/// Percent-decoding of an `encodeURIComponent` value (`%XX` → byte, then UTF-8). `None` for a
+/// broken escape or bytes that are no UTF-8; `+` stays a `+` (encodeURIComponent writes `%2B`).
+fn percent_decode(s: &str) -> Option<String> {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' {
+            let hex = std::str::from_utf8(b.get(i + 1..i + 3)?).ok()?;
+            out.push(u8::from_str_radix(hex, 16).ok()?);
+            i += 3;
+        } else {
+            out.push(b[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(out).ok()
+}
+
+/// The target and the bytes of a [`save_image`] call: a raw body (`Uint8Array`, no JSON array of
+/// numbers) and the path in [`SAVE_IMAGE_PATH_HEADER`], checked by `data::allowed_target`.
+/// Largest picture `save_image` writes (a landing card at 2× is a few MB).
+const SAVE_IMAGE_MAX_BYTES: usize = 32 * 1024 * 1024;
+/// The eight bytes every PNG starts with.
+const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
+
+fn save_image_parts(body: &tauri::ipc::InvokeBody, headers: &tauri::http::HeaderMap) -> Result<(std::path::PathBuf, Vec<u8>), String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = body else {
+        return Err("expected raw image bytes".into());
+    };
+    if bytes.len() > SAVE_IMAGE_MAX_BYTES {
+        let mb = bytes.len() / (1024 * 1024);
+        return Err(trf!("Bild zu groß ({mb} MB, höchstens 32 MB)", "Image too large ({mb} MB, at most 32 MB)"));
+    }
+    if !bytes.starts_with(PNG_SIGNATURE) {
+        return Err(lang::tr("Kein PNG-Bild", "Not a PNG image").to_string());
+    }
+    let raw = headers
+        .get(SAVE_IMAGE_PATH_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| lang::tr("kein Speicherort gewählt", "no location chosen").to_string())?;
+    let path = percent_decode(raw).ok_or_else(|| lang::tr("Ungültiger Speicherort", "Invalid location").to_string())?;
     let target = data::allowed_target(&path, data::IMAGE_EXTENSIONS)?;
+    Ok((target, bytes.clone()))
+}
+
+/// Binary file from the UI (Touchdown Card PNG), written to the path from the save dialog:
+/// `invoke("save_image", bytes, { headers: { "x-vectasim-path": encodeURIComponent(path) } })`.
+#[tauri::command]
+async fn save_image(request: tauri::ipc::Request<'_>) -> Result<(), String> {
+    let (target, bytes) = save_image_parts(request.body(), request.headers())?;
     blocking(move || std::fs::write(&target, bytes).map_err(|e| format!("{}: {e}", target.display()))).await
 }
 
@@ -811,7 +895,7 @@ pub fn run() {
             // Overlay & Schnittstelle: the local server, if it was left on
             server::restore(app.handle(), &store);
 
-            // `sim` = the simulator chosen in Einstellungen → Simulator (default: automatic)
+            // `sim` = the simulator chosen in Settings → Simulator (default: automatic)
             let kind = std::env::var("VECTASIM_PROVIDER").unwrap_or_else(|_| "sim".into());
             let manager = app.state::<ProviderManager>();
             simselect::apply_settings(&store, &manager);
@@ -821,12 +905,14 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            data::reveal_path,
             discord::discord_status,
             server::server_status,
             server::server_set_enabled,
             server::server_set_options,
             notify::notify,
             notify::notify_test,
+            store_notices,
             tray::set_tray_enabled,
             tray::tray_active,
             countries::countries_geojson,
@@ -976,6 +1062,163 @@ mod dll_tests {
         assert!(check_dll_choice("SimConnect.dll").is_err(), "relative");
         assert!(check_dll_choice(&dir.join("x").join("..").join("SimConnect.dll").display().to_string()).is_err(), "..");
         assert!(check_dll_choice(&dir.join("missing").join("SimConnect.dll").display().to_string()).is_err());
+        // network paths, however written
+        for p in [r"\\host\share\SimConnect.dll", r"//host/share/SimConnect.dll", r"\\?\UNC\host\share\SimConnect.dll"] {
+            let e = check_dll_choice(p).unwrap_err();
+            assert!(e.contains("Netzwerk") || e.contains("Network"), "{p}: {e}");
+        }
+        // the verbatim form of a local file is fine
+        assert!(check_dll_choice(&format!(r"\\?\{}", good.display())).is_ok());
         std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod save_image_tests {
+    use super::*;
+    use tauri::http::{HeaderMap, HeaderValue};
+    use tauri::ipc::InvokeBody;
+
+    /// What `encodeURIComponent` makes of a path (unreserved characters stay, the rest `%XX`).
+    fn encode_uri_component(s: &str) -> String {
+        s.bytes()
+            .map(|b| if b.is_ascii_alphanumeric() || b"-_.!~*'()".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") })
+            .collect()
+    }
+
+    fn headers(path: &str) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        h.insert(SAVE_IMAGE_PATH_HEADER, HeaderValue::from_str(&encode_uri_component(path)).unwrap());
+        h
+    }
+
+    #[test]
+    fn percent_decoding() {
+        assert_eq!(percent_decode("C%3A%5CUsers%5CJ%C3%BCrgen%5CKarte%20%2B1.png").as_deref(), Some(r"C:\Users\Jürgen\Karte +1.png"));
+        assert_eq!(percent_decode("a+b").as_deref(), Some("a+b"));
+        for bad in ["%", "%4", "%zz", "%C3"] {
+            assert_eq!(percent_decode(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn raw_body_and_header_pass_the_path_check() {
+        let dir = std::env::temp_dir().join("vectasim-save-image-test");
+        let target = dir.join("Landung EDDF – 25C.png");
+        let mut png = PNG_SIGNATURE.to_vec();
+        png.extend([1, 2, 3]);
+        let (path, bytes) = save_image_parts(&InvokeBody::Raw(png.clone()), &headers(&target.display().to_string())).unwrap();
+        assert_eq!((path.as_path(), bytes.as_slice()), (target.as_path(), png.as_slice()));
+        // the old JSON form, a missing header, a broken escape, a relative path or another extension: refused
+        let json = InvokeBody::Json(serde_json::json!({ "path": target.display().to_string(), "bytes": [1, 2] }));
+        assert_eq!(save_image_parts(&json, &headers(&target.display().to_string())).unwrap_err(), "expected raw image bytes");
+        let raw = InvokeBody::Raw(png);
+        assert!(save_image_parts(&raw, &HeaderMap::new()).is_err());
+        let mut broken = HeaderMap::new();
+        broken.insert(SAVE_IMAGE_PATH_HEADER, HeaderValue::from_static("C%3A%5Cx%ZZ.png"));
+        assert!(save_image_parts(&raw, &broken).is_err());
+        assert!(save_image_parts(&raw, &headers("karte.png")).is_err());
+        assert!(save_image_parts(&raw, &headers(&dir.join("karte.exe").display().to_string())).is_err());
+        assert!(save_image_parts(&raw, &headers(&dir.join("..").join("karte.png").display().to_string())).is_err());
+        assert!(save_image_parts(&raw, &headers(r"\\nas\share\karte.png")).is_err(), "network path");
+    }
+
+    #[test]
+    fn save_image_takes_only_pngs_of_a_sane_size() {
+        let target = std::env::temp_dir().join("vectasim-save-image-test").join("karte.png");
+        let h = headers(&target.display().to_string());
+        // not a PNG (an executable, an empty body, a truncated signature)
+        for body in [b"MZ\x90\x00".to_vec(), Vec::new(), PNG_SIGNATURE[..7].to_vec()] {
+            let e = save_image_parts(&InvokeBody::Raw(body), &h).unwrap_err();
+            assert!(e.contains("PNG"), "{e}");
+        }
+        // too large
+        let mut big = PNG_SIGNATURE.to_vec();
+        big.resize(SAVE_IMAGE_MAX_BYTES + 1, 0);
+        assert!(save_image_parts(&InvokeBody::Raw(big), &h).unwrap_err().contains("32 MB"));
+        // the largest allowed
+        let mut max = PNG_SIGNATURE.to_vec();
+        max.resize(SAVE_IMAGE_MAX_BYTES, 0);
+        assert!(save_image_parts(&InvokeBody::Raw(max), &h).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod capability_tests {
+    /// The `opener:allow-open-url` scope of the main window: (allow, deny) glob patterns.
+    fn open_url_scope() -> (Vec<glob::Pattern>, Vec<glob::Pattern>) {
+        let caps: serde_json::Value = serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
+        let entry = caps["permissions"].as_array().unwrap().iter().find(|p| p["identifier"] == "opener:allow-open-url").expect("open-url permission");
+        let list = |k: &str| entry[k].as_array().unwrap().iter().map(|e| glob::Pattern::new(e["url"].as_str().unwrap()).unwrap()).collect();
+        (list("allow"), list("deny"))
+    }
+
+    fn allowed(url: &str) -> bool {
+        let (allow, deny) = open_url_scope();
+        !deny.iter().any(|p| p.matches(url)) && allow.iter().any(|p| p.matches(url))
+    }
+
+    /// `href="…"` values and `"https://…"` string constants of a source file.
+    fn urls_in(src: &str) -> Vec<String> {
+        src.split('"').filter(|s| s.starts_with("https://")).map(|s| if s[8..].contains('/') { s.to_string() } else { format!("{s}/") }).collect()
+    }
+
+    #[test]
+    fn the_app_opens_only_the_hosts_it_links_to() {
+        // what the webview opens: Planespotters credits, the notices on GitHub, the SDK licence,
+        // the map attributions (MapLibre's own link, OpenFreeMap's style, satellite, weather) and the overlay pages
+        let mut urls = vec![
+            "https://www.planespotters.net/photo/1234567/d-aibl-lufthansa-airbus-a319-112".to_string(),
+            crate::simconnect_dl::EULA_URL.to_string(),
+            "https://maplibre.org/".into(),
+            "https://openfreemap.org/".into(),
+            "https://www.openmaptiles.org/".into(),
+            "https://www.openstreetmap.org/copyright".into(),
+            "http://127.0.0.1:8095/overlay/hud?scale=1.5".into(),
+        ];
+        let notices = urls_in(include_str!("../../src/Settings.tsx"));
+        assert!(notices.iter().any(|u| u.starts_with("https://github.com/unwritten-dev/VectaSim/")), "{notices:?}");
+        urls.extend(notices);
+        let attributions: Vec<String> = urls_in(include_str!("../../src/map/satellite.ts")).into_iter().chain(urls_in(include_str!("../../src/map/weatherOverlay.ts"))).filter(|u| !u.contains('{')).collect();
+        // the attribution links (tile URLs are fetched, not opened, but allowed hosts would not hurt)
+        for u in attributions.iter().filter(|u| u.contains("cloudless.eox.at") || u.contains("rainviewer.com/api") || u.contains("view.eumetsat.int/")) {
+            urls.push(u.clone());
+        }
+        assert!(urls.iter().any(|u| u.contains("cloudless.eox.at")) && urls.iter().any(|u| u.contains("rainviewer.com")) && urls.iter().any(|u| u.contains("eumetsat")));
+        for u in &urls {
+            assert!(allowed(u), "{u} must be allowed");
+        }
+        // anything else is not (no `https://*` scope)
+        for u in [
+            "https://evil.example/",
+            "https://www.planespotters.net.evil.example/photo/1",
+            "https://user@www.planespotters.net/photo/1",
+            "http://www.planespotters.net/photo/1",
+            "https://github.com/someone-else/x",
+            "file:///C:/Windows/System32/calc.exe",
+            "http://192.168.1.5:8095/",
+        ] {
+            assert!(!allowed(u), "{u} must be refused");
+        }
+    }
+}
+
+#[cfg(test)]
+mod workspace_tests {
+    /// No crate of the workspace can be published by accident (and cargo-deny's
+    /// `[licenses.private] ignore` covers them all).
+    #[test]
+    fn every_crate_is_private() {
+        let crates = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates");
+        let mut seen = 0;
+        for dir in std::fs::read_dir(&crates).unwrap().flatten() {
+            let manifest = dir.path().join("Cargo.toml");
+            let Ok(text) = std::fs::read_to_string(&manifest) else { continue };
+            assert!(text.lines().any(|l| l.trim() == "publish = false"), "{} lacks publish = false", manifest.display());
+            seen += 1;
+        }
+        assert!(seen >= 10, "{seen} crates");
+        let app = include_str!("../Cargo.toml");
+        assert!(app.lines().any(|l| l.trim() == "publish = false"), "the app crate");
     }
 }

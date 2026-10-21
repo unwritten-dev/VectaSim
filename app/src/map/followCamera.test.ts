@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CATCH_UP_MS, CameraGuard, FOLLOW_EVENT, GLIDE_EVENT, anchorCenter, followCameraUpdate, isMultiTouch, stepTowards, type FollowAnchor } from "./followCamera";
+import { CATCH_UP_MS, CameraGuard, FOLLOW_EVENT, FOLLOW_GLIDE_MAX_MS, FollowGlide, GLIDE_EVENT, MAX_CENTER_LAT, anchorCenter, followCameraUpdate, isMultiTouch, stepTowards, type FollowAnchor } from "./followCamera";
 
 /** Just enough of a MapLibre map: events, isMoving, the gesture handlers and the canvas container. */
 function fakeMap() {
@@ -123,7 +123,23 @@ describe("stepTowards", () => {
     expect(stepTowards({ lon: 8, lat: 50, elev: 0 }, { lon: 9, lat: 51, elev: 1000 }, 1)).toEqual({ lon: 9, lat: 51, elev: 1000 });
     const half = stepTowards({ lon: 179, lat: 0, elev: 0 }, { lon: -179, lat: 0, elev: 0 }, 0.5);
     expect(Math.abs(half.lon)).toBeCloseTo(180, 9);
-    expect(stepTowards({ lon: 179.5, lat: 0, elev: 0 }, { lon: -179.5, lat: 0, elev: 0 }, 1).lon).toBeCloseTo(-179.5, 9);
+    // N-3: the result stays in the camera centre's world copy (no jump by 360° to −179.5)
+    expect(stepTowards({ lon: 179.5, lat: 0, elev: 0 }, { lon: -179.5, lat: 0, elev: 0 }, 1).lon).toBeCloseTo(180.5, 9);
+  });
+
+  it("N-3: a camera left beyond ±180 by an ease follows a wrapped target without a world-copy jump", () => {
+    // MapLibre's easeTo over the date line left the centre at 180.4; the aircraft reports −179.5
+    let cam = { lon: 180.4, lat: -15, elev: 0 };
+    for (let i = 0; i < 5; i++) {
+      const next = stepTowards(cam, { lon: -179.5 + i * 0.01, lat: -15, elev: 0 }, 0.5);
+      expect(Math.abs(next.lon - cam.lon)).toBeLessThan(1);
+      cam = next;
+    }
+    expect(cam.lon).toBeGreaterThan(180);
+  });
+
+  it("N-1: the latitude never leaves ±MAX_CENTER_LAT", () => {
+    expect(stepTowards({ lon: 0, lat: 85, elev: 0 }, { lon: 0, lat: 89.9, elev: 0 }, 1).lat).toBe(MAX_CENTER_LAT);
   });
 });
 
@@ -178,6 +194,31 @@ describe("anchorCenter", () => {
     // across the antimeridian
     expect(anchorCenter({ lon: -179.9, lat: 0, shift: { dLon: 0.2, dLat: 0, atZoom: 5 } }, 5).lon).toBeCloseTo(179.9, 9);
   });
+
+  it("N-1: a pole-near shift scaled up by a strong zoom-out stays a valid latitude (LngLat threw beyond ±90)", () => {
+    // measured at zoom 12 beside the card near the pole, zoomed out to 2 (factor 1024)
+    const a: FollowAnchor = { lon: 20, lat: 84, shift: { dLon: 0.01, dLat: -0.02, atZoom: 12 } };
+    const c = anchorCenter(a, 2);
+    expect(Math.abs(c.lat)).toBeLessThanOrEqual(MAX_CENTER_LAT);
+    expect(Number.isFinite(c.lon)).toBe(true);
+    // the extrapolation is meaningless that far out: the aircraft is centred instead
+    expect(anchorCenter({ lon: 20, lat: 10, shift: { dLon: 0.1, dLat: 0.1, atZoom: 12 } }, 2)).toEqual({ lon: 20, lat: 10 });
+    // an aircraft itself beyond Web Mercator's limit (polar route)
+    expect(anchorCenter({ lon: 0, lat: 89.5 }, 5).lat).toBe(MAX_CENTER_LAT);
+    // the hook builds LngLat from it inside the gesture frame: never out of range
+    const lngLat = (lon: number, lat: number) => {
+      if (lat > 90 || lat < -90) throw new Error("Invalid LngLat latitude value");
+      return { lng: lon, lat } as never;
+    };
+    const update = followCameraUpdate({ userMoving: () => true }, () => a, lngLat);
+    for (let z = 12; z >= 0; z -= 0.5) expect(() => update({ center: { lng: 20, lat: 80 } as never, zoom: z, roll: 0, pitch: 0, bearing: 0, elevation: 0 })).not.toThrow();
+  });
+
+  it("N-3: in the world copy of the camera centre", () => {
+    expect(anchorCenter({ lon: -179.5, lat: 0 }, 5, 180.4).lon).toBeCloseTo(180.5, 9);
+    expect(anchorCenter({ lon: 179.5, lat: 0 }, 5, -180.2).lon).toBeCloseTo(-180.5, 9);
+    expect(anchorCenter({ lon: 8, lat: 0 }, 5, 368).lon).toBeCloseTo(368, 9);
+  });
 });
 
 describe("followCameraUpdate", () => {
@@ -216,6 +257,12 @@ describe("followCameraUpdate", () => {
     expect(at11.center.lng).toBeCloseTo(8.55, 12);
   });
 
+  it("N-3: the held centre is in the frame's world copy (after an ease over the date line)", () => {
+    const update = followCameraUpdate({ userMoving: () => true }, () => ({ lon: -179.6, lat: -10 }), lngLat);
+    const out = update(next(180.3, -10, 8)) as { center: { lng: number } };
+    expect(out.center.lng).toBeCloseTo(180.4, 9);
+  });
+
   it("the anchor is read on every frame (the aircraft moves on during a long zoom)", () => {
     let anchor: FollowAnchor = { lon: 8.6, lat: 50.05 };
     const update = followCameraUpdate({ userMoving: () => true }, () => anchor, lngLat);
@@ -231,5 +278,34 @@ describe("isMultiTouch", () => {
     expect(isMultiTouch({ touches: { length: 1 } } as unknown as Event)).toBe(false);
     expect(isMultiTouch({ button: 0 } as unknown as Event)).toBe(false);
     expect(isMultiTouch(undefined)).toBe(false);
+  });
+});
+
+describe("FollowGlide (own follow camera between two samples)", () => {
+  it("glides linearly over the sample gap and then stays on the target", () => {
+    const g = new FollowGlide();
+    expect(g.at(0)).toBeNull();
+    expect(g.done(0)).toBe(true);
+    g.set({ lon: 8, lat: 50, elev: 0 }, { lon: 8.01, lat: 50.01, elev: 100 }, 1000, 100);
+    expect(g.at(1050)).toEqual({ lon: expect.closeTo(8.005, 9), lat: expect.closeTo(50.005, 9), elev: expect.closeTo(50, 9) });
+    expect(g.done(1050)).toBe(false);
+    expect(g.at(1200)).toEqual({ lon: 8.01, lat: 50.01, elev: 100 });
+    expect(g.done(1100)).toBe(true);
+  });
+  it("never longer than FOLLOW_GLIDE_MAX_MS; a zero gap jumps; the short way across ±180", () => {
+    const g = new FollowGlide();
+    g.set({ lon: 179.9, lat: 0, elev: 0 }, { lon: -179.9, lat: 0, elev: 0 }, 0, 5000);
+    expect(g.done(FOLLOW_GLIDE_MAX_MS)).toBe(true);
+    expect(Math.abs(g.at(FOLLOW_GLIDE_MAX_MS / 2)!.lon)).toBeCloseTo(180, 6);
+    g.set({ lon: 1, lat: 1, elev: 0 }, { lon: 2, lat: 2, elev: 0 }, 0, 0);
+    expect(g.at(0)).toEqual({ lon: 2, lat: 2, elev: 0 });
+    g.clear();
+    expect(g.at(0)).toBeNull();
+  });
+  it("N-3: the target is taken in the camera's world copy, also at the end of the glide", () => {
+    const g = new FollowGlide();
+    g.set({ lon: 180.3, lat: 0, elev: 0 }, { lon: -179.5, lat: 0, elev: 0 }, 0, 100);
+    expect(g.at(50)!.lon).toBeCloseTo(180.4, 9);
+    expect(g.at(1000)!.lon).toBeCloseTo(180.5, 9);
   });
 });

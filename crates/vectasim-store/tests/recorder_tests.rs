@@ -359,8 +359,10 @@ fn touch_and_go_outcome_corrects_a_touchdown_still_waiting_for_its_insert() {
     long_touch_and_go_then_full_stop(true);
 }
 
-/// The system clock set back by an hour mid-flight: 1 Hz samples and the 15 s flush go on
-/// (the recorder paces on a monotonic clock, the samples keep the wall-clock time).
+/// The system clock set back mid-flight: the 1 Hz cadence and the 15 s flush go on (the
+/// recorder paces on a monotonic clock). The track never goes back in `t_ms` (the
+/// live map's incremental reload cursors on it) – a small step is clamped, a large one leaves
+/// a hole until the wall clock has passed the last sample again.
 #[test]
 fn clock_set_back_keeps_sampling_and_flushing() {
     let store = Store::open_in_memory().unwrap();
@@ -374,18 +376,39 @@ fn clock_set_back_keeps_sampling_and_flushing() {
         assert!(tick(&mut session, &mut rec, &flight.sample(t_s, wall(t_s, 0))).1);
     }
     let id = rec.current_flight_id().unwrap().to_owned();
-    let before = rec.live_track().lock().unwrap().len();
-    let stored_before = store.get_track(&id).unwrap().unwrap().len();
-    // 60 s with the wall clock an hour behind
+    let live = rec.live_track();
+    let live_len = || live.lock().unwrap().len();
+    let before = live_len();
+    // NTP: 3 s back for the next 60 s – sampling goes on at 1 Hz
     for i in (150 * 20 + 1)..=(210 * 20) {
+        let t_s = i as f64 / hz;
+        assert!(tick(&mut session, &mut rec, &flight.sample(t_s, wall(t_s, 3_000))).1);
+    }
+    let after = live_len();
+    assert!((58..=61).contains(&(after - before)), "1 Hz samples go on: {before} → {after}");
+    // by hand: an hour back for 60 s – no samples (they would run backwards), flushes go on
+    let distance_before = store.get_flight(&id).unwrap().unwrap().flight.distance_nm;
+    for i in (210 * 20 + 1)..=(270 * 20) {
         let t_s = i as f64 / hz;
         assert!(tick(&mut session, &mut rec, &flight.sample(t_s, wall(t_s, 3_600_000))).1);
     }
-    let after = rec.live_track().lock().unwrap().len();
-    assert!((58..=61).contains(&(after - before)), "1 Hz samples go on: {before} → {after}");
+    assert_eq!(live_len(), after, "a hole instead of samples back in time");
+    assert!(store.get_flight(&id).unwrap().unwrap().flight.distance_nm > distance_before, "flushes go on");
+    // the clock corrected again: the track resumes on the wall clock
+    for i in (270 * 20 + 1)..=(280 * 20) {
+        let t_s = i as f64 / hz;
+        assert!(tick(&mut session, &mut rec, &flight.sample(t_s, wall(t_s, 0))).1);
+    }
+    let live = live.lock().unwrap().clone();
+    assert!(live.len() >= after + 9, "{} → {}", after, live.len());
+    assert!(live.last().unwrap().t_ms > wall(279.0, 0), "wall clock again");
+    rec.checkpoint(session.summary(), wall(280.0, 0)).unwrap();
     let stored = store.get_track(&id).unwrap().unwrap();
-    assert!(stored.len() >= stored_before + 40, "flushes go on: {stored_before} → {}", stored.len());
-    assert!(stored.last().unwrap().t_ms < T0, "samples keep the wall-clock time");
+    // the incremental flush encodes exactly what a full encode of the live track gives
+    assert_eq!(stored, vectasim_store::decode_track(&vectasim_store::encode_track(&live)).unwrap(), "the flush stores the live track");
+    for track in [&live, &stored] {
+        assert!(track.windows(2).all(|w| w[0].t_ms < w[1].t_ms), "strictly increasing t_ms");
+    }
 }
 
 /// One sample of a ground session at `wall_ms` (engines on unless `engines` is 0).

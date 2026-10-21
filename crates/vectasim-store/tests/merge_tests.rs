@@ -196,6 +196,26 @@ fn merge_joins_two_flights_and_trashes_the_second() {
 }
 
 #[test]
+fn resumed_summary_leaves_an_unrated_landing_out() {
+    // the summary for resuming a flight took the last full stop's 0 fpm even when it was
+    // unrated (slewed / fast-forwarded down): live view, overlay and Discord showed "0 fpm"
+    let store = Store::open_in_memory().unwrap();
+    let mut rec = FlightRecorder::new(store.clone(), RecorderContext { provider: "simconnect".into(), ..Default::default() });
+    let s = FlightSummary { state: FlightState::Active, phase: FlightPhase::Final, off_block_ms: Some(T0), ..Default::default() };
+    let t = tele(T0, 50.0, 8.0, 400.0);
+    rec.on_telemetry(&t, &s, &[FlightEvent::FlightStarted { timestamp_ms: T0 }]).unwrap();
+    let id = rec.current_flight_id().unwrap().to_owned();
+    let unrated = TouchdownReport { landing_rate_fpm: 0.0, landing_rate_source: LandingRateSource::Unrated, ..touchdown(T0 + 5_000, 50.0, 8.0) };
+    rec.on_telemetry(&tele(T0 + 5_000, 50.0, 8.0, 364.0), &s, &[FlightEvent::Touchdown(unrated)]).unwrap();
+    let end = T0 + 10_000;
+    rec.on_events(&FlightSummary { state: FlightState::Interrupted, ..s.clone() }, &[FlightEvent::FlightEnded { timestamp_ms: end, interrupted: true }], end)
+        .unwrap();
+    let sum = store.flight_summary(&id).unwrap().unwrap();
+    assert_eq!(sum.touchdowns.len(), 1);
+    assert_eq!(sum.landing_rate_fpm, None, "an unrated touchdown is no landing rate");
+}
+
+#[test]
 fn merge_refuses_what_is_not_one_flight() {
     let store = Store::open_in_memory().unwrap();
     let a = record(&store, &first_leg());
@@ -374,8 +394,10 @@ fn resume_after_restart_appends_to_the_interrupted_flight() {
     assert_eq!(trash.iter().map(|d| d.flight.id.as_str()).collect::<Vec<_>>(), [interim.as_str()]);
 }
 
-/// Crash while taxiing out: after the restart the aircraft rolls on before the engine left
-/// Preflight; resuming must not start a second flight when it does.
+/// Crash while taxiing in after the landing: after the restart the aircraft rolls on before the
+/// engine left Preflight; resuming must not start a second flight when it does. (A crash while
+/// taxiing *out* leaves a ground session: discarded on the next open, nothing to resume – see
+/// `store_tests::crash_during_a_ground_session_is_discarded_on_open`.)
 #[test]
 fn resume_before_the_engine_left_the_blocks_keeps_one_flight() {
     let dir = tempfile::tempdir().unwrap();
@@ -384,20 +406,20 @@ fn resume_before_the_engine_left_the_blocks_keeps_one_flight() {
     const HZ: f64 = 4.0;
     let (mut flight, mut session, mut rec) = (MockFlight::with_variant(MockVariant::Circuit), FlightSession::new(), mock_recorder(&store));
     let mut cut = None;
-    for i in 1..=(400.0 * HZ) as u64 {
+    for i in 1..=(MockVariant::Circuit.loop_seconds() * HZ) as u64 {
         let t_s = i as f64 / HZ;
         let t = flight.sample(t_s, T0 + (t_s * 1000.0) as u64);
         let ev = session.update(&t);
         rec.on_telemetry(&t, session.summary(), &ev).unwrap();
-        if rec.current_flight_id().is_some() && t.ground_speed_kt > 5.0 && t.on_ground && t_s > 20.0 {
+        if rec.current_flight_id().is_some() && t.ground_speed_kt > 5.0 && t.on_ground && session.summary().landing_ms.is_some() {
             cut = Some(t_s);
             break;
         }
     }
-    let cut = cut.expect("taxiing with a flight open");
+    let cut = cut.expect("taxiing in with the flight open");
     let a = rec.current_flight_id().unwrap().to_owned();
-    // the app crashes (a provider stop here would discard the taxi-only recording): what was
-    // flushed stays, the row is still `active` and becomes `interrupted` on the next open
+    // the app crashes: what was flushed stays, the row is still `active` and becomes
+    // `interrupted` on the next open
     rec.checkpoint(session.summary(), T0 + (cut * 1000.0) as u64).unwrap();
     drop((rec, store));
     let store = Store::open(&path).unwrap();

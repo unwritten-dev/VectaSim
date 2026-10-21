@@ -1,4 +1,4 @@
-//! Which simulator VectaSim connects to (Einstellungen → Simulator): `auto` (MSFS first,
+//! Which simulator VectaSim connects to (Settings → Simulator): `auto` (MSFS first,
 //! then X-Plane), `simconnect` (MSFS only) or `xplane` (X-Plane 12 Web API only), plus the
 //! X-Plane host/port. Stored as settings; `VECTASIM_PROVIDER` / `VECTASIM_XPLANE_HOST|PORT`
 //! override them for a run.
@@ -189,8 +189,19 @@ pub fn set_sim_settings(
         return Err(format!("unknown provider '{mode}'"));
     }
     let host = xplane_host.trim();
-    if host.is_empty() || host.contains(char::is_whitespace) || host.contains('/') {
-        return Err(trf!("Ungültiger Host: „{host}“", "Invalid host: “{host}”"));
+    // the Web API is plain HTTP without a password: this PC, the local network or a host name only
+    let scope = match vectasim_xplane::check_host(host) {
+        Ok(scope) => scope,
+        Err(vectasim_xplane::HostError::Public) => {
+            return Err(trf!(
+                "Öffentliche Adresse „{host}“ abgelehnt: Die X-Plane Web API ist unverschlüsselt – nur dieser PC oder das lokale Netzwerk.",
+                "Public address “{host}” refused: the X-Plane Web API is unencrypted – only this PC or the local network."
+            ));
+        }
+        Err(vectasim_xplane::HostError::Syntax) => return Err(trf!("Ungültiger Host: „{host}“", "Invalid host: “{host}”")),
+    };
+    if scope != vectasim_xplane::HostScope::Loopback {
+        log::warn!("X-Plane host {host} is not this PC: the Web API is spoken over unencrypted HTTP");
     }
     if xplane_port == 0 {
         return Err(crate::lang::tr("Ungültiger Port", "Invalid port").into());

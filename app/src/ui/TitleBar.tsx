@@ -27,9 +27,20 @@ export default function TitleBar({ rec }: { rec: RecStatus }) {
         .then((m) => alive && setMaximized(m))
         .catch(() => {});
     sync();
-    const un = win.onResized(sync).catch(() => () => {});
+    // resize events arrive dozens of times per second while dragging: one isMaximized() IPC
+    // per 100 ms is enough for the maximise/restore icon (trailing call keeps the end state)
+    let timer: number | undefined;
+    const throttled = () => {
+      if (timer !== undefined) return;
+      timer = window.setTimeout(() => {
+        timer = undefined;
+        sync();
+      }, 100);
+    };
+    const un = win.onResized(throttled).catch(() => () => {});
     return () => {
       alive = false;
+      window.clearTimeout(timer);
       un.then((f) => f());
     };
   }, []);

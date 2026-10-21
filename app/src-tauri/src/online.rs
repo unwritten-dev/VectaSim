@@ -165,7 +165,11 @@ pub fn start_feed(app: &AppHandle, feed: &OnlineFeed) {
 pub fn restore(app: &AppHandle, store: &Store) {
     let online = app.state::<OnlineState>();
     for network in Network::ALL {
-        if store.get_setting(setting_key(network)).ok().flatten().as_deref() == Some("1") {
+        let on = store.get_setting(setting_key(network)).ok().flatten().as_deref() == Some("1");
+        if network == Network::Vatsim {
+            online.metar.set_vatsim_fallback(on);
+        }
+        if on {
             start_feed(app, online.feed(network));
         }
     }
@@ -177,6 +181,10 @@ fn parse_network(network: &str) -> Result<Network, String> {
 
 fn apply_enabled(app: &AppHandle, store: &Store, online: &OnlineState, network: Network, enabled: bool) -> Result<(), String> {
     store.set_setting(setting_key(network), if enabled { "1" } else { "0" }).map_err(|e| e.to_string())?;
+    if network == Network::Vatsim {
+        // the VATSIM METAR fallback follows the switch: VATSIM off means no VATSIM server at all
+        online.metar.set_vatsim_fallback(enabled);
+    }
     let feed = online.feed(network);
     if enabled {
         start_feed(app, feed);
@@ -279,7 +287,8 @@ pub fn capture_metar(app: &AppHandle, store: Store, flight_id: String, slot: Met
     tauri::async_runtime::spawn(async move {
         let airports = app.state::<Arc<AirportIndex>>().inner().clone();
         let Some(near) = airports.nearest(lat, lon, CAPTURE_AIRPORT_NM) else {
-            log::info!("no airport near {lat:.4},{lon:.4} – no {slot:?} METAR");
+            // the position only at DEBUG (it is where the user flies; Streamer-Modus)
+            log::debug!("no airport near {lat:.4},{lon:.4} – no {slot:?} METAR");
             return;
         };
         let online = app.state::<OnlineState>();

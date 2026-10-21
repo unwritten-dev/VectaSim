@@ -2,7 +2,7 @@
 
 VectaSim itself is licensed under the [MIT License](LICENSE). This document lists the third-party libraries, fonts, data and services the app uses at runtime, together with their licenses. The license texts of the packages are included in each package (npm: `node_modules/<package>/LICENSE`, Rust: the crates.io source). The installer places this file and VectaSim’s `LICENSE.txt` in the installation folder, next to `vectasim.exe`.
 
-Generated from `npx license-checker-rseidelsohn --production` (in `app/`) and `cargo tree --workspace -e normal --target x86_64-pc-windows-msvc` (as of version 0.5.1). Where a license is given with “OR”, VectaSim chooses the MIT option if available.
+Generated from `npx license-checker-rseidelsohn --production` (in `app/`) and `cargo tree --workspace -e normal --target x86_64-pc-windows-msvc` (as of version 0.5.2). Where a license is given with “OR”, VectaSim chooses the MIT option if available.
 
 ## Data and services
 
@@ -18,7 +18,7 @@ Generated from `npx license-checker-rseidelsohn --production` (in `app/`) and `c
 | [Natural Earth](https://www.naturalearthdata.com/) | Country borders 1:110m (Admin-0 Countries) for the *Countries* view, simplified and embedded in `crates/vectasim-data/data/countries.geojson.zst` (`scripts/update-countries.py`) | Public domain ([terms of use](https://www.naturalearthdata.com/about/terms-of-use/)); the source is credited on the map |
 | [Unicode CLDR](https://cldr.unicode.org/) | German and English country names in `crates/vectasim-data/data/countries.csv` | [Unicode License v3](https://www.unicode.org/license.txt) – © 1991–2026 Unicode, Inc. |
 | NOAA / [aviationweather.gov](https://aviationweather.gov) | METAR weather | US government work, public domain |
-| [VATSIM](https://vatsim.net) data feed v3 and `metar.vatsim.net` | Online traffic and ATC (only when “Traffic” is turned on); METAR fallback when aviationweather.gov does not answer | VATSIM data usage terms; the data feed is fetched at most every 15 s |
+| [VATSIM](https://vatsim.net) data feed v3 and `metar.vatsim.net` | Online traffic and ATC (only when “Traffic” is turned on); METAR fallback when aviationweather.gov does not answer | Public feed without login or API key, documented in the [VATSIM Data API documentation](https://vatsim.dev/api/data-api); VATSIM data usage terms apply; the data feed is fetched at most every 15 s |
 | [IVAO](https://ivao.aero) Whazzup v2 (`api.ivao.aero/v2/tracker/whazzup`) | Online traffic and ATC (only when “Traffic” is turned on with IVAO or “Both”) | Public file without login or API key; according to the [IVAO documentation](https://wiki.ivao.aero/en/home/devops/api/whazuup/how-to-retrieve-v2) at most one request every 15 s (more often leads to an IP ban), which VectaSim keeps to |
 | [SimBrief](https://www.simbrief.com) (Navigraph) | OFP download on request | Navigraph/SimBrief terms of use |
 | [Planespotters.net](https://www.planespotters.net) | Aircraft photos by registration | Photo © the respective photographer; credit and a link to the photo page are shown with every photo |
@@ -274,7 +274,7 @@ The bundled SQLite library (3.53.2, via `libsqlite3-sys`, feature `bundled`) is 
 | `rustls` | 0.23.46 | Apache-2.0 OR ISC OR MIT |
 | `rustls-pki-types` | 1.15.1 | MIT OR Apache-2.0 |
 | `rustls-platform-verifier` | 0.7.1 | MIT OR Apache-2.0 |
-| `rustls-webpki` | 0.103.15 | ISC |
+| `rustls-webpki` | 0.103.16 | ISC |
 | `ryu` | 1.0.23 | Apache-2.0 OR BSL-1.0 |
 | `same-file` | 1.0.6 | Unlicense/MIT |
 | `schemars` | 0.8.22 | MIT |
@@ -359,6 +359,7 @@ The bundled SQLite library (3.53.2, via `libsqlite3-sys`, feature `bundled`) is 
 | `try-lock` | 0.2.5 | MIT |
 | `tungstenite` | 0.29.0 | MIT OR Apache-2.0 |
 | `tungstenite` | 0.30.0 | MIT OR Apache-2.0 |
+| `typed-path` | 0.12.4 | MIT OR Apache-2.0 |
 | `typeid` | 1.0.3 | MIT OR Apache-2.0 |
 | `typenum` | 1.20.1 | MIT OR Apache-2.0 |
 | `unicode-ident` | 1.0.27 | (MIT OR Apache-2.0) AND Unicode-3.0 |
@@ -373,7 +374,7 @@ The bundled SQLite library (3.53.2, via `libsqlite3-sys`, feature `bundled`) is 
 | `want` | 0.3.2 | MIT |
 | `web_atoms` | 0.2.6 | MIT OR Apache-2.0 |
 | `web-time` | 1.1.0 | MIT OR Apache-2.0 |
-| `webpki-roots` | 1.0.9 | CDLA-Permissive-2.0 |
+| `webpki-roots` | 1.0.10 | CDLA-Permissive-2.0 |
 | `webview2-com` | 0.39.1 | MIT |
 | `webview2-com-macros` | 0.8.1 | MIT |
 | `webview2-com-sys` | 0.39.1 | MIT |
@@ -408,7 +409,7 @@ The bundled SQLite library (3.53.2, via `libsqlite3-sys`, feature `bundled`) is 
 | `zerotrie` | 0.2.5 | Unicode-3.0 |
 | `zerovec` | 0.11.8 | Unicode-3.0 |
 | `zerovec-derive` | 0.11.6 | Unicode-3.0 |
-| `zip` | 4.6.1 | MIT |
+| `zip` | 9.0.5 | MIT |
 | `zlib-rs` | 0.6.8 | Zlib |
 | `zmij` | 1.0.23 | MIT |
 | `zstd` | 0.13.3 | MIT |

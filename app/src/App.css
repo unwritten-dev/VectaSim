@@ -3095,7 +3095,7 @@ button.theme-card:focus-visible {
 .settings > .settings-wide {
   grid-column: 1 / -1;
 }
-/* Overlay & Schnittstelle: port and LAN while the server is off (ServerPanel.tsx) */
+/* Overlay & API: port and LAN while the server is off (ServerPanel.tsx) */
 .server-options {
   display: flex;
   flex-direction: column;
@@ -3158,7 +3158,7 @@ details.fold > summary {
   align-items: flex-end;
   gap: 2px;
 }
-/* ---- Diagnose → Live-Rohdaten ---- */
+/* ---- Diagnostics → Live raw data ---- */
 .raw-diag {
   display: flex;
   flex-direction: column;
@@ -3199,7 +3199,7 @@ table.raw-table tr.raw-ev-warn td {
   color: var(--err);
 }
 
-/* ---- Debug-Modus (Einstellungen → Diagnose) -------------------------------------------- */
+/* ---- Debug mode (Settings → Diagnostics) -------------------------------------------- */
 .badge-debug {
   background: var(--warn-soft);
   color: var(--warn);
@@ -3208,7 +3208,7 @@ table.raw-table tr.raw-ev-warn td {
   font-weight: var(--fw-strong);
 }
 
-/* ---- Einstellungen → Daten, Papierkorb ---- */
+/* ---- Settings → Data, trash ---- */
 .data-head {
   margin: var(--sp-2) 0 0;
   font-size: var(--fs-md, 1rem);
@@ -3245,7 +3245,7 @@ table.raw-table tr.raw-ev-warn td {
   color: var(--warn);
 }
 
-/* ---- Einstellungen → Daten → Gesamtexport ---- */
+/* ---- Settings → Data → Full export ---- */
 .import-confirm {
   display: flex;
   flex-direction: column;
@@ -3421,7 +3421,7 @@ button.link-btn::after {
   min-width: 0;
 }
 
-/* ==== CSV-Import (Einstellungen → Daten → Import) ======================================= */
+/* ==== CSV import (Settings → Data → Import) ======================================= */
 
 .csv-backdrop {
   position: fixed;

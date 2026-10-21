@@ -15,7 +15,7 @@ use vectasim_core::{AircraftInfo, FlightPhase, FlightSummary, IntegrityFlags, La
 
 /// Newest schema this build writes. A file with a higher version is refused
 /// ([`StoreError::NewerSchema`]) instead of being opened by an older app.
-pub const SCHEMA_VERSION: i64 = 16;
+pub const SCHEMA_VERSION: i64 = 17;
 
 /// Days a deleted flight stays in the Papierkorb before `purge_deleted` removes it.
 pub const TRASH_RETENTION_DAYS: u32 = 30;
@@ -261,6 +261,21 @@ const MIGRATION_V16_COLUMNS: &[(&str, &str)] = &[
     ("g_source", "TEXT"),
 ];
 
+/// v17: the landings counted into a derived runway go with their flight. `user_runway_landings`
+/// had no tie to `flights`, so rows of permanently deleted flights stayed behind. A trigger
+/// instead of a `REFERENCES … ON DELETE CASCADE` column (that would need a table rebuild and
+/// would refuse rows whose flight is not there yet – the bundle import writes runways before
+/// flights, in batches): rows of a deleted flight go with it, and the rows already orphaned are
+/// removed. Removing them only means the landing would count again if the flight came back.
+const MIGRATION_V17: &str = r#"
+DELETE FROM user_runway_landings WHERE flight_id NOT IN (SELECT id FROM flights);
+CREATE TRIGGER IF NOT EXISTS user_runway_landings_follow_flight
+AFTER DELETE ON flights
+BEGIN
+    DELETE FROM user_runway_landings WHERE flight_id = OLD.id;
+END;
+"#;
+
 /// Version of the cached approach facts; bump whenever the rules in
 /// `vectasim_core::approach` (or the row mapping below) change, so old rows are recomputed.
 /// 2: displaced thresholds move the runway geometry (glidepath origin, distances).
@@ -290,13 +305,34 @@ const LANDING_SOURCE_SQL: &str =
 pub(crate) const RATED_LANDING_RATE_SQL: &str = "CASE WHEN COALESCE(landing_rate_source, '') <> 'unrated' THEN \
      COALESCE(landing_rate_fpm, ROUND(CASE WHEN ABS(vs_fpm_sim) >= 1 THEN vs_fpm_sim ELSE vs_fpm_measured END)) END";
 
+/// Index for the v17 trigger (`DELETE … WHERE flight_id = OLD.id`); created on every open.
+const USER_RUNWAY_LANDINGS_FLIGHT_INDEX: &str =
+    "CREATE INDEX IF NOT EXISTS user_runway_landings_flight ON user_runway_landings(flight_id);";
+
+/// Phases (as stored) that only an aircraft in the air reaches: Climb to Final.
+const AIRBORNE_PHASES_SQL: &str = "('climb', 'cruise', 'descent', 'approach', 'final')";
+
 /// Whether the flight row `alias` counts in statistics (counters, airports, countries, fleet):
 /// not a discarded ground session, and – for recorded flights (imports carry their own facts) –
-/// it took off or touched down. Rows from before 0.5.1 that only taxied fall out this way.
+/// it took off, touched down, or ended in an airborne phase. Rows from before 0.5.1 that only
+/// taxied fall out this way. The last one is a flight started in the air (no take-off time) that
+/// was interrupted before its landing: it flew, so it counts (flights, distance, airports; its
+/// block time is unknown without an on-block). [`FlightRow::counts_in_stats`] is the same rule.
 pub(crate) fn counts_in_stats_sql(alias: &str) -> String {
     format!(
         "({alias}.state <> 'discarded' AND ({alias}.takeoff_ms IS NOT NULL OR COALESCE({alias}.provider, '') LIKE 'import:%' \
+          OR {alias}.phase IN {AIRBORNE_PHASES_SQL} \
           OR EXISTS (SELECT 1 FROM touchdowns tc WHERE tc.flight_id = {alias}.id)))"
+    )
+}
+
+/// Whether the flight row `alias` left the ground, as far as its row tells: a take-off time, a
+/// touchdown, or a phase from Takeoff to TaxiIn. A row left `active` by a crash without any of it
+/// was a ground session (see [`Store::open`]).
+fn flown_sql(alias: &str) -> String {
+    format!(
+        "({alias}.takeoff_ms IS NOT NULL OR {alias}.phase IN ('takeoff', 'climb', 'cruise', 'descent', 'approach', 'final', 'landing', 'taxiIn') \
+          OR EXISTS (SELECT 1 FROM touchdowns tf WHERE tf.flight_id = {alias}.id))"
     )
 }
 
@@ -328,6 +364,44 @@ pub struct Store {
     conn: Arc<Mutex<Connection>>,
     /// File behind the connection (`None` for in-memory stores).
     path: Option<PathBuf>,
+    /// What opening the file wants the pilot to know ([`Store::take_notices`]).
+    notices: Arc<Mutex<Vec<StoreNotice>>>,
+}
+
+/// Something that happened while opening the logbook and that the UI should show once
+/// (the app takes them with [`Store::take_notices`] after startup and sends each one as the
+/// `store:notice` event; serialised with `kind`, `code`, `message` filled by the app's
+/// language). A WARN/ERROR log line is written in any case.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum StoreNotice {
+    /// "Restore and restart" did not restore: the staged copy was unusable or could
+    /// not be put in place, it lies next to the database as `.restore-failed`, and the previous
+    /// logbook is open.
+    RestoreFailed { detail: String },
+}
+
+impl StoreNotice {
+    /// Stable code for the frontend's own texts.
+    pub fn code(&self) -> &'static str {
+        match self {
+            StoreNotice::RestoreFailed { .. } => "store.restore_failed",
+        }
+    }
+
+    /// The text for a toast, in the backend language.
+    pub fn message(&self, lang: vectasim_core::Lang) -> String {
+        match self {
+            StoreNotice::RestoreFailed { detail } => match lang {
+                vectasim_core::Lang::De => format!(
+                    "Die Sicherung wurde nicht wiederhergestellt, das bisherige Logbuch ist geöffnet. Die Kopie liegt als „.restore-failed“ neben der Datenbank. Grund: {detail}"
+                ),
+                vectasim_core::Lang::En => format!(
+                    "The backup was not restored; the previous logbook is open. The copy lies next to the database as \".restore-failed\". Reason: {detail}"
+                ),
+            },
+        }
+    }
 }
 
 /// A flight in the Papierkorb with the time it was deleted.
@@ -467,6 +541,8 @@ const MIGRATIONS: &[MigrationStep] = &[
             Ok(())
         },
     },
+    // idempotent like v9-v16 (trigger IF NOT EXISTS, the orphan sweep finds nothing the second time)
+    MigrationStep { to: 17, apply: |c| Ok(c.execute_batch(MIGRATION_V17)?) },
 ];
 
 /// Schema version of an open file; 0 = empty (no `schema_version` table yet).
@@ -565,11 +641,14 @@ pub struct FlightRow {
 }
 
 impl FlightRow {
-    /// Same rule as `counts_in_stats_sql`: not discarded, and a recorded flight took off or
-    /// touched down (imports always count).
+    /// Same rule as `counts_in_stats_sql`: not discarded, and a recorded flight took off,
+    /// touched down or ended in an airborne phase (imports always count).
     pub fn counts_in_stats(&self) -> bool {
         self.state != "discarded"
-            && (self.takeoff_ms.is_some() || self.landing_count > 0 || self.provider.as_deref().is_some_and(|p| p.starts_with("import:")))
+            && (self.takeoff_ms.is_some()
+                || self.landing_count > 0
+                || self.phase.is_airborne_phase()
+                || self.provider.as_deref().is_some_and(|p| p.starts_with("import:")))
     }
 }
 
@@ -1141,6 +1220,14 @@ fn row_to_approach_fact(r: &Row<'_>) -> rusqlite::Result<ApproachFactRow> {
     })
 }
 
+/// [`Invalid::FlightRecording`] when the flight `id` is `active` (recorded right now, or its end
+/// not written yet).
+fn refuse_active(conn: &Connection, id: &str) -> Result<()> {
+    let active: bool =
+        conn.query_row("SELECT EXISTS (SELECT 1 FROM flights WHERE id = ?1 AND state = 'active')", params![id], |r| r.get(0))?;
+    if active { Err(Invalid::FlightRecording.into()) } else { Ok(()) }
+}
+
 fn approach_facts_of(conn: &Connection, flight_id: &str) -> Result<Vec<ApproachFactRow>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT {APPROACH_COLS} FROM approach_facts WHERE flight_id = ?1 AND approach_index >= 0 ORDER BY approach_index"
@@ -1171,18 +1258,24 @@ impl Store {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        if crate::backup::apply_pending_restore(path)? {
-            log::warn!("logbook replaced by a restored backup: {}", path.display());
+        let mut notices = Vec::new();
+        match crate::backup::apply_pending_restore_outcome(path)? {
+            crate::backup::RestoreOutcome::Applied => log::warn!("logbook replaced by a restored backup: {}", path.display()),
+            crate::backup::RestoreOutcome::SetAside { detail } => {
+                log::warn!("restore NOT applied, the previous logbook is open; the staged copy is set aside as .restore-failed");
+                notices.push(StoreNotice::RestoreFailed { detail });
+            }
+            crate::backup::RestoreOutcome::NothingStaged => {}
         }
         let conn = Connection::open(path)?;
-        Self::init(conn, Some(path.to_path_buf()), Some(default_backup_dir))
+        Self::init(conn, Some(path.to_path_buf()), Some(default_backup_dir), notices)
     }
 
     pub fn open_in_memory() -> Result<Self> {
-        Self::init(Connection::open_in_memory()?, None, None)
+        Self::init(Connection::open_in_memory()?, None, None, Vec::new())
     }
 
-    fn init(conn: Connection, path: Option<PathBuf>, default_backup_dir: Option<&Path>) -> Result<Self> {
+    fn init(conn: Connection, path: Option<PathBuf>, default_backup_dir: Option<&Path>, notices: Vec<StoreNotice>) -> Result<Self> {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
@@ -1198,13 +1291,35 @@ impl Store {
             None => Vec::new(),
         };
         Self::migrate(&conn, &backup_dirs)?;
-        // A flight left 'active' means the app died mid-flight; keep it, but say so.
+        // the v17 trigger deletes by flight_id: without this every deleted flight scans the
+        // whole table (files already at v17 get it here, idempotent)
+        conn.execute_batch(USER_RUNWAY_LANDINGS_FLIGHT_INDEX)?;
         let now = vectasim_core::now_ms() as i64;
+        // A flight left 'active' means the app died mid-flight. One that never flew (a taxi, a
+        // ground session) is no flight: discarded and into the trash, like the recorder
+        // does when the session ends normally. The others are kept as interrupted.
+        let discarded = conn.execute(
+            &format!(
+                "UPDATE flights SET state = 'discarded', updated_ms = ?1, deleted_ms = COALESCE(deleted_ms, ?1)
+                 WHERE state = 'active' AND NOT {}",
+                flown_sql("flights")
+            ),
+            params![now],
+        )?;
+        if discarded > 0 {
+            log::info!("logbook: {discarded} ground session(s) left open by a crash discarded (in the trash)");
+        }
         conn.execute(
             "UPDATE flights SET state = 'interrupted', updated_ms = ?1 WHERE state = 'active'",
             params![now],
         )?;
-        Ok(Self { conn: Arc::new(Mutex::new(conn)), path })
+        Ok(Self { conn: Arc::new(Mutex::new(conn)), path, notices: Arc::new(Mutex::new(notices)) })
+    }
+
+    /// Notices from opening the logbook that the UI should show once (see [`StoreNotice`]):
+    /// taken, so each one is handed out a single time.
+    pub fn take_notices(&self) -> Vec<StoreNotice> {
+        std::mem::take(&mut *self.notices.lock().unwrap_or_else(|e| e.into_inner()))
     }
 
     /// Apply the schema steps newer than what the file has. Before the first step on an
@@ -1755,11 +1870,13 @@ impl Store {
     /// Move a flight to the Papierkorb at `now_ms`. It disappears from every logbook read
     /// (list, totals, fleet, landing/approach facts) but keeps all its rows until restored
     /// or purged. False if unknown or already deleted.
+    /// A flight still `active` – being recorded, or ended but its end not written yet
+    /// ("ending", the recorder retries it) – is refused ([`Invalid::FlightRecording`]): its row
+    /// would vanish under the recorder. After a crash no row is `active` any more ([`Store::open`]).
     pub fn delete_flight_at(&self, id: &str, now_ms: u64) -> Result<bool> {
-        Ok(self
-            .conn()
-            .execute("UPDATE flights SET deleted_ms = ?2 WHERE id = ?1 AND deleted_ms IS NULL", params![id, now_ms as i64])?
-            > 0)
+        let conn = self.conn();
+        refuse_active(&conn, id)?;
+        Ok(conn.execute("UPDATE flights SET deleted_ms = ?2 WHERE id = ?1 AND deleted_ms IS NULL", params![id, now_ms as i64])? > 0)
     }
 
     /// A recording that never flew (`FlightState::Discarded`): state `discarded` and into the
@@ -1777,9 +1894,12 @@ impl Store {
         Ok(self.conn().execute("UPDATE flights SET deleted_ms = NULL WHERE id = ?1 AND deleted_ms IS NOT NULL", params![id])? > 0)
     }
 
-    /// Remove a flight for good, with its touchdowns, phases, track and cached facts.
+    /// Remove a flight for good, with its touchdowns, phases, track and cached facts. An
+    /// `active` flight is refused like in [`Store::delete_flight_at`].
     pub fn delete_flight_permanently(&self, id: &str) -> Result<bool> {
-        Ok(self.conn().execute("DELETE FROM flights WHERE id = ?1", params![id])? > 0)
+        let conn = self.conn();
+        refuse_active(&conn, id)?;
+        Ok(conn.execute("DELETE FROM flights WHERE id = ?1", params![id])? > 0)
     }
 
     /// Flights in the Papierkorb, most recently deleted first.

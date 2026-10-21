@@ -62,7 +62,7 @@ export default function AirframeImage({ airframe: a, size = "thumb", credit = fa
   const [broken, setBroken] = useState(false);
   useEffect(() => setBroken(false), [url]);
   const line = a ? photoCredit(a) : null;
-  /** Only Planespotters photo pages are opened (Security N4). */
+  /** Only Planespotters photo pages are opened. */
   const link = safePhotoLink(a?.imageLink);
   const show = !!url && !broken;
   // Planespotters requires the photographer credit and a link on every displayed photo; where

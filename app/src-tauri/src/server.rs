@@ -1,4 +1,4 @@
-//! Einstellungen → Overlay & Schnittstelle: the local HTTP/WebSocket server
+//! Settings → Overlay & API: the local HTTP/WebSocket server
 //! (`crates/vectasim-server`) for OBS overlays, a second screen and the JSON interface.
 //!
 //! Off by default (setting `server_enabled`). Port `server_port` (default 8095), LAN access
@@ -40,7 +40,7 @@ const AIRPORT_SEARCH_NM: f64 = 5.0;
 /// Below this ground speed no ETA (same as the HUD, progress.ts → ETA_MIN_GS_KT).
 const ETA_MIN_GS_KT: f64 = 50.0;
 
-/// What Einstellungen → Overlay & Schnittstelle shows.
+/// What Settings → Overlay & API shows.
 #[derive(Clone, Debug, Default, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerStatus {

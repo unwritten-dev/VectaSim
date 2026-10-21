@@ -15,6 +15,9 @@
 //!   value: the event's rate is the worst contact of that event, never a flight peak;
 //! - an on-ground flag is only believed when AGL ≤ 50 ft (or, without a usable AGL,
 //!   GS ≤ 200 kt) – [`ground_contact_corroborated`];
+//! - a contact is only a landing after a qualified flight: > 500 ft AGL, 60 s of air time, or
+//!   [`MS_LIFT_OFF_QUALIFIES`] (5 s) continuously above 50 ft AGL – the same rule as the phase
+//!   engine's Landing gate, so a short helicopter or STOL hop lands;
 //! - first contact opens the report; it is only emitted after the aircraft was
 //!   corroborated on ground for 3 consecutive samples spanning ≥ 2 s (three 1 Hz
 //!   samples), then at the end of the bounce window or the rollout;
@@ -89,6 +92,11 @@ const ROLLOUT_DONE_KT: f64 = 30.0;
 pub const OUTCOME_TIMEOUT_MS: u64 = 120_000;
 const QUALIFY_AGL_FT: f64 = 500.0;
 const QUALIFY_AIRBORNE_MS: u64 = 60_000;
+/// A confirmed lift-off qualifies too: continuously above [`LIFT_OFF_AGL_FT`] this long
+/// (shared with the phase engine, see [`crate::phase`]) – a helicopter or STOL hop lands.
+pub const MS_LIFT_OFF_QUALIFIES: u64 = 5_000;
+/// Height above ground of a confirmed lift-off, ft.
+pub const LIFT_OFF_AGL_FT: f64 = 50.0;
 /// Air time that requalifies a flight after a context reset in the air: long enough
 /// that the ring buffer holds real airborne V/S again (and shared with the phase engine).
 pub const MS_REQUALIFY_AFTER_RESET: u64 = 10_000;
@@ -296,7 +304,8 @@ struct Rollout {
 enum State {
     /// Not yet clearly airborne in this flight.
     Ground,
-    /// Flying; `qualified` latches once it was clearly a flight (> 500 ft AGL or > 60 s).
+    /// Flying; `qualified` latches once it was clearly a flight (> 500 ft AGL, > 60 s, or 5 s
+    /// above 50 ft).
     Airborne { since: u64, qualified: bool },
     /// First contact happened; collecting peak G, bounces and confirmation.
     Settling(Box<Event>),
@@ -321,6 +330,10 @@ pub struct TouchdownDetector {
     /// [`TouchdownDetector::restore_qualified`] was called: the next evaluated sample
     /// continues a qualified flight.
     restore_qualified: bool,
+    /// V/S from just before a short continuous reset, seeded into the ring with the next sample.
+    restore_vs: Option<f64>,
+    /// Since when the aircraft is continuously above [`LIFT_OFF_AGL_FT`] (airborne state).
+    above_since: Option<u64>,
 }
 
 impl Default for TouchdownDetector {
@@ -390,16 +403,22 @@ impl TouchdownDetector {
             outcome: None,
             last_wall_ms: 0,
             restore_qualified: false,
+            restore_vs: None,
+            above_since: None,
         }
     }
 
     /// The session found the position continuous across a context reset in the air (see
     /// [`crate::flight`]): the next evaluated sample continues a qualified flight, so a ground
-    /// contact right after the reset is a landing again. The V/S history stays empty – the
-    /// rate comes from the samples after the reset, the sim's value, or is unrated.
-    pub fn restore_qualified(&mut self) {
+    /// contact right after the reset is a landing again. The V/S history is empty; with
+    /// `last_vs_fpm` (the V/S of the last sample before a *short* hole) it starts with that
+    /// value as one airborne sample, so a contact at once is measured with it instead of being
+    /// unrated. Without it the rate comes from the samples after the reset, the sim's value, or
+    /// is unrated.
+    pub fn restore_qualified(&mut self, last_vs_fpm: Option<f64>) {
         self.qualify_ms = QUALIFY_AIRBORNE_MS;
         self.restore_qualified = true;
+        self.restore_vs = last_vs_fpm.filter(|v| v.is_finite());
     }
 
     /// Drop the V/S history and the airborne latch (data stream discontinuity). Returns
@@ -410,6 +429,8 @@ impl TouchdownDetector {
     pub fn reset(&mut self, resume_airborne: bool) -> Option<TouchdownReport> {
         self.ring.clear();
         self.restore_qualified = false;
+        self.restore_vs = None;
+        self.above_since = None;
         self.qualify_ms = if resume_airborne { MS_REQUALIFY_AFTER_RESET } else { QUALIFY_AIRBORNE_MS };
         match std::mem::replace(&mut self.state, State::Ground) {
             State::Settling(ev) if ev.confirmed => {
@@ -440,6 +461,9 @@ impl TouchdownDetector {
     pub fn shift_time(&mut self, ms: u64) {
         for s in &mut self.ring {
             s.ts = s.ts.saturating_add(ms);
+        }
+        if let Some(s) = self.above_since.as_mut() {
+            *s = s.saturating_add(ms);
         }
         match &mut self.state {
             State::Ground => {}
@@ -477,10 +501,22 @@ impl TouchdownDetector {
         }
         let g = if (0.0..=G_MAX_PLAUSIBLE).contains(&t.g_force) { t.g_force } else { 1.0 };
         let on_ground = ground_contact_corroborated(t);
+        let restore = std::mem::take(&mut self.restore_qualified);
+        if let Some(vs) = self.restore_vs.take().filter(|_| restore) {
+            // the last airborne V/S before the short hole (see `restore_qualified`)
+            self.push(Sample { ts: now, vs, on_ground: false });
+        }
         self.push(Sample { ts: now, vs: t.vertical_speed_fpm, on_ground });
-        if std::mem::take(&mut self.restore_qualified) && matches!(self.state, State::Ground) {
+        if restore && matches!(self.state, State::Ground) {
             self.state = State::Airborne { since: now, qualified: true };
         }
+        // continuously above 50 ft for 5 s: a confirmed lift-off (NaN AGL counts as "not above")
+        let lifted_off = if !on_ground && t.altitude_agl_ft > LIFT_OFF_AGL_FT {
+            now.saturating_sub(*self.above_since.get_or_insert(now)) >= MS_LIFT_OFF_QUALIFIES
+        } else {
+            self.above_since = None;
+            false
+        };
 
         let out = match std::mem::replace(&mut self.state, State::Ground) {
             State::Ground => {
@@ -488,8 +524,10 @@ impl TouchdownDetector {
                 None
             }
             State::Airborne { since, qualified } => {
-                let qualified =
-                    qualified || t.altitude_agl_ft > QUALIFY_AGL_FT || now.saturating_sub(since) > self.qualify_ms;
+                let qualified = qualified
+                    || t.altitude_agl_ft > QUALIFY_AGL_FT
+                    || now.saturating_sub(since) > self.qualify_ms
+                    || lifted_off;
                 if on_ground {
                     if qualified {
                         self.qualify_ms = QUALIFY_AIRBORNE_MS;
@@ -927,7 +965,7 @@ mod tests {
 
     #[test]
     fn glitch_g_in_the_contact_frame_is_no_peak() {
-        // audit 0.5.0 N4: 7 g in the contact frame was clamped to a "5 g" landing
+        // 7 g in the contact frame was clamped to a "5 g" landing
         let mut f = Feed::new(50);
         f.run(70.0, air(1500.0, -700.0, 0.0));
         f.run(2.0, air(10.0, -150.0, 0.0));
@@ -945,7 +983,7 @@ mod tests {
 
     #[test]
     fn contact_without_airborne_samples_is_unrated_unless_the_sim_has_a_value() {
-        // audit 0.5.0 M2: slewed down to the ground, the V/S of the ground sample (0) was the rate
+        // slewed down to the ground, the V/S of the ground sample (0) was the rate
         let slewed_down = |f: &mut Feed, sim: f64| {
             f.run(70.0, air(1500.0, -700.0, 0.0));
             f.run(10.0, |t| {
@@ -972,13 +1010,13 @@ mod tests {
 
     #[test]
     fn restored_qualification_makes_the_next_contact_a_landing() {
-        // audit 0.5.0 M1: after a reset in the air with a continuous position the session
+        // after a reset in the air with a continuous position the session
         // requalifies the detector at once
         let mut f = Feed::new(250);
         f.run(70.0, air(1500.0, -700.0, 0.0));
         f.run(2.0, air(80.0, -600.0, 0.0));
         f.det.reset(true);
-        f.det.restore_qualified();
+        f.det.restore_qualified(None);
         f.run(3.0, air(40.0, -600.0, 0.0));
         f.run(8.0, ground(20.0, 0.0));
         assert_eq!(f.out.len(), 1, "landing 3 s after the reset");

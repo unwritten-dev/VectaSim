@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="vectasim-token" content="">
 <title data-t="title.index">VectaSim Overlay &amp; Schnittstelle</title>
 <link rel="stylesheet" href="/overlay/overlay.css">
 </head>
@@ -49,7 +50,7 @@
   <p>Felder und Beispiele: <code>docs/overlay-api.md</code> im VectaSim-Repository. Im Streamer-Modus sind Kennzeichen, Rufzeichen und Airline maskiert.</p>
 
   <h2>Zugriff</h2>
-  <p>Standard: nur <code>127.0.0.1</code>, ohne Token. Mit „Im Netzwerk erreichbar“ in den VectaSim-Einstellungen brauchen andere Geräte (Tablet, zweiter PC) das Token: <code>?token=…</code> an jede URL oder den Header <code>Authorization: Bearer …</code>.</p>
+  <p>Standard: nur <code>127.0.0.1</code>, ohne Token. Mit „Im Netzwerk erreichbar (mit Token)“ in den VectaSim-Einstellungen brauchen andere Geräte (Tablet, zweiter PC) das Token – im Browser nur beim ersten Aufruf: <code>?token=…</code> an die URL hängen; VectaSim merkt es sich dann ein Jahr lang in einem Cookie, die Seite entfernt es aus der Adresszeile, und Lesezeichen ohne Token funktionieren weiter. Programme schicken stattdessen den Header <code>X-VectaSim-Token: …</code> oder <code>Authorization: Bearer …</code>. Rangfolge: <code>X-VectaSim-Token</code> vor <code>Authorization</code> vor <code>?token</code> vor Cookie – ein falscher Header schlägt ein gültiges Cookie. „Neu erzeugen“ macht alte Links und Cookies ungültig (401); danach die URL mit dem neuen Token einmal aufrufen.</p>
   </div>
 
   <div data-lang="en">
@@ -89,7 +90,7 @@
   <p>Fields and examples: <code>docs/overlay-api.md</code> in the VectaSim repository. In the streamer mode registration, callsign and airline are masked.</p>
 
   <h2>Access</h2>
-  <p>Default: <code>127.0.0.1</code> only, without a token. With “Reachable in the network” in the VectaSim settings, other devices (tablet, second PC) need the token: <code>?token=…</code> on every URL or the header <code>Authorization: Bearer …</code>.</p>
+  <p>Default: <code>127.0.0.1</code> only, without a token. With “Reachable on the network (with token)” in the VectaSim settings, other devices (tablet, second PC) need the token – in a browser only on the first load: add <code>?token=…</code> to the URL; VectaSim then keeps it in a cookie for a year, the page removes it from the address bar, and bookmarks without the token keep working. Programs send the header <code>X-VectaSim-Token: …</code> or <code>Authorization: Bearer …</code> instead. Order: <code>X-VectaSim-Token</code> before <code>Authorization</code> before <code>?token</code> before the cookie – a wrong header beats a valid cookie. “Regenerate” makes old links and cookies invalid (401); then open the URL with the new token once.</p>
   </div>
 </main>
 <script src="/overlay/overlay.js"></script>

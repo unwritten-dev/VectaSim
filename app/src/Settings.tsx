@@ -1,7 +1,8 @@
 import { useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { revealPath } from "./revealPath";
 import { open as openFileDialog, save as saveFileDialog } from "@tauri-apps/plugin-dialog";
 import { desktopDir, join } from "@tauri-apps/api/path";
 import type {
@@ -257,7 +258,7 @@ export default function Settings({ providers, onProvider, online, status, flight
         title: t("settings.diag.package.saved"),
         body: `${mp(pkg.path)} · ${fmtBytes(pkg.bytes)} · ${t("settings.diag.package.files", { count: pkg.files.length })}`,
         durationMs: 12000,
-        actions: [{ label: t("settings.openFolder"), onClick: () => void revealItemInDir(pkg.path).catch(() => {}) }],
+        actions: [{ label: t("settings.openFolder"), onClick: () => void revealPath(pkg.path).catch(() => {}) }],
       });
     } catch (e) {
       showToast({ tone: "err", ...errorToast(t("settings.diag.package.failed"), e, "settings") });
@@ -275,7 +276,7 @@ export default function Settings({ providers, onProvider, online, status, flight
     invoke<string>("dump_now")
       .then((path) => {
         showToast({ tone: "ok", title: t("settings.diag.dump.saved"), body: mp(path), durationMs: 6000 });
-        void revealItemInDir(path).catch(() => {});
+        void revealPath(path).catch(() => {});
         invoke<DumpInfo>("dump_info").then(setDump).catch(() => {});
       })
       .catch((e) => showToast({ tone: "warn", ...errorToast(t("settings.diag.dump.notSaved"), e, "settings"), durationMs: 6000 }));
@@ -359,7 +360,7 @@ export default function Settings({ providers, onProvider, online, status, flight
       })
       .finally(() => setNetBusy(false));
   };
-  const reveal = (path: string) => revealItemInDir(path).catch((e) => setError(String(e)));
+  const reveal = (path: string) => revealPath(path).catch((e) => setError(String(e)));
   const recTone: Tone = rec.error ? "err" : rec.kind === "ready" || rec.kind === "recording" ? "ok" : rec.kind === "suspended" ? "warn" : rec.kind === "demo" ? "info" : "off";
   const recording = flight?.state === "active" && !demo;
   const logFile = logDir ? joinPath(logDir, LOG_FILE) : null;
@@ -574,7 +575,7 @@ export default function Settings({ providers, onProvider, online, status, flight
         </Panel>
       </div>
 
-      {/* Overlay & Schnittstelle under Integrationen made the right column
+      {/* Overlay & API under Integrationen made the right column
           ~450 px longer than the left (more with the server on); with the X-Plane address folded
           (SimulatorSelect) both columns now end within ~60 px, so the overlay stays full width */}
       <IntegrationsPanel onError={(e) => setError(e)} />
@@ -1020,8 +1021,8 @@ function backupLabel(t: TFunction, b: BackupEntry): string {
 type DataTask = "backup" | "restore" | "export" | "import" | "emptyTrash" | "wipe";
 
 /**
- * Einstellungen → Daten: where the logbook lives, backups (folder, automatic, restore),
- * Papierkorb and „Alle Daten löschen“.
+ * Settings → Data: where the logbook lives, backups (folder, automatic, restore),
+ * trash and "Delete all data".
  */
 function DataPanel({ onError }: { onError: (e: string) => void }) {
   const t = useT();
@@ -1054,7 +1055,7 @@ function DataPanel({ onError }: { onError: (e: string) => void }) {
       a.then((u) => u());
       b.then((u) => u());
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- subscribe once on mount; `load` is recreated each render but only calls invoke and the stable setters
   }, []);
 
   const run = async (what: DataTask, fn: () => Promise<void>) => {
@@ -1141,7 +1142,7 @@ function DataPanel({ onError }: { onError: (e: string) => void }) {
           ? t("settings.data.export.bodyWarnings", { path: mp(r.path), size: fmtBytes(r.bytes), warnings: t("csvImport.done.warnings", { count: r.warnings.length }) })
           : `${mp(r.path)} · ${fmtBytes(r.bytes)}`,
         durationMs: 12_000,
-        actions: [{ label: t("settings.openFolder"), onClick: () => void revealItemInDir(r.path).catch(() => {}) }],
+        actions: [{ label: t("settings.openFolder"), onClick: () => void revealPath(r.path).catch(() => {}) }],
       });
     });
   };
@@ -1179,7 +1180,7 @@ function DataPanel({ onError }: { onError: (e: string) => void }) {
           ? t("csvImport.done.bodyWarnings", { summary: importSummary(t, r), warnings: t("csvImport.done.warnings", { count: r.warnings.length }), list: r.warnings.slice(0, 2).join("; ") })
           : importSummary(t, r),
         durationMs: 15_000,
-        actions: r.backup ? [{ label: t("settings.data.import.showBackup"), onClick: () => void revealItemInDir(r.backup ?? "").catch(() => {}) }] : undefined,
+        actions: r.backup ? [{ label: t("settings.data.import.showBackup"), onClick: () => void revealPath(r.backup ?? "").catch(() => {}) }] : undefined,
       });
       await load();
     });
@@ -1202,7 +1203,7 @@ function DataPanel({ onError }: { onError: (e: string) => void }) {
         title: t("settings.data.wipe.done", { flights: t("count.flights", { count: r.flights }) }),
         body: t("settings.data.wipe.backup", { path: mp(r.backup) }),
         durationMs: 12_000,
-        actions: [{ label: t("settings.openFolder"), onClick: () => void revealItemInDir(r.backup).catch(() => {}) }],
+        actions: [{ label: t("settings.openFolder"), onClick: () => void revealPath(r.backup).catch(() => {}) }],
       });
       await load();
     });
@@ -1227,7 +1228,7 @@ function DataPanel({ onError }: { onError: (e: string) => void }) {
           {info ? mp(info.dbPath) : "–"}
         </span>
         {info && <span className="detail">{fmtBytes(info.dbBytes)}</span>}
-        <button onClick={() => info && void revealItemInDir(info.dbPath).catch((e) => onError(String(e)))} disabled={!info}>
+        <button onClick={() => info && void revealPath(info.dbPath).catch((e) => onError(String(e)))} disabled={!info}>
           {t("settings.data.db.reveal")}
         </button>
       </div>

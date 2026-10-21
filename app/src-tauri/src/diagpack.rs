@@ -1,4 +1,4 @@
-//! „Diagnosepaket erstellen“ (Einstellungen → Diagnose): one ZIP the user sends to the developer.
+//! “Create diagnostics package” (Settings → Diagnostics): one ZIP the user sends to the developer.
 //!
 //! Always: `logs/` (every `vectasim*.log*`), `settings.json` (SimBrief ID masked), `system.json`,
 //! `db.json` (schema, counts, size, the last phase events), `README.txt` (in the backend language;
@@ -6,11 +6,12 @@
 //! `dumps/` (newest first, at most [`DUMP_BUDGET`] bytes; the running file is flushed and the RAM
 //! ring written as a fresh `ring-*.vsdump` first) and `simconnect.json` (DLL search, connection,
 //! raw diagnostics). Nothing is uploaded – the file goes where the save dialog says.
-//! With the Streamer-Modus on, the JSON files, the logs and the notes have the Windows user
-//! name removed from their paths (`privacy::mask_user_paths`) and the registrations and callsigns
-//! of the logbook, the fleet, the loaded OFP and the sim's aircraft replaced by `***`
-//! (`privacy::Redactor`); aircraft titles, ATC IDs and airlines in the JSON become `***`. The raw
-//! dumps cannot be filtered and are left out (README says so).
+//! The JSON files, the logs and the notes always have the Windows user name removed from their
+//! paths (`privacy::mask_user_paths`) – the package is meant to be attached to a public issue.
+//! With the Streamer-Modus on, the registrations and callsigns of the logbook, the fleet, the
+//! loaded OFP and the sim's aircraft are replaced by `***` as well (`privacy::Redactor`); aircraft
+//! titles, ATC IDs and airlines in the JSON become `***`. The raw dumps cannot be filtered and are
+//! left out then (README says so).
 
 use crate::lang::Lang;
 use crate::manager::ProviderManager;
@@ -48,9 +49,9 @@ struct Sources {
     system: Value,
     db: Value,
     simconnect: Option<Value>,
-    /// Streamer-Modus: user names removed from paths in JSON, logs and notes, identity fields
-    /// masked in the JSON, `redactor` applied everywhere, dumps left out.
-    mask_paths: bool,
+    /// Streamer-Modus: identity fields masked in the JSON, `redactor` applied everywhere, dumps
+    /// left out. (User names in paths are removed either way.)
+    streamer: bool,
     /// Registrations and callsigns to hide (filled only with the Streamer-Modus).
     redactor: crate::privacy::Redactor,
     /// Language of README and notes (file contents from logs/JSON stay as they are).
@@ -78,7 +79,7 @@ fn collect(app: &AppHandle) -> Sources {
     let store = app.state::<Store>();
     let manager = app.state::<ProviderManager>();
     let debug = crate::debug_mode_on(&store);
-    let mask_paths = crate::privacy::privacy_mode_on(&store);
+    let streamer = crate::privacy::privacy_mode_on(&store);
     log::logger().flush();
 
     let dumps_dir = if debug {
@@ -102,7 +103,7 @@ fn collect(app: &AppHandle) -> Sources {
         "createdUtc": vectasim_dump::file_stamp(vectasim_core::now_ms()),
         "app": { "name": app.package_info().name, "version": app.package_info().version.to_string(), "tauri": tauri::VERSION },
         "debugMode": debug,
-        "privacyMode": mask_paths,
+        "privacyMode": streamer,
         "logLevel": store.get_setting(crate::logging::SETTING_LOG_LEVEL).ok().flatten(),
         "rustLog": crate::logging::env_override(),
         "os": os_info(),
@@ -120,7 +121,7 @@ fn collect(app: &AppHandle) -> Sources {
     let db = db_json(&store, db_path.as_deref());
     let simconnect = debug.then(|| simconnect_json(&store, &manager));
 
-    let redactor = if mask_paths {
+    let redactor = if streamer {
         let mut words = db_path.as_deref().map(identity_words).unwrap_or_default();
         if let Some(a) = &status.aircraft {
             words.push(a.atc_id.clone());
@@ -136,7 +137,7 @@ fn collect(app: &AppHandle) -> Sources {
         crate::privacy::Redactor::default()
     };
 
-    Sources { log_dir: app.path().app_log_dir().ok(), dumps_dir, settings, system, db, simconnect, mask_paths, redactor, lang: crate::lang::current() }
+    Sources { log_dir: app.path().app_log_dir().ok(), dumps_dir, settings, system, db, simconnect, streamer, redactor, lang: crate::lang::current() }
 }
 
 /// Every registration and callsign the logbook knows (fleet, booked airframes, OFP callsigns,
@@ -284,11 +285,17 @@ fn reg_value(output: &str, name: &str) -> Option<String> {
     })
 }
 
+/// `reg.exe` with its full System32 path (not found through the program folder first).
+#[cfg(windows)]
+fn reg_exe() -> std::path::PathBuf {
+    crate::simconnect_dl::system32("reg.exe")
+}
+
 #[cfg(windows)]
 fn reg_query(key: &str, value: Option<&str>) -> Option<String> {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let mut cmd = std::process::Command::new("reg");
+    let mut cmd = std::process::Command::new(reg_exe());
     cmd.args(["query", key]);
     if let Some(v) = value {
         cmd.args(["/v", v]);
@@ -402,10 +409,10 @@ simconnect.json  Welche SimConnect.dll geladen wurde, welche Pfade durchsucht wu
 Datenschutz
 -----------
 Es sind keine Passwörter, Schlüssel oder Zugangsdaten enthalten – VectaSim speichert keine.
-Dateipfade (z. B. C:\\Users\\<Name>\\...) können deinen Windows-Benutzernamen zeigen – außer im
-Streamer-Modus (Einstellungen → Anzeige): dann ersetzt VectaSim ihn in den JSON-Dateien, den
-Protokollen und HINWEISE.txt durch %USERPROFILE%, %LOCALAPPDATA% oder %APPDATA%, blendet
-Kennzeichen und Rufzeichen (Callsigns) als *** aus und lässt die Roh-Aufzeichnungen weg.
+Deinen Windows-Benutzernamen in Dateipfaden (C:\\Users\\<Name>\\...) ersetzt VectaSim in den
+JSON-Dateien, den Protokollen und HINWEISE.txt immer durch %USERPROFILE%, %LOCALAPPDATA% oder
+%APPDATA%. Im Streamer-Modus (Einstellungen → Anzeige) blendet VectaSim außerdem Kennzeichen und
+Rufzeichen (Callsigns) als *** aus und lässt die Roh-Aufzeichnungen weg.
 Die Roh-Aufzeichnungen enthalten Flugdaten (Position, Flugzeug, Kennung) wie im Logbuch.
 ";
 
@@ -434,10 +441,10 @@ simconnect.json  Which SimConnect.dll was loaded, which paths were searched and 
 Privacy
 -------
 No passwords, keys or credentials are included – VectaSim stores none.
-File paths (e.g. C:\\Users\\<name>\\...) can show your Windows user name – except in the
-streamer mode (Settings → Display): then VectaSim replaces it in the JSON files, the logs and
-NOTES.txt with %USERPROFILE%, %LOCALAPPDATA% or %APPDATA%, hides registrations and callsigns
-as *** and leaves the raw recordings out.
+VectaSim always replaces your Windows user name in file paths (C:\\Users\\<name>\\...) in the
+JSON files, the logs and NOTES.txt with %USERPROFILE%, %LOCALAPPDATA% or %APPDATA%. In the
+streamer mode (Settings → Display) it also hides registrations and callsigns as *** and leaves
+the raw recordings out.
 The raw recordings contain flight data (position, aircraft, registration) as in the logbook.
 ";
 
@@ -478,7 +485,7 @@ fn write_zip<W: Write + Seek>(out: W, src: &Sources) -> io::Result<Vec<String>> 
     };
     let l = src.lang;
     let base = l.tr(README_DE, README_EN);
-    let readme = if src.mask_paths {
+    let readme = if src.streamer {
         let masked = l.tr(
             "In diesem Paket (Streamer-Modus an): Benutzername in Pfaden, Kennzeichen und Rufzeichen ausgeblendet; Flugzeugtitel und Airline als ***. Die Roh-Aufzeichnungen (dumps/) sind nicht enthalten, weil sie sich nicht filtern lassen.",
             "In this package (streamer mode on): user name in paths, registrations and callsigns hidden; aircraft titles and airlines as ***. The raw recordings (dumps/) are not included because they cannot be filtered.",
@@ -490,8 +497,8 @@ fn write_zip<W: Write + Seek>(out: W, src: &Sources) -> io::Result<Vec<String>> 
     add_bytes(&mut zip, "README.txt", readme.replace('\n', "\r\n").as_bytes())?;
     let pretty = |v: &Value| {
         let mut v = v.clone();
-        if src.mask_paths {
-            crate::privacy::mask_json(&mut v);
+        crate::privacy::mask_json(&mut v);
+        if src.streamer {
             crate::privacy::mask_identity_fields(&mut v);
             src.redactor.mask_json(&mut v);
         }
@@ -508,7 +515,7 @@ fn write_zip<W: Write + Seek>(out: W, src: &Sources) -> io::Result<Vec<String>> 
     let mut add_file = |zip: &mut ZipWriter<W>, name: String, path: &Path, opts: SimpleFileOptions, mask_text: bool| -> io::Result<()> {
         // a log/dump can vanish (rotation) or be locked; the package goes on without it
         match File::open(path) {
-            // a log with the Streamer-Modus: read, mask, write; everything else is streamed
+            // a log: read, mask (user paths; with the Streamer-Modus also identities), write; dumps are streamed
             Ok(f) if mask_text => match io::read_to_string(f) {
                 Ok(text) => {
                     zip.start_file(name.as_str(), opts).map_err(io::Error::other)?;
@@ -529,11 +536,11 @@ fn write_zip<W: Write + Seek>(out: W, src: &Sources) -> io::Result<Vec<String>> 
     if let Some(dir) = &src.log_dir {
         for p in log_files(dir) {
             let name = format!("logs/{}", p.file_name().unwrap_or_default().to_string_lossy());
-            add_file(&mut zip, name, &p, deflate, src.mask_paths)?;
+            add_file(&mut zip, name, &p, deflate, true)?;
         }
     }
     // Streamer-Modus: raw dumps carry registration and callsign in binary frames – left out
-    if let Some(dir) = src.dumps_dir.as_ref().filter(|_| !src.mask_paths) {
+    if let Some(dir) = src.dumps_dir.as_ref().filter(|_| !src.streamer) {
         let (picked, skipped) = pick_dumps(dir, DUMP_BUDGET);
         for p in picked {
             let name = format!("dumps/{}", p.file_name().unwrap_or_default().to_string_lossy());
@@ -546,7 +553,7 @@ fn write_zip<W: Write + Seek>(out: W, src: &Sources) -> io::Result<Vec<String>> 
     if !notes.is_empty() {
         zip.start_file(notes_name(l), deflate).map_err(io::Error::other)?;
         let text = notes.join("\r\n");
-        let text = if src.mask_paths { src.redactor.mask(&crate::privacy::mask_user_paths(&text)) } else { text };
+        let text = src.redactor.mask(&crate::privacy::mask_user_paths(&text));
         zip.write_all(text.as_bytes())?;
         files.push(notes_name(l).into());
     }
@@ -558,6 +565,15 @@ fn write_zip<W: Write + Seek>(out: W, src: &Sources) -> io::Result<Vec<String>> 
 mod tests {
     use super::*;
     use std::io::Read;
+
+    #[cfg(windows)]
+    #[test]
+    fn reg_is_started_from_system32() {
+        let reg = reg_exe();
+        assert!(reg.is_absolute(), "{}", reg.display());
+        assert!(reg.ends_with(r"System32\reg.exe"), "{}", reg.display());
+        assert!(reg.is_file(), "{}", reg.display());
+    }
 
     fn temp_dir(tag: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("vs-diagpack-{tag}-{}-{}", std::process::id(), vectasim_core::now_ms()));
@@ -618,7 +634,7 @@ mod tests {
             system: json!({ "app": "test" }),
             db: json!({ "schemaVersion": 9 }),
             simconnect: Some(json!({ "foundDll": null })),
-            mask_paths: false,
+            streamer: false,
             redactor: Default::default(),
             lang: Lang::De,
         };
@@ -661,7 +677,7 @@ mod tests {
             system: json!({ "app": "test" }),
             db: json!({ "path": r"C:\Users\Max\AppData\Roaming\io.vectasim.app\vectasim.db" }),
             simconnect: None,
-            mask_paths: true,
+            streamer: true,
             redactor: Default::default(),
             lang: Lang::De,
         };
@@ -686,6 +702,40 @@ mod tests {
     }
 
     #[test]
+    fn user_paths_are_masked_without_the_streamer_mode_too() {
+        let dir = temp_dir("mask-always");
+        let logs = dir.join("logs");
+        std::fs::create_dir_all(&logs).unwrap();
+        std::fs::write(logs.join("vectasim.log"), "booked onto airframe D-AIBL, db C:\\Users\\Max\\AppData\\Local\\x.db\n").unwrap();
+        let src = Sources {
+            log_dir: Some(logs),
+            dumps_dir: None,
+            settings: settings_json(vec![("backup_dir".into(), r"D:\Users\Max\Backups".into())]),
+            system: json!({ "app": "test" }),
+            db: json!({ "recentFlights": [{ "aircraft": "Airbus A320 Lufthansa" }] }),
+            simconnect: None,
+            streamer: false,
+            redactor: Default::default(),
+            lang: Lang::En,
+        };
+        let target = dir.join("pkg.zip");
+        write_package(&target, &src).unwrap();
+        let mut zip = zip::ZipArchive::new(File::open(&target).unwrap()).unwrap();
+        let mut read = |n: &str| {
+            let mut s = String::new();
+            zip.by_name(n).unwrap().read_to_string(&mut s).unwrap();
+            s
+        };
+        let [settings, db, log, readme] = ["settings.json", "db.json", "logs/vectasim.log", "README.txt"].map(&mut read);
+        assert!(!settings.contains("Max") && settings.contains(r"%USERPROFILE%\\Backups"), "{settings}");
+        assert_eq!(log, "booked onto airframe D-AIBL, db %LOCALAPPDATA%\\x.db\n");
+        // identities only go with the Streamer-Modus
+        assert!(db.contains("Lufthansa"), "{db}");
+        assert!(readme.contains("always replaces your Windows user name"), "{readme}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn streamer_mode_hides_registrations_callsigns_and_dumps() {
         let dir = temp_dir("ids");
         let logs = dir.join("logs");
@@ -705,7 +755,7 @@ mod tests {
             system: json!({ "app": "test" }),
             db: json!({ "recentFlights": [{ "id": "f1", "aircraft": "Airbus A320 Lufthansa Bella", "dep": "EDDF" }] }),
             simconnect: Some(json!({ "status": { "aircraft": { "title": "Airbus A320 Lufthansa Bella", "atcId": "DAIBL", "atcModel": "A320" } } })),
-            mask_paths: true,
+            streamer: true,
             redactor: crate::privacy::Redactor::new(["D-AIBL", "DLH4AB"]),
             lang: Lang::De,
         };
@@ -756,7 +806,7 @@ mod tests {
             system: json!({}),
             db: json!({}),
             simconnect: None,
-            mask_paths: true,
+            streamer: true,
             redactor: Default::default(),
             lang: Lang::En,
         };

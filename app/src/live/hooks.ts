@@ -19,7 +19,7 @@ export function useNearestIcao(point: GeoPoint | null | undefined): string | nul
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- asks once per `key` (rounded position), not for every telemetry sample of `point`
   }, [key]);
   return icao;
 }

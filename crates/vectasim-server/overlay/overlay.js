@@ -4,11 +4,37 @@
 // the data. URL parameters: token (LAN access), scale (font size factor), local=1 (local time
 // instead of UTC), preview=1 (sample data, for placing the source in OBS), lang=de|en (the server
 // sets <html lang> from it or from the app's language; texts below in TEXT, phases stay English).
+// The token is only needed on the first load: the server answers it with an HttpOnly cookie, and
+// the script takes it out of the address bar (history, bookmarks) and keeps it for this tab only
+// (sessionStorage) for the WebSocket URL and the links on the start page. The start page also gets
+// it from the server (<meta name="vectasim-token">, only for an authorised request while LAN
+// access is on), so its copy URLs carry the token after a bookmark load through the cookie too;
+// the element is removed right after reading.
 (function () {
   "use strict";
 
   var P = new URLSearchParams(location.search);
-  var TOKEN = P.get("token") || "";
+  var TOKEN_KEY = "vectasim_token";
+  var META = document.querySelector('meta[name="vectasim-token"]');
+  var SERVED = META ? META.getAttribute("content") || "" : "";
+  if (META && META.parentNode) META.parentNode.removeChild(META);
+  var TOKEN = SERVED || P.get("token") || "";
+  try {
+    if (TOKEN) sessionStorage.setItem(TOKEN_KEY, TOKEN);
+    else TOKEN = sessionStorage.getItem(TOKEN_KEY) || "";
+  } catch (e) {
+    /* storage blocked: the cookie still carries the token */
+  }
+  if (P.has("token") && window.history && history.replaceState) {
+    var rest = new URLSearchParams(location.search);
+    rest.delete("token");
+    var qs = rest.toString();
+    try {
+      history.replaceState(history.state, "", location.pathname + (qs ? "?" + qs : "") + location.hash);
+    } catch (e) {
+      /* keep the URL as it is */
+    }
+  }
   var LOCAL = P.get("local") === "1";
   var PREVIEW = P.get("preview") === "1";
   var scale = parseFloat(P.get("scale") || "1");
@@ -297,14 +323,10 @@
   // ---- start page --------------------------------------------------------------------
   function renderIndex() {
     var base = location.protocol + "//" + location.host;
+    // the URLs to copy (OBS on another PC) carry the token; the language switch does not (cookie)
     var q = TOKEN ? "?token=" + encodeURIComponent(TOKEN) : "";
-    // language switch keeps the token
     document.querySelectorAll("[data-switch]").forEach(function (e) {
-      e.setAttribute("href", "?lang=" + e.getAttribute("data-switch") + (TOKEN ? "&token=" + encodeURIComponent(TOKEN) : ""));
-    });
-    // language switch keeps the token
-    document.querySelectorAll("[data-switch]").forEach(function (e) {
-      e.setAttribute("href", "?lang=" + e.getAttribute("data-switch") + (TOKEN ? "&token=" + encodeURIComponent(TOKEN) : ""));
+      e.setAttribute("href", "?lang=" + e.getAttribute("data-switch"));
     });
     document.querySelectorAll("[data-url]").forEach(function (e) {
       var path = e.getAttribute("data-url");

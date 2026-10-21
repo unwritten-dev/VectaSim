@@ -86,7 +86,7 @@ fn info(restarted: bool) -> SimConnectDownloadInfo {
     }
 }
 
-/// State of the in-app download for Einstellungen → Simulator.
+/// State of the in-app download for Settings → Simulator.
 #[tauri::command]
 pub fn simconnect_download_info() -> SimConnectDownloadInfo {
     info(false)
@@ -206,7 +206,7 @@ fn exit_code(kind: FailKind) -> i32 {
 
 /// A DLL the SimConnect provider would load: the loader's search order
 /// (`ffi::candidate_paths`), where the downloaded copy only counts when it matches the pinned
-/// hash. The file chosen in Einstellungen → Simulator lives in the logbook database and is not
+/// hash. The file chosen in Settings → Simulator lives in the logbook database and is not
 /// read here (the installer then offers the download once more, which does no harm).
 fn usable_dll() -> Option<PathBuf> {
     let downloaded = ffi::downloaded_dll_path();
@@ -366,7 +366,10 @@ fn write_source_note(dir: &Path) {
     }
 }
 
-fn system32(exe: &str) -> PathBuf {
+/// A Windows tool by its full path (`%SystemRoot%\System32\<exe>`), never by its bare name:
+/// Windows would look in the program folder first, which a per-user install lets the user's
+/// processes write to.
+pub(crate) fn system32(exe: &str) -> PathBuf {
     let root = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
     root.join("System32").join(exe)
 }

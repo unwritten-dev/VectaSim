@@ -53,7 +53,7 @@ export function useActiveAirframe(key: string): Airframe | null {
     invoke<Airframe | null>("active_airframe")
       .then(setA)
       .catch(() => setA(null));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `key` is only the re-ask trigger (flight/aircraft changed); the command takes no argument
   }, [key]);
   useRefreshOn(load);
   return a;

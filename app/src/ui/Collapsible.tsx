@@ -3,7 +3,10 @@
 // summary; the choice is remembered per section id in localStorage. Default open.
 //
 // The toggle is a native <button type="button">: click, Enter and Space toggle it (the browser
-// fires click for both keys), aria-expanded / aria-controls describe it. Folding is instant (no
+// fires click for both keys), aria-expanded describes it and aria-controls points at the body
+// only while the body is rendered (a folded section has none). The body is a plain group, not a
+// landmark: a side panel with a dozen open sections would otherwise drown landmark navigation;
+// `region` opts a section in for the few main areas that deserve one. Folding is instant (no
 // height animation); only the chevron turns, and the global reduced-motion rule stops that too.
 
 import { useCallback, useId, useState, type ReactNode } from "react";
@@ -61,20 +64,22 @@ interface ViewProps {
   level?: 2 | 3 | 4;
   /** Extra class of the body. */
   bodyClassName?: string;
+  /** The open body as a named landmark (role="region"); only for a few main sections. */
+  region?: boolean;
   /** Section attributes passed through (e.g. aria-live). */
   "aria-live"?: "polite" | "off";
   children?: ReactNode;
 }
 
 /** The stateless part: no hooks, so tests can call it and click its toggle directly. */
-export function CollapsibleView({ title, summary, actions, open, onToggle, uid, className, headClassName, level, bodyClassName, children, ...rest }: ViewProps) {
+export function CollapsibleView({ title, summary, actions, open, onToggle, uid, className, headClassName, level, bodyClassName, region, children, ...rest }: ViewProps) {
   const bodyId = `${uid}-body`;
   const headId = `${uid}-head`;
   const Head = level ? (`h${level}` as const) : "div";
   return (
     <section className={`collapsible${className ? ` ${className}` : ""}${open ? "" : " is-collapsed"}`} aria-live={rest["aria-live"]}>
       <Head className={`collapsible-head${headClassName ? ` ${headClassName}` : ""}`}>
-        <button type="button" id={headId} className="collapsible-toggle" aria-expanded={open} aria-controls={bodyId} onClick={onToggle}>
+        <button type="button" id={headId} className="collapsible-toggle" aria-expanded={open} aria-controls={open ? bodyId : undefined} onClick={onToggle}>
           <Chevron open={open} />
           <span className="collapsible-title">{title}</span>
           {!open && summary != null && summary !== "" && <span className="collapsible-summary">{summary}</span>}
@@ -82,7 +87,7 @@ export function CollapsibleView({ title, summary, actions, open, onToggle, uid, 
         {actions && <span className="collapsible-actions">{actions}</span>}
       </Head>
       {open && (
-        <div id={bodyId} className={`collapsible-body${bodyClassName ? ` ${bodyClassName}` : ""}`} role="region" aria-labelledby={headId}>
+        <div id={bodyId} className={`collapsible-body${bodyClassName ? ` ${bodyClassName}` : ""}`} role={region ? "region" : undefined} aria-labelledby={region ? headId : undefined}>
           {children}
         </div>
       )}

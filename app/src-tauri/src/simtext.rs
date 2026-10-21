@@ -4,7 +4,7 @@
 //!
 //! `VectaSim · Gelandet −142 fpm (sanft) · 1,18 g · keine Bounces · 27L: 412 m hinter der Schwelle, 1 m links`
 //!
-//! Setting `sim_text_landing` (default on; "0" = off), *Einstellungen → Simulator*. Only the
+//! Setting `sim_text_landing` (default on; "0" = off), *Settings → Simulator*. Only the
 //! SimConnect provider sends it (the queue is drained by its session; nothing is queued for
 //! X-Plane, the mock or a replay). Whether MSFS shows it depends on the sim version – a
 //! rejected call is only logged. The text carries no registration or callsign.
@@ -31,11 +31,18 @@ fn metres(m: f64) -> String {
 }
 
 /// The line for one touchdown; `fact` adds runway, touchdown point and centreline offset
-/// when a runway was matched.
-pub fn landing_line(lang: Lang, rate_fpm: f64, peak_g: f64, bounces: u32, touch_and_go: bool, fact: Option<&LandingFactCache>) -> String {
-    let n = rate_fpm.round();
-    let minus = lang.tr("\u{2212}", "-");
-    let rate = if n < 0.0 { format!("{minus}{:.0} fpm", -n) } else { format!("{n:.0} fpm") };
+/// when a runway was matched. `rate_fpm` is `None` for an unrated touchdown: "Landerate nicht
+/// bewertbar" / "landing rate not rated" without a band (never "0 fpm (smooth)").
+pub fn landing_line(lang: Lang, rate_fpm: Option<f64>, peak_g: f64, bounces: u32, touch_and_go: bool, fact: Option<&LandingFactCache>) -> String {
+    let rate = match rate_fpm {
+        Some(r) => {
+            let n = r.round();
+            let minus = lang.tr("\u{2212}", "-");
+            let v = if n < 0.0 { format!("{minus}{:.0} fpm", -n) } else { format!("{n:.0} fpm") };
+            format!("{v} ({})", band_label(lang, vs_band(r)))
+        }
+        None => lang.tr("Landerate nicht bewertbar", "landing rate not rated").to_owned(),
+    };
     let what = if touch_and_go { "Touch-and-go" } else { lang.tr("Gelandet", "Landed") };
     let bounce = match bounces {
         0 => lang.tr("keine Bounces", "no bounces").to_owned(),
@@ -44,7 +51,7 @@ pub fn landing_line(lang: Lang, rate_fpm: f64, peak_g: f64, bounces: u32, touch_
     };
     let mut parts = vec![
         "VectaSim".to_owned(),
-        format!("{what} {rate} ({})", band_label(lang, vs_band(rate_fpm))),
+        format!("{what} {rate}"),
         format!("{} g", lang.decimal(peak_g, 2)),
         bounce,
     ];
@@ -87,29 +94,37 @@ mod tests {
 
     #[test]
     fn german_full_line() {
-        let s = landing_line(Lang::De, -142.4, 1.183, 0, false, Some(&fact(412.3, -1.4)));
+        let s = landing_line(Lang::De, Some(-142.4), 1.183, 0, false, Some(&fact(412.3, -1.4)));
         assert_eq!(s, "VectaSim · Gelandet \u{2212}142 fpm (sanft) · 1,18 g · keine Bounces · 27L: 412 m hinter der Schwelle, 1 m links");
     }
 
     #[test]
     fn english_touch_and_go_without_runway() {
-        let s = landing_line(Lang::En, -455.0, 1.62, 2, true, None);
+        let s = landing_line(Lang::En, Some(-455.0), 1.62, 2, true, None);
         assert_eq!(s, "VectaSim · Touch-and-go -455 fpm (firm) · 1.62 g · 2 Bounces");
         // an unmatched fact adds nothing
         let unmatched = LandingFactCache { matched: false, ..fact(10.0, 0.0) };
-        assert_eq!(landing_line(Lang::En, -455.0, 1.62, 2, true, Some(&unmatched)), s);
+        assert_eq!(landing_line(Lang::En, Some(-455.0), 1.62, 2, true, Some(&unmatched)), s);
     }
 
     #[test]
     fn short_and_on_the_centreline() {
-        let s = landing_line(Lang::En, -95.0, 1.05, 1, false, Some(&fact(-20.0, 0.2)));
+        let s = landing_line(Lang::En, Some(-95.0), 1.05, 1, false, Some(&fact(-20.0, 0.2)));
         assert!(s.ends_with("1 Bounce · 27L: 20 m before the threshold, on the centreline"), "{s}");
         assert!(s.contains("(smooth)"));
     }
 
     #[test]
+    fn unrated_touchdown_has_no_rate_and_no_band() {
+        let s = landing_line(Lang::En, None, 1.05, 0, false, None);
+        assert_eq!(s, "VectaSim · Landed landing rate not rated · 1.05 g · no bounces");
+        let s = landing_line(Lang::De, None, 1.05, 0, false, None);
+        assert!(s.contains("Gelandet Landerate nicht bewertbar") && !s.contains("fpm") && !s.contains("sanft"), "{s}");
+    }
+
+    #[test]
     fn fits_the_simconnect_buffer() {
-        let s = landing_line(Lang::De, -1234.0, 2.55, 12, true, Some(&fact(1834.0, -23.0)));
+        let s = landing_line(Lang::De, Some(-1234.0), 2.55, 12, true, Some(&fact(1834.0, -23.0)));
         assert!(s.len() < vectasim_simconnect::text::MAX_BYTES, "{} bytes: {s}", s.len());
     }
 }

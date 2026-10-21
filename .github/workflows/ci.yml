@@ -1,5 +1,6 @@
-# Checks on every push to main and every pull request. Third-party actions are pinned to a
-# commit SHA (the comment names the release); the Rust toolchain comes from rust-toolchain.toml.
+# Checks on every push to main and every pull request; release.yml calls the same jobs for the
+# tagged commit before it builds. Third-party actions are pinned to a commit SHA (the comment
+# names the release); the Rust toolchain comes from rust-toolchain.toml.
 #
 # Not (yet) part of it: `cargo fmt --check` – rustfmt.toml exists, but the tree has not been
 # formatted with it in one go (see DEVELOPMENT.md → Tests and checks → Tools).
@@ -9,12 +10,15 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read
 
+# github.workflow is the caller's name when release.yml runs these jobs, so a release never
+# cancels (or waits for) the CI run of a push
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -38,14 +42,29 @@ jobs:
         with:
           persist-credentials: false
       - run: rustup toolchain install
-      # caches ~/.cargo/bin as well, so cargo-audit is compiled once per cache key
+      # caches ~/.cargo/bin as well, so cargo-audit and cargo-deny are compiled once per cache key
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: audit
       - run: cargo install cargo-audit --locked --version 0.22.2
+      # built from crates.io (immutable per version, --locked) like cargo-audit instead of
+      # EmbarkStudios/cargo-deny-action, whose Dockerfile downloads the release binary without
+      # a checksum check
+      - run: cargo install cargo-deny --locked --version 0.20.2
       # RustSec advisories against Cargo.lock; vulnerabilities fail the job, warnings
       # (unmaintained / unsound crates) are printed only
       - run: cargo audit
+      # licences, banned or duplicate crates, crate sources and advisories as configured in deny.toml
+      - run: cargo deny --locked check
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # README.md and README.de.md: same headings, lists, tables, images and code blocks
+      - run: node scripts/readme-pair-check.mjs
 
   frontend:
     runs-on: ubuntu-latest
@@ -63,7 +82,8 @@ jobs:
           cache-dependency-path: app/package-lock.json
       # npm ci fails when package-lock.json does not match package.json
       - run: npm ci
-      # known vulnerabilities in production dependencies (high/critical) fail the job
+      # known vulnerabilities in what ships in the installer (production dependencies) fail the
+      # job at high/critical; dev tooling (Vite, ESLint, Vitest) never reaches users and is left out
       - run: npm audit --omit=dev --audit-level=high
       - run: npm run lint
       - run: npx tsc --noEmit

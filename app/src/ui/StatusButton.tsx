@@ -53,7 +53,7 @@ export default function StatusButton({ status, flight, stats, providers, lastErr
   const sim = status?.simName ? `${status.simName}${status.simVersion ? ` ${status.simVersion}` : ""}` : "–";
   const live = rec.kind === "ready" || rec.kind === "recording" || rec.kind === "demo";
   const mark = rec.error ? "error" : rec.kind;
-  // SimConnect.dll missing: the next step is the download card in Einstellungen → Simulator
+  // SimConnect.dll missing: the next step is the download card in Settings → Simulator
   const needsSetup = rec.kind === "waiting" && isSimMissing(status?.detail ?? "");
 
   return (

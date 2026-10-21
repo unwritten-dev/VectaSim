@@ -51,7 +51,7 @@ export function retrySeconds(raw: string): number | null {
 /**
  * What to do when SimConnect.dll is missing. MSFS itself does not ship the DLL where VectaSim
  * can load it; it comes with the MSFS SDK – so this is not "MSFS is not installed". VectaSim
- * downloads it on one click (Einstellungen → Simulator → „SimConnect herunterladen“).
+ * downloads it on one click (Settings → Simulator → "Download SimConnect").
  */
 export function dllMissingText(): string {
   return t("errors.dllMissingText");
@@ -131,6 +131,10 @@ export function userMessage(err: unknown, ctx?: ErrorContext, extra: { user?: st
   if (/database is locked|SQLITE_BUSY/i.test(detail)) return m(t("errors.dbLocked.title"), t("errors.dbLocked.hint"));
   if (/Access is denied|Zugriff verweigert|permission denied|os error 5\b|os error 13\b/i.test(detail))
     return m(t("errors.accessDenied.title"), t("errors.accessDenied.hint"));
+
+  // clipboard write refused (window not focused / no user activation): DOMException "NotAllowedError"
+  if ((err instanceof Error && err.name === "NotAllowedError") || /NotAllowedError|Document is not focused/i.test(detail))
+    return m(t("errors.clipboardDenied.title"), t("errors.clipboardDenied.hint"));
 
   return m(ctx ? t("errors.unexpected.titleService", { service: service(ctx) }) : t("errors.unexpected.title"), t("errors.unexpected.hint"));
 }

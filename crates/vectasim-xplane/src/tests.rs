@@ -557,3 +557,63 @@ fn config_from_env() {
     let d = XPlaneConfig::from_lookup(|k| (k == ENV_PORT).then(|| "x".into()));
     assert_eq!((d.host.as_str(), d.port), ("localhost", 8086));
 }
+
+#[test]
+fn host_setting_is_this_pc_the_lan_or_a_name() {
+    use crate::{HostError, HostScope, check_host};
+    for h in ["localhost", "LocalHost", "127.0.0.1", "127.1.2.3", "::1"] {
+        assert_eq!(check_host(h), Ok(HostScope::Loopback), "{h}");
+    }
+    for h in ["192.168.1.20", " 10.0.0.5 ", "172.16.4.1", "169.254.10.1", "100.101.102.103", "fd12:3456::1", "fe80::1", "::ffff:192.168.1.2"] {
+        assert_eq!(check_host(h), Ok(HostScope::Local), "{h}");
+    }
+    for h in ["simpc", "simpc.local", "sim-pc.fritz.box", "simpc."] {
+        assert_eq!(check_host(h), Ok(HostScope::Name), "{h}");
+    }
+    for h in ["8.8.8.8", "100.128.0.1", "2001:db8::1", "0.0.0.0", "255.255.255.255", "224.0.0.1"] {
+        assert_eq!(check_host(h), Err(HostError::Public), "{h}");
+    }
+    for h in ["", " ", "sim pc", "sim/pc", "simpc:8086", "[::1]", "sim_pc", "-simpc", "simpc-", "a..b", "999.1.1.1", "1.2.3", "sim\r\npc"] {
+        assert_eq!(check_host(h), Err(HostError::Syntax), "{h:?}");
+    }
+    // a refused host in the settings or environment falls back to localhost
+    let c = XPlaneConfig::from_lookup(|k| (k == ENV_HOST).then(|| "8.8.8.8".into()));
+    assert_eq!(c.host, DEFAULT_HOST);
+    assert_eq!(crate::http::authority("fe80::1", 8086), "[fe80::1]:8086");
+    assert_eq!(crate::http::authority("simpc", 8086), "simpc:8086");
+}
+
+#[test]
+fn a_host_name_must_resolve_to_this_pc_or_the_lan() {
+    use crate::http::connect_with;
+    use std::net::{SocketAddr, TcpListener};
+    let t = Duration::from_millis(500);
+    // a name pointing at the internet is refused before anything is dialled
+    let public: SocketAddr = "93.184.216.34:8086".parse().unwrap();
+    let e = connect_with("example.com", 8086, t, |_, _| Ok(vec![public])).unwrap_err();
+    assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied, "{e}");
+    assert!(e.to_string().contains("93.184.216.34"), "{e}");
+    // IPv6 and IPv4-mapped public addresses alike
+    let v6: Vec<SocketAddr> = vec!["[2001:4860::8888]:8086".parse().unwrap(), "[::ffff:8.8.8.8]:8086".parse().unwrap()];
+    assert_eq!(connect_with("foo.duckdns.org", 8086, t, |_, _| Ok(v6)).unwrap_err().kind(), std::io::ErrorKind::PermissionDenied);
+    // a name with a public and a loopback address: only the loopback one is dialled
+    let l = TcpListener::bind("127.0.0.1:0").unwrap();
+    let local = l.local_addr().unwrap();
+    let s = connect_with("simpc", local.port(), t, |_, _| Ok(vec![public, local])).expect("loopback address dialled");
+    assert_eq!(s.peer_addr().unwrap(), local);
+    // the resolver runs on every connect: a name that later points elsewhere is caught
+    let calls = std::cell::Cell::new(0);
+    for answer in [local, public] {
+        let r = connect_with("simpc", local.port(), t, |_, _| {
+            calls.set(calls.get() + 1);
+            Ok(vec![answer])
+        });
+        assert_eq!(r.is_ok(), answer == local);
+    }
+    assert_eq!(calls.get(), 2);
+    // nothing resolved: an error, no panic
+    assert!(connect_with("simpc", 8086, t, |_, _| Ok(vec![])).is_err());
+    // the same scope as the host setting
+    assert_eq!(crate::ip_scope("192.168.1.20".parse().unwrap()), Ok(crate::HostScope::Local));
+    assert_eq!(crate::ip_scope("8.8.8.8".parse().unwrap()), Err(crate::HostError::Public));
+}

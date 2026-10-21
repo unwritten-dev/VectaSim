@@ -1,4 +1,4 @@
-// Einstellungen → Integrationen: Discord Rich Presence, Windows notifications, tray icon.
+// Settings → Integrations: Discord Rich Presence, Windows notifications, tray icon.
 // The backend does the work (discord.rs, notify.rs, tray.rs); this panel only switches and
 // shows the state.
 

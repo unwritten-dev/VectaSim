@@ -11,10 +11,12 @@ import { flushSync } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { join } from "@tauri-apps/api/path";
-import { revealItemInDir } from "@tauri-apps/plugin-opener";
+import { revealPath } from "../revealPath";
 import { showToast } from "../ui/Toast";
 import { t } from "../i18n";
 import { userMessage } from "../errors";
+import { saveImage } from "../saveImage";
+import { copyErrorToast, errorToast, NoClipboardError } from "../ui/errorToast";
 import { readCardTheme, type CardTheme } from "../landing/LandingCard";
 import { cardFontCss } from "../landing/cardFonts";
 import { cardHidesReg } from "../landing/exportCard";
@@ -105,8 +107,7 @@ export async function renderStackPng(src: CardSource): Promise<Blob> {
 }
 
 async function writePng(path: string, blob: Blob): Promise<void> {
-  const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
-  await invoke("save_image", { path, bytes });
+  await saveImage(path, blob);
 }
 
 /** The card folder (Bilder\VectaSim by default) as the dialogs' starting point. */
@@ -119,8 +120,8 @@ async function cardDir(): Promise<string | null> {
 }
 
 function failed(what: string, e: unknown) {
-  const m = userMessage(e, "export");
-  showToast({ id: "review-export", tone: "err", title: `${what}: ${m.title}`, body: `${m.hint}${m.detail ? ` (${m.detail.slice(0, 160)})` : ""}` });
+  // the reason behind "Details" (errorToast), never the raw text in the body
+  showToast({ id: "review-export", tone: "err", ...errorToast(`${what}: ${userMessage(e, "export").title}`, e, "export") });
 }
 
 function savedToast(title: string, path: string, body: string) {
@@ -130,7 +131,7 @@ function savedToast(title: string, path: string, body: string) {
     title,
     body,
     durationMs: 4000,
-    actions: [{ label: t("review.export.openFolder"), onClick: () => void revealItemInDir(path).catch(() => {}) }],
+    actions: [{ label: t("review.export.openFolder"), onClick: () => void revealPath(path).catch(() => {}) }],
   });
 }
 
@@ -153,13 +154,13 @@ export async function saveReviewCard(id: CardId, format: CardFormat, src: CardSo
 /** Copy one card to the clipboard. */
 export async function copyReviewCard(id: CardId, format: CardFormat, src: CardSource): Promise<boolean> {
   try {
-    if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") throw new Error(t("review.export.noClipboard"));
+    if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") throw new NoClipboardError(t("review.export.noClipboard"));
     // the promise keeps the click's user activation while the PNG renders
     await navigator.clipboard.write([new ClipboardItem({ "image/png": renderReviewPng(id, format, src) })]);
     showToast({ id: "review-export", tone: "ok", title: t("review.export.copied"), durationMs: 2500 });
     return true;
   } catch (e) {
-    showToast({ id: "review-export", tone: "err", title: t("review.export.copyFailed"), body: e instanceof Error ? e.message : String(e) });
+    showToast({ id: "review-export", tone: "err", ...copyErrorToast(t("review.export.copyFailed"), e) });
     return false;
   }
 }

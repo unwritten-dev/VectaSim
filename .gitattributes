@@ -5,3 +5,5 @@
 *.vsdump binary
 *.dll binary
 *.cab binary
+*.zst binary
+*.vsdump binary

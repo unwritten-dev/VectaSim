@@ -3,7 +3,7 @@
 use crate::api::{self, Snapshot};
 use crate::auth::{self, RequestInfo};
 use crate::watch::{Change, Tracker};
-use crate::{Config, Limits, MAX_WS_CLIENTS, STREAM_INTERVAL, Source, overlay};
+use crate::{Config, Limits, STREAM_INTERVAL, Source, overlay};
 use axum::Router;
 use axum::body::Body;
 use axum::extract::ws::{Message, Utf8Bytes, WebSocket, WebSocketUpgrade};
@@ -17,12 +17,12 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 use hyper::body::Incoming;
 use hyper_util::rt::{TokioIo, TokioTimer};
 use hyper_util::service::TowerToHyperService;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore, broadcast, watch};
+use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore, broadcast, watch};
 use tower::ServiceExt as _;
 use vectasim_core::{Lang, now_ms};
 
@@ -37,16 +37,19 @@ const SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
 #[derive(Clone)]
 pub(crate) struct AppState {
     cfg: Arc<Config>,
+    /// Name of the token cookie (with the port, [`auth::cookie_name`]).
+    cookie: Arc<str>,
     source: Arc<dyn Source>,
-    clients: Arc<AtomicUsize>,
+    clients: Arc<WsQuota>,
     events: broadcast::Sender<Utf8Bytes>,
     shutdown: watch::Receiver<bool>,
 }
 
 impl AppState {
-    pub(crate) fn new(cfg: Config, source: Arc<dyn Source>, clients: Arc<AtomicUsize>, shutdown: watch::Receiver<bool>) -> Self {
+    pub(crate) fn new(cfg: Config, source: Arc<dyn Source>, clients: Arc<WsQuota>, shutdown: watch::Receiver<bool>) -> Self {
         let (events, _) = broadcast::channel(CLIENT_BACKLOG);
-        Self { cfg: Arc::new(cfg), source, clients, events, shutdown }
+        let cookie = auth::cookie_name(cfg.port).into();
+        Self { cfg: Arc::new(cfg), cookie, source, clients, events, shutdown }
     }
 }
 
@@ -78,6 +81,46 @@ pub(crate) struct Pools {
     per_ip: Arc<Mutex<HashMap<IpAddr, usize>>>,
     per_ip_max: usize,
     max: usize,
+    /// The open loopback connections, oldest first (for [`Pools::evict_idle`]).
+    local_conns: Arc<Mutex<Vec<Arc<LocalConn>>>>,
+}
+
+/// One served loopback connection: whether a request is in flight, and the signal that asks
+/// it to close (graceful: an answer in progress is finished first).
+#[derive(Default)]
+pub(crate) struct LocalConn {
+    busy: AtomicUsize,
+    kicked: AtomicBool,
+    kick: Notify,
+}
+
+/// Marks a request in flight on its connection.
+struct Busy(Arc<LocalConn>);
+
+impl Busy {
+    fn new(c: &Arc<LocalConn>) -> Self {
+        c.busy.fetch_add(1, Ordering::AcqRel);
+        Self(c.clone())
+    }
+}
+
+impl Drop for Busy {
+    fn drop(&mut self) {
+        self.0.busy.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+/// A loopback connection's slot: the pool permit and its entry in the list of open connections.
+pub(crate) struct LocalSlot {
+    _permit: OwnedSemaphorePermit,
+    conn: Arc<LocalConn>,
+    list: Arc<Mutex<Vec<Arc<LocalConn>>>>,
+}
+
+impl Drop for LocalSlot {
+    fn drop(&mut self) {
+        self.list.lock().unwrap_or_else(|e| e.into_inner()).retain(|c| !Arc::ptr_eq(c, &self.conn));
+    }
 }
 
 /// A LAN connection's slot: the pool permit and its count for the address, both given back on drop.
@@ -108,19 +151,49 @@ impl Pools {
             per_ip: Arc::default(),
             per_ip_max: limits.max_connections_per_ip.max(1),
             max,
+            local_conns: Arc::default(),
         }
     }
 
     /// A slot for a LAN peer now, or `None` (pool or the address's share full: close it).
+    /// Nothing is recorded for a refused address.
     pub(crate) fn try_lan(&self, ip: IpAddr) -> Option<LanSlot> {
         let mut m = self.per_ip.lock().unwrap_or_else(|e| e.into_inner());
-        let n = m.entry(ip).or_insert(0);
-        if *n >= self.per_ip_max {
+        if m.get(&ip).is_some_and(|&n| n >= self.per_ip_max) {
             return None;
         }
         let permit = self.lan.clone().try_acquire_owned().ok()?;
-        *n += 1;
+        *m.entry(ip).or_insert(0) += 1;
         Some(LanSlot { _permit: permit, ip, per_ip: self.per_ip.clone() })
+    }
+
+    fn local_slot(&self, permit: OwnedSemaphorePermit) -> LocalSlot {
+        let conn = Arc::new(LocalConn::default());
+        self.local_conns.lock().unwrap_or_else(|e| e.into_inner()).push(conn.clone());
+        LocalSlot { _permit: permit, conn, list: self.local_conns.clone() }
+    }
+
+    /// A slot for a loopback connection: free right away, else the oldest idle loopback
+    /// connection (keep-alive, or never sent a request) is asked to close and its slot taken;
+    /// `None` after `wait` without a slot (every connection busy).
+    pub(crate) async fn local(&self, wait: Duration) -> Option<LocalSlot> {
+        if let Ok(p) = self.local.clone().try_acquire_owned() {
+            return Some(self.local_slot(p));
+        }
+        self.evict_idle();
+        let p = tokio::time::timeout(wait, self.local.clone().acquire_owned()).await.ok()?.ok()?;
+        Some(self.local_slot(p))
+    }
+
+    /// Asks the oldest idle loopback connection not asked yet to close; `false` if there is none.
+    fn evict_idle(&self) -> bool {
+        let list = self.local_conns.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(c) = list.iter().find(|c| c.busy.load(Ordering::Acquire) == 0 && !c.kicked.load(Ordering::Acquire)) else {
+            return false;
+        };
+        c.kicked.store(true, Ordering::Release);
+        c.kick.notify_one();
+        true
     }
 
     /// Waits for every slot of both pools (shutdown).
@@ -134,7 +207,8 @@ impl Pools {
 /// header-read timeout never fires, and it has no connection limit (slowloris in LAN mode).
 /// Here every connection gets a header-read timeout (also the keep-alive idle limit; shorter
 /// for LAN peers) and a slot from [`Pools`]: at most [`Limits::max_connections`] loopback
-/// connections are served at once (further ones wait until a slot is free), LAN connections
+/// connections are served at once (a new one closes the oldest idle one, or waits at most
+/// [`Limits::local_slot_wait`] and then gets a 503 with `Connection: close`), LAN connections
 /// beyond their pool or [`Limits::max_connections_per_ip`] are closed right away.
 pub(crate) async fn serve(listener: std::net::TcpListener, state: AppState, limits: Limits, mut shutdown: watch::Receiver<bool>) {
     let listener = match tokio::net::TcpListener::from_std(listener) {
@@ -174,24 +248,41 @@ pub(crate) async fn serve(listener: std::net::TcpListener, state: AppState, limi
             }
         };
         let _ = stream.set_nodelay(true);
-        let svc = app.clone().map_request(move |mut req: axum::http::Request<Incoming>| {
-            req.extensions_mut().insert(ConnectInfo(peer));
-            req.map(Body::new)
-        });
         let mut stop = shutdown.clone();
         let pools = pools.clone();
+        let app = app.clone();
         let header_timeout = if local { limits.header_read_timeout } else { limits.lan_header_read_timeout };
+        let wait = limits.local_slot_wait;
         tokio::spawn(async move {
-            // loopback: wait for a free slot (as in the OS backlog before)
-            let _local_permit = if lan_slot.is_none() {
+            // loopback: a free slot, the slot of an idle connection, or a bounded wait
+            let local_slot = if lan_slot.is_none() {
                 tokio::select! {
-                    p = pools.local.clone().acquire_owned() => match p { Ok(p) => Some(p), Err(_) => return },
+                    s = pools.local(wait) => match s {
+                        Some(s) => Some(s),
+                        None => {
+                            log::debug!("overlay server: connection from {peer} refused (local connection limit)");
+                            refuse_busy(stream).await;
+                            return;
+                        }
+                    },
                     _ = stopped(&mut stop) => return,
                 }
             } else {
                 None
             };
             let _lan_slot = lan_slot;
+            let conn_state = local_slot.as_ref().map(|s| s.conn.clone());
+            let busy_state = conn_state.clone();
+            let svc = tower::service_fn(move |mut req: axum::http::Request<Incoming>| {
+                let app = app.clone();
+                let busy = busy_state.as_ref().map(Busy::new);
+                req.extensions_mut().insert(ConnectInfo(peer));
+                async move {
+                    let res = app.oneshot(req.map(Body::new)).await;
+                    drop(busy);
+                    res
+                }
+            });
             let conn = hyper::server::conn::http1::Builder::new()
                 .timer(TokioTimer::new())
                 .header_read_timeout(header_timeout)
@@ -204,13 +295,62 @@ pub(crate) async fn serve(listener: std::net::TcpListener, state: AppState, limi
                     conn.as_mut().graceful_shutdown();
                     let _ = conn.await;
                 }
+                _ = kicked(conn_state.as_deref()) => {
+                    // a newer loopback connection needs the slot: an idle keep-alive closes at once
+                    conn.as_mut().graceful_shutdown();
+                    let _ = conn.await;
+                }
             }
+            drop(local_slot);
         });
     }
     // let open requests finish (WebSockets close themselves on the stop signal)
     if tokio::time::timeout(SHUTDOWN_GRACE, pools.drain()).await.is_err() {
         log::info!("overlay server: connections still open after {SHUTDOWN_GRACE:?}, closing them");
     }
+}
+
+/// Resolves once [`Pools::evict_idle`] picked this loopback connection; never for LAN ones.
+async fn kicked(conn: Option<&LocalConn>) {
+    match conn {
+        Some(c) => c.kick.notified().await,
+        None => std::future::pending().await,
+    }
+}
+
+/// The answer for a loopback connection that found no slot: 503 with `Connection: close`,
+/// written straight to the socket (no slot, no hyper). Whatever the client sent is read and
+/// dropped until it closes (at most half a second), so the unread request does not turn the
+/// close into a reset that would swallow the answer.
+async fn refuse_busy(stream: tokio::net::TcpStream) {
+    const BODY: &str = r#"{"error":"Server ausgelastet / server busy","status":503}"#;
+    let reply = format!(
+        "HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\nContent-Length: {}\r\nCache-Control: no-store\r\nRetry-After: 1\r\nConnection: close\r\n\r\n{BODY}",
+        BODY.len()
+    );
+    let _ = tokio::time::timeout(Duration::from_millis(500), async {
+        let bytes = reply.as_bytes();
+        let mut sent = 0;
+        while sent < bytes.len() {
+            stream.writable().await?;
+            match stream.try_write(&bytes[sent..]) {
+                Ok(n) => sent += n,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(e) => return Err(e),
+            }
+        }
+        let mut buf = [0u8; 2048];
+        loop {
+            stream.readable().await?;
+            match stream.try_read(&mut buf) {
+                Ok(0) => return Ok(()),
+                Ok(_) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(e) => return Err(e),
+            }
+        }
+    })
+    .await;
 }
 
 /// Resolves once the stop signal is set (the watch guard is not held across awaits).
@@ -234,8 +374,24 @@ async fn guard(State(st): State<AppState>, ConnectInfo(peer): ConnectInfo<Socket
     let h = req.headers();
     let origin = header_str(h, header::ORIGIN).map(str::to_owned);
     let host = header_str(h, header::HOST).map(str::to_owned);
-    let token = auth::request_token(req.uri().query(), header_str(h, header::AUTHORIZATION), h.get("x-vectasim-token").and_then(|v| v.to_str().ok()))
-        .map(str::to_owned);
+    let query = req.uri().query();
+    let cookie = header_str(h, header::COOKIE);
+    let token = auth::request_token(
+        query,
+        header_str(h, header::AUTHORIZATION),
+        h.get("x-vectasim-token").and_then(|v| v.to_str().ok()),
+        cookie,
+        &st.cookie,
+    )
+    .map(str::to_owned);
+    // a LAN device that came in with `?token=` gets it as a cookie, so the URL can drop it (auth module doc)
+    let set_cookie = !auth::is_local(peer, host.as_deref())
+        && token.as_deref().is_some_and(|t| Some(t) == auth::query_token(query) && st.cfg.lan_token().is_some_and(|e| auth::token_eq(t, e)));
+    // a cookie whose token no longer works (Regenerate, LAN off) and the port-less one of older versions
+    let mut stale = auth::stale_cookies(cookie, &st.cookie, st.cfg.lan_token());
+    if set_cookie {
+        stale.retain(|n| *n != *st.cookie);
+    }
     let info = RequestInfo { method: req.method().as_str(), host: host.as_deref(), origin: origin.as_deref(), token: token.as_deref() };
     if let Err(d) = auth::check(&info, peer, st.cfg.lan_token()) {
         log::debug!("overlay server: {} {} from {peer} refused: {d:?}", req.method(), req.uri().path());
@@ -243,10 +399,10 @@ async fn guard(State(st): State<AppState>, ConnectInfo(peer): ConnectInfo<Socket
         if d == auth::Denied::Method {
             r.headers_mut().insert(header::ALLOW, HeaderValue::from_static("GET, HEAD, OPTIONS"));
         }
-        // a refused LAN client does not keep its connection (and slot) open
-        if !auth::is_loopback_peer(peer.ip()) {
-            r.headers_mut().insert(header::CONNECTION, HeaderValue::from_static("close"));
-        }
+        // a refused client does not keep its connection (and slot) open – loopback too, so a
+        // page rebinding its name to 127.0.0.1 cannot park keep-alive connections here
+        r.headers_mut().insert(header::CONNECTION, HeaderValue::from_static("close"));
+        clear_cookies(r.headers_mut(), &stale);
         return r;
     }
     let preflight = req.method() == Method::OPTIONS;
@@ -255,6 +411,10 @@ async fn guard(State(st): State<AppState>, ConnectInfo(peer): ConnectInfo<Socket
     hs.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
     hs.insert(header::REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
     hs.entry(header::CACHE_CONTROL).or_insert(HeaderValue::from_static("no-store"));
+    if set_cookie && let Some(v) = token.as_deref().filter(|t| auth::valid_token(t)).and_then(|t| HeaderValue::from_str(&auth::token_cookie(&st.cookie, t)).ok()) {
+        hs.append(header::SET_COOKIE, v);
+    }
+    clear_cookies(hs, &stale);
     if let Some(v) = origin.as_deref().and_then(|o| HeaderValue::from_str(o).ok()) {
         hs.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, v);
         hs.insert(header::VARY, HeaderValue::from_static("Origin"));
@@ -265,6 +425,15 @@ async fn guard(State(st): State<AppState>, ConnectInfo(peer): ConnectInfo<Socket
         }
     }
     res
+}
+
+/// `Set-Cookie: <name>=; Max-Age=0` for each name.
+fn clear_cookies(hs: &mut HeaderMap, names: &[String]) {
+    for n in names {
+        if let Ok(v) = HeaderValue::from_str(&auth::clear_cookie(n)) {
+            hs.append(header::SET_COOKIE, v);
+        }
+    }
 }
 
 async fn not_found() -> Response {
@@ -293,13 +462,32 @@ pub(crate) fn localized(body: &'static str, lang: Lang) -> String {
     body.replacen("<html lang=\"de\">", &format!("<html lang=\"{}\">", lang.code()), 1)
 }
 
+/// The empty token element of the start page ([`with_token`]).
+const TOKEN_META: &str = r#"<meta name="vectasim-token" content="">"#;
+
+/// The start page with the LAN token in its `<meta name="vectasim-token">`:
+/// the page is only served to an authorised request (this PC, or a device that sent the token
+/// as query, header or cookie), so it hands back nothing the reader did not have, and the copy
+/// URLs for OBS on another PC carry the token even after a bookmark load through the cookie.
+/// `overlay.js` reads the element and removes it. Only tokens of the URL-safe alphabet.
+pub(crate) fn with_token(page: String, token: Option<&str>) -> String {
+    match token.filter(|t| auth::valid_token(t)) {
+        Some(t) => page.replacen(TOKEN_META, &format!(r#"<meta name="vectasim-token" content="{t}">"#), 1),
+        None => page,
+    }
+}
+
 fn page(h: &HeaderMap, body: &'static str, lang: Lang) -> Response {
+    page_with(h, localized(body, lang))
+}
+
+fn page_with(h: &HeaderMap, html: String) -> Response {
     // `connect-src 'self'` covers ws: in CSP 3; the explicit ws:// entry is for older engines
     let ws = csp_host(h).map(|host| format!(" ws://{host}")).unwrap_or_default();
     let csp = format!(
         "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'{ws}; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
     );
-    let mut r = ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], localized(body, lang)).into_response();
+    let mut r = ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], html).into_response();
     if let Ok(v) = HeaderValue::from_str(&csp) {
         r.headers_mut().insert(header::CONTENT_SECURITY_POLICY, v);
     }
@@ -307,7 +495,7 @@ fn page(h: &HeaderMap, body: &'static str, lang: Lang) -> Response {
 }
 
 async fn page_index(State(st): State<AppState>, Query(q): Query<PageQuery>, h: HeaderMap) -> Response {
-    page(&h, overlay::INDEX_HTML, page_lang(&st, &q))
+    page_with(&h, with_token(localized(overlay::INDEX_HTML, page_lang(&st, &q)), st.cfg.lan_token()))
 }
 async fn page_hud(State(st): State<AppState>, Query(q): Query<PageQuery>, h: HeaderMap) -> Response {
     page(&h, overlay::HUD_HTML, page_lang(&st, &q))
@@ -418,30 +606,87 @@ async fn api_logbook(State(st): State<AppState>, Query(q): Query<LogbookQuery>) 
 
 // ---- WebSocket ----------------------------------------------------------------------------
 
-async fn api_ws(State(st): State<AppState>, ws: WebSocketUpgrade) -> Response {
+async fn api_ws(State(st): State<AppState>, ConnectInfo(peer): ConnectInfo<SocketAddr>, ws: WebSocketUpgrade) -> Response {
     // the slot is taken before the upgrade, so parallel handshakes cannot exceed the limit;
     // a failed upgrade drops the closure and with it the slot
-    let Some(slot) = ClientSlot::try_take(&st.clients, MAX_WS_CLIENTS) else {
+    let Some(slot) = st.clients.try_take(peer.ip()) else {
         return error(StatusCode::SERVICE_UNAVAILABLE, "Zu viele verbundene Overlays");
     };
     // clients only listen: small frames are plenty
     ws.max_message_size(4096).max_frame_size(4096).on_upgrade(move |socket| client(socket, st, slot))
 }
 
-/// Holds the client count while a socket is open.
-struct ClientSlot(Arc<AtomicUsize>);
+/// WebSocket quotas: one for this PC (loopback), one for other devices with a cap per address,
+/// so LAN clients can never take the stream away from the local OBS overlays.
+pub(crate) struct WsQuota {
+    counts: Mutex<WsCounts>,
+    local_max: usize,
+    lan_max: usize,
+    per_ip_max: usize,
+}
 
-impl ClientSlot {
-    /// One more client unless `max` are connected already (atomic check and increment).
-    fn try_take(c: &Arc<AtomicUsize>, max: usize) -> Option<Self> {
-        c.try_update(Ordering::AcqRel, Ordering::Acquire, |n| (n < max).then_some(n + 1)).ok()?;
-        Some(Self(c.clone()))
+#[derive(Default)]
+struct WsCounts {
+    local: usize,
+    lan: usize,
+    per_ip: HashMap<IpAddr, usize>,
+}
+
+impl WsQuota {
+    pub(crate) fn new(local_max: usize, lan_max: usize, per_ip_max: usize) -> Self {
+        Self { counts: Mutex::default(), local_max, lan_max, per_ip_max }
     }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, WsCounts> {
+        self.counts.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Open sockets, both quotas.
+    pub(crate) fn total(&self) -> usize {
+        let c = self.lock();
+        c.local + c.lan
+    }
+
+    /// A socket slot for `ip`, or `None` when its quota (or the address's share) is full.
+    fn try_take(self: &Arc<Self>, ip: IpAddr) -> Option<ClientSlot> {
+        let mut c = self.lock();
+        if auth::is_loopback_peer(ip) {
+            if c.local >= self.local_max {
+                return None;
+            }
+            c.local += 1;
+            return Some(ClientSlot { quota: self.clone(), lan_ip: None });
+        }
+        if c.lan >= self.lan_max || c.per_ip.get(&ip).is_some_and(|&n| n >= self.per_ip_max) {
+            return None;
+        }
+        c.lan += 1;
+        *c.per_ip.entry(ip).or_insert(0) += 1;
+        Some(ClientSlot { quota: self.clone(), lan_ip: Some(ip) })
+    }
+}
+
+/// Holds a socket's place in its quota while it is open.
+struct ClientSlot {
+    quota: Arc<WsQuota>,
+    lan_ip: Option<IpAddr>,
 }
 
 impl Drop for ClientSlot {
     fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::Relaxed);
+        let mut c = self.quota.lock();
+        match self.lan_ip {
+            None => c.local = c.local.saturating_sub(1),
+            Some(ip) => {
+                c.lan = c.lan.saturating_sub(1);
+                if let Some(n) = c.per_ip.get_mut(&ip) {
+                    *n = n.saturating_sub(1);
+                    if *n == 0 {
+                        c.per_ip.remove(&ip);
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -562,25 +807,69 @@ mod tests {
     use crate::api::{Flight, Status};
     use vectasim_core::{FlightPhase, FlightState};
 
+    use crate::{MAX_LAN_WS_CLIENTS, MAX_WS_CLIENTS, MAX_WS_PER_IP};
+
     #[test]
     fn ws_slots_never_exceed_the_limit() {
-        let c = Arc::new(AtomicUsize::new(0));
-        let slots: Vec<ClientSlot> = (0..5).filter_map(|_| ClientSlot::try_take(&c, 3)).collect();
-        assert_eq!((slots.len(), c.load(Ordering::Relaxed)), (3, 3));
+        let q = Arc::new(WsQuota::new(3, 3, 3));
+        let lo: IpAddr = "127.0.0.1".parse().unwrap();
+        let slots: Vec<ClientSlot> = (0..5).filter_map(|_| q.try_take(lo)).collect();
+        assert_eq!((slots.len(), q.total()), (3, 3));
         drop(slots);
-        assert_eq!(c.load(Ordering::Relaxed), 0);
+        assert_eq!(q.total(), 0);
         // many threads racing for the last slots
-        let c = Arc::new(AtomicUsize::new(0));
+        let q = Arc::new(WsQuota::new(MAX_WS_CLIENTS, MAX_LAN_WS_CLIENTS, MAX_WS_PER_IP));
         let taken: usize = std::thread::scope(|s| {
             let hs: Vec<_> = (0..32)
                 .map(|_| {
-                    let c = c.clone();
-                    s.spawn(move || ClientSlot::try_take(&c, MAX_WS_CLIENTS).map(std::mem::forget).is_some() as usize)
+                    let q = q.clone();
+                    s.spawn(move || q.try_take(lo).map(std::mem::forget).is_some() as usize)
                 })
                 .collect();
             hs.into_iter().map(|h| h.join().unwrap()).sum()
         });
-        assert_eq!((taken, c.load(Ordering::Relaxed)), (MAX_WS_CLIENTS, MAX_WS_CLIENTS));
+        assert_eq!((taken, q.total()), (MAX_WS_CLIENTS, MAX_WS_CLIENTS));
+    }
+
+    #[test]
+    fn lan_websockets_cannot_take_the_local_quota() {
+        let q = Arc::new(WsQuota::new(MAX_WS_CLIENTS, MAX_LAN_WS_CLIENTS, MAX_WS_PER_IP));
+        let lo: IpAddr = "127.0.0.1".parse().unwrap();
+        // one tablet: four sockets, the fifth is refused
+        let tablet: IpAddr = "192.168.1.20".parse().unwrap();
+        let t: Vec<ClientSlot> = (0..6).filter_map(|_| q.try_take(tablet)).collect();
+        assert_eq!(t.len(), MAX_WS_PER_IP);
+        // many devices fill the LAN quota (16), the 17th LAN socket is refused …
+        let mut lan: Vec<ClientSlot> = Vec::new();
+        for i in 21..40u8 {
+            let ip = IpAddr::from([192, 168, 1, i]);
+            lan.extend((0..MAX_WS_PER_IP).filter_map(|_| q.try_take(ip)));
+        }
+        assert_eq!(t.len() + lan.len(), MAX_LAN_WS_CLIENTS);
+        assert!(q.try_take(IpAddr::from([192, 168, 1, 99])).is_none());
+        // … and this PC still has all its sockets
+        let local: Vec<ClientSlot> = (0..MAX_WS_CLIENTS + 2).filter_map(|_| q.try_take(lo)).collect();
+        assert_eq!(local.len(), MAX_WS_CLIENTS);
+        assert!(q.try_take("::1".parse().unwrap()).is_none(), "the local quota is full now");
+        assert_eq!(q.total(), MAX_WS_CLIENTS + MAX_LAN_WS_CLIENTS);
+        // closing gives the place back, nothing stays behind for the address
+        drop(t);
+        assert!(q.try_take(tablet).is_some());
+        drop(lan);
+        drop(local);
+        assert_eq!(q.total(), 0);
+        assert!(q.lock().per_ip.is_empty());
+    }
+
+    #[test]
+    fn the_start_page_carries_the_token() {
+        let page = localized(overlay::INDEX_HTML, Lang::En);
+        assert!(page.contains(TOKEN_META), "index.html has the token element");
+        let tok = "TestTokenTestTokenTest24";
+        assert!(with_token(page.clone(), Some(tok)).contains(&format!(r#"<meta name="vectasim-token" content="{tok}">"#)));
+        // LAN off or a hand-edited token with markup: the element stays empty
+        assert!(with_token(page.clone(), None).contains(TOKEN_META));
+        assert!(with_token(page, Some("\"><script>x</script>")).contains(TOKEN_META));
     }
 
     #[test]
@@ -644,5 +933,42 @@ mod pool_tests {
         drop(a1);
         let _c1 = pools.try_lan(c).expect("slot given back");
         assert!(pools.try_lan(a).is_none(), "pool full again");
+    }
+
+    #[test]
+    fn refused_lan_peers_leave_no_entry() {
+        let limits = Limits { max_connections: 2, max_connections_per_ip: 2, ..Limits::default() };
+        let pools = Pools::new(&limits);
+        let _a = pools.try_lan("192.168.1.20".parse().unwrap()).unwrap();
+        let _b = pools.try_lan("192.168.1.21".parse().unwrap()).unwrap();
+        // pool full: a hundred refused addresses add nothing to the per-address map
+        for i in 0..100u8 {
+            assert!(pools.try_lan(IpAddr::from([10, 0, 0, i])).is_none());
+        }
+        assert_eq!(pools.per_ip.lock().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_new_local_connection_takes_the_slot_of_an_idle_one() {
+        let limits = Limits { max_connections: 2, ..Limits::default() };
+        let pools = Pools::new(&limits);
+        let a = pools.local(Duration::from_millis(50)).await.unwrap();
+        let b = pools.local(Duration::from_millis(50)).await.unwrap();
+        // b is busy, a idle: the newcomer asks a (the oldest idle one) to close
+        let busy_b = Busy::new(&b.conn);
+        let waiting = pools.local(Duration::from_secs(5));
+        tokio::pin!(waiting);
+        tokio::select! {
+            _ = &mut waiting => panic!("slot without anyone closing"),
+            _ = a.conn.kick.notified() => {}
+        }
+        assert!(a.conn.kicked.load(Ordering::Acquire) && !b.conn.kicked.load(Ordering::Acquire));
+        drop(a);
+        let c = waiting.await.expect("slot of the idle connection");
+        // every connection busy: no slot within the wait
+        let _busy_c = Busy::new(&c.conn);
+        assert!(pools.local(Duration::from_millis(50)).await.is_none());
+        assert_eq!(pools.local_conns.lock().unwrap().len(), 2);
+        drop(busy_b);
     }
 }

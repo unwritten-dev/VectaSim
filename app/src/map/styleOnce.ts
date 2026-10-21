@@ -41,3 +41,31 @@ export function replaceCustomLayer(map: StyleTarget, layer: maplibregl.CustomLay
   if (map.getLayer(layer.id)) map.removeLayer(layer.id);
   map.addLayer(layer, before && map.getLayer(before) ? before : undefined);
 }
+
+/**
+ * Removes every custom (WebGL) layer of the current style. Call right before `setStyle` (theme
+ * change, context restore): MapLibre's style swap drops custom layers without calling their
+ * `onRemove`, so their buffers, programs and VAOs stayed allocated until the JS objects were
+ * collected (the curtain's VBO reaches several MB on a long flight). removeLayer frees them while
+ * the context is still valid. A style that is not loaded yet carries none of our custom layers
+ * (they are added on `style.load`), and a removal it refuses is skipped. Returns the removed ids.
+ */
+export function removeCustomLayers(map: Pick<StyleTarget, "getLayer" | "removeLayer"> & { getLayersOrder(): string[] }): string[] {
+  const removed: string[] = [];
+  let order: string[];
+  try {
+    order = map.getLayersOrder();
+  } catch {
+    return removed;
+  }
+  for (const id of order) {
+    if ((map.getLayer(id) as { type?: string } | undefined)?.type !== "custom") continue;
+    try {
+      map.removeLayer(id);
+      removed.push(id);
+    } catch {
+      /* style not loaded: nothing of ours to free */
+    }
+  }
+  return removed;
+}

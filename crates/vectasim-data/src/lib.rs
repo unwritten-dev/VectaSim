@@ -134,15 +134,32 @@ impl AirportIndex {
     }
 
     /// Nearest airport within `max_nm`, searching outward ring by ring on the grid.
+    ///
+    /// A cell is 60 nm high but only 60·cos(lat) nm wide, so towards the poles a ring reaches
+    /// `k` cells east and west for every cell north and south (`k` from the most poleward
+    /// latitude within `max_nm`): every ring then covers at least `r`·60 nm in each direction,
+    /// and the search stops once the best hit is closer than that. Up to 0.5.0 a ring was one
+    /// cell wide in longitude, which at high latitudes could miss or misrank airports a few
+    /// cells east or west. Longitude cells wrap across the antimeridian.
     pub fn nearest(&self, lat: f64, lon: f64, max_nm: f64) -> Option<NearestAirport> {
+        if !(lat.is_finite() && lon.is_finite() && max_nm >= 0.0) {
+            return None;
+        }
         let (clat, clon) = cell(lat, lon);
-        // one grid cell is ≥ 60 nm in latitude, so a ring radius of ceil(max_nm/60)+1 covers the box
-        let rings = (max_nm / 60.0).ceil() as i16 + 1;
+        // one grid cell is 60 nm in latitude, so a ring radius of ceil(max_nm/60)+1 covers the box
+        let rings = (max_nm / 60.0).ceil().min(180.0) as i16 + 1;
+        // longitude cells per latitude cell; +1° for the great circle bulging poleward
+        let lat_far = (lat.abs() + max_nm / 60.0 + 1.0).min(90.0);
+        let k = (1.0 / lat_far.to_radians().cos().max(1e-6)).ceil().min(180.0) as i16;
         let mut best: Option<(f64, usize)> = None;
         for r in 0..=rings {
+            // offsets -span..=span cover each longitude cell once (−180 == 180)
+            let span = (k * r).min(180);
+            let from = if span == 180 { -179 } else { -span };
             for dlat in -r..=r {
-                for dlon in -r..=r {
-                    if dlat.abs() != r && dlon.abs() != r {
+                for dlon in from..=span {
+                    let ring = dlat.abs().max((dlon.abs() + k - 1) / k);
+                    if ring != r {
                         continue; // only the ring's border cells; inner ones were visited already
                     }
                     for i in self.cell_indices(clat + dlat, wrap_lon_cell(clon + dlon)) {
@@ -154,7 +171,7 @@ impl AirportIndex {
                     }
                 }
             }
-            // anything in a farther ring is at least (r) * ~60 nm away in latitude; stop once best is closer
+            // anything in a farther ring is at least r · 60 nm away; stop once best is closer
             if let Some((bd, _)) = best
                 && bd < (r as f64) * 60.0
             {
@@ -189,13 +206,7 @@ fn binary_search(n: usize, cmp: impl Fn(usize) -> Ordering) -> Option<usize> {
 }
 
 fn wrap_lon_cell(c: i16) -> i16 {
-    if c < -180 {
-        c + 360
-    } else if c >= 180 {
-        c - 360
-    } else {
-        c
-    }
+    (c + 180).rem_euclid(360) - 180
 }
 
 pub fn haversine_nm(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
@@ -273,6 +284,52 @@ mod tests {
         assert!(idx.nearest(45.0, -35.0, 50.0).is_none());
         // far ring search still works with a large radius
         assert!(idx.nearest(45.0, -35.0, 600.0).is_some());
+    }
+
+    /// Brute force over every airport: the reference for `nearest`.
+    fn nearest_brute_force(lat: f64, lon: f64, max_nm: f64) -> Option<(String, f64)> {
+        index()
+            .in_bbox(-180.0, -90.0, 180.0, 90.0, usize::MAX)
+            .into_iter()
+            .map(|a| (a.ident.clone(), haversine_nm(lat, lon, a.latitude, a.longitude)))
+            .filter(|(_, d)| *d <= max_nm)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+    }
+
+    #[test]
+    fn nearest_at_high_latitudes_and_across_the_antimeridian_matches_brute_force() {
+        // rings assumed 60 nm per cell east-west, it is 60·cos(lat)
+        let idx = index();
+        let svalbard = idx.get("ENSB").expect("Longyearbyen");
+        let points = [
+            (69.9, 23.0),                                  // 70°N, northern Norway
+            (70.0, -150.0),                                // North Slope, Alaska
+            (svalbard.latitude, svalbard.longitude - 3.0), // ENSB ~32 nm east of the point
+            (78.25, 10.0),
+            (82.5, -62.3), // Alert
+            (89.9, 0.0),
+            (-16.5, 179.99), // Fiji, east of the date line
+            (-16.5, -179.99),
+            (65.0, 179.9), // Chukotka / Bering Sea
+            (65.0, -179.9),
+            (50.033, 8.570),
+            (-77.85, 166.7), // McMurdo
+        ];
+        for (lat, lon) in points {
+            for max_nm in [3.0, 10.0, 50.0, 120.0, 400.0] {
+                let got = idx.nearest(lat, lon, max_nm).map(|n| (n.airport.ident, n.distance_nm));
+                let want = nearest_brute_force(lat, lon, max_nm);
+                match (&got, &want) {
+                    (Some(g), Some(w)) => assert!((g.1 - w.1).abs() < 1e-9, "({lat}, {lon}) {max_nm} nm: {got:?} vs {want:?}"),
+                    _ => assert_eq!(got, want, "({lat}, {lon}) {max_nm} nm"),
+                }
+            }
+        }
+        // Longyearbyen from 32 nm west: three cells east at 78°N, found with a 50 nm radius
+        let n = idx.nearest(svalbard.latitude, svalbard.longitude - 3.0, 50.0).expect("found");
+        assert!(n.distance_nm > 30.0 && n.distance_nm < 40.0, "{n:?}");
+        assert!(idx.nearest(f64::NAN, 0.0, 10.0).is_none());
+        assert_eq!((wrap_lon_cell(180), wrap_lon_cell(-181), wrap_lon_cell(-180), wrap_lon_cell(179)), (-180, 179, -180, 179));
     }
 
     #[test]

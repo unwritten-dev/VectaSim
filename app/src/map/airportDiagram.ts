@@ -6,7 +6,7 @@ import * as maplibregl from "maplibre-gl";
 import { invoke } from "@tauri-apps/api/core";
 import type { Airport, Runway } from "../types";
 import { COLOR, DIAGRAM } from "../theme";
-import { boundedDebounce } from "./debounce";
+import { MOVE_REFRESH, boundedDebounce } from "./debounce";
 import { addLayerOnce, addSourceOnce } from "./styleOnce";
 import { queryBox, unwrapLon } from "./geo";
 
@@ -129,7 +129,7 @@ export function addAirportDiagramLayers(map: maplibregl.Map): () => void {
       .catch(() => {});
   };
   // the follow camera ends a move up to every frame: at most a few lookups per second
-  const soon = boundedDebounce(refresh, 150, 500);
+  const soon = boundedDebounce(refresh, ...MOVE_REFRESH.diagram);
   map.on("moveend", soon);
   refresh();
   return () => {
@@ -340,7 +340,8 @@ function offset(lat: number, lon: number, bearingDeg: number, meters: number): [
   return [lon + dLon, lat + dLat];
 }
 
-function bearing(lat1: number, lon1: number, lat2: number, lon2: number): number {
+/** Initial great-circle bearing from 1 to 2, degrees true 0..360 (a runway without headings). */
+export function bearing(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const r = Math.PI / 180;
   const y = Math.sin((lon2 - lon1) * r) * Math.cos(lat2 * r);
   const x = Math.cos(lat1 * r) * Math.sin(lat2 * r) - Math.sin(lat1 * r) * Math.cos(lat2 * r) * Math.cos((lon2 - lon1) * r);

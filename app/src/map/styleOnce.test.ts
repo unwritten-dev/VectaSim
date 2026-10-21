@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { addLayerOnce, addSourceOnce, replaceCustomLayer } from "./styleOnce";
+import { addLayerOnce, addSourceOnce, removeCustomLayers, replaceCustomLayer } from "./styleOnce";
 import { addAirportLayers, addCurtainLayers, addRouteLayers, addTrackLayers } from "./common";
 import { addOwnAircraftLayers } from "./ownAircraft";
 
@@ -91,5 +91,29 @@ describe("layer setup is idempotent (theme change before the first load, double 
     // the WebGL curtain was replaced by a fresh instance, not added twice
     expect(m.removed).toEqual(["track-3d"]);
     expect(m.layers.filter((l) => l.id === "track-3d")).toHaveLength(1);
+  });
+});
+
+describe("removeCustomLayers (before setStyle on a theme change)", () => {
+  it("removes only the custom layers and calls their onRemove (GL resources freed)", () => {
+    const m = new FakeMap();
+    const freed: string[] = [];
+    m.addLayer({ id: "bg", type: "background" });
+    m.addLayer({ id: "track-3d", type: "custom", onRemove: () => freed.push("track-3d") } as never);
+    m.addLayer({ id: "airports", type: "circle" });
+    m.addLayer({ id: "aircraft-model", type: "custom", onRemove: () => freed.push("aircraft-model") } as never);
+    expect(removeCustomLayers(m as never)).toEqual(["track-3d", "aircraft-model"]);
+    expect(freed).toEqual(["track-3d", "aircraft-model"]);
+    expect(m.getLayersOrder()).toEqual(["bg", "airports"]);
+  });
+
+  it("a style that refuses the removal (not loaded yet) is skipped without throwing", () => {
+    const m = new FakeMap();
+    m.addLayer({ id: "c", type: "custom" });
+    m.removeLayer = () => {
+      throw new Error("Style is not done loading.");
+    };
+    expect(() => removeCustomLayers(m as never)).not.toThrow();
+    expect(removeCustomLayers(m as never)).toEqual([]);
   });
 });

@@ -11,7 +11,7 @@
 use serde_json::{Map, Value, json};
 use vectasim_core::Lang;
 
-/// A user-correctable field of a flight (Logbuch → Flug bearbeiten).
+/// A user-correctable field of a flight (logbook → edit flight).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Field {
     Callsign,
@@ -98,6 +98,7 @@ pub enum Invalid {
     MergePositionUnknown,
     MergeJump { distance_nm: f64, max_nm: f64 },
     LastFlightNotSaved,
+    FlightRecording,
     // ---- backup / restore
     FileNotFound { path: String },
     NotADatabase { detail: String },
@@ -161,6 +162,7 @@ impl Invalid {
             MergePositionUnknown => "store.merge_position_unknown",
             MergeJump { .. } => "store.merge_jump",
             LastFlightNotSaved => "store.last_flight_not_saved",
+            FlightRecording => "store.flight_recording",
             FileNotFound { .. } => "store.file_not_found",
             NotADatabase { .. } => "store.not_a_database",
             BackupCorrupt { .. } => "store.backup_corrupt",
@@ -276,6 +278,10 @@ impl Invalid {
                 if de { format!("Die Positionen liegen {d} nm auseinander (höchstens {m} nm).") } else { format!("The positions are {d} nm apart (at most {m} nm).") }
             }
             LastFlightNotSaved => s("Das Ende des letzten Flugs ist noch nicht gespeichert.", "The end of the last flight is not saved yet."),
+            FlightRecording => s(
+                "Der Flug wird gerade aufgezeichnet (oder sein Ende ist noch nicht gespeichert) und kann erst danach gelöscht werden.",
+                "This flight is being recorded (or its end is not saved yet) and can only be deleted after that.",
+            ),
             FileNotFound { path } => if de { format!("Datei nicht gefunden: {path}") } else { format!("File not found: {path}") },
             NotADatabase { detail } => if de { format!("keine lesbare Datenbank: {detail}") } else { format!("not a readable database: {detail}") },
             BackupCorrupt { detail } => if de { format!("Sicherung beschädigt: {detail}") } else { format!("Backup damaged: {detail}") },

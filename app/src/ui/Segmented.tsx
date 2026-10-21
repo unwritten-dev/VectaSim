@@ -22,9 +22,9 @@ interface Props<T> {
 /** Index to select for `key` in a radio group (←/↑ previous, →/↓ next, wrapping; Home/End), else null. */
 export function radioKeyIndex(key: string, current: number, count: number): number | null {
   if (count <= 0) return null;
-  const i = current < 0 ? 0 : current;
-  if (key === "ArrowRight" || key === "ArrowDown") return (i + 1) % count;
-  if (key === "ArrowLeft" || key === "ArrowUp") return (i - 1 + count) % count;
+  // nothing selected yet: → picks the first option, ← the last (not the second / the first)
+  if (key === "ArrowRight" || key === "ArrowDown") return current < 0 ? 0 : (current + 1) % count;
+  if (key === "ArrowLeft" || key === "ArrowUp") return current < 0 ? count - 1 : (current - 1 + count) % count;
   if (key === "Home") return 0;
   if (key === "End") return count - 1;
   return null;

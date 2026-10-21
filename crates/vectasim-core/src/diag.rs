@@ -1,5 +1,5 @@
 //! Raw-value diagnostics shared between a provider thread and the UI
-//! (Einstellungen → Diagnose → Live-Rohdaten).
+//! (Settings → Diagnostics → live raw values).
 //!
 //! A provider that has raw definitions (SimConnect, Replay) updates a [`SharedRawDiag`] per
 //! message; the app takes a [`RawDiag::snapshot`] at most a few times per second. Providers

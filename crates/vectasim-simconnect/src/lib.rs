@@ -61,7 +61,7 @@ pub struct SimConnectProvider {
     pub watchdog: WatchdogConfig,
     /// Raw recorder (session files / RAM ring); `None` records nothing.
     pub dump: Option<Arc<DumpRecorder>>,
-    /// Raw-value diagnostics (Einstellungen → Diagnose → Live-Rohdaten).
+    /// Raw-value diagnostics (Settings → Diagnostics → Live raw data).
     pub diag: SharedRawDiag,
 }
 

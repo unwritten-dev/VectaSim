@@ -30,15 +30,38 @@
 //! next ground contact is a landing. Why: up to 0.5.0 every such reset demanded 10 s of fresh
 //! air time, so a SimConnect hiccup or the MSFS ESC menu on short final (below ~120 ft at
 //! 700 fpm) ended the flight as interrupted, lost its landing and started a ghost flight from
-//! the rollout. A sim restarted at the gate or a reload elsewhere still fails the comparison
-//! (position or altitude jumped) and keeps the old rule; a teleport detected between two
-//! samples never takes this path. The rate of a landing right after the hole comes from the
-//! samples after it or the sim's own value, else the touchdown is unrated (see
+//! the rollout.
+//!
+//! The comparison is bounded, because its tolerances grow with the gap (after 10 min on the
+//! approach they were ±20 000 ft and 71 nm, so a sim restarted at the destination gate passed
+//! and the flight was "completed" with a landing at the reconnect time):
+//! - only holes up to [`RESUME_MAX_GAP_MS`] (60 s) are compared with the gap's tolerances;
+//! - a longer one only counts as a hole when the sim clock stood still across it (ESC menu,
+//!   pause) and the aircraft is still where it was (the tolerances of a zero gap: 1 nm, 100 ft);
+//! - never when the last sample before the reset was airborne and the first one after it is
+//!   on the ground below [`RESUME_PARKED_KT`] (5 kt): parked is a restart, whatever the gap
+//!   (the session has no airport data; a landing aircraft is never at 5 kt the moment it
+//!   touches down).
+//!
+//! Otherwise the old rule applies: requalify on 10 s of air time, and a ground contact before
+//! that ends the flight as interrupted (the app then offers to resume it). A teleport detected
+//! between two samples never takes the continuity path. A hole the stream was away for (sim
+//! clock running, longer than 5 s) goes into `integrity.gap_ms`; it is not flown time the
+//! recording saw (the flight time itself is still take-off to landing). The rate of a landing
+//! right after the hole comes from the samples after it or the sim's own value; after a hole of
+//! at most 10 s (or a frozen sim) the V/S of the last sample before it is the measured
+//! fallback ([`TouchdownDetector::restore_qualified`]); else the touchdown is unrated (see
 //! [`crate::touchdown`]).
 //!
+//! A reset in the Takeoff phase counts as a reset in the air when the last sample before it
+//! was airborne (initial climb before Climb): same continuity check, same interruption on a
+//! ground contact elsewhere, and the take-off time stays the lift-off before the reset.
+//!
 //! Ground sessions are no flights ([`FlightState::Discarded`]): a recording that ends without
-//! the aircraft ever having flown – airborne qualified (> 500 ft AGL or 60 s), a take-off time,
-//! a touchdown or a start in the air – is discarded instead of `Completed` / `Interrupted`.
+//! the aircraft ever having flown – airborne qualified (> 500 ft AGL, 60 s, or 5 s above 50 ft),
+//! a confirmed lift-off out of the Takeoff phase ([`PhaseEngine::lifted_off`]: a hop that stayed
+//! below 50 ft for 10 s), a take-off time, a touchdown or a start in the air – is discarded
+//! instead of `Completed` / `Interrupted`.
 //! That covers taxiing around and shutting down again, a provider stop on the ground, and the
 //! "scenery test": a flight loaded at airport A (taxied a bit, so it started), then a new flight
 //! loaded at airport B. Up to 0.5.0 that was stitched into one flight A → B. Now the A part ends
@@ -72,8 +95,9 @@
 //! time like after a reset in the air. No teleport flag – nothing jumped.
 //!
 //! Thresholds:
-//! - teleport: position jump between two samples > `GS·Δt·3 + 1 nm` (GS = the larger of
-//!   both samples), or altitude change > 5 000 ft/s;
+//! - teleport: position jump between two samples > `GS·Δt·rate·3 + 1 nm` (GS = the larger of
+//!   both samples, rate = the larger sim rate of both, at least 1: at 16× time acceleration the
+//!   aircraft covers 16 times the distance per wall-clock second), or altitude change > 5 000 ft/s;
 //! - pause without telemetry: a gap Δt > 5 s between two samples during which the sim
 //!   clock advanced by less than a quarter of Δt counts as a pause of Δt (dwell timers and
 //!   air time are shifted by it, `pause_count`/`paused_ms` are updated).
@@ -129,6 +153,14 @@ const RESUME_ALT_FACTOR: f64 = 2.0;
 const RESUME_MIN_FPM: f64 = 1_000.0;
 /// … plus this margin, ft.
 const RESUME_ALT_MARGIN_FT: f64 = 100.0;
+/// Continuity across a reset is only judged with the gap's tolerances for holes up to this
+/// long, ms; a longer hole must be a frozen sim at the same spot (see the module doc).
+pub const RESUME_MAX_GAP_MS: u64 = 60_000;
+/// First sample after a reset in the air on the ground below this GS: parked, a restart.
+pub const RESUME_PARKED_KT: f64 = 5.0;
+/// After a continuous hole up to this long (or a frozen sim) the V/S before it may rate a
+/// landing right after it, ms.
+const RESUME_VS_MAX_GAP_MS: u64 = 10_000;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -291,6 +323,9 @@ struct SampleRef {
     vs_fpm: f64,
     gs_kt: f64,
     sim_time_s: f64,
+    sim_rate: f64,
+    /// Corroborated ground contact ([`ground_contact_corroborated`]).
+    on_ground: bool,
 }
 
 impl SampleRef {
@@ -304,6 +339,8 @@ impl SampleRef {
             vs_fpm: t.vertical_speed_fpm,
             gs_kt: t.ground_speed_kt,
             sim_time_s: t.sim_zulu_time_s,
+            sim_rate: t.sim_rate,
+            on_ground: ground_contact_corroborated(t),
         }
     }
 }
@@ -421,7 +458,7 @@ impl FlightSession {
         self.pending_touchdown
     }
 
-    /// Engine internals for Einstellungen → Diagnose (read-only, cheap).
+    /// Engine internals for Settings → Diagnostics (read-only, cheap).
     pub fn debug_state(&self) -> FlightDebug {
         FlightDebug {
             phase: self.engine.phase(),
@@ -520,7 +557,7 @@ impl FlightSession {
     pub fn reset_position_context(&mut self) -> Vec<FlightEvent> {
         // several resets in a row (reconnect, then AircraftLoaded) compare with the last real sample
         let before = self.last_sample.take().or(self.pre_reset);
-        let events = self.reset_context();
+        let events = self.reset_context(before.is_some_and(|b| !b.on_ground));
         self.pre_reset = before;
         events
     }
@@ -568,6 +605,7 @@ impl FlightSession {
     fn note_flown(&mut self) {
         if self.summary.state == FlightState::Active
             && (self.engine.airborne_qualified()
+                || self.engine.lifted_off()
                 || self.engine.started_airborne()
                 || self.summary.takeoff_ms.is_some()
                 || !self.summary.touchdowns.is_empty())
@@ -619,14 +657,22 @@ impl FlightSession {
             if !continues_after_reset(before, t, now) {
                 // somewhere else after the reset: a ground session ends, an idle engine restarts
                 if self.jumped_before_flying(before.wall_ts, &mut events) {
-                    events.extend(self.reset_context());
+                    events.extend(self.reset_context(!before.on_ground));
                 }
             } else if self.resumed_airborne && !t.slew {
                 // only a hole in the stream: the flight goes on, a landing now is a landing
-                log::info!("position continuous across the context reset: flight requalified");
+                let gap_ms = now.saturating_sub(before.ts);
+                let frozen = sim_clock_stood_still(before, t, gap_ms as f64 / 1000.0);
+                log::info!("position continuous across the context reset ({} s): flight requalified", gap_ms / 1000);
                 self.engine.restore_qualified();
-                self.detector.restore_qualified();
+                // the V/S before a short hole still describes the aircraft (see the module doc)
+                let short = gap_ms <= RESUME_VS_MAX_GAP_MS || frozen;
+                self.detector.restore_qualified(short.then_some(before.vs_fpm));
                 self.resumed_airborne = false;
+                if !frozen && gap_ms > GAP_PAUSE_MS && self.summary.state == FlightState::Active {
+                    // the stream was away while the sim flew on: time without recording
+                    self.summary.integrity.gap_ms += gap_ms;
+                }
             }
         }
         self.check_discontinuity(t, now, &mut events);
@@ -734,9 +780,13 @@ impl FlightSession {
     }
 
     /// Context reset without touching `last_sample` (a teleport keeps the new position as reference).
-    fn reset_context(&mut self) -> Vec<FlightEvent> {
+    /// `was_airborne`: the last sample before the reset was in the air (makes a reset in the
+    /// Takeoff phase one in the air, see the module doc).
+    fn reset_context(&mut self, was_airborne: bool) -> Vec<FlightEvent> {
         let mut events = Vec::new();
-        let resume = self.summary.state == FlightState::Active && self.engine.phase().is_airborne_phase();
+        let phase = self.engine.phase();
+        let resume = self.summary.state == FlightState::Active
+            && (phase.is_airborne_phase() || phase == FlightPhase::Takeoff && was_airborne);
         if let Some(r) = self.detector.reset(resume) {
             self.push_touchdown(r, &mut events);
         }
@@ -768,7 +818,7 @@ impl FlightSession {
             if !self.jumped_before_flying(prev.wall_ts, events) && self.summary.state == FlightState::Active {
                 self.summary.integrity.teleport_detected = true;
             }
-            events.extend(self.reset_context());
+            events.extend(self.reset_context(!prev.on_ground));
         }
     }
 
@@ -791,9 +841,15 @@ impl FlightSession {
             // a flight that started in the air has no lift-off to take the time from
             Climb if self.summary.takeoff_ms.is_none() && !self.engine.started_airborne() => {
                 // Climb comes up to 45 s after lift-off; the take-off time is the lift-off itself
-                self.summary.takeoff_ms = Some(self.engine.airborne_since().unwrap_or(tr.timestamp_ms));
+                // (kept across a reset in the initial climb)
+                let lift_off = self.engine.takeoff_lift_off().or(self.engine.airborne_since());
+                self.summary.takeoff_ms = Some(lift_off.unwrap_or(tr.timestamp_ms));
             }
             Landing => {
+                if tr.from == Takeoff && self.summary.takeoff_ms.is_none() && !self.engine.started_airborne() {
+                    // a hop that never reached Climb: its lift-off is the take-off time
+                    self.summary.takeoff_ms = self.engine.takeoff_lift_off();
+                }
                 // landing_ms waits for the full stop (see the module doc)
                 self.landing_phase_ms = Some(tr.timestamp_ms);
                 self.summary.arrival = Some(GeoPoint { latitude: t.latitude, longitude: t.longitude });
@@ -927,7 +983,20 @@ fn sim_clock_stood_still(prev: SampleRef, t: &Telemetry, dt_s: f64) -> bool {
 /// The first sample after a reset in the air is where the last one before it could have got
 /// to in the gap (see the module doc). NaN altitudes compare false: no continuity.
 fn continues_after_reset(before: SampleRef, t: &Telemetry, now: u64) -> bool {
-    let dt_s = now.saturating_sub(before.ts) as f64 / 1000.0;
+    let parked = t.ground_speed_kt.is_nan() || t.ground_speed_kt < RESUME_PARKED_KT;
+    if !before.on_ground && ground_contact_corroborated(t) && parked {
+        // in the air before, parked after: the sim was restarted (NaN GS counts as parked)
+        return false;
+    }
+    let gap_ms = now.saturating_sub(before.ts);
+    let dt_s = if gap_ms <= RESUME_MAX_GAP_MS {
+        gap_ms as f64 / 1000.0
+    } else if sim_clock_stood_still(before, t, gap_ms as f64 / 1000.0) {
+        // a frozen sim (ESC menu, pause): only the very same spot continues
+        0.0
+    } else {
+        return false;
+    };
     let allowed_ft =
         before.vs_fpm.abs().max(RESUME_MIN_FPM) * dt_s / 60.0 * RESUME_ALT_FACTOR + RESUME_ALT_MARGIN_FT;
     let within = |a: f64, b: f64| (a - b).abs() <= allowed_ft;
@@ -941,7 +1010,9 @@ fn is_teleport(prev: SampleRef, t: &Telemetry, dt_s: f64) -> bool {
     let dt_s = dt_s.max(0.05);
     let dist = haversine_nm(prev.pos, here);
     let gs = prev.gs_kt.max(t.ground_speed_kt).max(0.0);
-    let allowed = gs * dt_s / 3_600.0 * TELEPORT_GS_FACTOR + TELEPORT_MARGIN_NM;
+    // time acceleration: the sim covers `rate` seconds per wall-clock second (NaN → 1)
+    let rate = prev.sim_rate.max(t.sim_rate).max(1.0);
+    let allowed = gs * dt_s * rate / 3_600.0 * TELEPORT_GS_FACTOR + TELEPORT_MARGIN_NM;
     let climb = (t.altitude_msl_ft - prev.alt_msl_ft).abs() / dt_s;
     // NaN compares false: garbage samples never count as a jump
     dist > allowed || climb > TELEPORT_FT_PER_S

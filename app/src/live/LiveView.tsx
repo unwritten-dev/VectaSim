@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import LiveMap from "../map/LiveMap";
+import { LiveMap } from "../lazyMaps";
 import Dispatch from "../Dispatch";
 import OnlinePanel from "../OnlinePanel";
 import { PHASE_LABEL, TRANSITION_ALTITUDE_FT, haversineNm } from "../format";
@@ -27,9 +27,10 @@ import { demoLabel, waitingShort, type RecStatus } from "../status";
 import AfterFlightCard, { type AfterFlight } from "./AfterFlightCard";
 import ReadyCard from "./ReadyCard";
 import { isDebriefOpen, openDebrief, useDebrief } from "../landing/debriefStore";
+import { isModalOpen } from "../ui/modalStack";
 import { G_HARD } from "../landing/facts";
 import { liveMaxG, liveMaxGTitle } from "../gload";
-import { useEventLog } from "./eventLog";
+import { eventsSummary, useEventLog } from "./eventLog";
 import { isRated } from "../landing/rated";
 
 interface Props {
@@ -137,7 +138,7 @@ export default function LiveView({
   useEffect(() => {
     if (!active) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.key === "." && !isDebriefOpen()) {
+      if (e.ctrlKey && e.key === "." && !isDebriefOpen() && !isModalOpen()) {
         e.preventDefault();
         setPanelOpen(!panelOpen);
       }
@@ -280,7 +281,7 @@ export default function LiveView({
                   className="side-group"
                   headClassName="side-group-title"
                   title={t("live.events.title")}
-                  summary={events.length ? `${events.length} · ${events[events.length - 1].text}` : undefined}
+                  summary={eventsSummary(events)}
                 >
                   {events.length === 0 ? (
                     <div className="detail">{t("live.events.empty")}</div>

@@ -9,6 +9,7 @@ import { usePrefs } from "./prefs";
 import { demoLeftOut } from "./totals";
 import { visitedAirportCounts } from "./activitiesData";
 import { latestOnly } from "./latest";
+import { lookupAirports } from "./airportLookup";
 
 interface Visited {
   icao: string;
@@ -42,15 +43,17 @@ export default function Activities() {
     // statistics rule (flightStats.ts): no discarded ground sessions, no taxi-only rows
     setDemoHidden(demoLeftOut(all, showDemo));
     const counts = visitedAirportCounts(all, showDemo);
-    // local airport DB, queried in parallel; an unknown ICAO just shows without name/country
+    // local airport DB, each ICAO asked once per session (airportLookup.ts); an unknown ICAO
+    // just shows without name/country
     const entries = [...counts.entries()];
-    const details = await Promise.all(
-      entries.map(([icao]) => invoke<{ airport: Airport } | null>("get_airport", { ident: icao }).catch(() => null)),
+    const details = await lookupAirports(
+      entries.map(([icao]) => icao),
+      (ident) => invoke<{ airport: Airport } | null>("get_airport", { ident }),
     );
     if (!isLatest()) return;
     const countrySet = new Set<string>();
-    const rows: Visited[] = entries.map(([icao, c], i) => {
-      const a = details[i]?.airport;
+    const rows: Visited[] = entries.map(([icao, c]) => {
+      const a = details.get(icao);
       if (a?.country) countrySet.add(a.country);
       return { icao, name: a?.name ?? "", country: a?.country ?? "", ...c };
     });

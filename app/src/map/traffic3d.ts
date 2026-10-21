@@ -86,11 +86,67 @@ export function fieldsOf(airports: Iterable<Airport>): FieldRef[] {
   return out;
 }
 
+/** Grid cell of the field index, degrees (15 nm = 0.25° of latitude). */
+const CELL_DEG = 0.25;
+const LON_CELLS = 360 / CELL_DEG;
+
+/**
+ * The height reference's airports indexed by a 0.25° grid: up to 1500 pilots each looking for
+ * the nearest of up to 2000 fields was a linear scan per pilot (3 million distance checks per
+ * refresh); the grid looks only at the cells within `maxNm` (a handful of fields).
+ */
+export class FieldIndex {
+  private readonly cells = new Map<number, FieldRef[]>();
+
+  constructor(readonly fields: readonly FieldRef[]) {
+    for (const f of fields) {
+      if (!Number.isFinite(f.lat) || !Number.isFinite(f.lon)) continue;
+      const k = FieldIndex.key(Math.floor(f.lat / CELL_DEG), FieldIndex.lonCell(f.lon));
+      const list = this.cells.get(k);
+      if (list) list.push(f);
+      else this.cells.set(k, [f]);
+    }
+  }
+
+  private static lonCell(lon: number): number {
+    return ((Math.floor(lon / CELL_DEG) % LON_CELLS) + LON_CELLS) % LON_CELLS;
+  }
+
+  private static key(latCell: number, lonCell: number): number {
+    return (latCell + 1000) * LON_CELLS + lonCell;
+  }
+
+  /** The fields that can lie within `maxNm` of the point (a superset; the caller measures). */
+  *candidates(lat: number, lon: number, maxNm: number): Iterable<FieldRef> {
+    const dLat = maxNm / NM_PER_DEG;
+    const cos = Math.cos(Math.min(89.9, Math.abs(lat) + dLat) * D2R);
+    const dLonDeg = cos > 1e-6 ? dLat / cos : 360;
+    const span = Math.ceil(dLonDeg / CELL_DEG);
+    // near the poles the radius spans (almost) every longitude: all fields, no grid
+    if (2 * span + 1 >= LON_CELLS) {
+      yield* this.fields;
+      return;
+    }
+    const lat0 = Math.floor((lat - dLat) / CELL_DEG);
+    const lat1 = Math.floor((lat + dLat) / CELL_DEG);
+    const lonC = FieldIndex.lonCell(lon);
+    for (let la = lat0; la <= lat1; la++)
+      for (let d = -span; d <= span; d++) {
+        const list = this.cells.get(FieldIndex.key(la, (((lonC + d) % LON_CELLS) + LON_CELLS) % LON_CELLS));
+        if (list) yield* list;
+      }
+  }
+}
+
+/** Fields as a list (small sets, tests) or indexed (the 3D traffic's height reference). */
+export type FieldSet = readonly FieldRef[] | FieldIndex;
+
 /** Nearest field within `maxNm`, or null. */
-export function nearestField(lat: number, lon: number, fields: readonly FieldRef[], maxNm = FIELD_RADIUS_NM): { field: FieldRef; nm: number } | null {
+export function nearestField(lat: number, lon: number, fields: FieldSet, maxNm = FIELD_RADIUS_NM): { field: FieldRef; nm: number } | null {
   const dLat = maxNm / NM_PER_DEG;
   let best: { field: FieldRef; nm: number } | null = null;
-  for (const f of fields) {
+  const list = fields instanceof FieldIndex ? fields.candidates(lat, lon, maxNm) : fields;
+  for (const f of list) {
     if (Math.abs(f.lat - lat) > dLat) continue;
     const nm = distNm(lat, lon, f.lat, f.lon);
     if (nm <= maxNm && (!best || nm < best.nm)) best = { field: f, nm };
@@ -106,7 +162,7 @@ export function nearestField(lat: number, lon: number, fields: readonly FieldRef
  */
 export function trafficHeightFt(
   p: Pick<Pilot, "latitude" | "longitude" | "altitudeFt" | "groundSpeedKt" | "onGround">,
-  fields: readonly FieldRef[],
+  fields: FieldSet,
 ): number {
   if (p.onGround) return 0;
   const msl = Number.isFinite(p.altitudeFt) ? p.altitudeFt : 0;
@@ -162,7 +218,7 @@ export interface TrafficPose {
 }
 
 /** Fix of a pilot; `tMs` is when it arrived. */
-export function fixOf(p: Pilot, fields: readonly FieldRef[], tMs: number): TrafficFix {
+export function fixOf(p: Pilot, fields: FieldSet, tMs: number): TrafficFix {
   const cat = wakeCategory(p.aircraftShort);
   return {
     key: pilotKey(p),
@@ -292,7 +348,7 @@ export interface TrafficHistoryFix {
  * Curtain points of a flown track: heights on the traffic models' scale (trafficHeightFt with the
  * airports around the view), so the curtain's top edge meets the model.
  */
-export function historyPoints(fixes: readonly TrafficHistoryFix[], fields: readonly FieldRef[]): TrackPoint[] {
+export function historyPoints(fixes: readonly TrafficHistoryFix[], fields: FieldSet): TrackPoint[] {
   const out: TrackPoint[] = [];
   for (const f of fixes) {
     if (!Number.isFinite(f.latitude) || !Number.isFinite(f.longitude)) continue;
@@ -385,6 +441,61 @@ export function buildInstances(items: readonly InstanceInput[]): Map<ModelKind, 
 }
 
 /**
+ * buildInstances without the allocations, for the per-frame render: one growing buffer per shape
+ * class, kept from frame to frame (`reset` empties them, `push` appends one instance), uploaded with
+ * bufferSubData. The layout is buildInstances'.
+ */
+export class InstanceBuffers {
+  private data = new Map<ModelKind, Float32Array>();
+  private n = new Map<ModelKind, number>();
+
+  /** Empties every class (keeps the memory). */
+  reset() {
+    for (const k of this.n.keys()) this.n.set(k, 0);
+  }
+
+  push(kind: ModelKind, x: number, y: number, altM: number, headingDeg: number, size: number, selected: boolean) {
+    const n = this.n.get(kind) ?? 0;
+    let buf = this.data.get(kind);
+    if (!buf || (n + 1) * INSTANCE_FLOATS > buf.length) {
+      const grown = new Float32Array(Math.max(16, (n + 1) * 2) * INSTANCE_FLOATS);
+      if (buf) grown.set(buf.subarray(0, n * INSTANCE_FLOATS));
+      this.data.set(kind, grown);
+      buf = grown;
+    }
+    const o = n * INSTANCE_FLOATS;
+    buf[o] = x;
+    buf[o + 1] = y;
+    buf[o + 2] = altM;
+    buf[o + 3] = (headingDeg * Math.PI) / 180;
+    buf[o + 4] = size;
+    buf[o + 5] = selected ? 1 : 0;
+    this.n.set(kind, n + 1);
+  }
+
+  /** Instances of a class since the last reset. */
+  count(kind: ModelKind): number {
+    return this.n.get(kind) ?? 0;
+  }
+
+  /** The class's buffer (its first count × INSTANCE_FLOATS floats are valid). */
+  array(kind: ModelKind): Float32Array | undefined {
+    return this.data.get(kind);
+  }
+}
+
+/** Web Mercator x (0..1, plus whole worlds beyond ±180) of a longitude. */
+export function mercatorX(lon: number): number {
+  return (lon + 180) / 360;
+}
+
+/** Web Mercator y (0 north .. 1 south) of a latitude, clamped to ±85.0511°. */
+export function mercatorY(lat: number): number {
+  const s = Math.sin(Math.max(-85.0511, Math.min(85.0511, lat)) * D2R);
+  return 0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI);
+}
+
+/**
  * Largest tile coordinate the globe shader takes for a normal vertex: beyond ±32767 MapLibre's
  * projectToSphere snaps it to a pole (the curtain uses the same limit, curtainLayer.pickTile).
  */
@@ -396,13 +507,23 @@ export const TILE_COORD_LIMIT = 30_000;
  * the world copy nearest the centre) lies within TILE_COORD_LIMIT tile units of it.
  */
 export function trafficRefTile(cx: number, cy: number, zoom: number, pts: ReadonlyArray<readonly [number, number]>): { tx: number; ty: number; tz: number } {
+  const xy = new Float64Array(pts.length * 2);
+  pts.forEach(([x, y], i) => {
+    xy[2 * i] = x;
+    xy[2 * i + 1] = y;
+  });
+  return trafficRefTileFlat(cx, cy, zoom, xy, pts.length);
+}
+
+/** trafficRefTile over `count` points stored flat (x0, y0, x1, y1, …): the per-frame form, no pair arrays. */
+export function trafficRefTileFlat(cx: number, cy: number, zoom: number, xy: ArrayLike<number>, count: number): { tx: number; ty: number; tz: number } {
   let z = Math.max(0, Math.min(18, Math.floor(zoom)));
   for (;;) {
     const n = 2 ** z;
     const tx = Math.min(n - 1, Math.max(0, Math.floor(cx * n)));
     const ty = Math.min(n - 1, Math.max(0, Math.floor(cy * n)));
     let reach = 0;
-    for (const [x, y] of pts) reach = Math.max(reach, Math.abs(x * n - tx), Math.abs(y * n - ty));
+    for (let i = 0; i < count; i++) reach = Math.max(reach, Math.abs(xy[2 * i] * n - tx), Math.abs(xy[2 * i + 1] * n - ty));
     if (z === 0 || !(reach * 8192 > TILE_COORD_LIMIT)) return { tx, ty, tz: z };
     z--;
   }
@@ -414,8 +535,5 @@ export function trafficRefTile(cx: number, cy: number, zoom: number, pts: Readon
  */
 export function tileUnits(lon: number, lat: number, tx: number, ty: number, z: number, wrap = 0): [number, number] {
   const n = 2 ** z;
-  const mx = (lon + 180) / 360 + wrap;
-  const s = Math.sin(Math.max(-85.0511, Math.min(85.0511, lat)) * D2R);
-  const my = 0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI);
-  return [(mx * n - tx) * 8192, (my * n - ty) * 8192];
+  return [((mercatorX(lon) + wrap) * n - tx) * 8192, (mercatorY(lat) * n - ty) * 8192];
 }

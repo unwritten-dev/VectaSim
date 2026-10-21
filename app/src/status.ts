@@ -36,7 +36,7 @@ export function isDemo(status: StatusSnapshot | null | undefined): boolean {
 
 /**
  * SimConnect.dll missing (not downloaded, no MSFS SDK, no file chosen) – a hint with a next step,
- * not a red error: VectaSim keeps looking, and Einstellungen → Simulator downloads it on one click.
+ * not a red error: VectaSim keeps looking, and Settings → Simulator downloads it on one click.
  */
 export function isSimMissing(raw: string): boolean {
   return isDllMissing(raw);

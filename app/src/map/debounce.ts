@@ -32,3 +32,18 @@ export function boundedDebounce(fn: () => void, waitMs: number, maxWaitMs: numbe
   };
   return call;
 }
+
+/**
+ * Wait / max-wait (ms) of the live map's per-move refreshes. While following, the camera ends a
+ * move with every follow frame (up to 30 per second), so each refresh runs at most every max-wait:
+ * ≈ 2 airport lookups, 1 online re-filter, 2 diagram and 2 readout lookups (zoomed in) and
+ * ⅔ METAR batch per second (followIpc.test.ts measures it).
+ */
+export const MOVE_REFRESH = {
+  airports: [150, 500],
+  online: [250, 1000],
+  metars: [600, 1500],
+  traffic3d: [100, 300],
+  diagram: [150, 500],
+  readout: [150, 500],
+} as const satisfies Record<string, readonly [number, number]>;

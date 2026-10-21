@@ -12,6 +12,7 @@ import {
   buildInstances,
   deadReckon,
   distNm,
+  FieldIndex,
   fieldsOf,
   fixOf,
   historyPoints,
@@ -24,6 +25,8 @@ import {
   trafficHeightFt,
   type FieldRef,
   type TrafficFix,
+  InstanceBuffers,
+  trafficRefTileFlat,
 } from "./traffic3d";
 
 const EDDF: FieldRef = { lat: 50.0333, lon: 8.5706, elevFt: 364 };
@@ -202,6 +205,38 @@ describe("instance buffers", () => {
     expect(nb[6]).toBe(5);
     expect([...m.get("prop")!].map((v) => +v.toFixed(4))).toEqual([3, 4, 1, +Math.PI.toFixed(4), 1, 1]);
   });
+  it("H-3: the reused per-frame buffers hold the same data as buildInstances, without new arrays per frame", () => {
+    const items = [
+      { kind: "narrowbody" as const, x: 1, y: 2, altM: 300, headingDeg: 90, size: 1.3, selected: false },
+      { kind: "prop" as const, x: 3, y: 4, altM: 1, headingDeg: 180, size: 1, selected: true },
+      { kind: "narrowbody" as const, x: 5, y: 6, altM: 0, headingDeg: 0, size: 1.3, selected: false },
+    ];
+    const ref = buildInstances(items);
+    const b = new InstanceBuffers();
+    const fill = () => {
+      b.reset();
+      for (const it of items) b.push(it.kind, it.x, it.y, it.altM, it.headingDeg, it.size, it.selected);
+    };
+    fill();
+    for (const [k, data] of ref) expect([...b.array(k)!.subarray(0, b.count(k) * INSTANCE_FLOATS)]).toEqual([...data]);
+    // the next frame writes into the same arrays
+    const before = b.array("narrowbody");
+    fill();
+    expect(b.array("narrowbody")).toBe(before);
+    expect(b.count("narrowbody")).toBe(2);
+    // growing keeps what was written
+    b.reset();
+    for (let i = 0; i < 200; i++) b.push("widebody", i, 0, 0, 0, 1, false);
+    expect(b.count("widebody")).toBe(200);
+    expect(b.array("widebody")![199 * INSTANCE_FLOATS]).toBe(199);
+    expect(b.count("prop")).toBe(0);
+  });
+  it("trafficRefTileFlat is trafficRefTile over flat coordinates", () => {
+    const pts: Array<[number, number]> = [[0.51, 0.32], [0.53, 0.33], [0.9, 0.1]];
+    const flat = new Float64Array(pts.flat());
+    expect(trafficRefTileFlat(0.52, 0.32, 9, flat, 3)).toEqual(trafficRefTile(0.52, 0.32, 9, pts));
+    expect(trafficRefTileFlat(0.52, 0.32, 9, flat, 2)).toEqual(trafficRefTile(0.52, 0.32, 9, pts.slice(0, 2)));
+  });
   it("tile units: the tile centre is 4096 / 4096, world copies shift by whole tiles", () => {
     // zoom 1, tile (1, 0): lon 90, lat ≈ 66.51 is its centre
     const [x, y] = tileUnits(90, 66.51326, 1, 0, 1);
@@ -304,5 +339,48 @@ describe("trafficRefTile (globe: no vertex beyond the shader's tile-coordinate r
 
   it("falls back to zoom 0 at worst", () => {
     expect(trafficRefTile(0.5, 0.5, 12, [[0.01, 0.02], [0.99, 0.98]]).tz).toBeLessThanOrEqual(2);
+  });
+});
+
+describe("field index (grid instead of a linear scan per pilot)", () => {
+  // deterministic pseudo-random fields and probes
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const fields: FieldRef[] = Array.from({ length: 2000 }, () => ({ lat: -89 + rnd() * 178, lon: -180 + rnd() * 360, elevFt: Math.round(rnd() * 5000) }));
+  // a dense cluster (Europe) so many probes have a field within 15 nm
+  for (let i = 0; i < 500; i++) fields.push({ lat: 48 + rnd() * 4, lon: 6 + rnd() * 6, elevFt: 300 });
+  const index = new FieldIndex(fields);
+
+  it("finds the same nearest field as the linear scan everywhere (incl. ±180 and the poles)", () => {
+    const probes: Array<[number, number]> = [
+      [50, 8],
+      [49.9, 7.1],
+      [0, 179.95],
+      [0, -179.95],
+      [89.95, 10],
+      [-89.9, -120],
+    ];
+    for (let i = 0; i < 3000; i++) probes.push(i % 3 ? [48 + rnd() * 4, 6 + rnd() * 6] : [-89 + rnd() * 178, -180 + rnd() * 360]);
+    for (const [lat, lon] of probes) expect(nearestField(lat, lon, index)?.field).toBe(nearestField(lat, lon, fields)?.field);
+  });
+
+  it("a field just across the antimeridian is found from the other side", () => {
+    const f: FieldRef = { lat: 10, lon: 179.98, elevFt: 100 };
+    expect(nearestField(10, -179.98, new FieldIndex([f]))?.field).toBe(f);
+  });
+
+  it("1500 pilots against 2500 fields: far fewer distance checks than the scan", () => {
+    const pilots = Array.from({ length: 1500 }, () => [48 + rnd() * 4, 6 + rnd() * 6] as const);
+    const t0 = performance.now();
+    for (const [lat, lon] of pilots) nearestField(lat, lon, fields);
+    const linear = performance.now() - t0;
+    const t1 = performance.now();
+    for (const [lat, lon] of pilots) nearestField(lat, lon, index);
+    const grid = performance.now() - t1;
+    // timing is informative only (CI machines vary); the candidate count is the real check
+    let candidates = 0;
+    for (const [lat, lon] of pilots) for (const _ of index.candidates(lat, lon, 15)) candidates++;
+    expect(candidates / pilots.length).toBeLessThan(60);
+    expect(Number.isFinite(linear) && Number.isFinite(grid)).toBe(true);
   });
 });

@@ -401,9 +401,14 @@ pub fn export_kml(flight: &FlightRow, samples: &[TrackSample], touchdowns: &[Tou
     out.push_str("    </gx:Track>\n  </Placemark>\n");
 
     for (n, t) in touchdowns.iter().enumerate() {
+        // an unrated touchdown (slewed / fast-forwarded down) has no rate: never "0 fpm"
+        let rate = if t.landing_rate_source.is_rated() {
+            format!("{:.0} fpm", t.landing_rate_fpm)
+        } else {
+            "Landerate nicht bewertbar".to_owned()
+        };
         let desc = format!(
-            "{:.0} fpm · {:.2} g · {:.0} kt · {} Bounce{}",
-            t.landing_rate_fpm,
+            "{rate} · {:.2} g · {:.0} kt · {} Bounce{}",
             t.peak_g,
             t.ground_speed_kt,
             t.bounces,

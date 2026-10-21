@@ -94,7 +94,7 @@ VectaSim läuft neben Microsoft Flight Simulator 2020/2024 und X-Plane 12.1.1 od
 - **Tastatur:** Strg+F sucht im Logbuch, Strg+. klappt das Seitenpanel der Karte ein und aus, die Eingabetaste öffnet die Landeauswertung des gewählten Flugs, Entf legt ihn in den Papierkorb, Alt+T springt zum neuesten Hinweis – die vollständige Liste steht unter *Einstellungen → Tastatur*.
 - **Karte:** Globus oder flache Karte in der Kartenleiste oder unter *Einstellungen → Anzeige* umschalten; die 3D-Ansicht mit der rechten Maustaste oder Strg + Ziehen drehen und neigen.
 - **Deutsch und Englisch:** *Einstellungen → Anzeige → Sprache* – System (folgt der Windows-Anzeigesprache), Deutsch oder English, wirkt sofort. Benachrichtigungen, Tray-Menü, Discord-Status, Overlays und Installer folgen derselben Einstellung; Flugphasen stehen immer auf Englisch.
-- **Streamer-Modus** (Strg+Umschalt+P) blendet Kennzeichen, Rufzeichen, Airline, SimBrief-ID und Benutzerpfade überall aus – auch auf der Landekarte und im Diagnosepaket.
+- **Streamer-Modus** (Strg+Umschalt+P) blendet Kennzeichen, Rufzeichen, Airline, SimBrief-ID und Benutzerpfade überall aus – auch auf der Landekarte und im Diagnosepaket; den Windows-Benutzernamen lässt das Diagnosepaket auch ohne ihn weg.
 - **Landerate im Sim (MSFS):** Einige Sekunden nach dem Aufsetzen zeigt eine Zeile oben im Bild Rate, Einstufung, g, Bounces und Aufsetzpunkt, z. B. „VectaSim · Gelandet −142 fpm (sanft) · 1,18 g · keine Bounces · 27L: 412 m hinter der Schwelle, 1 m links“ (*Einstellungen → Simulator*, standardmäßig an; hängt davon ab, ob die MSFS-Version SimConnect-Text anzeigt).
 - **Integrationen** (alle optional, außer Benachrichtigungen und Tray-Symbol standardmäßig aus): Discord-Status mit Route und Phase (standardmäßig aus, einschalten unter *Einstellungen → Integrationen*; keine eigene Discord-Anwendung nötig – die Aktivitätsfreigabe muss in Discord erlaubt sein), Windows-Benachrichtigungen (Landung, Flug gespeichert, Verbindung, Update), ein Symbol im Infobereich: Minimieren oder Schließen lässt VectaSim dort weiterlaufen (samt Aufzeichnung); Doppelklick auf das Symbol öffnet es wieder, *Beenden* im Menü beendet die App (abschaltbar unter *Einstellungen → Integrationen*).
 - **Overlay & Schnittstelle** (standardmäßig aus): lokaler Server mit transparenten OBS-Overlays (HUD, Landung, Route); Overlays und Startseite lassen sich auf Tablet oder Handy im WLAN öffnen (mit Token); dazu eine nur lesende JSON/WebSocket-Schnittstelle für VAs. Overlays verstehen `?lang=de|en` – Endpunkte und Sicherheit in [docs/overlay-api.md](docs/overlay-api.md) (englisch).
@@ -123,7 +123,7 @@ Updates meldet VectaSim beim Start und installiert sie nach Bestätigung. Mehr D
 ## Deine Daten & Datenschutz
 
 - Dein Logbuch liegt in `%APPDATA%\io.vectasim.app\`; Protokolle und der Standardordner für Sicherungen liegen in `%LOCALAPPDATA%\io.vectasim.app\`.
-- VectaSim nimmt nur Kontakt auf zu: OpenFreeMap (Kartenkacheln), EOX (Satellitenkacheln, nur mit „Satellit“), RainViewer und EUMETSAT (Radar und Wolken, nur wenn eingeschaltet), aviationweather.gov (METAR; fällt es aus, `metar.vatsim.net` – auch bei ausgeschaltetem VATSIM-Verkehr), VATSIM und IVAO (Verkehr, nur wenn eingeschaltet), SimBrief (nur mit deiner Pilot-ID), Planespotters.net (Flugzeugfotos, abschaltbar), GitHub (Updates), dem SDK-Server von Microsoft (nur für den SimConnect-Download) und Discord (nur der lokale Discord-Client, nur mit eingeschaltetem Discord-Status).
+- VectaSim nimmt nur Kontakt auf zu: OpenFreeMap (Kartenkacheln), EOX (Satellitenkacheln, nur mit „Satellit“), RainViewer und EUMETSAT (Radar und Wolken, nur wenn eingeschaltet), aviationweather.gov (METAR; fällt es aus und VATSIM-Verkehr ist an, `metar.vatsim.net`), VATSIM und IVAO (Verkehr, nur wenn eingeschaltet; die VATSIM-Datenadresse wird nur auf vatsim.net akzeptiert), SimBrief (nur mit deiner Pilot-ID), Planespotters.net (Flugzeugfotos, abschaltbar), GitHub (Updates), dem SDK-Server von Microsoft (nur für den SimConnect-Download) und Discord (nur der lokale Discord-Client, nur mit eingeschaltetem Discord-Status).
 
 ## Deinstallieren
 
@@ -135,11 +135,12 @@ Windows-*Einstellungen → Apps → VectaSim → Deinstallieren*. Dein Logbuch b
 
 ## Bekannte Einschränkungen
 
-- **X-Plane:** 10 Werte pro Sekunde, kein Aufsetzwert aus dem Sim – die Landerate ist „gemessen“ (etwa ±50–100 fpm), keine ILS-Referenz, nur auf demselben PC.
+- **X-Plane:** 10 Werte pro Sekunde, kein Aufsetzwert aus dem Sim – die Landerate ist „gemessen“ (etwa ±50–100 fpm), keine ILS-Referenz; X-Plane nur auf diesem PC oder im lokalen Netzwerk (öffentliche Adressen werden abgelehnt).
 - Importierte Flüge haben keinen Track und keine Landeauswertung.
 - Abgeleitete Pisten sind auf etwa ±50 m genau.
 - Flugphasen stehen immer auf Englisch.
 - Der Installer ist noch nicht code-signiert.
+- Das Niederschlagsradar stammt aus dem kostenlosen Zugang von RainViewer, den RainViewer nur für die private Nutzung und für Bildungszwecke anbietet (Zoom ≤ 7, ein Farbschema).
 
 ## Status
 

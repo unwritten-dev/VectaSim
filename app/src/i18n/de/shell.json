@@ -295,6 +295,10 @@
       "title": "Datei konnte nicht geschrieben werden.",
       "hint": "Wähle einen anderen Ordner oder schließe die Datei in anderen Programmen."
     },
+    "clipboardDenied": {
+      "title": "Zwischenablage nicht freigegeben.",
+      "hint": "Klicke erneut, während das VectaSim-Fenster im Vordergrund ist."
+    },
     "unexpected": {
       "title": "Unerwarteter Fehler.",
       "titleService": "{service}: unerwarteter Fehler.",
@@ -467,6 +471,9 @@
       "hiddenTitle": "VectaSim läuft weiter",
       "hiddenBody": "Das Fenster ist im Infobereich. Doppelklick auf das Symbol öffnet es, „Beenden“ im Menü schließt VectaSim."
     },
+    "store": {
+      "noticeTitle": "Hinweis zum Logbuch"
+    },
     "quit": {
       "title": "Aufzeichnung läuft – trotzdem beenden?",
       "message": "Der Flug wird abgebrochen und im Logbuch als unterbrochen gespeichert.",
@@ -483,8 +490,7 @@
       "checkFailed": "Update-Prüfung fehlgeschlagen",
       "recordingTitle": "Aufzeichnung läuft – Update nach dem Flug",
       "recordingBody": "Die Installation startet VectaSim neu. Installiere Version {version} nach dem Flug unter Einstellungen → Updates.",
-      "backupFailed": "Sicherung vor dem Update fehlgeschlagen",
-      "backupFailedBody": "{error} – das Update läuft trotzdem.",
+      "backupFailed": "Sicherung vor dem Update fehlgeschlagen – das Update läuft trotzdem",
       "installed": "Update installiert",
       "installedBody": "VectaSim startet jetzt neu.",
       "failed": "Update fehlgeschlagen"

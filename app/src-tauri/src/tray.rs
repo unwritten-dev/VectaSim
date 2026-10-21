@@ -1,9 +1,9 @@
-//! Tray icon and minimise-/close-to-tray (Einstellungen → Integrationen, settings `tray_minimize`
+//! Tray icon and minimise-/close-to-tray (Settings → Integrations, settings `tray_minimize`
 //! and `tray_close`, both default on; "0" = off).
 //!
 //! With the setting on there is a tray icon (the window icon) whose tooltip is the short status
 //! ("VectaSim · Aufzeichnung läuft · Cruise") and whose menu offers „Öffnen“, the recording
-//! state (disabled line), „Debug-Modus“ (same switch as Einstellungen → Diagnose) and „Beenden“.
+//! state (disabled line), „Debug-Modus“ (same switch as Settings → Diagnostics) and „Beenden“.
 //! Texts follow the backend language (`lang`), flight phases stay English like in the UI
 //! (format.ts → PHASE_LABEL); a language switch relabels the menu at once ([`relabel`]).
 //! Minimising the window then hides it into the tray; a double click on the icon (or „Öffnen“)
@@ -242,7 +242,7 @@ pub fn on_window_event(window: &Window, event: &WindowEvent) {
     app.state::<ProviderManager>().set_ui_visible(false);
 }
 
-/// Einstellungen → Integrationen → Tray switch.
+/// Settings → Integrations → tray switch.
 #[tauri::command]
 pub fn set_tray_enabled(on: bool, app: AppHandle, store: tauri::State<'_, Store>) -> Result<bool, String> {
     store.set_setting(SETTING_TRAY, if on { "1" } else { "0" }).map_err(lang::ui_error)?;

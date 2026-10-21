@@ -30,7 +30,7 @@ export interface Prefs {
   cardAutosave: boolean;
   /** `card_hide_reg` = "1": landing card PNG without registration even outside the Streamer-Modus. */
   cardHideReg: boolean;
-  /** `discord_presence` = "1": Discord Rich Presence (Einstellungen → Integrationen, default off). */
+  /** `discord_presence` = "1": Discord Rich Presence (Settings → Integrations, default off). */
   discordPresence: boolean;
   /** `notifications` ≠ "0": Windows notifications while the window is not focused (default on). */
   notifications: boolean;
@@ -245,7 +245,7 @@ export function usePrivacyShortcut() {
   }, []);
 }
 
-// ---- in-app zoom (Ctrl+Plus/Minus/0, Einstellungen → Anzeige) ---------------------------
+// ---- in-app zoom (Ctrl+Plus/Minus/0, Settings → Display) ---------------------------
 // A per-machine convenience like the window geometry, so localStorage rather than the
 // backend settings table: the factor is applied before the stored prefs arrive.
 

@@ -257,15 +257,6 @@ const OPT_COLUMNS: &[(f64, OptGetter, OptSetter)] = &[
 ];
 const _: () = assert!(OPT_COLUMNS.len() <= 32, "presence bits are a u32");
 
-/// Delta + zigzag + varint of one column of quantised values.
-fn write_column(raw: &mut Vec<u8>, values: impl Iterator<Item = i64>) {
-    let mut prev: i64 = 0;
-    for q in values {
-        write_varint(raw, zigzag(q.wrapping_sub(prev)));
-        prev = q;
-    }
-}
-
 fn quantise(v: f64, scale: f64) -> i64 {
     (v * scale).round() as i64
 }
@@ -276,24 +267,102 @@ fn opt_value(s: &TrackSample, i: usize) -> Option<f64> {
 }
 
 pub fn encode_track(samples: &[TrackSample]) -> Vec<u8> {
-    zstd::encode_all(raw_track(samples).as_slice(), ZSTD_LEVEL).expect("zstd encode into Vec cannot fail")
+    let mut e = TrackEncoder::new();
+    for s in samples {
+        e.push(s);
+    }
+    e.encode(None)
 }
 
 /// The uncompressed v2 stream (also what the golden tests pin down).
+#[cfg(test)]
 fn raw_track(samples: &[TrackSample]) -> Vec<u8> {
-    let mut raw = Vec::with_capacity(16 + samples.len() * 40);
-    raw.extend_from_slice(MAGIC);
-    raw.push(VERSION);
-    raw.extend_from_slice(&(samples.len() as u32).to_le_bytes());
-    for (scale, get, _) in COLUMNS {
-        write_column(&mut raw, samples.iter().map(|s| quantise(get(s), *scale)));
+    let mut e = TrackEncoder::new();
+    for s in samples {
+        e.push(s);
     }
-    let present = |s: &TrackSample| (0..OPT_COLUMNS.len()).filter(|&i| opt_value(s, i).is_some()).fold(0u32, |m, i| m | 1 << i);
-    write_column(&mut raw, samples.iter().map(|s| i64::from(present(s))));
+    e.raw(None)
+}
+
+/// The quantised values of one sample in storage order: base columns, presence, optional ones.
+fn quantised(s: &TrackSample) -> [i64; V2_COLUMNS] {
+    let mut q = [0i64; V2_COLUMNS];
+    for (i, (scale, get, _)) in COLUMNS.iter().enumerate() {
+        q[i] = quantise(get(s), *scale);
+    }
+    let mut present = 0u32;
     for (i, (scale, _, _)) in OPT_COLUMNS.iter().enumerate() {
-        write_column(&mut raw, samples.iter().map(|s| opt_value(s, i).map_or(0, |v| quantise(v, *scale))));
+        if let Some(v) = opt_value(s, i) {
+            present |= 1 << i;
+            q[COLUMNS.len() + 1 + i] = quantise(v, *scale);
+        }
     }
-    raw
+    q[COLUMNS.len()] = i64::from(present);
+    q
+}
+
+/// Builds the v2 stream sample by sample: each column's deltas are written once, when the
+/// sample comes in, so the recorder's 15 s flush only adds the samples since the last one and
+/// concatenates the columns (plus the zstd pass) instead of quantising the whole track again.
+/// The output is byte for byte what [`encode_track`] writes for the same samples.
+#[derive(Clone, Debug)]
+pub struct TrackEncoder {
+    cols: Vec<Vec<u8>>,
+    prev: [i64; V2_COLUMNS],
+    count: usize,
+}
+
+impl Default for TrackEncoder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TrackEncoder {
+    pub fn new() -> Self {
+        Self { cols: vec![Vec::new(); V2_COLUMNS], prev: [0; V2_COLUMNS], count: 0 }
+    }
+
+    /// Samples pushed so far.
+    pub fn len(&self) -> usize {
+        self.count
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.count == 0
+    }
+
+    pub fn push(&mut self, s: &TrackSample) {
+        let q = quantised(s);
+        for (i, col) in self.cols.iter_mut().enumerate() {
+            write_varint(col, zigzag(q[i].wrapping_sub(self.prev[i])));
+        }
+        self.prev = q;
+        self.count += 1;
+    }
+
+    /// The uncompressed stream of the pushed samples, plus `extra` as one more last sample
+    /// (not kept: the track preview's "last sample" that moves on with every flush).
+    fn raw(&self, extra: Option<&TrackSample>) -> Vec<u8> {
+        let extra = extra.map(quantised);
+        let n = self.count + usize::from(extra.is_some());
+        let mut raw = Vec::with_capacity(9 + self.cols.iter().map(Vec::len).sum::<usize>() + V2_COLUMNS * 10);
+        raw.extend_from_slice(MAGIC);
+        raw.push(VERSION);
+        raw.extend_from_slice(&(n as u32).to_le_bytes());
+        for (i, col) in self.cols.iter().enumerate() {
+            raw.extend_from_slice(col);
+            if let Some(q) = &extra {
+                write_varint(&mut raw, zigzag(q[i].wrapping_sub(self.prev[i])));
+            }
+        }
+        raw
+    }
+
+    /// The zstd blob ([`encode_track`] format) of the pushed samples plus `extra`.
+    pub fn encode(&self, extra: Option<&TrackSample>) -> Vec<u8> {
+        zstd::encode_all(self.raw(extra).as_slice(), ZSTD_LEVEL).expect("zstd encode into Vec cannot fail")
+    }
 }
 
 /// Reads one column; `apply` gets each sample and its quantised value.
@@ -492,6 +561,36 @@ mod tests {
         raw.extend_from_slice(&count.to_le_bytes());
         raw.extend_from_slice(body);
         zstd::encode_all(raw.as_slice(), 1).unwrap()
+    }
+
+    #[test]
+    fn incremental_encoder_writes_what_encode_track_writes() {
+        let samples: Vec<TrackSample> = (0..95)
+            .map(|i| TrackSample {
+                t_ms: 1_000_000 + i * 1_000,
+                latitude: 50.0 + i as f64 * 1e-4,
+                altitude_msl_ft: 400.0 + i as f64 * 10.0,
+                tas_kt: (i % 3 != 0).then_some(140.0 + i as f64),
+                n1_pct: (i > 40).then_some(80.0),
+                on_ground: i < 10,
+                ..Default::default()
+            })
+            .collect();
+        let mut e = TrackEncoder::new();
+        for (i, s) in samples.iter().enumerate() {
+            e.push(s);
+            if i % 17 == 0 {
+                assert_eq!(e.encode(None), encode_track(&samples[..=i]), "after {i}");
+            }
+        }
+        assert_eq!(e.len(), samples.len());
+        assert_eq!(decode_track(&e.encode(None)).unwrap(), decode_track(&encode_track(&samples)).unwrap());
+        // an extra last sample, as the preview's moving end
+        let (head, last) = samples.split_at(samples.len() - 1);
+        let mut e = TrackEncoder::new();
+        head.iter().for_each(|s| e.push(s));
+        assert_eq!(e.raw(Some(&last[0])), raw_track(&samples));
+        assert_eq!(e.len(), head.len(), "the extra sample is not kept");
     }
 
     #[test]

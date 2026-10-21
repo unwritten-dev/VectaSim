@@ -671,7 +671,7 @@ export interface LandingFactsResult {
   skipped: number;
 }
 
-// ---- Diagnose → Live-Rohdaten (`diagnostics_snapshot`, event `diag:raw`) ----
+// ---- Diagnostics → Live raw data (`diagnostics_snapshot`, event `diag:raw`) ----
 
 export interface VarDiag {
   name: string;
@@ -816,7 +816,7 @@ export interface LogLevelInfo {
   debugMode?: boolean;
 }
 
-/** `get_debug_mode` / `set_debug_mode` (Einstellungen → Diagnose → Debug-Modus). */
+/** `get_debug_mode` / `set_debug_mode` (Settings → Diagnostics → Debug mode). */
 export interface DebugModeInfo {
   on: boolean;
   log: LogLevelInfo;
@@ -848,7 +848,7 @@ export interface BackupEntry {
   bytes: number;
 }
 
-/** Einstellungen → Daten (`get_backup_info`, `set_backup_dir`). */
+/** Settings → Data (`get_backup_info`, `set_backup_dir`). */
 export interface BackupInfo {
   dbPath: string;
   dbBytes: number;

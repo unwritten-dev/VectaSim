@@ -101,7 +101,7 @@ pub struct StatusSnapshot {
     pub frames: u64,
 }
 
-/// Everything Einstellungen → Diagnose → Live-Rohdaten shows.
+/// Everything Settings → Diagnostics → live raw values shows.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiagSnapshot {
@@ -191,10 +191,25 @@ impl Outbox for AppHandle {
             let fact = app
                 .try_state::<Arc<vectasim_data::AirportIndex>>()
                 .map(|a| crate::landing::compute_fact(&store, &a, &detail.flight, &detail.touchdowns, index));
-            let line = crate::simtext::landing_line(crate::lang::current(), td.landing_rate_fpm, td.peak_g, td.bounces, touch_and_go, fact.as_ref());
+            let rate = td.landing_rate_source.is_rated().then_some(td.landing_rate_fpm);
+            let line = crate::simtext::landing_line(crate::lang::current(), rate, td.peak_g, td.bounces, touch_and_go, fact.as_ref());
             vectasim_simconnect::text::show_text(&line, crate::simtext::SECONDS);
         });
     }
+}
+
+/// Samples after the client's cursor `ts_ms` ([`ProviderManager::live_track_since`]). The
+/// recorder appends in strictly increasing `t_ms` (it never writes a sample back in time, see
+/// `vectasim_store::recorder`). Should the order still break (a buffer from an older build), the
+/// cursor is the sample the client saw last (`t_ms == ts_ms`, the latest one with it) and
+/// everything after it is new to the client – rather than nothing, which a binary search over
+/// unsorted samples could return. Without that sample: from the first one newer than `ts_ms`.
+fn samples_since(samples: &[TrackSample], ts_ms: u64) -> Vec<TrackSample> {
+    let from = match samples.iter().rposition(|s| s.t_ms == ts_ms) {
+        Some(i) => i + 1,
+        None => samples.iter().position(|s| s.t_ms > ts_ms).unwrap_or(samples.len()),
+    };
+    samples[from..].to_vec()
 }
 
 fn emit<T: Serialize + ?Sized>(out: &impl Outbox, event: &str, payload: &T) {
@@ -362,9 +377,7 @@ impl ProviderManager {
     pub fn live_track_since(&self, ts_ms: u64) -> Vec<TrackSample> {
         let live = lock(&self.live).clone();
         let samples = lock(&live);
-        // samples are appended in non-decreasing t_ms order (the recorder's 1 Hz cadence)
-        let from = samples.partition_point(|s| s.t_ms <= ts_ms);
-        samples[from..].to_vec()
+        samples_since(&samples, ts_ms)
     }
 
     /// The flight this provider session is recording, if any – never one left over from
@@ -935,7 +948,9 @@ impl<O: Outbox> Forwarder<O> {
             TouchdownOutcome::Unknown | TouchdownOutcome::Pending => return,
         };
         let Some(td) = self.session.summary().touchdowns.get(o.index) else { return };
-        let (title, body) = crate::notify::landing_text(crate::lang::current(), td.landing_rate_fpm, td.peak_g, td.bounces, touch_and_go);
+        // an unrated touchdown has no rate to announce (never "0 fpm")
+        let rate = td.landing_rate_source.is_rated().then_some(td.landing_rate_fpm);
+        let (title, body) = crate::notify::landing_text(crate::lang::current(), rate, td.peak_g, td.bounces, touch_and_go);
         self.out.notify(crate::notify::Kind::Landing, &title, &body);
         if self.sim_text {
             self.out.landing_in_sim(&self.store, self.recorder.current_flight_id().map(str::to_owned), o.index, touch_and_go);
@@ -1025,7 +1040,8 @@ pub(crate) fn set_ui_visible(visible: bool, manager: tauri::State<'_, ProviderMa
 }
 
 /// Frontend → `invoke("get_live_track_since", { tsMs })`: samples with `t_ms > tsMs`.
-/// Off the main thread: the recorder holds the buffer while it encodes a flush.
+/// Off the main thread: the copy of a long live buffer (up to ~36 000 samples) is not free, and
+/// the recorder's flush takes the same lock for its own copy (it encodes outside the lock).
 #[tauri::command(async)]
 pub(crate) fn get_live_track_since(ts_ms: u64, manager: tauri::State<'_, ProviderManager>) -> Vec<TrackSample> {
     manager.live_track_since(ts_ms)
@@ -1044,6 +1060,18 @@ mod tests {
     use super::*;
     use std::sync::atomic::AtomicUsize;
     use vectasim_core::{MockFlight, MockVariant, sleep_interruptible};
+
+    #[test]
+    fn samples_since_tolerates_a_buffer_out_of_order() {
+        let at = |t_ms| TrackSample { t_ms, ..Default::default() };
+        let sorted: Vec<_> = [10, 20, 30, 40].into_iter().map(at).collect();
+        assert_eq!(samples_since(&sorted, 20).iter().map(|s| s.t_ms).collect::<Vec<_>>(), [30, 40]);
+        assert!(samples_since(&sorted, 40).is_empty());
+        assert_eq!(samples_since(&sorted, 0).len(), 4);
+        // a clock step back in an old buffer: the client saw 40, the samples after it are new
+        let stepped: Vec<_> = [10, 20, 40, 15, 16, 17].into_iter().map(at).collect();
+        assert_eq!(samples_since(&stepped, 40).iter().map(|s| s.t_ms).collect::<Vec<_>>(), [15, 16, 17]);
+    }
 
     /// `landing_in_sim` arguments: flight id, touchdown index, touch-and-go.
     type InSimCall = (Option<String>, usize, bool);

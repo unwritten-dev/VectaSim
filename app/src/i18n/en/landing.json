@@ -1,8 +1,7 @@
 {
   "facts": {
     "unit": {
-      "dots": "dots",
-      "dot": "dot"
+      "dots": "dots"
     },
     "and": "{rest} and {last}",
     "gScale": "smooth < {smooth} · normal < {normal} · firm < {firm} · hard ≥ {firm} g",

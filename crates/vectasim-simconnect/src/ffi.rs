@@ -248,7 +248,7 @@ impl std::fmt::Display for LoadError {
         if self.wrong_architecture.is_empty() {
             write!(
                 f,
-                "SimConnect.dll not found or unloadable – download it in Einstellungen → Simulator, \
+                "SimConnect.dll not found or unloadable – download it in Settings → Simulator, \
                  install the MSFS SDK or set VECTASIM_SIMCONNECT_DLL"
             )?;
         } else {
@@ -293,7 +293,7 @@ pub fn downloaded_dll_path_from(env: &dyn Fn(&str) -> Option<String>) -> Option<
 /// Where a SimConnect.dll candidate comes from, for the diagnostics ("Quelle").
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DllSource {
-    /// `%VECTASIM_SIMCONNECT_DLL%` or the file chosen in Einstellungen → Simulator.
+    /// `%VECTASIM_SIMCONNECT_DLL%` or the file chosen in Settings → Simulator.
     Override,
     /// Fetched by VectaSim from Microsoft's SDK server (in-app download).
     Downloaded,
@@ -306,7 +306,7 @@ pub enum DllSource {
 }
 
 impl DllSource {
-    /// German label for Einstellungen → Diagnose.
+    /// German label for Settings → Diagnostics.
     pub fn label(self) -> &'static str {
         match self {
             DllSource::Override => "manuell gewählt",
@@ -350,14 +350,17 @@ pub fn dll_source_from(path: &Path, env: &dyn Fn(&str) -> Option<String>, exe: O
 /// 3. next to the VectaSim executable
 /// 4. `%MSFS2024_SDK%` / `%MSFS_SDK%` (set by the SDK installers; a running process
 ///    only sees them after a restart / re-login)
-/// 5. the SDK installers' default folders `%SystemDrive%\MSFS 2024 SDK` and
-///    `%SystemDrive%\MSFS SDK`
-/// 6. the bare name, i.e. the Windows DLL search order (EXE dir, System32, PATH, …)
+/// 5. the bare name, searched only in the application folder and System32
+///    (`LOAD_LIBRARY_SEARCH_DEFAULT_DIRS`, see [`open_library`]) – not in the current
+///    directory or the folders on `PATH`, which other programs or accounts may control
 ///
 /// The sim installations themselves (Steam/Store, incl. the
 /// `%LOCALAPPDATA%\Packages\Microsoft.FlightSimulator_8wekyb3d8bbwe\LocalCache` tree)
 /// do not ship a loadable client SimConnect.dll in a documented place, so they are
-/// deliberately not probed.
+/// deliberately not probed. Neither are the SDK installers' default folders at the drive root
+/// (`%SystemDrive%\MSFS SDK`, `…\MSFS 2024 SDK`) on their own: any local account may create
+/// such a folder where it is missing and put a DLL there. An SDK installed
+/// there is still found through `%MSFS_SDK%` / `%MSFS2024_SDK%`, which its installer sets.
 pub fn candidate_paths() -> Vec<PathBuf> {
     candidate_paths_from(&|k| std::env::var(k).ok(), std::env::current_exe().ok())
 }
@@ -384,13 +387,26 @@ pub fn candidate_paths_from(env: &dyn Fn(&str) -> Option<String>, exe: Option<Pa
             push(sdk_dll(p.trim()));
         }
     }
-    let drive = env("SystemDrive").filter(|s| !s.is_empty()).unwrap_or_else(|| "C:".into());
-    for folder in ["MSFS 2024 SDK", "MSFS SDK"] {
-        push(sdk_dll(format!("{drive}\\{folder}")));
-    }
-    // plain name → Windows DLL search path (System32, PATH, …)
+    // plain name → application folder and System32 only (open_library)
     push(PathBuf::from("SimConnect.dll"));
     v
+}
+
+/// Loads one candidate. A bare file name (no folder) is searched with
+/// `LOAD_LIBRARY_SEARCH_DEFAULT_DIRS` (application folder, System32, folders added with
+/// `AddDllDirectory`) instead of the classic search order with the current directory and `PATH`.
+///
+/// # Safety
+/// Loading a DLL runs its `DllMain`, see [`libloading::Library::new`].
+unsafe fn open_library(path: &Path) -> Result<libloading::Library, libloading::Error> {
+    #[cfg(windows)]
+    if path.parent().is_none_or(|p| p.as_os_str().is_empty()) {
+        use libloading::os::windows::{LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, Library};
+        // SAFETY: as for the caller
+        return unsafe { Library::load_with_flags(path, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS) }.map(Into::into);
+    }
+    // SAFETY: as for the caller
+    unsafe { libloading::Library::new(path) }
 }
 
 /// Win32 error code behind a libloading error, if any.
@@ -443,7 +459,7 @@ impl SimConnectLib {
                 continue;
             }
             // SAFETY: loading SimConnect.dll runs its DllMain; this is the intended use of the library.
-            match unsafe { libloading::Library::new(&path) } {
+            match unsafe { open_library(&path) } {
                 Ok(lib) => match Self::resolve(lib, path.clone()) {
                     Ok(s) => return Ok(s),
                     Err(e) => {
@@ -600,12 +616,12 @@ mod tests {
     }
 
     #[test]
-    fn candidate_order_env_exe_sdk_defaults_searchpath() {
+    fn candidate_order_env_exe_sdk_searchpath() {
         let env = |k: &str| match k {
             "VECTASIM_SIMCONNECT_DLL" => Some(r"D:\x\SimConnect.dll".to_string()),
             "LOCALAPPDATA" => Some(r"C:\Users\p\AppData\Local".to_string()),
             "MSFS2024_SDK" => Some(r"E:\SDK24".to_string()),
-            "MSFS_SDK" => Some(r"C:\MSFS SDK".to_string()), // duplicate of a default folder
+            "MSFS_SDK" => Some(r"C:\MSFS SDK".to_string()), // the installer's default folder, named by the variable
             "SystemDrive" => Some("C:".to_string()),
             _ => None,
         };
@@ -619,24 +635,21 @@ mod tests {
                 r"C:\Apps\VectaSim\SimConnect.dll",
                 r"E:\SDK24\SimConnect SDK\lib\SimConnect.dll",
                 r"C:\MSFS SDK\SimConnect SDK\lib\SimConnect.dll",
-                r"C:\MSFS 2024 SDK\SimConnect SDK\lib\SimConnect.dll",
                 "SimConnect.dll",
             ]
         );
     }
 
     #[test]
-    fn candidates_without_env_still_include_defaults() {
-        let p = candidate_paths_from(&|_| None, None);
+    fn drive_root_sdk_folders_only_through_the_variables() {
+        // nothing set: no folder at the drive root, any account could create one there
+        let p = candidate_paths_from(&|k| (k == "SystemDrive").then(|| "C:".to_string()), None);
         let s: Vec<String> = p.iter().map(|p| p.display().to_string()).collect();
-        assert_eq!(
-            s,
-            vec![
-                r"C:\MSFS 2024 SDK\SimConnect SDK\lib\SimConnect.dll",
-                r"C:\MSFS SDK\SimConnect SDK\lib\SimConnect.dll",
-                "SimConnect.dll"
-            ]
-        );
+        assert_eq!(s, vec!["SimConnect.dll"]);
+        // the SDK installer's variable pointing at the default folder: taken
+        let env = |k: &str| (k == "MSFS2024_SDK").then(|| r"C:\MSFS 2024 SDK".to_string());
+        let s: Vec<String> = candidate_paths_from(&env, None).iter().map(|p| p.display().to_string()).collect();
+        assert_eq!(s, vec![r"C:\MSFS 2024 SDK\SimConnect SDK\lib\SimConnect.dll", "SimConnect.dll"]);
     }
 
     #[test]

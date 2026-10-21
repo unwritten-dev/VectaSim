@@ -6,10 +6,11 @@
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
-import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import { showToast } from "../ui/Toast";
 import { userMessage } from "../errors";
+import { saveImage } from "../saveImage";
+import { copyErrorToast, errorToast, NoClipboardError } from "../ui/errorToast";
 import { getLanguage, t, tIn, type Language } from "../i18n";
 import ApproachCard, { type ApproachCardProps } from "./ApproachCard";
 import { readCardTheme, type CardTheme } from "./LandingCard";
@@ -75,13 +76,12 @@ export async function saveApproachCardPng(approach: ApproachAnalysis, flight: Ca
     const path = await save({ defaultPath: approachCardFileName(approach), filters: [{ name: t("approach.export.pngFilter"), extensions: ["png"] }] });
     if (!path) return null;
     const blob = await renderApproachCardPng(approach, flight);
-    const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
-    await invoke("save_image", { path, bytes });
+    await saveImage(path, blob);
     showToast({ tone: "ok", title: t("approach.export.saved"), body: path, durationMs: 3000 });
     return path;
   } catch (e) {
-    const m = userMessage(e, "export");
-    showToast({ id: "approach-card-export", tone: "err", title: t("approach.export.saveFailed", { reason: m.title }), body: `${m.hint}${m.detail ? ` (${m.detail.slice(0, 160)})` : ""}` });
+    // the reason behind "Details" (errorToast), never the raw text in the body
+    showToast({ id: "approach-card-export", tone: "err", ...errorToast(t("approach.export.saveFailed", { reason: userMessage(e, "export").title }), e, "export") });
     return null;
   }
 }
@@ -89,12 +89,12 @@ export async function saveApproachCardPng(approach: ApproachAnalysis, flight: Ca
 /** Copy the PNG to the clipboard. */
 export async function copyApproachCardPng(approach: ApproachAnalysis, flight: CardFlight = null): Promise<boolean> {
   try {
-    if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") throw new Error(t("approach.export.clipboardNoImages"));
+    if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") throw new NoClipboardError(t("approach.export.clipboardNoImages"));
     await navigator.clipboard.write([new ClipboardItem({ "image/png": renderApproachCardPng(approach, flight) })]);
     showToast({ tone: "ok", title: t("approach.export.copied"), durationMs: 2500 });
     return true;
   } catch (e) {
-    showToast({ id: "approach-card-copy", tone: "err", title: t("approach.export.copyFailed"), body: e instanceof Error ? e.message : String(e) });
+    showToast({ id: "approach-card-copy", tone: "err", ...copyErrorToast(t("approach.export.copyFailed"), e) });
     return false;
   }
 }

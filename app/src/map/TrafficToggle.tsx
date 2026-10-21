@@ -4,7 +4,7 @@
 // settings can never disagree. The choice is the backend's while traffic is on; while it is
 // off the last choice is remembered in localStorage, so "Verkehr" brings back the same networks.
 
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { Fragment, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { Network, OnlineSummary } from "../types";
@@ -12,6 +12,7 @@ import { userMessage } from "../errors";
 import { showToast } from "../ui/Toast";
 import { useT, type TKey } from "../i18n";
 import "./trafficToggle.css";
+import { useHintIds } from "./hint";
 
 export type NetworkChoice = Network | "both";
 
@@ -154,6 +155,7 @@ export default function TrafficToggle({ on, onEnable }: Props) {
     apply(networksOfChoice(next), true);
   };
 
+  const hints = useHintIds();
   const toggleTitle =
     choice === "both"
       ? on
@@ -172,6 +174,7 @@ export default function TrafficToggle({ on, onEnable }: Props) {
         disabled={busy}
         aria-pressed={on}
         title={toggleTitle}
+        aria-describedby={hints("main", toggleTitle).describedBy}
       >
         {t("map.traffic.toggle")}
       </button>
@@ -190,6 +193,7 @@ export default function TrafficToggle({ on, onEnable }: Props) {
         aria-expanded={open}
         aria-label={t("map.traffic.network", { network: label })}
         title={t("map.traffic.networkTitle")}
+        aria-describedby={hints("net", t("map.traffic.networkTitle")).describedBy}
       >
         {label}
         <span className="traffic-net-caret" aria-hidden="true">
@@ -210,12 +214,18 @@ export default function TrafficToggle({ on, onEnable }: Props) {
               className={c.id === choice ? "active" : undefined}
               onClick={() => pick(c.id)}
               title={t(c.titleKey)}
+              aria-describedby={hints(c.id, t(c.titleKey)).describedBy}
             >
               {t(c.labelKey)}
             </button>
           ))}
+          {CHOICES.map((c) => (
+            <Fragment key={c.id}>{hints(c.id, t(c.titleKey)).node}</Fragment>
+          ))}
         </div>
       )}
+      {hints("main", toggleTitle).node}
+      {hints("net", t("map.traffic.networkTitle")).node}
     </span>
   );
 }

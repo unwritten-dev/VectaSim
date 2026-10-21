@@ -1,11 +1,10 @@
-// „CSV importieren …“ (Einstellungen → Daten → Import): flights from other logbooks
+// "Import CSV …" (Settings → Data → Import): flights from other logbooks
 // (Volanta's import CSV, SimToolkitPro, VA/phpVMS exports, VectaSim's own logbook CSV).
 // Step 1 file → what was recognised, step 2 column mapping, step 3 preview with warnings,
-// step 4 import → result toast. A real modal like the debrief: everything behind it is
-// inert, Tab stays inside, Esc closes, focus returns to the button that opened it.
+// step 4 import → result toast. A real modal (ui/Modal) like the debrief: everything behind
+// it is inert, Tab stays inside, Esc closes, focus returns to the button that opened it.
 
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import type {
@@ -23,7 +22,8 @@ import type {
 import { fmt, fmtDateTime } from "./i18n/number";
 import { t as tGlobal, useT, type TFunction, type TKey } from "./i18n";
 import { showToast } from "./ui/Toast";
-import { acquireModal } from "./ui/modalStack";
+import { Modal } from "./ui/Modal";
+import { tabbables } from "./ui/modalStack";
 import { usePrivacy } from "./prefs";
 
 /** i18n key of each preset's name. */
@@ -174,7 +174,8 @@ function fileStem(path: string): string {
   return name.replace(/\.[^.]+$/, "").replace(/,/g, " ").slice(0, 30).trim();
 }
 
-function remembering(m: CsvColumnMapping, columns: string[], zone: Zone, dedupe: boolean, hasHeader: boolean): Remembered {
+/** What a successful import remembers for its preset (exported for the tests). */
+export function remembering(m: CsvColumnMapping, columns: string[], zone: Zone, dedupe: boolean, hasHeader: boolean): Remembered {
   const named: Partial<Record<CsvField, string>> = {};
   if (hasHeader) {
     for (const g of FIELD_GROUPS) {
@@ -187,7 +188,8 @@ function remembering(m: CsvColumnMapping, columns: string[], zone: Zone, dedupe:
   return { columns: named, dateFormat: m.dateFormat, zone, weightUnit: m.weightUnit, durationUnit: m.durationUnit, dedupe };
 }
 
-function missingRequired(m: CsvColumnMapping): string | null {
+/** The first required mapping still missing (hint under „Importieren“), or null. Exported for the tests. */
+export function missingRequired(m: CsvColumnMapping): string | null {
   const c = m.columns;
   if (c.dep_icao == null) return tGlobal("csvImport.missing.dep");
   if (c.arr_icao == null) return tGlobal("csvImport.missing.arr");
@@ -201,29 +203,6 @@ function importSummary(t: TFunction, r: CsvImportReport): string {
   if (r.skippedInvalid) parts.push(t("csvImport.summary.invalid", { count: r.skippedInvalid }));
   if (r.airframesAdded) parts.push(t("csvImport.summary.airframes", { count: r.airframesAdded }));
   return parts.join(" · ");
-}
-
-const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
-function trapTab(e: KeyboardEvent, root: HTMLElement | null) {
-  if (!root) return;
-  const items = Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => el.getClientRects().length > 0);
-  if (items.length === 0) {
-    e.preventDefault();
-    return;
-  }
-  const active = document.activeElement;
-  const inside = !!active && root.contains(active);
-  if (active && !inside && active !== document.body) return; // a toast keeps its own order
-  const first = items[0];
-  const last = items[items.length - 1];
-  if (e.shiftKey && (!inside || active === first)) {
-    e.preventDefault();
-    last.focus();
-  } else if (!e.shiftKey && (!inside || active === last)) {
-    e.preventDefault();
-    first.focus();
-  }
 }
 
 type Step = 1 | 2 | 3;
@@ -248,36 +227,10 @@ export default function CsvImportDialog({ onClose }: { onClose: () => void }) {
   const localSpans = useMemo(() => localOffsetSpans(), []);
   /** A running import cannot be cancelled: Esc and "Schließen" are off until it is done. */
   const importing = busy === "Import";
-  const closeRef = useRef(onClose);
-  const importingRef = useRef(importing);
-  useEffect(() => {
-    closeRef.current = onClose;
-    importingRef.current = importing;
-  }, [onClose, importing]);
-
-  // modal: inert behind, Esc closes, Tab cycles, focus back on close
-  useEffect(() => {
-    const before = document.activeElement as HTMLElement | null;
-    const modal = acquireModal();
-    ref.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (!modal.isTop()) return;
-      if (e.key === "Escape" && !e.defaultPrevented) {
-        e.preventDefault();
-        if (!importingRef.current) closeRef.current();
-      } else if (e.key === "Tab") trapTab(e, ref.current);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      modal.release();
-      if (before?.isConnected) before.focus({ preventScroll: true });
-    };
-  }, []);
-
   // a new step: focus its first control (keyboard users land in the new content)
   useEffect(() => {
-    ref.current?.querySelector<HTMLElement>(`.csv-step ${FOCUSABLE}`)?.focus();
+    const section = ref.current?.querySelector<HTMLElement>(".csv-step");
+    if (section) tabbables(section)[0]?.focus();
   }, [step]);
 
   const applyPreset = (p: CsvProfile, preset: CsvPreset, file: string) => {
@@ -382,236 +335,234 @@ export default function CsvImportDialog({ onClose }: { onClose: () => void }) {
   const missing = mapping ? missingRequired(mapping) : t("csvImport.missing.file");
   const sample = (i: number) => profile?.sampleRows.find((r) => (r[i] ?? "").trim() !== "")?.[i] ?? "";
 
-  return createPortal(
-    <div className="csv-backdrop">
-      <div ref={ref} className="csv-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId} aria-busy={importing || undefined}>
-        <header className="csv-head">
-          <h2 id={titleId}>{t("csvImport.title")}</h2>
-          <ol className="csv-steps" aria-label={t("csvImport.steps")}>
-            {([1, 2, 3] as Step[]).map((s) => (
-              <li key={s} aria-current={s === step ? "step" : undefined} className={s === step ? "current" : s < step ? "done" : undefined}>
-                {s}. {t(STEP_TITLE[s])}
-              </li>
-            ))}
-          </ol>
-          <button className="btn-sm" onClick={onClose} aria-label={t("csvImport.close")} disabled={importing} title={importing ? t("csvImport.closeWhileImporting") : undefined}>
-            {t("shell.action.close")}
-          </button>
-        </header>
+  // modal (ui/Modal): inert behind, Esc closes (not while importing), Tab cycles, focus back
+  return (
+    <Modal backdropClassName="csv-backdrop" className="csv-dialog" dialogRef={ref} labelledBy={titleId} aria-busy={importing || undefined} onClose={onClose} closeOnEscape={!importing}>
+      <header className="csv-head">
+        <h2 id={titleId}>{t("csvImport.title")}</h2>
+        <ol className="csv-steps" aria-label={t("csvImport.steps")}>
+          {([1, 2, 3] as Step[]).map((s) => (
+            <li key={s} aria-current={s === step ? "step" : undefined} className={s === step ? "current" : s < step ? "done" : undefined}>
+              {s}. {t(STEP_TITLE[s])}
+            </li>
+          ))}
+        </ol>
+        <button className="btn-sm" onClick={onClose} aria-label={t("csvImport.close")} disabled={importing} title={importing ? t("csvImport.closeWhileImporting") : undefined}>
+          {t("shell.action.close")}
+        </button>
+      </header>
 
-        {error && (
-          <div className="csv-error" role="alert">
-            {error}
-          </div>
-        )}
+      {error && (
+        <div className="csv-error" role="alert">
+          {error}
+        </div>
+      )}
 
-        {step === 1 && (
-          <section className="csv-step" aria-label={t("csvImport.chooseFile")}>
-            <p className="detail">{t("csvImport.intro")}</p>
-            <div className="setting-row">
-              <button className="btn-primary" onClick={() => void chooseFile()} disabled={busy != null}>
-                {busy === "Lesen" ? t("csvImport.reading") : path ? t("csvImport.otherFile") : t("csvImport.pickFile")}
-              </button>
-              {path && (
-                <span className="dll-path mono" title={priv.mask(path, "path")}>
-                  {priv.mask(path, "path")}
-                </span>
-              )}
-            </div>
-            {profile && mapping && (
-              <>
-                <dl className="csv-facts">
-                  <div>
-                    <dt>{t("csvImport.facts.detected")}</dt>
-                    <dd>{t(PRESET_LABEL[profile.detectedPreset])}</dd>
-                  </div>
-                  <div>
-                    <dt>{t("csvImport.facts.delimiter")}</dt>
-                    <dd>{DELIMITER_LABEL[profile.delimiter] ? t(DELIMITER_LABEL[profile.delimiter]) : t("csvImport.delimiter.custom", { char: profile.delimiter })}</dd>
-                  </div>
-                  <div>
-                    <dt>{t("csvImport.facts.encoding")}</dt>
-                    <dd>{profile.encoding === "utf8_bom" ? t("csvImport.encodingBom") : (ENCODING_LABEL[profile.encoding] ?? profile.encoding)}</dd>
-                  </div>
-                  <div>
-                    <dt>{t("csvImport.facts.rows")}</dt>
-                    <dd>
-                      {fmt(profile.rowCount)} {profile.hasHeader ? t("csvImport.facts.withHeader") : t("csvImport.facts.noHeader")}
-                    </dd>
-                  </div>
-                </dl>
-                <label className="csv-inline">
-                  <span>{t("csvImport.format")}</span>
-                  <select value={mapping.preset} onChange={(e) => applyPreset(profile, e.target.value as CsvPreset, path ?? "")}>
-                    {(Object.keys(PRESET_LABEL) as CsvPreset[]).map((p) => (
-                      <option key={p} value={p}>
-                        {t(PRESET_LABEL[p])}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                {mapping.preset === "simtoolkitpro" && (
-                  <div className="detail">{t("csvImport.stkpHint")}</div>
-                )}
-                <SampleTable profile={profile} />
-              </>
+      {step === 1 && (
+        <section className="csv-step" aria-label={t("csvImport.chooseFile")}>
+          <p className="detail">{t("csvImport.intro")}</p>
+          <div className="setting-row">
+            <button className="btn-primary" onClick={() => void chooseFile()} disabled={busy != null}>
+              {busy === "Lesen" ? t("csvImport.reading") : path ? t("csvImport.otherFile") : t("csvImport.pickFile")}
+            </button>
+            {path && (
+              <span className="dll-path mono" title={priv.mask(path, "path")}>
+                {priv.mask(path, "path")}
+              </span>
             )}
-            <footer className="csv-foot">
-              <button className="btn-sm" onClick={onClose}>
-                {t("shell.action.cancel")}
-              </button>
-              <button className="btn-sm btn-primary" onClick={() => setStep(2)} disabled={!profile || profile.rowCount === 0}>
-                {t("csvImport.next")}
-              </button>
-            </footer>
-          </section>
-        )}
-
-        {step === 2 && profile && mapping && (
-          <section className="csv-step" aria-label={t("csvImport.step.columns")}>
-            <p className="detail">{t("csvImport.mappingIntro", { preset: t(PRESET_LABEL[mapping.preset]) })}</p>
-            <div className="csv-formats">
+          </div>
+          {profile && mapping && (
+            <>
+              <dl className="csv-facts">
+                <div>
+                  <dt>{t("csvImport.facts.detected")}</dt>
+                  <dd>{t(PRESET_LABEL[profile.detectedPreset])}</dd>
+                </div>
+                <div>
+                  <dt>{t("csvImport.facts.delimiter")}</dt>
+                  <dd>{DELIMITER_LABEL[profile.delimiter] ? t(DELIMITER_LABEL[profile.delimiter]) : t("csvImport.delimiter.custom", { char: profile.delimiter })}</dd>
+                </div>
+                <div>
+                  <dt>{t("csvImport.facts.encoding")}</dt>
+                  <dd>{profile.encoding === "utf8_bom" ? t("csvImport.encodingBom") : (ENCODING_LABEL[profile.encoding] ?? profile.encoding)}</dd>
+                </div>
+                <div>
+                  <dt>{t("csvImport.facts.rows")}</dt>
+                  <dd>
+                    {fmt(profile.rowCount)} {profile.hasHeader ? t("csvImport.facts.withHeader") : t("csvImport.facts.noHeader")}
+                  </dd>
+                </div>
+              </dl>
               <label className="csv-inline">
-                <span>{t("csvImport.dateFormat.label")}</span>
-                <select value={mapping.dateFormat} onChange={(e) => setMapping({ ...mapping, dateFormat: e.target.value as CsvDateFormat })}>
-                  {DATE_FORMATS.map(([v, l]) => (
-                    <option key={v} value={v}>
-                      {t(l)}
+                <span>{t("csvImport.format")}</span>
+                <select value={mapping.preset} onChange={(e) => applyPreset(profile, e.target.value as CsvPreset, path ?? "")}>
+                  {(Object.keys(PRESET_LABEL) as CsvPreset[]).map((p) => (
+                    <option key={p} value={p}>
+                      {t(PRESET_LABEL[p])}
                     </option>
                   ))}
                 </select>
               </label>
-              <label className="csv-inline">
-                <span>{t("csvImport.zone.label")}</span>
-                <select value={zone} onChange={(e) => setZone(e.target.value as Zone)}>
-                  <option value="utc">{t("csvImport.zone.utc")}</option>
-                  <option value="local">{t("csvImport.zone.local")}</option>
-                </select>
-              </label>
-              <label className="csv-inline">
-                <span>{t("csvImport.weightUnit")}</span>
-                <select value={mapping.weightUnit} onChange={(e) => setMapping({ ...mapping, weightUnit: e.target.value as "kg" | "lb" })}>
-                  <option value="kg">kg</option>
-                  <option value="lb">lb</option>
-                </select>
-              </label>
-              <label className="csv-inline">
-                <span>{t("csvImport.durationUnit.label")}</span>
-                <select value={mapping.durationUnit} onChange={(e) => setMapping({ ...mapping, durationUnit: e.target.value as "minutes" | "hours" })}>
-                  <option value="minutes">{t("csvImport.durationUnit.minutes")}</option>
-                  <option value="hours">{t("csvImport.durationUnit.hours")}</option>
-                </select>
-              </label>
-            </div>
-            <div className="csv-scroll">
-              <table className="csv-map">
-                <caption className="sr-only">{t("csvImport.map.caption")}</caption>
-                <thead>
-                  <tr>
-                    <th scope="col">{t("csvImport.map.field")}</th>
-                    <th scope="col">{t("csvImport.map.column")}</th>
-                    <th scope="col">{t("csvImport.map.sample")}</th>
-                  </tr>
-                </thead>
-                {FIELD_GROUPS.map((g) => (
-                  <tbody key={g.title}>
-                    <tr className="csv-group">
-                      <th scope="rowgroup" colSpan={3}>
-                        {t(g.title)}
-                      </th>
-                    </tr>
-                    {g.fields.map((f) => {
-                      const label = `${t(FIELD_LABEL[f])}${REQUIRED_FIELDS.has(f) ? " *" : ""}`;
-                      const id = `${titleId}-${f}`;
-                      const col = mapping.columns[f];
-                      return (
-                        <tr key={f}>
-                          <th scope="row">
-                            <label htmlFor={id}>{label}</label>
-                          </th>
-                          <td>
-                            <select id={id} value={col ?? ""} onChange={(e) => setColumn(f, e.target.value)}>
-                              <option value="">{t("csvImport.map.unmapped")}</option>
-                              {profile.columns.map((c, i) => (
-                                <option key={i} value={i}>
-                                  {c}
-                                </option>
-                              ))}
-                            </select>
-                          </td>
-                          <td className="detail mono csv-sample">{col != null ? sample(col) : ""}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                ))}
-              </table>
-            </div>
-            {missing && <div className="detail warn-text">{missing}</div>}
-            <footer className="csv-foot">
-              <button className="btn-sm" onClick={() => setStep(1)}>
-                {t("csvImport.back")}
-              </button>
-              <button className="btn-sm btn-primary" onClick={() => void loadPreview()} disabled={!!missing || busy != null}>
-                {busy === "Vorschau" ? t("csvImport.reading") : t("csvImport.step.preview")}
-              </button>
-            </footer>
-          </section>
-        )}
+              {mapping.preset === "simtoolkitpro" && (
+                <div className="detail">{t("csvImport.stkpHint")}</div>
+              )}
+              <SampleTable profile={profile} />
+            </>
+          )}
+          <footer className="csv-foot">
+            <button className="btn-sm" onClick={onClose}>
+              {t("shell.action.cancel")}
+            </button>
+            <button className="btn-sm btn-primary" onClick={() => setStep(2)} disabled={!profile || profile.rowCount === 0}>
+              {t("csvImport.next")}
+            </button>
+          </footer>
+        </section>
+      )}
 
-        {step === 3 && preview && mapping && (
-          <section className="csv-step" aria-label={t("csvImport.step.preview")}>
-            <div className="csv-counts" role="status">
-              {t("csvImport.counts.rows", { rows: fmt(preview.totalRows), valid: fmt(preview.valid) })}
-              {preview.invalid ? ` · ${t("csvImport.counts.invalid", { count: preview.invalid })}` : ""}
-              {dedupe ? ` · ${t("csvImport.counts.duplicates", { count: preview.duplicates })}` : ""}
-            </div>
-            <div className="csv-scroll">
-              <PreviewTable rows={preview.rows} dedupe={dedupe} />
-            </div>
-            {preview.totalRows > preview.rows.length && (
-              <div className="detail">{t("csvImport.counts.shown", { count: preview.rows.length })}</div>
-            )}
-            <div className="csv-formats">
-              <label className="check">
-                <input
-                  type="checkbox"
-                  checked={dedupe}
-                  onChange={(e) => {
-                    setDedupe(e.target.checked);
-                    void loadPreview(e.target.checked);
-                  }}
-                />
-                {t("csvImport.dedupe")}
-              </label>
-              <label className="csv-inline">
-                <span>{t("csvImport.sourceTag")}</span>
-                <input value={sourceTag} onChange={(e) => setSourceTag(e.target.value)} maxLength={30} list={`${titleId}-tags`} autoComplete="off" />
-                <datalist id={`${titleId}-tags`}>
-                  {[...new Set([PRESET_TAG[mapping.preset], "volanta", "stkp", path ? fileStem(path) : ""])].filter(Boolean).map((tag) => (
-                    <option key={tag} value={tag} />
-                  ))}
-                </datalist>
-              </label>
-            </div>
-            <div className="detail">{t("csvImport.tagsHint")}</div>
-            <footer className="csv-foot">
-              <button className="btn-sm" onClick={() => setStep(2)} disabled={importing}>
-                {t("csvImport.back")}
-              </button>
-              <button
-                className="btn-sm btn-primary"
-                onClick={() => void runImport()}
-                disabled={busy != null || preview.valid - (dedupe ? preview.duplicates : 0) <= 0}
-              >
-                {busy === "Import" ? t("csvImport.importing") : t("csvImport.importButton", { count: preview.valid - (dedupe ? preview.duplicates : 0) })}
-              </button>
-            </footer>
-          </section>
-        )}
-      </div>
-    </div>,
-    document.body,
+      {step === 2 && profile && mapping && (
+        <section className="csv-step" aria-label={t("csvImport.step.columns")}>
+          <p className="detail">{t("csvImport.mappingIntro", { preset: t(PRESET_LABEL[mapping.preset]) })}</p>
+          <div className="csv-formats">
+            <label className="csv-inline">
+              <span>{t("csvImport.dateFormat.label")}</span>
+              <select value={mapping.dateFormat} onChange={(e) => setMapping({ ...mapping, dateFormat: e.target.value as CsvDateFormat })}>
+                {DATE_FORMATS.map(([v, l]) => (
+                  <option key={v} value={v}>
+                    {t(l)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="csv-inline">
+              <span>{t("csvImport.zone.label")}</span>
+              <select value={zone} onChange={(e) => setZone(e.target.value as Zone)}>
+                <option value="utc">{t("csvImport.zone.utc")}</option>
+                <option value="local">{t("csvImport.zone.local")}</option>
+              </select>
+            </label>
+            <label className="csv-inline">
+              <span>{t("csvImport.weightUnit")}</span>
+              <select value={mapping.weightUnit} onChange={(e) => setMapping({ ...mapping, weightUnit: e.target.value as "kg" | "lb" })}>
+                <option value="kg">kg</option>
+                <option value="lb">lb</option>
+              </select>
+            </label>
+            <label className="csv-inline">
+              <span>{t("csvImport.durationUnit.label")}</span>
+              <select value={mapping.durationUnit} onChange={(e) => setMapping({ ...mapping, durationUnit: e.target.value as "minutes" | "hours" })}>
+                <option value="minutes">{t("csvImport.durationUnit.minutes")}</option>
+                <option value="hours">{t("csvImport.durationUnit.hours")}</option>
+              </select>
+            </label>
+          </div>
+          <div className="csv-scroll">
+            <table className="csv-map">
+              <caption className="sr-only">{t("csvImport.map.caption")}</caption>
+              <thead>
+                <tr>
+                  <th scope="col">{t("csvImport.map.field")}</th>
+                  <th scope="col">{t("csvImport.map.column")}</th>
+                  <th scope="col">{t("csvImport.map.sample")}</th>
+                </tr>
+              </thead>
+              {FIELD_GROUPS.map((g) => (
+                <tbody key={g.title}>
+                  <tr className="csv-group">
+                    <th scope="rowgroup" colSpan={3}>
+                      {t(g.title)}
+                    </th>
+                  </tr>
+                  {g.fields.map((f) => {
+                    const label = `${t(FIELD_LABEL[f])}${REQUIRED_FIELDS.has(f) ? " *" : ""}`;
+                    const id = `${titleId}-${f}`;
+                    const col = mapping.columns[f];
+                    return (
+                      <tr key={f}>
+                        <th scope="row">
+                          <label htmlFor={id}>{label}</label>
+                        </th>
+                        <td>
+                          <select id={id} value={col ?? ""} onChange={(e) => setColumn(f, e.target.value)}>
+                            <option value="">{t("csvImport.map.unmapped")}</option>
+                            {profile.columns.map((c, i) => (
+                              <option key={i} value={i}>
+                                {c}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="detail mono csv-sample">{col != null ? sample(col) : ""}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              ))}
+            </table>
+          </div>
+          {missing && <div className="detail warn-text">{missing}</div>}
+          <footer className="csv-foot">
+            <button className="btn-sm" onClick={() => setStep(1)}>
+              {t("csvImport.back")}
+            </button>
+            <button className="btn-sm btn-primary" onClick={() => void loadPreview()} disabled={!!missing || busy != null}>
+              {busy === "Vorschau" ? t("csvImport.reading") : t("csvImport.step.preview")}
+            </button>
+          </footer>
+        </section>
+      )}
+
+      {step === 3 && preview && mapping && (
+        <section className="csv-step" aria-label={t("csvImport.step.preview")}>
+          <div className="csv-counts" role="status">
+            {t("csvImport.counts.rows", { rows: fmt(preview.totalRows), valid: fmt(preview.valid) })}
+            {preview.invalid ? ` · ${t("csvImport.counts.invalid", { count: preview.invalid })}` : ""}
+            {dedupe ? ` · ${t("csvImport.counts.duplicates", { count: preview.duplicates })}` : ""}
+          </div>
+          <div className="csv-scroll">
+            <PreviewTable rows={preview.rows} dedupe={dedupe} />
+          </div>
+          {preview.totalRows > preview.rows.length && (
+            <div className="detail">{t("csvImport.counts.shown", { count: preview.rows.length })}</div>
+          )}
+          <div className="csv-formats">
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={dedupe}
+                onChange={(e) => {
+                  setDedupe(e.target.checked);
+                  void loadPreview(e.target.checked);
+                }}
+              />
+              {t("csvImport.dedupe")}
+            </label>
+            <label className="csv-inline">
+              <span>{t("csvImport.sourceTag")}</span>
+              <input value={sourceTag} onChange={(e) => setSourceTag(e.target.value)} maxLength={30} list={`${titleId}-tags`} autoComplete="off" />
+              <datalist id={`${titleId}-tags`}>
+                {[...new Set([PRESET_TAG[mapping.preset], "volanta", "stkp", path ? fileStem(path) : ""])].filter(Boolean).map((tag) => (
+                  <option key={tag} value={tag} />
+                ))}
+              </datalist>
+            </label>
+          </div>
+          <div className="detail">{t("csvImport.tagsHint")}</div>
+          <footer className="csv-foot">
+            <button className="btn-sm" onClick={() => setStep(2)} disabled={importing}>
+              {t("csvImport.back")}
+            </button>
+            <button
+              className="btn-sm btn-primary"
+              onClick={() => void runImport()}
+              disabled={busy != null || preview.valid - (dedupe ? preview.duplicates : 0) <= 0}
+            >
+              {busy === "Import" ? t("csvImport.importing") : t("csvImport.importButton", { count: preview.valid - (dedupe ? preview.duplicates : 0) })}
+            </button>
+          </footer>
+        </section>
+      )}
+    </Modal>
   );
 }
 

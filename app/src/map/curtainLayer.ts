@@ -42,6 +42,8 @@ export const TOL_H_M = 3;
 export const TOL_V_M = 2;
 /** Above this many kept points the tolerance doubles and the track is thinned again. */
 export const MAX_CONTROL = 12_000;
+/** Points per step of a background curtain build (a few ms each; frames render in between). */
+export const BUILD_CHUNK = 2000;
 /** Spline points added inside a bent segment ("2–4 between two samples"). */
 export const SUB_BENT = 3;
 /** A segment bends when its direction changes by more than this (deg) or its climb gradient by more than BEND_SLOPE. */
@@ -311,6 +313,13 @@ export class CurtainGeometry {
   /** Bounding box of every point (Mercator), for the tile choice. */
   bbox = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
   private consumed = 0;
+  /**
+   * With `deferRethin` the geometry does not re-thin itself synchronously when it exceeds
+   * MAX_CONTROL (a full rebuild over every point, tens of ms on a long flight): it keeps growing
+   * incrementally and sets `rethinDue`; CurtainLayer rebuilds a coarser copy in the background.
+   */
+  deferRethin = false;
+  rethinDue = false;
   private firstRef: TrackPoint | null = null;
   private lastRef: TrackPoint | null = null;
   private lastX: number | undefined;
@@ -318,6 +327,16 @@ export class CurtainGeometry {
 
   constructor(ramp: ReadonlyArray<readonly [number, string]>) {
     this.ramp = parseRamp(ramp);
+  }
+
+  /** Points of the list consumed so far. */
+  get consumedCount(): number {
+    return this.consumed;
+  }
+
+  /** Would `sync(points)` throw away what is built (a new list, not an extension of the last)? */
+  wouldReplace(points: readonly TrackPoint[]): boolean {
+    return points.length < this.consumed || (this.consumed > 0 && (points[0] !== this.firstRef || points[this.consumed - 1] !== this.lastRef));
   }
 
   /** Vertex count (stable + tail). */
@@ -337,6 +356,7 @@ export class CurtainGeometry {
     this.consumed = 0;
     this.firstRef = this.lastRef = null;
     this.lastX = undefined;
+    this.rethinDue = false;
     this.generation++;
     this.version++;
   }
@@ -344,10 +364,11 @@ export class CurtainGeometry {
   /**
    * Bring the geometry up to `points` (appended since the last call, or a new list: rebuilt).
    * `head`: the aircraft's position now (null clears it, undefined keeps the last one).
+   * `upTo`: consume at most this many points of the list (one chunk of a background build).
    * Returns whether anything changed.
    */
-  sync(points: readonly TrackPoint[], head?: TrackPoint | null): boolean {
-    const replaced = points.length < this.consumed || (this.consumed > 0 && (points[0] !== this.firstRef || points[this.consumed - 1] !== this.lastRef));
+  sync(points: readonly TrackPoint[], head?: TrackPoint | null, upTo = points.length): boolean {
+    const replaced = this.wouldReplace(points);
     let changed = false;
     if (replaced) {
       const scale = this.tolScale;
@@ -355,18 +376,22 @@ export class CurtainGeometry {
       this.tolScale = scale;
       changed = true;
     }
-    if (points.length > this.consumed) {
-      for (let i = this.consumed; i < points.length; i++) this.append(toCPt(points[i], this.lastX));
-      this.consumed = points.length;
+    const end = Math.min(points.length, upTo);
+    if (end > this.consumed) {
+      for (let i = this.consumed; i < end; i++) this.append(toCPt(points[i], this.lastX));
+      this.consumed = end;
       this.firstRef = points[0];
-      this.lastRef = points[points.length - 1];
+      this.lastRef = points[end - 1];
       changed = true;
       if (this.ctrl.length > MAX_CONTROL) {
-        // too many kept points even after thinning: coarser, all again
-        const scale = this.tolScale * 2;
-        this.reset();
-        this.tolScale = scale;
-        return this.sync(points, head === undefined ? null : head);
+        if (this.deferRethin) this.rethinDue = true;
+        else {
+          // too many kept points even after thinning: coarser, all again
+          const scale = this.tolScale * 2;
+          this.reset();
+          this.tolScale = scale;
+          return this.sync(points, head === undefined ? null : head, upTo);
+        }
       }
     }
     if (head !== undefined) {
@@ -609,7 +634,8 @@ export class CurtainLayer implements maplibregl.CustomLayerInterface {
   readonly renderingMode = "3d" as const;
   failed = false;
   onFail?: () => void;
-  readonly geo: CurtainGeometry;
+  /** The geometry drawn now (replaced by a background build once that is complete). */
+  geo: CurtainGeometry;
   /** CPU time of the last render call (ms) – the GPU work is a few thousand vertices. */
   lastRenderMs = 0;
   private map: maplibregl.Map | null = null;
@@ -620,10 +646,41 @@ export class CurtainLayer implements maplibregl.CustomLayerInterface {
   private gpuGeneration = -1;
   private gpuVersion = -1;
   private enabled = false;
+  private readonly ramp: ReadonlyArray<readonly [number, string]>;
+  /** A geometry being built in chunks (late 3D switch, a long list, re-thinning) and the list it is built to. */
+  private building: { geo: CurtainGeometry; points: readonly TrackPoint[] } | null = null;
+  private buildTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The aircraft's position as last given (the head a finished background build gets). */
+  private lastHead: TrackPoint | null = null;
+  /** Longest single build step so far (ms): what a rebuild costs one frame at most. */
+  maxBuildStepMs = 0;
+  /**
+   * Removed from its map (theme change, context loss): until the next style load adds a fresh
+   * instance, sync calls are ignored instead of building geometry nobody draws.
+   */
+  removed = false;
 
-  constructor(id: string, ramp: ReadonlyArray<readonly [number, string]>) {
+  /** `schedule` runs the next build chunk: a macrotask, so frames render in between (tests inject their own). */
+  constructor(
+    id: string,
+    ramp: ReadonlyArray<readonly [number, string]>,
+    private readonly schedule: (fn: () => void) => ReturnType<typeof setTimeout> = (fn) => setTimeout(fn, 0),
+  ) {
     this.id = id;
-    this.geo = new CurtainGeometry(ramp);
+    this.ramp = ramp;
+    this.geo = this.newGeometry(1);
+  }
+
+  private newGeometry(tolScale: number): CurtainGeometry {
+    const g = new CurtainGeometry(this.ramp);
+    g.tolScale = tolScale;
+    g.deferRethin = true;
+    return g;
+  }
+
+  /** Is a background build running? */
+  get rebuilding(): boolean {
+    return this.building !== null;
   }
 
   setEnabled(on: boolean) {
@@ -632,21 +689,103 @@ export class CurtainLayer implements maplibregl.CustomLayerInterface {
     this.map?.triggerRepaint();
   }
 
-  /** See CurtainGeometry.sync; repaints when something changed. */
+  /**
+   * See CurtainGeometry.sync; repaints when something changed. Large work never runs in one go:
+   * more than BUILD_CHUNK new points (3D switched on late in a long flight, the logbook's whole
+   * track, the re-add after a theme change) or the re-thinning at MAX_CONTROL build a new
+   * geometry in chunks of BUILD_CHUNK points, one per macrotask, while the current one stays
+   * drawn and keeps taking the per-sample head; the new one replaces it once complete. A replaced
+   * list clears the drawn curtain at once (a previous flight must not stay on screen).
+   */
   sync(points: readonly TrackPoint[], head?: TrackPoint | null) {
-    if (this.geo.sync(points, head) && this.enabled) this.map?.triggerRepaint();
+    if (this.removed) return;
+    if (head !== undefined) this.lastHead = head;
+    const g = this.geo;
+    const replaced = g.wouldReplace(points);
+    const backlog = points.length - (replaced ? 0 : g.consumedCount);
+    const b = this.building;
+    // the same list grown (the live track) or unchanged: the build follows it
+    const follows = !!b && points.length > 0 && points.length >= b.points.length && points[0] === b.points[0] && !b.geo.wouldReplace(points);
+    if (b && follows) {
+      // the running build follows the list; the drawn geometry only takes the cheap per-sample part
+      b.points = points;
+      if (!replaced && backlog <= BUILD_CHUNK) this.syncDrawn(points, head);
+      else this.clearDrawn(replaced);
+      return;
+    }
+    if (backlog > BUILD_CHUNK) {
+      this.clearDrawn(replaced);
+      this.startBuild(points, g.tolScale);
+      return;
+    }
+    this.cancelBuild();
+    this.syncDrawn(points, head);
+  }
+
+  private clearDrawn(replaced: boolean) {
+    if (!replaced || !this.geo.vertexCount) return;
+    this.geo.reset();
+    this.repaint();
+  }
+
+  private syncDrawn(points: readonly TrackPoint[], head?: TrackPoint | null) {
+    const g = this.geo;
+    if (g.sync(points, head)) this.repaint();
+    if (g.rethinDue && !this.building) this.startBuild(points, g.tolScale * 2);
+  }
+
+  private repaint() {
+    if (this.enabled) this.map?.triggerRepaint();
+  }
+
+  private startBuild(points: readonly TrackPoint[], tolScale: number) {
+    this.cancelBuild();
+    this.building = { geo: this.newGeometry(tolScale), points };
+    this.buildTimer = this.schedule(() => this.buildStep());
+  }
+
+  private cancelBuild() {
+    if (this.buildTimer !== undefined) clearTimeout(this.buildTimer);
+    this.buildTimer = undefined;
+    this.building = null;
+  }
+
+  /** One chunk of the background build; swaps it in once it has every point. */
+  private buildStep() {
+    this.buildTimer = undefined;
+    const b = this.building;
+    if (!b) return;
+    const t0 = performance.now();
+    b.geo.sync(b.points, null, b.geo.consumedCount + BUILD_CHUNK);
+    if (b.geo.rethinDue) {
+      // still too many kept points at this tolerance: start over coarser (chunked as well)
+      this.startBuild(b.points, b.geo.tolScale * 2);
+    } else if (b.geo.consumedCount >= b.points.length) {
+      b.geo.sync(b.points, this.lastHead);
+      this.building = null;
+      this.geo = b.geo;
+      // another geometry object: the GPU copy is uploaded whole
+      this.gpuGeneration = -1;
+      this.repaint();
+    } else {
+      this.buildTimer = this.schedule(() => this.buildStep());
+    }
+    this.maxBuildStepMs = Math.max(this.maxBuildStepMs, performance.now() - t0);
   }
 
   onAdd(map: maplibregl.Map) {
     this.map = map;
+    this.removed = false;
   }
 
   onRemove(_map: maplibregl.Map, gl: WebGL2RenderingContext | WebGLRenderingContext) {
+    this.cancelBuild();
     if (this.vbo) gl.deleteBuffer(this.vbo);
     this.vbo = null;
     for (const p of this.programs.values()) gl.deleteProgram(p.prog);
     this.programs.clear();
     this.map = null;
+    this.removed = true;
   }
 
   private program(gl: WebGL2RenderingContext, shader: maplibregl.CustomRenderMethodInput["shaderData"]): Program | null {

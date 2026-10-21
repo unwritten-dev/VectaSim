@@ -46,7 +46,42 @@ function firstSymbolLayer(map: maplibregl.Map): string | undefined {
   return map.getStyle().layers.find((l) => l.type === "symbol")?.id;
 }
 
-function addOwnLayers(map: maplibregl.Map, outlines: GeoJSON.FeatureCollection) {
+/** Pins of the visited arrival airports (none while hidden). */
+export function pinsGeoJson(airports: readonly VisitedAirport[], show: boolean): GeoJSON.FeatureCollection {
+  return {
+    type: "FeatureCollection",
+    features: show ? airports.map((a) => ({ type: "Feature", properties: { ident: a.ident, iso2: a.iso2 }, geometry: { type: "Point", coordinates: [a.longitude, a.latitude] } })) : [],
+  };
+}
+
+/**
+ * Where a selected country lies: its outline's bounds, else (small states without an outline at
+ * 1:110m) its visited airports plus 1°; null when it spans the antimeridian (Russia, Fiji, the
+ * USA with Alaska: the box would be the world – no zoom then) or nothing is known.
+ */
+export function selectionBounds(
+  outlines: GeoJSON.FeatureCollection,
+  airports: readonly VisitedAirport[],
+  iso2: string,
+): [[number, number], [number, number]] | null {
+  const f = outlines.features.find((x) => x.properties?.iso2 === iso2);
+  let b = geometryBounds(f?.geometry);
+  if (!b) {
+    const pts = airports.filter((a) => a.iso2 === iso2);
+    if (pts.length) {
+      const xs = pts.map((a) => a.longitude);
+      const ys = pts.map((a) => a.latitude);
+      b = [
+        [Math.min(...xs) - 1, Math.min(...ys) - 1],
+        [Math.max(...xs) + 1, Math.max(...ys) + 1],
+      ];
+    }
+  }
+  return b && b[1][0] - b[0][0] < 180 ? b : null;
+}
+
+/** Country fills, outlines and selection below the basemap labels, the airport pins on top. */
+export function addCountryLayers(map: maplibregl.Map, outlines: GeoJSON.FeatureCollection) {
   const before = firstSymbolLayer(map);
   map.addSource(SRC, { type: "geojson", data: outlines, promoteId: "iso2", attribution: tGlobal("countries.map.attribution") });
   type Expr = maplibregl.ExpressionSpecification;
@@ -147,16 +182,13 @@ export default function CountryMap({ outlines, countries, visits, airports, show
     const map = mapRef.current;
     const p = propsRef.current;
     if (!map || !readyRef.current || !p.outlines) return;
-    if (!map.getSource(SRC)) addOwnLayers(map, p.outlines);
+    if (!map.getSource(SRC)) addCountryLayers(map, p.outlines);
     for (const f of p.outlines.features) {
       const iso = f.properties?.iso2 as string | undefined;
       if (!iso) continue;
       map.setFeatureState({ source: SRC, id: iso }, { visited: p.visits.has(iso), selected: iso === p.selected });
     }
-    const pins: GeoJSON.Feature[] = p.showPins
-      ? p.airports.map((a) => ({ type: "Feature", properties: { ident: a.ident, iso2: a.iso2 }, geometry: { type: "Point", coordinates: [a.longitude, a.latitude] } }))
-      : [];
-    (map.getSource(PINS) as maplibregl.GeoJSONSource | undefined)?.setData({ type: "FeatureCollection", features: pins });
+    (map.getSource(PINS) as maplibregl.GeoJSONSource | undefined)?.setData(pinsGeoJson(p.airports, p.showPins));
   };
   const syncRef = useRef(sync);
   syncRef.current = sync;
@@ -286,22 +318,8 @@ export default function CountryMap({ outlines, countries, visits, airports, show
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !selected || !outlines) return;
-    const f = outlines.features.find((x) => x.properties?.iso2 === selected);
-    let b = geometryBounds(f?.geometry);
-    if (!b) {
-      // no outline at 1:110m (small states): the visited airports there
-      const pts = airports.filter((a) => a.iso2 === selected);
-      if (pts.length) {
-        const xs = pts.map((a) => a.longitude);
-        const ys = pts.map((a) => a.latitude);
-        b = [
-          [Math.min(...xs) - 1, Math.min(...ys) - 1],
-          [Math.max(...xs) + 1, Math.max(...ys) + 1],
-        ];
-      }
-    }
-    // countries across the antimeridian (Russia, Fiji, USA with Alaska) span the world: no zoom then
-    if (b && b[1][0] - b[0][0] < 180) map.fitBounds(b, { padding: 60, maxZoom: 5, duration: 600 });
+    const b = selectionBounds(outlines, airports, selected);
+    if (b) map.fitBounds(b, { padding: 60, maxZoom: 5, duration: 600 });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only on a new selection
   }, [selected]);
 

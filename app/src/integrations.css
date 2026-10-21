@@ -1,4 +1,4 @@
-/* Einstellungen → Integrationen (IntegrationsPanel.tsx). Colours come from the theme tokens. */
+/* Settings → Integrations (IntegrationsPanel.tsx). Colours come from the theme tokens. */
 .integrations {
   display: grid;
   gap: var(--sp-4);

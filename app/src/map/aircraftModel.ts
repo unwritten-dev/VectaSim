@@ -289,6 +289,30 @@ export interface ModelColors {
   light?: boolean;
 }
 
+/** Smallest pose change that shows: this many px of position or height… */
+export const VISIBLE_PX = 0.5;
+/** …or this much heading, pitch or bank (the model is MODEL_PX wide: 0.5° moves its tips by ~0.2 px). */
+export const VISIBLE_DEG = 0.5;
+
+const M_PER_DEG_LAT = 111_320;
+
+/**
+ * Would the model look different at `b` than at `a`? Position and height against half a pixel at
+ * the map's scale (`metersPerPx`, metersPerPixel), attitude against half a degree; another shape
+ * or size always shows. Zoomed out at cruise a 10 Hz sample moves the aircraft by a fraction of
+ * a pixel: such a change is taken over without a blend and without a frame (frameCap.ts).
+ */
+export function poseChangeVisible(a: ModelPose | null, b: ModelPose | null, metersPerPx: number): boolean {
+  if (!a || !b) return a !== b;
+  if (a.kind !== b.kind || a.size !== b.size) return true;
+  const lim = VISIBLE_PX * (Number.isFinite(metersPerPx) && metersPerPx > 0 ? metersPerPx : 0);
+  const dy = (b.lat - a.lat) * M_PER_DEG_LAT;
+  const dx = lerpAngle(0, b.lon - a.lon, 1) * M_PER_DEG_LAT * Math.cos((a.lat * Math.PI) / 180);
+  if (Math.hypot(dx, dy) >= lim || Math.abs(b.altFt - a.altFt) * 0.3048 >= lim) return true;
+  const dAng = (x: number, y: number) => Math.abs(lerpAngle(x, y, 1) - x);
+  return dAng(a.headingDeg, b.headingDeg) >= VISIBLE_DEG || Math.abs(b.pitchDeg - a.pitchDeg) >= VISIBLE_DEG || Math.abs(b.bankDeg - a.bankDeg) >= VISIBLE_DEG;
+}
+
 /** Duration of the blend towards a new pose; the telemetry runs at ~10 Hz. */
 const BLEND_MAX_MS = 250;
 
@@ -313,6 +337,8 @@ export class AircraftModelLayer implements maplibregl.CustomLayerInterface {
   private startMs = 0;
   private blendMs = 0;
   private lastArrival = 0;
+  /** The pose of the last frame (poseChangeVisible compares against it). */
+  private drawn: ModelPose | null = null;
   private colors: { body: [number, number, number]; dark: [number, number, number] };
   private lightScheme: number;
 
@@ -338,6 +364,14 @@ export class AircraftModelLayer implements maplibregl.CustomLayerInterface {
     const current = this.poseAt(nowMs);
     const gap = this.lastArrival ? nowMs - this.lastArrival : 0;
     this.lastArrival = nowMs;
+    // not even half a pixel from what is on screen: taken over without a blend and a frame (the
+    // next frame for any other reason draws it)
+    const map = this.map;
+    if (map && this.drawn && current && !poseChangeVisible(this.drawn, p, metersPerPixel(p.lat, map.getZoom()))) {
+      this.from = null;
+      this.to = p;
+      return;
+    }
     // a jump (first pose, teleport, long gap) is not animated
     const far = current ? Math.abs(current.lat - p.lat) + Math.abs(lerpAngle(current.lon, p.lon, 1) - current.lon) > 0.05 : true;
     this.from = current && !far && gap > 0 && gap < 2000 ? current : p;
@@ -368,6 +402,7 @@ export class AircraftModelLayer implements maplibregl.CustomLayerInterface {
     if (this.lineVbo) gl.deleteBuffer(this.lineVbo);
     for (const p of this.programs.values()) gl.deleteProgram(p.prog);
     this.programs.clear();
+    this.drawn = null;
     this.map = null;
   }
 
@@ -448,6 +483,10 @@ export class AircraftModelLayer implements maplibregl.CustomLayerInterface {
     const now = performance.now();
     const pose = this.poseAt(now);
     if (!pose) return;
+    this.drawn = pose;
+    // still blending: ask for the next frame. On the live map capRenders (frameCap.ts) spaces it to
+    // the follow frame rate (30 / 15 fps) like every other frame – a second limiter here only
+    // added up to a frame of delay; the logbook map has no budget and blends at the display rate
     if (this.to && pose !== this.to) map.triggerRepaint();
     const p = this.program(gl, args.shaderData);
     if (!p) {

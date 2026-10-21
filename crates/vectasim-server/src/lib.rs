@@ -17,21 +17,28 @@ pub mod watch;
 
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 pub use api::API_VERSION;
 
-/// Default port (Einstellungen → Overlay & Schnittstelle).
+/// Default port (Settings → Overlay & API).
 pub const DEFAULT_PORT: u16 = 8095;
-/// Most WebSocket clients at once (OBS scenes, a tablet, a VA tool …).
+/// Most WebSocket clients of this PC at once (OBS scenes, a VA tool …). Other devices have a
+/// quota of their own ([`MAX_LAN_WS_CLIENTS`]), so a tablet with hanging tabs can never cut the
+/// local OBS overlays off the live stream.
 pub const MAX_WS_CLIENTS: usize = 16;
+/// Most WebSocket clients from other devices (LAN) at once.
+pub const MAX_LAN_WS_CLIENTS: usize = 16;
+/// Most WebSocket clients from one LAN address at once.
+pub const MAX_WS_PER_IP: usize = 4;
 /// WebSocket telemetry interval (2 Hz).
 pub const STREAM_INTERVAL: Duration = Duration::from_millis(500);
 /// Most HTTP connections at once, counted separately for this PC (loopback) and for other
 /// devices (LAN), so the LAN can never take the slots of the local OBS overlays. WebSockets
-/// are counted by [`MAX_WS_CLIENTS`] once upgraded.
+/// are counted by [`MAX_WS_CLIENTS`] / [`MAX_LAN_WS_CLIENTS`] once upgraded. A new loopback
+/// connection that finds its pool full closes the oldest idle loopback connection (no request
+/// in flight) and waits at most [`LOCAL_SLOT_WAIT`] for the slot, else it gets a 503.
 pub const MAX_CONNECTIONS: usize = 64;
 /// Most connections at once from one LAN address (a tablet needs a handful).
 pub const MAX_CONNECTIONS_PER_IP: usize = 16;
@@ -40,16 +47,20 @@ pub const MAX_CONNECTIONS_PER_IP: usize = 16;
 pub const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(10);
 /// The same for other devices: shorter, so idle LAN connections give their slot back soon.
 pub const LAN_HEADER_READ_TIMEOUT: Duration = Duration::from_secs(5);
+/// Longest wait of a new loopback connection for a slot of a full pool (then 503).
+pub const LOCAL_SLOT_WAIT: Duration = Duration::from_secs(2);
 
 /// Connection limits of the HTTP side (tests shorten them).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
-    /// Per pool: loopback connections wait for a free slot, LAN connections beyond it are closed.
+    /// Per pool: loopback connections take the slot of an idle one or wait for a free slot
+    /// (at most `local_slot_wait`, then 503), LAN connections beyond it are closed.
     pub max_connections: usize,
     /// LAN connections from one address beyond this are closed.
     pub max_connections_per_ip: usize,
     pub header_read_timeout: Duration,
     pub lan_header_read_timeout: Duration,
+    pub local_slot_wait: Duration,
 }
 
 impl Default for Limits {
@@ -59,6 +70,7 @@ impl Default for Limits {
             max_connections_per_ip: MAX_CONNECTIONS_PER_IP,
             header_read_timeout: HEADER_READ_TIMEOUT,
             lan_header_read_timeout: LAN_HEADER_READ_TIMEOUT,
+            local_slot_wait: LOCAL_SLOT_WAIT,
         }
     }
 }
@@ -105,7 +117,7 @@ impl Config {
 /// A running server; [`Server::stop`] (or drop) shuts it down.
 pub struct Server {
     addr: SocketAddr,
-    clients: Arc<AtomicUsize>,
+    clients: Arc<routes::WsQuota>,
     shutdown: tokio::sync::watch::Sender<bool>,
     thread: Option<JoinHandle<()>>,
 }
@@ -123,7 +135,9 @@ impl Server {
         listener.set_nonblocking(true).map_err(|e| e.to_string())?;
         let addr = listener.local_addr().map_err(|e| e.to_string())?;
         let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|e| e.to_string())?;
-        let clients = Arc::new(AtomicUsize::new(0));
+        let clients = Arc::new(routes::WsQuota::new(MAX_WS_CLIENTS, MAX_LAN_WS_CLIENTS, MAX_WS_PER_IP));
+        // the real port (also for `port: 0`): it names the token cookie
+        let cfg = Config { port: addr.port(), ..cfg };
         let (shutdown, shutdown_rx) = tokio::sync::watch::channel(false);
         let state = routes::AppState::new(cfg, source, clients.clone(), shutdown_rx.clone());
         let thread = std::thread::Builder::new()
@@ -141,9 +155,9 @@ impl Server {
         self.addr
     }
 
-    /// Connected WebSocket clients.
+    /// Connected WebSocket clients (this PC and other devices).
     pub fn clients(&self) -> usize {
-        self.clients.load(Ordering::Relaxed)
+        self.clients.total()
     }
 
     pub fn stop(mut self) {

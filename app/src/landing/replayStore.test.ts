@@ -266,8 +266,7 @@ describe("debriefReplayPlan", () => {
 
 describe("cursor rendering", () => {
   const plan = debriefReplayPlan(null, mock);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const render = (store: ReturnType<typeof createReplayStore>, el: (p: any) => ReactNode, props: object) =>
+  const render = <P extends object>(store: ReturnType<typeof createReplayStore>, el: (p: P) => ReactNode, props: P) =>
     renderToStaticMarkup(createElement(ReplayContext.Provider, { value: store }, createElement(el, props)));
 
   it("draws the cursor and the values only with a cursor time", () => {

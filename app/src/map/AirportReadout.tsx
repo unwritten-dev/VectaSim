@@ -3,7 +3,7 @@ import type * as maplibregl from "maplibre-gl";
 import { invoke } from "@tauri-apps/api/core";
 import type { Airport, NearestAirport, Runway } from "../types";
 import { DIAGRAM_FROM_ZOOM } from "./airportDiagram";
-import { boundedDebounce } from "./debounce";
+import { MOVE_REFRESH, boundedDebounce } from "./debounce";
 import { fmt } from "../i18n/number";
 import { useT } from "../i18n";
 import "./airportReadout.css";
@@ -51,7 +51,7 @@ export default function AirportReadout({ mapRef, ready }: { mapRef: RefObject<ma
         .catch(() => {});
     };
     // the follow camera ends a move up to every frame: at most a few lookups per second
-    const soon = boundedDebounce(update, 150, 500);
+    const soon = boundedDebounce(update, ...MOVE_REFRESH.readout);
     map.on("moveend", soon);
     update();
     return () => {

@@ -4,7 +4,9 @@
 #
 # Trigger: a tag like v0.2.0 on the public repository, created by the snapshot script
 # (docs/releasing.md). The `versions` job fails the run when the tag and the version fields
-# in the tree differ.
+# in the tree differ; the `ci` job runs every check of ci.yml (clippy, tests, cargo audit /
+# deny, npm audit, lint, tsc, README pair) on the tagged commit. The build starts only when
+# both have passed.
 #
 # Every third-party action is pinned to a full commit SHA (the comment names the release):
 # the release job holds the updater signing key and a token that can write releases, so a
@@ -59,8 +61,12 @@ jobs:
           if (bad) process.exit(1);
           JS
 
+  # same jobs as on a push; read-only token, no secrets passed on
+  ci:
+    uses: ./.github/workflows/ci.yml
+
   release:
-    needs: versions
+    needs: [versions, ci]
     runs-on: windows-latest
     permissions:
       contents: write # tauri-action creates the draft release and uploads the assets

@@ -24,3 +24,15 @@ export function errorToast(title: string, e: unknown, ctx?: ErrorContext): { tit
     announce,
   };
 }
+
+/** "The clipboard does not support images here": thrown with the translated text, shown as is. */
+export class NoClipboardError extends Error {
+  override name = "NoClipboardError";
+}
+
+/** Toast fields for a failed copy: the translated "no clipboard" text stays the body, anything
+ *  unexpected (NotAllowedError, render failure …) goes through userMessage like other errors. */
+export function copyErrorToast(title: string, e: unknown): { title: string; body: ReactNode; announce: string } {
+  if (e instanceof NoClipboardError) return { title, body: e.message, announce: `${title}. ${e.message}` };
+  return errorToast(title, e, "export");
+}
