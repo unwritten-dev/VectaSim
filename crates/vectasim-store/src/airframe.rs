@@ -101,6 +101,10 @@ pub struct Airframe {
     /// (`AircraftRef::landing_flaps_index`); `None` = the last handle position.
     #[serde(default)]
     pub landing_flaps: Option<i32>,
+    /// Assessment profile for this airframe's approaches (schema v19): a built-in or custom
+    /// profile id; `None` = automatic (type mapping, then the engine type).
+    #[serde(default)]
+    pub approach_profile: Option<String>,
     pub created_ms: u64,
     pub updated_ms: u64,
 }
@@ -141,6 +145,10 @@ pub struct AirframeEdit {
     /// 0..=[`LANDING_FLAPS_MAX`].
     #[serde(default)]
     pub landing_flaps: Option<i32>,
+    /// Assessment profile: `None` leaves it, `Some("")` clears it (automatic), otherwise a
+    /// built-in or custom profile id (an unknown id is refused).
+    #[serde(default)]
+    pub approach_profile: Option<String>,
 }
 
 /// Plausible range of a manually entered Vapp, KIAS.
@@ -187,7 +195,8 @@ pub(crate) const MIGRATION_V11: &str = "ALTER TABLE airframes ADD COLUMN vapp_kt
 pub(crate) const MIGRATION_V15: &str = "ALTER TABLE airframes ADD COLUMN landing_flaps INTEGER;";
 
 const AIRFRAME_COLS: &str = "a.registration, a.icao_type, a.title, a.airline, a.custom_name, a.notes, a.image_url,
-    a.image_thumb_url, a.image_credit, a.image_link, a.image_source, a.image_fetched_ms, a.created_ms, a.updated_ms, a.vapp_kt, a.landing_flaps";
+    a.image_thumb_url, a.image_credit, a.image_link, a.image_source, a.image_fetched_ms, a.created_ms, a.updated_ms, a.vapp_kt, a.landing_flaps,
+    a.approach_profile";
 
 const DEMO_F2: &str = "(?1 OR COALESCE(f2.provider, '') <> 'mock')";
 
@@ -209,6 +218,7 @@ fn row_to_airframe(r: &Row<'_>) -> rusqlite::Result<Airframe> {
         updated_ms: r.get::<_, i64>(13)? as u64,
         vapp_kt: r.get(14)?,
         landing_flaps: r.get(15)?,
+        approach_profile: r.get(16)?,
     })
 }
 
@@ -336,14 +346,14 @@ impl Store {
         let rows = stmt.query_map(params![include_demo], |r| {
             Ok(AirframeRow {
                 airframe: row_to_airframe(r)?,
-                flights: r.get::<_, i64>(16)? as u64,
-                total_flights: r.get::<_, i64>(23)? as u64,
-                block_time_ms: r.get::<_, i64>(17)?.max(0) as u64,
-                flight_time_ms: r.get::<_, i64>(18)?.max(0) as u64,
-                distance_nm: r.get(19)?,
-                landings: r.get::<_, i64>(20)? as u64,
-                avg_landing_vs_fpm: r.get(21)?,
-                last_flown_ms: r.get::<_, Option<i64>>(22)?.map(|v| v as u64),
+                flights: r.get::<_, i64>(17)? as u64,
+                total_flights: r.get::<_, i64>(24)? as u64,
+                block_time_ms: r.get::<_, i64>(18)?.max(0) as u64,
+                flight_time_ms: r.get::<_, i64>(19)?.max(0) as u64,
+                distance_nm: r.get(20)?,
+                landings: r.get::<_, i64>(21)? as u64,
+                avg_landing_vs_fpm: r.get(22)?,
+                last_flown_ms: r.get::<_, Option<i64>>(23)?.map(|v| v as u64),
             })
         })?;
         Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
@@ -382,6 +392,12 @@ impl Store {
             Some(v) if v <= LANDING_FLAPS_MAX => Some(Some(v)),
             Some(v) => return Err(crate::Invalid::FlapsOutOfRange { value: v, max: LANDING_FLAPS_MAX }.into()),
         };
+        let profile: Option<Option<String>> = match edit.approach_profile.as_deref().map(str::trim) {
+            None => None,
+            Some("") => Some(None),
+            Some(id) if self.approach_profile_exists(id)? => Some(Some(id.to_string())),
+            Some(id) => return Err(crate::Invalid::ApproachProfileUnknown { id: id.to_string() }.into()),
+        };
         {
             let conn = self.conn();
             conn.execute(
@@ -412,6 +428,25 @@ impl Store {
                 if before != v {
                     conn.execute("UPDATE airframes SET vapp_kt = ?2, updated_ms = ?3 WHERE registration = ?1", params![reg, v, now_ms as i64])?;
                     // the cached approach facts were assessed against the old reference: recomputed lazily
+                    conn.execute(
+                        "DELETE FROM approach_facts WHERE flight_id IN (SELECT id FROM flights WHERE airframe_reg = ?1)",
+                        params![reg],
+                    )?;
+                    conn.execute(
+                        "DELETE FROM flight_metrics WHERE flight_id IN (SELECT id FROM flights WHERE airframe_reg = ?1)",
+                        params![reg],
+                    )?;
+                }
+            }
+            if let Some(v) = profile {
+                let before: Option<String> =
+                    conn.query_row("SELECT approach_profile FROM airframes WHERE registration = ?1", params![reg], |r| r.get(0))?;
+                if before != v {
+                    conn.execute(
+                        "UPDATE airframes SET approach_profile = ?2, updated_ms = ?3 WHERE registration = ?1",
+                        params![reg, v, now_ms as i64],
+                    )?;
+                    // other thresholds: recomputed lazily, like after a Vapp change
                     conn.execute(
                         "DELETE FROM approach_facts WHERE flight_id IN (SELECT id FROM flights WHERE airframe_reg = ?1)",
                         params![reg],
@@ -467,6 +502,9 @@ impl Store {
         // A new airframe takes its type from the flight; an existing one keeps its own.
         let (_, hint) = facts.hint();
         upsert_from_hint(&conn, &reg, &hint, now_ms)?;
+        // another airframe may mean another assessment profile (and Vapp): recomputed lazily
+        conn.execute("DELETE FROM approach_facts WHERE flight_id = ?1", params![flight_id])?;
+        conn.execute("DELETE FROM flight_metrics WHERE flight_id = ?1", params![flight_id])?;
         // bumping updated_ms lets open views reload the flight
         Ok(conn.execute(
             "UPDATE flights SET airframe_reg = ?2, updated_ms = MAX(updated_ms, ?3) WHERE id = ?1",
@@ -504,6 +542,7 @@ impl Store {
                     notes = COALESCE(notes, (SELECT notes FROM airframes WHERE registration = ?1)),
                     vapp_kt = COALESCE(vapp_kt, (SELECT vapp_kt FROM airframes WHERE registration = ?1)),
                     landing_flaps = COALESCE(landing_flaps, (SELECT landing_flaps FROM airframes WHERE registration = ?1)),
+                    approach_profile = COALESCE(approach_profile, (SELECT approach_profile FROM airframes WHERE registration = ?1)),
                     created_ms = MIN(created_ms, (SELECT created_ms FROM airframes WHERE registration = ?1)),
                     updated_ms = ?3
                  WHERE registration = ?2",

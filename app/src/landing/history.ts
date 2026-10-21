@@ -14,6 +14,10 @@ import { isRated } from "./rated";
 import { t } from "../i18n";
 import { NNBSP, fmt, fmtNum } from "../i18n/number";
 import { fmtDegS, rotationBand } from "../trackEvents";
+import { profileOf } from "./approachProfiles";
+
+/** Assessment profile of a flight's metrics row (missing = generic, cached before profiles). */
+export const metricsProfileOf = (m: { approachProfile?: string | null }): string => profileOf({ profileId: m.approachProfile });
 
 /** A landing fact whose centreline offset may be missing. */
 export type HistLanding = Omit<LandingFact, "centerlineOffsetM"> & { centerlineOffsetM: number | null };
@@ -201,12 +205,18 @@ export interface ApproachComparison {
 /** Assessed below 1000 ft (has a band) – the only approaches with a meaningful "stabil ab". */
 const assessed = (f: ApproachFact) => f.band != null;
 
+/**
+ * The approach against the pilot's other approaches – only those assessed with the same
+ * profile (other thresholds make "stable from" and the gates incomparable).
+ */
 export function compareApproach(afact: ApproachFact, afacts: ApproachFact[], opts: CompareOpts = {}): ApproachComparison {
   const rk = runwayKey(afact);
   const tk = typeKey(afact);
+  const profile = profileOf(afact);
   const peers = afacts
     .filter((f) => !(f.flightId === afact.flightId && f.approachIndex === afact.approachIndex))
     .filter(assessed)
+    .filter((f) => profileOf(f) === profile)
     .filter((f) => !opts.sameRunway || (rk != null && runwayKey(f) === rk))
     .filter((f) => !opts.sameType || typeKey(f) === tk)
     .sort((a, b) => b.endedMs - a.endedMs)
@@ -276,11 +286,13 @@ export interface FlightMetricCompare extends MetricCompare {
  * Peers of a flight's metric: the pilot's other flights in `scope` that have a value, newest
  * first, at most `limit`.
  */
-function metricPeers(fact: FlightMetricsFact, facts: FlightMetricsFact[], scope: Scope, has: (f: FlightMetricsFact) => boolean, limit: number): FlightMetricsFact[] {
+function metricPeers(fact: FlightMetricsFact, facts: FlightMetricsFact[], scope: Scope, has: (f: FlightMetricsFact) => boolean, limit: number, sameProfile = false): FlightMetricsFact[] {
   const rk = runwayKey(fact);
   const tk = typeKey(fact);
+  const profile = metricsProfileOf(fact);
   return facts
     .filter((f) => f.flightId !== fact.flightId && has(f))
+    .filter((f) => !sameProfile || metricsProfileOf(f) === profile)
     .filter((f) => scope !== "runway" || (rk != null && runwayKey(f) === rk))
     .filter((f) => scope !== "type" || typeKey(f) === tk)
     .sort((a, b) => b.timestampMs - a.timestampMs)
@@ -293,23 +305,31 @@ const widening = (scope: Scope): Scope[] => SCOPES.slice(SCOPES.indexOf(scope));
 /**
  * One metric of a flight against the same metric of the pilot's other flights – median and
  * quartiles like the landing rate, in `scope` or, with fewer than MIN_PEERS values there, the
- * next wider scope. null without a value or without enough peers anywhere.
+ * next wider scope. null without a value or without enough peers anywhere. `sameProfile`:
+ * only flights assessed with the same approach profile (exceedances, gates).
  */
-export function compareFlightMetric(fact: FlightMetricsFact, facts: FlightMetricsFact[], get: FlightMetricGetter, scope: Scope, limit = DEFAULT_PEERS): FlightMetricCompare | null {
+export function compareFlightMetric(
+  fact: FlightMetricsFact,
+  facts: FlightMetricsFact[],
+  get: FlightMetricGetter,
+  scope: Scope,
+  limit = DEFAULT_PEERS,
+  sameProfile = false,
+): FlightMetricCompare | null {
   const v = get(fact);
   if (!isNum(v)) return null;
   for (const s of widening(scope)) {
-    const peers = metricPeers(fact, facts, s, (f) => isNum(get(f)), limit);
+    const peers = metricPeers(fact, facts, s, (f) => isNum(get(f)), limit, sameProfile);
     if (peers.length >= MIN_PEERS) return { ...metric(v, peers.map(get), null), scope: s };
   }
   return null;
 }
 
-/** The 500 ft gate of a flight against the pilot's stable-at-500-ft quota (same widening). */
+/** The 500 ft gate of a flight against the pilot's stable-at-500-ft quota (same widening, same assessment profile). */
 export function compareGate500(fact: FlightMetricsFact, facts: FlightMetricsFact[], scope: Scope, limit = DEFAULT_PEERS): { current: boolean; yes: number; total: number; scope: Scope } | null {
   if (fact.stable500 == null) return null;
   for (const s of widening(scope)) {
-    const peers = metricPeers(fact, facts, s, (f) => f.stable500 != null, limit);
+    const peers = metricPeers(fact, facts, s, (f) => f.stable500 != null, limit, true);
     if (peers.length >= MIN_PEERS) return { current: fact.stable500, ...quota(peers.map((f) => f.stable500)), scope: s };
   }
   return null;
@@ -420,11 +440,18 @@ function series(raw: Raw[], bucket: Bucket, window: number, kind: "median" | "qu
  * the approach facts (never-stable approaches left out, as everywhere), rotation, gear-down
  * height and exceedances from the flight metrics (flights without the value left out).
  */
-export function trendSeries(facts: HistLanding[], bucket: Bucket = "flight", opts: { approaches?: ApproachFact[]; metrics?: FlightMetricsFact[]; window?: number } = {}): TrendSeries {
+export function trendSeries(
+  facts: HistLanding[],
+  bucket: Bucket = "flight",
+  opts: { approaches?: ApproachFact[]; metrics?: FlightMetricsFact[]; window?: number; profile?: string | null } = {},
+): TrendSeries {
   const window = Math.max(1, opts.window ?? (bucket === "flight" ? 5 : 3));
   const key = (f: HistLanding) => `${f.flightId}#${f.touchdownIndex}`;
   const raw = (v: (f: HistLanding) => number | null): Raw[] => facts.map((f) => ({ key: key(f), tMs: f.timestampMs, v: v(f) }));
   const approaches = (opts.approaches ?? []).filter(assessed);
+  // "stabil ab" and the exceedances follow the thresholds: with `profile` only that assessment profile
+  const sameProfile = (id: string) => opts.profile == null || id === opts.profile;
+  const profiled = approaches.filter((a) => sameProfile(profileOf(a)));
   // flights without the value are left out (a gap, not a zero)
   const metricSeries = (get: (m: FlightMetricsFact) => number | null) =>
     series(
@@ -440,7 +467,7 @@ export function trendSeries(facts: HistLanding[], bucket: Bucket = "flight", opt
     distance: series(raw((f) => f.touchdownDistanceM), bucket, window, "median"),
     centerline: series(raw((f) => (isNum(f.centerlineOffsetM) ? Math.abs(f.centerlineOffsetM) : null)), bucket, window, "median"),
     stableFrom: series(
-      approaches.map((a) => ({ key: `${a.flightId}#a${a.approachIndex}`, tMs: a.endedMs, v: a.stableFromFt })),
+      profiled.map((a) => ({ key: `${a.flightId}#a${a.approachIndex}`, tMs: a.endedMs, v: a.stableFromFt })),
       bucket,
       window,
       "median",
@@ -456,7 +483,7 @@ export function trendSeries(facts: HistLanding[], bucket: Bucket = "flight", opt
     tdz: series(raw((f) => (f.inTouchdownZone ? 1 : 0)), bucket, window, "quota"),
     rotation: metricSeries((m) => m.rotationRateDegS),
     gearDown: metricSeries((m) => m.gearDownAglFt),
-    exceedances: metricSeries((m) => m.exceedances),
+    exceedances: metricSeries((m) => (sameProfile(metricsProfileOf(m)) ? m.exceedances : null)),
   };
 }
 
@@ -635,7 +662,8 @@ export function flightMetricLines(fact: FlightMetricsFact, facts: FlightMetricsF
     out.push({ id: "landingFlaps", warn: false, text: w ? t("landingHistory.metrics.landingFlapsWhere", { ...vars, where: w }) : t("landingHistory.metrics.landingFlaps", vars) });
   }
 
-  const exc = compareFlightMetric(fact, facts, (f) => f.exceedances, scope);
+  // exceedances depend on the thresholds: only flights assessed with the same profile
+  const exc = compareFlightMetric(fact, facts, (f) => f.exceedances, scope, DEFAULT_PEERS, true);
   if (exc && exc.value != null) {
     const vars = { value: t("landingHistory.metrics.exceedanceCount", { count: exc.value }), median: countText(exc.median), count: exc.n };
     const w = where(exc.scope);

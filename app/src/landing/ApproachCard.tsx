@@ -17,7 +17,7 @@ import { providerLabel } from "../status";
 import type { FlightRow } from "../types";
 import { ShapeMark } from "./BandMark";
 import {
-  APPROACH_BAND_LABEL,
+  approachBandLabel,
   APPROACH_BAND_SHAPE,
   ENERGY_BAND_LABEL,
   GATE_LABEL,
@@ -168,7 +168,7 @@ export default function ApproachCard({ approach: a, colors: t, flight, fontCss, 
           <>
             <ShapeMark shape={APPROACH_BAND_SHAPE[a.band]} x={PAD + 7} y={153} r={7} style={{ fill: bandColor(t, a.band) }} />
             <text x={PAD + 22} y={159} fill={t.text} fontSize={20} fontWeight={600} style={sans}>
-              {APPROACH_BAND_LABEL[a.band]}
+              {approachBandLabel(a.band, a.config.hardGateFt)}
             </text>
           </>
         ) : (

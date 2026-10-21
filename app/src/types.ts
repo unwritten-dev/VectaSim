@@ -648,6 +648,8 @@ export interface Airframe {
   vappKt?: number | null;
   /** Pilot's landing flap handle index (e.g. 3 = CONF 3 on an A320); null = the last handle position. */
   landingFlaps?: number | null;
+  /** Approach assessment profile id for this airframe; null = automatic (type, then engine). */
+  approachProfile?: string | null;
   createdMs: number;
   updatedMs: number;
 }
@@ -675,6 +677,8 @@ export interface AirframeEdit {
   vappKt?: number | null;
   /** Landing flap handle index 0…10; −1 clears it, omitted leaves it unchanged. */
   landingFlaps?: number | null;
+  /** Assessment profile id; "" = automatic, omitted leaves it unchanged. */
+  approachProfile?: string | null;
 }
 
 /** One evaluated landing for the dispersion view (landing_facts_recent, app/src-tauri/src/landing.rs). */
@@ -734,6 +738,8 @@ export interface FlightMetricsFact {
   exceedances: number | null;
   stable1000: boolean | null;
   stable500: boolean | null;
+  /** Assessment profile of the landing approach (exceedances and gates compare within one profile). */
+  approachProfile?: string | null;
 }
 
 export interface FlightMetricsResult {

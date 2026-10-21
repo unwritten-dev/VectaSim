@@ -449,3 +449,52 @@ describe("flight metrics comparison", () => {
     expect(tr.exceedances.map((p) => p.value)).toEqual([0, 1, 1, 2, 5, 2]);
   });
 });
+
+describe("assessment profiles keep comparisons apart", () => {
+  it("compares an approach only with approaches of the same profile (missing = generic)", () => {
+    const peers = [
+      af({ flightId: "g1", stableFromFt: 1500, endedMs: T0 + 3 }),
+      af({ flightId: "g2", stableFromFt: 1000, endedMs: T0 + 2, profileId: "generic" }),
+      af({ flightId: "a1", stableFromFt: 500, endedMs: T0 + 1, profileId: "airbus" }),
+      af({ flightId: "a2", stableFromFt: 600, endedMs: T0, profileId: "airbus" }),
+    ];
+    const generic = compareApproach(af({ flightId: "me", stableFromFt: 1200 }), peers);
+    expect(generic.peers.map((p) => p.flightId)).toEqual(["g1", "g2"]);
+    const airbus = compareApproach(af({ flightId: "me", stableFromFt: 1200, profileId: "airbus" }), peers);
+    expect(airbus.peers.map((p) => p.flightId)).toEqual(["a1", "a2"]);
+    expect(airbus.stableFrom.median).toBe(550);
+  });
+
+  it("exceedances and gates only against flights of the same profile; rotation against all", () => {
+    const cur = mf({ flightId: "cur", rotationRateDegS: 2.4, exceedances: 2, stable500: false, approachProfile: "ga_piston" });
+    const peers = [
+      mf({ flightId: "g1", rotationRateDegS: 2.5, exceedances: 0, stable500: true }),
+      mf({ flightId: "g2", rotationRateDegS: 2.6, exceedances: 0, stable500: true }),
+      mf({ flightId: "g3", rotationRateDegS: 2.7, exceedances: 1, stable500: true }),
+      mf({ flightId: "p1", rotationRateDegS: 2.2, exceedances: 3, stable500: false, approachProfile: "ga_piston" }),
+      mf({ flightId: "p2", rotationRateDegS: 2.1, exceedances: 4, stable500: false, approachProfile: "ga_piston" }),
+      mf({ flightId: "p3", rotationRateDegS: 2.0, exceedances: 5, stable500: true, approachProfile: "ga_piston" }),
+    ];
+    const all = [cur, ...peers];
+    expect(compareFlightMetric(cur, all, (f) => f.rotationRateDegS, "all")!.n).toBe(6);
+    const exc = compareFlightMetric(cur, all, (f) => f.exceedances, "all", 20, true)!;
+    expect([exc.n, exc.median]).toEqual([3, 4]);
+    expect(compareGate500(cur, all, "all")).toMatchObject({ yes: 1, total: 3 });
+    expect(compareGate500(cur, all.slice(0, 4), "all")).toBeNull();
+  });
+
+  it("trend series of one profile", () => {
+    const landings = [lf({ flightId: "x", timestampMs: T0 })];
+    const approaches = [
+      af({ flightId: "x", stableFromFt: 1000, endedMs: T0 }),
+      af({ flightId: "y", approachIndex: 0, stableFromFt: 400, endedMs: T0 + 1, profileId: "ga_piston" }),
+    ];
+    const metrics = [mf({ flightId: "x", exceedances: 1 }), mf({ flightId: "y", timestampMs: T0 + 1, exceedances: 6, approachProfile: "ga_piston" })];
+    const g = trendSeries(landings, "flight", { approaches, metrics, profile: "generic" });
+    expect(g.stableFrom.map((p) => p.value)).toEqual([1000]);
+    expect(g.exceedances.map((p) => p.value)).toEqual([1]);
+    const p = trendSeries(landings, "flight", { approaches, metrics, profile: "ga_piston" });
+    expect(p.stableFrom.map((x) => x.value)).toEqual([400]);
+    expect(p.exceedances.map((x) => x.value)).toEqual([6]);
+  });
+});

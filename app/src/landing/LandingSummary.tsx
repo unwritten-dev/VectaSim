@@ -3,8 +3,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { fmt } from "../i18n/number";
 import { useT } from "../i18n";
 import { openDebrief } from "./debriefStore";
-import { APPROACH_BAND_LABEL, APPROACH_BAND_VAR, BAND_LABEL, BAND_VAR, isRated, lateralMeasurable, rateText, runwaySourceOf, touchdownDistanceText } from "./facts";
+import { APPROACH_BAND_VAR, BAND_LABEL, approachBandLabel, BAND_VAR, isRated, lateralMeasurable, rateText, runwaySourceOf, touchdownDistanceText } from "./facts";
 import { sideLabel } from "./geometry";
+import AssessedWith from "./AssessedWith";
 import type { LandingDebriefData } from "./types";
 import type { ApproachAnalysis } from "./approachTypes";
 
@@ -75,11 +76,13 @@ export default function LandingSummary({ flightId, touchdowns, updatedMs }: { fl
             )}
             {landedApproach?.band ? (
               <span>
-                {t("debrief.summary.approach")} <span className="band-dot inline" style={{ background: APPROACH_BAND_VAR[landedApproach.band] }} aria-hidden="true" /> {APPROACH_BAND_LABEL[landedApproach.band]}
+                {t("debrief.summary.approach")} <span className="band-dot inline" style={{ background: APPROACH_BAND_VAR[landedApproach.band] }} aria-hidden="true" /> {approachBandLabel(landedApproach.band, landedApproach.config.hardGateFt)}
                 {landedApproach.stability.stableFromFt != null
                   ? ` · ${t("debrief.summary.stableFrom", { alt: fmt(landedApproach.stability.stableFromFt, 0, "ft") })}`
                   : ` · ${t("debrief.summary.neverStable")}`}
                 {goArounds > 0 && ` · ${t("debrief.summary.goArounds", { count: goArounds })}`}
+                {" · "}
+                <AssessedWith profileId={landedApproach.config.profileId} />
               </span>
             ) : (
               <span>

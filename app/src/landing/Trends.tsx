@@ -10,6 +10,7 @@ import { niceStep, ticks, useWidth } from "./chartUtils";
 import { useHistoryFacts } from "./HistoryPanel";
 import { approachFor, demoFilter, metricsFor, monthCompare, trendSeries, typeKey, type Bucket, type HistLanding, type PeriodStats, type TrendPoint } from "./history";
 import type { ApproachFact } from "./approachTypes";
+import { profileName, profileOf, profileTooltip, useApproachProfiles } from "./approachProfiles";
 import type { FlightMetricsFact } from "../types";
 import { ROTATION_FAST_DEG_S, ROTATION_SLOW_DEG_S, fmtDegS } from "../trackEvents";
 import "./dispersion.css";
@@ -307,6 +308,8 @@ export default function Trends() {
   const [airport, setAirport] = useState<string | null>(null);
   const [limit, setLimit] = useState<Limit>(50);
   const [bucket, setBucket] = useState<Bucket>("flight");
+  const [profile, setProfile] = useState<string | null>(null);
+  const profiles = useApproachProfiles();
   const [setWrap, width] = useWidth(720);
   const twoCols = width >= 760;
 
@@ -331,6 +334,9 @@ export default function Trends() {
     () => allM.filter((f) => (!activeType || typeKey(f) === activeType) && (!activeAirport || f.airportIcao === activeAirport)),
     [allM, activeType, activeAirport],
   );
+  // "stabil ab" and exceedances only compare within one assessment profile: the chosen one, else the most frequent
+  const profileOpts = useMemo(() => options(filteredA.filter((a) => a.band != null).map(profileOf)), [filteredA]);
+  const activeProfile = profile && profileOpts.some((o) => o.key === profile) ? profile : (profileOpts[0]?.key ?? null);
   const facts = useMemo(() => filteredL.slice(0, limit), [filteredL, limit]);
   // approaches of the same period as the landings shown
   const aFacts = useMemo(() => {
@@ -344,10 +350,13 @@ export default function Trends() {
   }, [filteredM, facts, limit]);
   const win = limit === 20 ? 5 : 10;
   const series = useMemo(
-    () => trendSeries(facts, bucket, { approaches: aFacts, metrics: mFacts, window: bucket === "flight" ? win : 3 }),
-    [facts, aFacts, mFacts, bucket, win],
+    () => trendSeries(facts, bucket, { approaches: aFacts, metrics: mFacts, window: bucket === "flight" ? win : 3, profile: activeProfile }),
+    [facts, aFacts, mFacts, bucket, win, activeProfile],
   );
-  const month = useMemo(() => monthCompare(filteredL, filteredA, Date.now()), [filteredL, filteredA]);
+  const month = useMemo(
+    () => monthCompare(filteredL, activeProfile ? filteredA.filter((a) => profileOf(a) === activeProfile) : filteredA, Date.now()),
+    [filteredL, filteredA, activeProfile],
+  );
 
   if (error && !landings?.length) {
     return (
@@ -420,7 +429,20 @@ export default function Trends() {
         <div className="chips" role="group" aria-label={t("trends.groupBy")}>
           {BUCKETS.map((b) => chip(b, bucket === b, bucketLabel(t, b), () => setBucket(b)))}
         </div>
+        {/* no "all": approaches of different profiles were rated against different thresholds */}
+        {profileOpts.length > 1 && (
+          <div className="chips" role="group" aria-label={t("trends.profile.aria")}>
+            {profileOpts.map((o) =>
+              chip(`p-${o.key}`, activeProfile === o.key, profileName(o.key, profiles, t), () => setProfile(o.key), `${t("trends.profile.only", { count: o.count })}\n${profileTooltip(o.key, profiles, t)}`),
+            )}
+          </div>
+        )}
       </div>
+      {activeProfile && (
+        <div className="detail tr-profile-note" title={profileTooltip(activeProfile, profiles, t)}>
+          {t("trends.profile.note", { name: profileName(activeProfile, profiles, t) })}
+        </div>
+      )}
 
       {/* nothing to compare without landings in either month */}
       {(month.current.n > 0 || month.previous.n > 0) && <MonthTiles m={month} />}

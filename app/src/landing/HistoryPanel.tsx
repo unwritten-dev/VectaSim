@@ -27,6 +27,7 @@ import {
 } from "./history";
 import "./trends.css";
 import { isRated } from "./rated";
+import { profileName, profileOf, profileTooltip, useApproachProfiles } from "./approachProfiles";
 
 // ---- shared facts store -------------------------------------------------------------------
 // One request per list for every consumer (debrief, logbook detail, after-flight card, trends);
@@ -347,8 +348,20 @@ export default function HistoryPanel({ flightId, touchdownIndex, approachIndex }
           </div>
         )}
       </div>
+      {c.approach && <ProfileScope profileId={profileOf(c.approach)} />}
       <MetricLines flightId={flightId} scope={scope} />
     </section>
+  );
+}
+
+/** "Approach values only against approaches assessed with the Airbus-style profile". */
+function ProfileScope({ profileId }: { profileId: string }) {
+  const t = useT();
+  const profiles = useApproachProfiles();
+  return (
+    <p className="detail hist-profile" title={profileTooltip(profileId, profiles, t)}>
+      {t("landingHistory.profileScope", { name: profileName(profileId, profiles, t) })}
+    </p>
   );
 }
 

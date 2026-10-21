@@ -15,7 +15,7 @@ use vectasim_core::{AircraftInfo, FlightPhase, FlightSummary, IntegrityFlags, La
 
 /// Newest schema this build writes. A file with a higher version is refused
 /// ([`StoreError::NewerSchema`]) instead of being opened by an older app.
-pub const SCHEMA_VERSION: i64 = 18;
+pub const SCHEMA_VERSION: i64 = 19;
 
 /// Days a deleted flight stays in the Papierkorb before `purge_deleted` removes it.
 pub const TRASH_RETENTION_DAYS: u32 = 30;
@@ -276,6 +276,14 @@ BEGIN
 END;
 "#;
 
+/// v19: assessment profiles (`vectasim_core::approach_profile`). The profile an approach was
+/// assessed with goes with its facts (`approach_facts.profile_id`) and the flight metrics
+/// (`flight_metrics.approach_profile`), so comparisons stay within one profile; the pilot's
+/// choice per airframe is `airframes.approach_profile` (NULL = automatic). Each column only
+/// when missing, like v9-v16.
+const MIGRATION_V19_COLUMNS: &[(&str, &str, &str)] =
+    &[("approach_facts", "profile_id", "TEXT"), ("flight_metrics", "approach_profile", "TEXT"), ("airframes", "approach_profile", "TEXT")];
+
 /// Version of the cached approach facts; bump whenever the rules in
 /// `vectasim_core::approach` (or the row mapping below) change, so old rows are recomputed.
 /// 2: displaced thresholds move the runway geometry (glidepath origin, distances).
@@ -283,7 +291,8 @@ END;
 /// 4: lateral guidance (localizer RMS and lateral band in the detail).
 /// 5: track v2 – sim ILS as glidepath/localizer reference, thrust/spoiler/landing-flap
 ///    criteria, Vapp from VS0 × 1.3, energy band and sim wind in the detail.
-pub const APPROACH_FACTS_VERSION: u32 = 5;
+/// 6: assessment profiles – thresholds per profile, `profile_id` column, hard gate in the detail.
+pub const APPROACH_FACTS_VERSION: u32 = 6;
 
 /// Which end of a flight a stored METAR describes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -546,6 +555,19 @@ const MIGRATIONS: &[MigrationStep] = &[
     // per-flight metrics (`metrics.rs`); idempotent (IF NOT EXISTS). Rows are filled at flight end
     // and, for the flights already in the logbook, by the app in the background.
     MigrationStep { to: 18, apply: |c| Ok(c.execute_batch(crate::metrics::MIGRATION_V18)?) },
+    // assessment profiles; idempotent like v9-v16. The cached facts are recomputed through their
+    // versions (APPROACH_FACTS_VERSION 6, FLIGHT_METRICS_VERSION 2), not here.
+    MigrationStep {
+        to: 19,
+        apply: |c| {
+            for (table, col, ty) in MIGRATION_V19_COLUMNS {
+                if !has_column(c, table, col)? {
+                    c.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {col} {ty}"))?;
+                }
+            }
+            Ok(())
+        },
+    },
 ];
 
 /// Schema version of an open file; 0 = empty (no `schema_version` table yet).
@@ -1047,6 +1069,9 @@ pub struct ApproachFactRow {
     pub ga_lowest_hat_ft: Option<f64>,
     /// JSON of [`ApproachFactDetail`].
     pub detail_json: Option<String>,
+    /// Assessment profile the approach was assessed with (schema v19; None: cached before).
+    #[serde(default)]
+    pub profile_id: Option<String>,
 }
 
 /// The rest of an approach's facts, stored as `approach_facts.detail_json`. Additive only:
@@ -1084,6 +1109,9 @@ pub struct ApproachFactDetail {
     pub sim_headwind_kt: Option<f64>,
     #[serde(default)]
     pub sim_crosswind_kt: Option<f64>,
+    /// v6: the hard gate of the assessment profile, ft ("unstable below …"; None: before v6 = 500 ft).
+    #[serde(default)]
+    pub hard_gate_ft: Option<f64>,
 }
 
 impl ApproachFactRow {
@@ -1115,6 +1143,7 @@ impl ApproachFactRow {
             energy_band: a.energy.as_ref().and_then(|e| e.band),
             sim_headwind_kt: a.wind.as_ref().and_then(|w| w.headwind_kt),
             sim_crosswind_kt: a.wind.as_ref().and_then(|w| w.crosswind_kt),
+            hard_gate_ft: Some(a.config.hard_gate_ft),
         };
         Self {
             approach_index: a.index as u32,
@@ -1153,6 +1182,7 @@ impl ApproachFactRow {
             vs_sd_fpm: a.stability.vs_sd_fpm,
             ga_lowest_hat_ft: a.go_around.as_ref().map(|g| g.lowest_hat_ft),
             detail_json: serde_json::to_string(&detail).ok(),
+            profile_id: Some(a.config.profile_id.clone()),
         }
     }
 
@@ -1180,7 +1210,7 @@ const APPROACH_COLS: &str = "approach_index, version, computed_ms, outcome, touc
     g10_alt_dev_ft, g10_ias_kt, g10_energy_dev_ft, gfaf_alt_dev_ft, gfaf_ias_dev_kt,
     g1000_alt_dev_ft, g1000_ias_dev_kt, g1000_lat_dev_m, g1000_vs_fpm, g1000_pass,
     g500_alt_dev_ft, g500_ias_dev_kt, g500_lat_dev_m, g500_vs_fpm, g500_pass,
-    gp_rms_ft, lat_rms_m, ias_mad_kt, vs_sd_fpm, ga_lowest_hat_ft, detail_json";
+    gp_rms_ft, lat_rms_m, ias_mad_kt, vs_sd_fpm, ga_lowest_hat_ft, detail_json, profile_id";
 
 fn row_to_approach_fact(r: &Row<'_>) -> rusqlite::Result<ApproachFactRow> {
     Ok(ApproachFactRow {
@@ -1220,6 +1250,7 @@ fn row_to_approach_fact(r: &Row<'_>) -> rusqlite::Result<ApproachFactRow> {
         vs_sd_fpm: r.get(33)?,
         ga_lowest_hat_ft: r.get(34)?,
         detail_json: r.get(35)?,
+        profile_id: r.get(36)?,
     })
 }
 
@@ -1973,7 +2004,7 @@ impl Store {
         let n = conn.execute("DELETE FROM flights WHERE provider IN ('mock', 'replay')", [])?;
         for reg in regs {
             conn.execute(
-                "DELETE FROM airframes WHERE registration = ?1 AND custom_name IS NULL AND notes IS NULL AND vapp_kt IS NULL AND landing_flaps IS NULL
+                "DELETE FROM airframes WHERE registration = ?1 AND custom_name IS NULL AND notes IS NULL AND vapp_kt IS NULL AND landing_flaps IS NULL AND approach_profile IS NULL
                    AND NOT EXISTS (SELECT 1 FROM flights WHERE airframe_reg = ?1)",
                 params![reg],
             )?;
@@ -2290,7 +2321,7 @@ impl Store {
             )?;
         }
         {
-            let placeholders = (2..=37).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ");
+            let placeholders = (2..=38).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ");
             let mut stmt = tx.prepare(&format!("INSERT INTO approach_facts (flight_id, {APPROACH_COLS}) VALUES (?1, {placeholders})"))?;
             for f in rows {
                 let values: Vec<Value> = vec![
@@ -2331,6 +2362,7 @@ impl Store {
                     f.vs_sd_fpm.into(),
                     f.ga_lowest_hat_ft.into(),
                     f.detail_json.clone().into(),
+                    f.profile_id.clone().into(),
                 ];
                 stmt.execute(rusqlite::params_from_iter(values))?;
             }

@@ -265,6 +265,58 @@
       "fafFirst": "{first} first · {dist} · {height}",
       "valuesOnly": "values only",
       "windowNote": "{top} → {bottom}, only continuous stretches of at least the minimum duration"
+    },
+    "assessment": {
+      "name": {
+        "generic": "Generic profile (FSF/EASA)",
+        "airbus": "Airbus-style profile",
+        "boeing": "Boeing-style profile",
+        "turboprop": "Turboprop/regional profile",
+        "ga_piston": "GA piston profile"
+      },
+      "assessedWith": "Assessed with: {name}",
+      "unknown": "profile “{id}” (deleted)",
+      "differs": "Differs from the generic profile (FSF/EASA):",
+      "sameAsGeneric": "Same thresholds as the generic profile (FSF/EASA).",
+      "basedOn": "Based on the {name}",
+      "valueChange": "{label}: {value} (generic {generic})",
+      "on": "on",
+      "off": "off",
+      "key": {
+        "gateSpeedAboveKt": "Gate speed above Vapp",
+        "gateSpeedBelowKt": "Gate speed below Vapp",
+        "gateMaxVsFpm": "Gate sink rate",
+        "gateMaxBankDeg": "Gate bank",
+        "gateDots": "Gate glidepath/localizer",
+        "speedS1AboveKt": "Speed S1 above Vapp",
+        "speedS1BelowKt": "Speed S1 below Vapp",
+        "speedS2AboveKt": "Speed S2 above Vapp",
+        "speedS2BelowKt": "Speed S2 below Vapp",
+        "speedDurationS": "Speed minimum duration",
+        "vsS1Fpm": "Sink rate S1",
+        "vsS2Fpm": "Sink rate S2",
+        "vsS1DurationS": "Sink rate S1 minimum duration",
+        "vsS2DurationS": "Sink rate S2 minimum duration",
+        "bankS1Deg": "Bank S1",
+        "bankS2Deg": "Bank S2",
+        "bankDurationS": "Bank minimum duration",
+        "gsS1Dots": "Glidepath S1",
+        "gsS2Dots": "Glidepath S2",
+        "gsDurationS": "Glidepath minimum duration",
+        "locS1Dots": "Localizer S1",
+        "locS2Dots": "Localizer S2",
+        "locDurationS": "Localizer minimum duration",
+        "momentaryS": "Momentary excursions up to",
+        "configGateFt": "Configuration gate",
+        "hardGateFt": "Hard gate (unstable below)",
+        "windowTopFt": "Assessment window top",
+        "thrustCheck": "Thrust check",
+        "thrustMinN1Pct": "Thrust at least N1",
+        "thrustDurationS": "Thrust minimum duration",
+        "spoilersMaxPct": "Spoilers at most",
+        "statsSpeedAboveKt": "Statistics window above Vapp",
+        "statsSpeedBelowKt": "Statistics window below Vapp"
+      }
     }
   }
 }

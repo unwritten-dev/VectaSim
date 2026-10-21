@@ -2,6 +2,14 @@
 
 Entries are in English from 2026-10-18 on; earlier entries were translated.
 
+## 0.6.2 – 2026-10-22 (Beta)
+
+Assessment profiles: the approach is now rated by aircraft category – Airbus-style, Boeing-style, turboprop, GA piston or the generic FSF/EASA set – with every value traced to a public source, and your own SOP as an importable profile.
+
+### Approach
+
+- Approach assessment profiles: the thresholds of the approach rating now follow the aircraft – generic (FSF/EASA, as before), Airbus-style (gate speed Vapp −5/+10 kt), Boeing-style (same as generic until Boeing publishes values), turboprop (gate speed ±5 kt, no thrust check) and GA piston (tighter speed and sink-rate limits, configuration gate 500 ft, “unstable below 300 ft”), every value taken from a public source. VectaSim picks the profile by ICAO type (else by engine), the debrief and the flight detail name it (“Assessed with: Airbus-style profile”, the tooltip lists what differs), and comparisons and trends only compare approaches assessed with the same profile. In the fleet you can choose another profile per aircraft; *Settings → Approach assessment* lists the profiles with their sources and imports your own (JSON, e.g. your VA’s SOP). Flights already in the logbook are assessed again with their profile in the background.
+
 ## 0.6.1 – 2026-10-21 (Beta)
 
 Hotfix for the live map.

@@ -531,6 +531,31 @@
         "done": "Alle Daten gelöscht · {flights}",
         "backup": "Sicherung davor: {path}"
       }
+    },
+    "approachProfiles": {
+      "title": "Anflugbewertung",
+      "description": "Nach welchen Grenzwerten deine Anflüge bewertet werden. Ein Profil ändert nur wenige Werte des allgemeinen FSF/EASA-Satzes; jeder eingebaute Wert stammt aus einer öffentlichen Quelle.",
+      "autoTitle": "Automatische Wahl",
+      "auto": "Reihenfolge: das Profil, das in der Flotte für das Flugzeug gewählt ist, sonst der ICAO-Typ – Airbus (A318–A380, A220) → Airbus-Profil; Boeing 7x7 und 717, MD-80/90/11 → Boeing-Profil; ATR, Dash 8 und andere Turboprops mit zwei Piloten → Turboprop; C172, C182, PA-28, SR22, DA40 und andere Leichtflugzeuge, auch PC-12, TBM und Caravan → GA-Kolben; E-Jets, ERJ, CRJ und Business-Jets → allgemein. Unbekannte Typen: eine Aufzeichnung ohne Turbinen-N1 (Kolbenmotor) → GA-Kolben, sonst allgemein.",
+      "vapp": "Alle Fahrt-Grenzwerte gelten gegenüber deiner Vapp (Wert aus der Flotte, sonst der geflogene Median, sonst 1,3 × VS0). Die EASA-Data4Safety-Stufen sind gegenüber VREF definiert; Vapp liegt etwa bei VREF + 5 kt – eine VectaSim-Konvention.",
+      "builtinTitle": "Eingebaute Profile",
+      "loading": "Profile werden geladen …",
+      "source": "Quelle: {source}",
+      "customTitle": "Importierte Profile",
+      "customEmpty": "Noch keine importierten Profile.",
+      "import": "Profil importieren (JSON) …",
+      "importTitle": "Eine JSON-Datei mit id, name, basedOn, source und overrides – danach das Profil pro Flugzeug in der Flotte wählen.",
+      "format": "Format und alle erlaubten Werte: docs/approach-profiles.md",
+      "fileFilter": "Bewertungsprofil",
+      "imported": "Profil „{name}“ importiert",
+      "replaced": "Profil „{name}“ ersetzt",
+      "importedBody": "Wähle es pro Flugzeug in der Flotte; damit bewertete Anflüge werden neu bewertet.",
+      "importFailed": "Profil nicht importiert",
+      "delete": "Löschen",
+      "keep": "Behalten",
+      "confirmDelete": "„{name}“ löschen? Flugzeuge damit gehen zurück auf automatisch.",
+      "deleted": "Profil „{name}“ gelöscht",
+      "deleteFailed": "Profil nicht gelöscht"
     }
   }
 }

@@ -4,8 +4,8 @@ import { fmt, fmtNum, fmtSigned } from "../i18n/number";
 import type { FlightRow } from "../types";
 import type { ApproachAnalysis, ApproachBand, ConfigEvent, GoAroundSource, VappSource } from "./approachTypes";
 import {
-  APPROACH_BAND_LABEL,
   APPROACH_BAND_VAR,
+  approachBandLabel,
   CRITERION_LABEL,
   approachKeySentence,
   approachProvenance,
@@ -24,6 +24,7 @@ import {
 } from "./facts";
 import { copyApproachCardPng, saveApproachCardPng } from "./exportApproachCard";
 import { Hero } from "./Hero";
+import AssessedWith from "./AssessedWith";
 
 /** What the debrief knows about the approach of the shown landing. */
 export type ApproachStatus = { kind: "loading" } | { kind: "error"; reason: string } | { kind: "ok"; approach: ApproachAnalysis };
@@ -57,12 +58,12 @@ function gaSourceText(t: TFunction, s: GoAroundSource): string {
 }
 
 /** Badge with the four-step band (ok / warn / err tokens). */
-export function ApproachBandBadge({ band }: { band: ApproachBand }) {
+export function ApproachBandBadge({ band, hardGateFt }: { band: ApproachBand; hardGateFt?: number | null }) {
   useT(); // re-render on a language switch (the label is a getter)
   return (
     <span className="approach-band" style={{ borderColor: APPROACH_BAND_VAR[band], color: APPROACH_BAND_VAR[band] }}>
       <span className="band-dot" style={{ background: APPROACH_BAND_VAR[band] }} aria-hidden="true" />
-      {APPROACH_BAND_LABEL[band]}
+      {approachBandLabel(band, hardGateFt)}
     </span>
   );
 }
@@ -187,12 +188,13 @@ function ApproachBody({ a, title, flight }: { a: ApproachAnalysis; title: string
         <p className="approach-sentence">{sentence}</p>
         <div className="approach-badges">
           {a.band ? (
-            <ApproachBandBadge band={a.band} />
+            <ApproachBandBadge band={a.band} hardGateFt={a.config.hardGateFt} />
           ) : (
             <span className="approach-band muted">{t("approach.common.noBand", { height: fmt(1000, 0, "ft") })}</span>
           )}
           {isGa && <span className="approach-band ga">{t("approach.common.goAround")}</span>}
         </div>
+        <AssessedWith profileId={a.config.profileId} className="approach-profile" />
       </div>
 
       <div className="hero-row approach-heroes">
@@ -360,7 +362,7 @@ function ApproachBody({ a, title, flight }: { a: ApproachAnalysis; title: string
               <tr key={i} className={x.level === "s2" ? "ex-s2" : "ex-s1"}>
                 <td>
                   {CRITERION_LABEL[x.kind]}
-                  {x.below500 && <span className="detail"> · {t("approach.section.exceedances.below", { height: fmt(500, 0, "ft") })}</span>}
+                  {x.below500 && <span className="detail"> · {t("approach.section.exceedances.below", { height: fmt(a.config.hardGateFt ?? 500, 0, "ft") })}</span>}
                 </td>
                 <td className="num">{x.level.toUpperCase()}</td>
                 <td className="num">{exceedanceRange(x)}</td>

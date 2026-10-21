@@ -87,6 +87,9 @@ pub enum Invalid {
     RunwayWidthInvalid,
     RunwayElevationInvalid,
     RunwayNotSaved,
+    // ---- approach assessment profiles
+    ApproachProfileInvalid { cause: vectasim_core::approach_profile::ProfileError },
+    ApproachProfileUnknown { id: String },
     // ---- flights, merge, resume
     FlightNotFound,
     MergeSelf,
@@ -152,6 +155,8 @@ impl Invalid {
             RunwayWidthInvalid => "store.runway_width_invalid",
             RunwayElevationInvalid => "store.runway_elevation_invalid",
             RunwayNotSaved => "store.runway_not_saved",
+            ApproachProfileInvalid { .. } => "store.approach_profile_invalid",
+            ApproachProfileUnknown { .. } => "store.approach_profile_unknown",
             FlightNotFound => "store.flight_not_found",
             MergeSelf => "store.merge_self",
             MergeTrashed => "store.merge_trashed",
@@ -200,6 +205,8 @@ impl Invalid {
             IcaoInvalid { field } => json!({ "field": field.code() }),
             TextTooLong { field, max } => json!({ "field": field.code(), "max": max }),
             NotesTooLong { max } => json!({ "max": max }),
+            ApproachProfileInvalid { cause } => json!({ "reason": cause.code(), "detail": cause.message(Lang::En) }),
+            ApproachProfileUnknown { id } => json!({ "id": id }),
             MergeGap { minutes, max_minutes } => json!({ "minutes": minutes, "maxMinutes": max_minutes }),
             MergeJump { distance_nm, max_nm } => json!({ "distanceNm": distance_nm, "maxNm": max_nm }),
             FileNotFound { path } => json!({ "path": path }),
@@ -259,6 +266,17 @@ impl Invalid {
             RunwayWidthInvalid => s("Pistenbreite ungültig (1–200 m)", "Invalid runway width (1–200 m)"),
             RunwayElevationInvalid => s("Höhe ungültig", "Invalid elevation"),
             RunwayNotSaved => s("Piste nicht gespeichert", "Runway not saved"),
+            ApproachProfileInvalid { cause } => {
+                let m = cause.message(lang);
+                if de { format!("Profil nicht importiert: {m}") } else { format!("Profile not imported: {m}") }
+            }
+            ApproachProfileUnknown { id } => {
+                if de {
+                    format!("Bewertungsprofil „{id}“ gibt es nicht")
+                } else {
+                    format!("There is no assessment profile \"{id}\"")
+                }
+            }
             FlightNotFound => s("Flug nicht gefunden", "Flight not found"),
             MergeSelf => s("Ein Flug lässt sich nicht mit sich selbst zusammenführen.", "A flight cannot be merged with itself."),
             MergeTrashed => s("Flüge im Papierkorb lassen sich nicht zusammenführen.", "Flights in the trash cannot be merged."),
@@ -438,6 +456,19 @@ mod tests {
             e.to_json(Lang::En)["params"],
             json!({ "line": 7, "cause": { "code": "store.icao_invalid", "params": { "field": "departure" } } })
         );
+    }
+
+    #[test]
+    fn golden_approach_profile_invalid() {
+        use vectasim_core::approach_profile::ProfileError;
+        let e = StoreError::from(Invalid::ApproachProfileInvalid { cause: ProfileError::UnknownKey { key: "glidepathDeg".into() } });
+        assert_eq!(e.code(), "store.approach_profile_invalid");
+        assert_eq!(e.to_string(), "Profil nicht importiert: unbekannter Wert „glidepathDeg“ in „overrides“");
+        assert_eq!(e.message(Lang::En), "Profile not imported: unknown key \"glidepathDeg\" in \"overrides\"");
+        assert_eq!(e.params()["reason"], json!("unknownKey"));
+        let u = StoreError::from(Invalid::ApproachProfileUnknown { id: "my-va".into() });
+        assert_eq!(u.message(Lang::En), "There is no assessment profile \"my-va\"");
+        assert_eq!(u.to_json(Lang::De)["params"], json!({ "id": "my-va" }));
     }
 
     #[test]

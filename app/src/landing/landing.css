@@ -570,6 +570,15 @@
   gap: var(--sp-2);
   flex-wrap: wrap;
 }
+/* "Assessed with: Airbus-style profile"; the tooltip lists the values that differ from generic */
+.assessed-with {
+  cursor: help;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+.approach-profile {
+  flex-basis: 100%;
+}
 .approach-band {
   display: inline-flex;
   align-items: center;

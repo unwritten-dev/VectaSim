@@ -787,7 +787,7 @@
       },
       "bands": {
         "title": "Bänder:",
-        "text": "{stable} – keine Überschreitung; {deviations} – 1–2 Kriterien über 500 ft, keine darunter; {unstable} – 3 oder mehr Kriterien über 500 ft; {unstableBelow500} – mindestens eine Überschreitung unter 500 ft (nach EASA / Data4Safety). Ein Durchstarten ist kein Band, sondern das Ergebnis des Anflugs."
+        "text": "{stable} – keine Überschreitung; {deviations} – 1–2 Kriterien über {gate}, keine darunter; {unstable} – 3 oder mehr Kriterien über {gate}; {unstableBelow500} – mindestens eine Überschreitung unter {gate} (nach EASA / Data4Safety; harte Grenze nach: {profile}). Ein Durchstarten ist kein Band, sondern das Ergebnis des Anflugs."
       },
       "resolution": {
         "title": "Auflösung:",
@@ -979,6 +979,11 @@
       "rotation": "Rotation",
       "gearDown": "Fahrwerk",
       "exceedances": "Überschr."
+    },
+    "profile": {
+      "aria": "Bewertungsprofil",
+      "only": "Anflüge nach diesem Profil: {count}",
+      "note": "Stabil ab und Überschreitungen: nur Anflüge, bewertet nach: {name}"
     }
   },
   "dispersion": {
@@ -1232,7 +1237,8 @@
       "stable": "stabil",
       "unstable": "instabil",
       "unmeasured": "nicht messbar"
-    }
+    },
+    "profileScope": "Anflugwerte nur im Vergleich mit Anflügen, bewertet nach: {name}."
   },
   "replay": {
     "aria": "Wiedergabe des Anflugs",

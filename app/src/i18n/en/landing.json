@@ -787,7 +787,7 @@
       },
       "bands": {
         "title": "Bands:",
-        "text": "{stable} – no exceedance; {deviations} – 1–2 criteria above 500 ft, none below; {unstable} – 3 or more criteria above 500 ft; {unstableBelow500} – at least one exceedance below 500 ft (per EASA / Data4Safety). A go-around is not a band but the outcome of the approach."
+        "text": "{stable} – no exceedance; {deviations} – 1–2 criteria above {gate}, none below; {unstable} – 3 or more criteria above {gate}; {unstableBelow500} – at least one exceedance below {gate} (per EASA / Data4Safety; the hard gate of the {profile}). A go-around is not a band but the outcome of the approach."
       },
       "resolution": {
         "title": "Resolution:",
@@ -979,6 +979,11 @@
       "rotation": "Rotation",
       "gearDown": "Gear down",
       "exceedances": "Exceed."
+    },
+    "profile": {
+      "aria": "Assessment profile",
+      "only": "Approaches assessed with this profile: {count}",
+      "note": "Stable from and exceedances: only approaches assessed with the {name}"
     }
   },
   "dispersion": {
@@ -1232,7 +1237,8 @@
       "stable": "stable",
       "unstable": "unstable",
       "unmeasured": "not measurable"
-    }
+    },
+    "profileScope": "Approach values compared only with approaches assessed with the {name}."
   },
   "replay": {
     "aria": "Approach playback",

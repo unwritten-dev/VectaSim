@@ -531,6 +531,31 @@
         "done": "All data deleted · {flights}",
         "backup": "Backup before: {path}"
       }
+    },
+    "approachProfiles": {
+      "title": "Approach assessment",
+      "description": "Which thresholds rate your approaches. A profile changes only a few values of the generic FSF/EASA set; every built-in value comes from a public source.",
+      "autoTitle": "Automatic choice",
+      "auto": "Order: the profile chosen for the aircraft in the fleet, else the ICAO type – Airbus (A318–A380, A220) → Airbus-style; Boeing 7x7 and 717, MD-80/90/11 → Boeing-style; ATR, Dash 8 and other multi-crew turboprops → turboprop; C172, C182, PA-28, SR22, DA40 and other light aircraft, also PC-12, TBM and Caravan → GA piston; E-jets, ERJ, CRJ and business jets → generic. Unknown types: a recording without turbine N1 (piston engine) → GA piston, otherwise generic.",
+      "vapp": "All speed thresholds are applied to your Vapp (fleet value, else the flown median, else 1.3 × VS0). The EASA Data4Safety levels are defined against VREF; Vapp is about VREF + 5 kt – a VectaSim convention.",
+      "builtinTitle": "Built-in profiles",
+      "loading": "Loading profiles …",
+      "source": "Source: {source}",
+      "customTitle": "Imported profiles",
+      "customEmpty": "No imported profiles yet.",
+      "import": "Import profile (JSON) …",
+      "importTitle": "A JSON file with id, name, basedOn, source and overrides – then choose the profile per aircraft in the fleet.",
+      "format": "Format and all allowed keys: docs/approach-profiles.md",
+      "fileFilter": "Assessment profile",
+      "imported": "Profile “{name}” imported",
+      "replaced": "Profile “{name}” replaced",
+      "importedBody": "Choose it per aircraft in the fleet; approaches already assessed with it are assessed again.",
+      "importFailed": "Profile not imported",
+      "delete": "Delete",
+      "keep": "Keep",
+      "confirmDelete": "Delete “{name}”? Aircraft using it go back to automatic.",
+      "deleted": "Profile “{name}” deleted",
+      "deleteFailed": "Profile not deleted"
     }
   }
 }

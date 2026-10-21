@@ -34,7 +34,7 @@ import {
   type ScatterGate,
 } from "./approachStats";
 import { BandSwatch, ShapeMark } from "./BandMark";
-import type { BandShape } from "./facts";
+import { approachBandLabel, type BandShape } from "./facts";
 import "./dispersion.css";
 import "./approachDispersion.css";
 
@@ -73,7 +73,7 @@ const placeOf = (t: TFunction, f: ApproachFact) => [f.airportIcao, f.runwayIdent
 
 function factLine(t: TFunction, f: ApproachFact): string {
   const ac = [approachAircraftKey(f), f.registration].filter(Boolean).join(" ");
-  return [placeOf(t, f), ac, fmtDate(f.endedMs), outcomeText(t, f), f.band ? APPROACH_BAND_LABEL[f.band] : null, stableText(t, f)].filter(Boolean).join(" · ");
+  return [placeOf(t, f), ac, fmtDate(f.endedMs), outcomeText(t, f), f.band ? approachBandLabel(f.band, f.hardGateFt) : null, stableText(t, f)].filter(Boolean).join(" · ");
 }
 
 /**
@@ -563,7 +563,7 @@ export default function ApproachDispersion({ limit = 20 }: { limit?: number }) {
                     <td>
                       {f.band ? (
                         <>
-                          <BandSwatch shape={shapeOf(f.band)} color={bandVar(f.band)} /> {APPROACH_BAND_LABEL[f.band]}
+                          <BandSwatch shape={shapeOf(f.band)} color={bandVar(f.band)} /> {approachBandLabel(f.band, f.hardGateFt)}
                         </>
                       ) : (
                         "–"

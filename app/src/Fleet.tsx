@@ -15,6 +15,7 @@ import { LANDING_FLAPS_MAX, VAPP_MAX_KT, VAPP_MIN_KT, airframeName, matchesAirfr
 import { useAirframes } from "./airframes/hooks";
 import { navigate } from "./airframes/navigation";
 import { errorToast } from "./ui/errorToast";
+import { BUILTIN_PROFILES, profileName, profileTooltip, useApproachProfiles } from "./landing/approachProfiles";
 
 const PLANE_ICON = (
   <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round">
@@ -205,6 +206,7 @@ function AirframeDetail({ row: a, onSelect }: { row: AirframeRow; onSelect: (reg
     notes: a.notes ?? "",
     vappKt: a.vappKt != null ? String(Math.round(a.vappKt)) : "",
     landingFlaps: a.landingFlaps != null ? String(a.landingFlaps) : "",
+    approachProfile: a.approachProfile ?? "",
   });
   const [form, setForm] = useState(initial);
   const [flights, setFlights] = useState<FlightRow[] | null>(null);
@@ -212,6 +214,10 @@ function AirframeDetail({ row: a, onSelect }: { row: AirframeRow; onSelect: (reg
   const [merging, setMerging] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const { airframePhotos } = usePrefs();
+  const profiles = useApproachProfiles();
+  const customProfiles = (profiles?.profiles ?? []).filter((p) => !p.builtin);
+  // a chosen custom profile that is gone (deleted elsewhere) still shows until saved
+  const unknownProfile = form.approachProfile && !(BUILTIN_PROFILES as readonly string[]).includes(form.approachProfile) && profiles && !customProfiles.some((p) => p.id === form.approachProfile);
 
   useEffect(() => {
     invoke<FlightRow[]>("airframe_flights", { registration: a.registration, limit: 200 })
@@ -232,10 +238,10 @@ function AirframeDetail({ row: a, onSelect }: { row: AirframeRow; onSelect: (reg
       showToast({ tone: "warn", title: t("logbook.fleet.flapsInvalid"), body: t("logbook.fleet.flapsInvalidBody", { max: LANDING_FLAPS_MAX }) });
       return;
     }
-    const { customName, icaoType, airline, notes } = form;
-    // 0 clears the stored Vapp, −1 the landing flaps (the backend's conventions)
+    const { customName, icaoType, airline, notes, approachProfile } = form;
+    // 0 clears the stored Vapp, −1 the landing flaps, "" the profile (automatic) – the backend's conventions
     invoke("upsert_airframe", {
-      edit: { registration: a.registration, customName, icaoType, airline, notes, vappKt: vapp ?? 0, landingFlaps: flaps ?? -1 } satisfies AirframeEdit,
+      edit: { registration: a.registration, customName, icaoType, airline, notes, vappKt: vapp ?? 0, landingFlaps: flaps ?? -1, approachProfile } satisfies AirframeEdit,
     })
       .then(() => showToast({ tone: "ok", title: t("logbook.fleet.saved", { reg }) }))
       .catch((e) => showToast({ tone: "err", ...errorToast(t("logbook.fleet.saveFailed"), e, "logbook") }));
@@ -336,6 +342,33 @@ function AirframeDetail({ row: a, onSelect }: { row: AirframeRow; onSelect: (reg
             className: "num",
             title: t("logbook.fleet.flapsTitle"),
           })}
+          <label className="af-field">
+            <span className="stat-label">{t("logbook.fleet.profile")}</span>
+            <select
+              value={form.approachProfile}
+              onChange={(e) => setForm({ ...form, approachProfile: e.target.value })}
+              title={form.approachProfile ? profileTooltip(form.approachProfile, profiles, t) : t("logbook.fleet.profileTitle")}
+            >
+              <option value="">{t("logbook.fleet.profileAuto")}</option>
+              <optgroup label={t("logbook.fleet.profileBuiltin")}>
+                {BUILTIN_PROFILES.map((id) => (
+                  <option key={id} value={id}>
+                    {profileName(id, profiles, t)}
+                  </option>
+                ))}
+              </optgroup>
+              {customProfiles.length > 0 && (
+                <optgroup label={t("logbook.fleet.profileCustom")}>
+                  {customProfiles.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {unknownProfile && <option value={form.approachProfile}>{profileName(form.approachProfile, profiles, t)}</option>}
+            </select>
+          </label>
           <label className="af-field af-notes">
             <span className="stat-label">{t("logbook.fleet.notes")}</span>
             <textarea rows={3} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />

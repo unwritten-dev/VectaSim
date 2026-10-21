@@ -6,6 +6,7 @@
 //! (recorder, phase engine, UI) downsample as they see fit.
 
 pub mod approach;
+pub mod approach_profile;
 pub mod clock;
 pub mod diag;
 pub mod flight;

@@ -6,10 +6,18 @@
 //! window; this module covers the approach before it and down to the ground.
 //!
 //! Criteria and thresholds follow the EASA/Data4Safety "unstable approach" guidance
-//! (two levels S1/S2, each with a minimum duration; 1–2 criteria above 500 ft =
-//! "deviations", ≥ 3 above 500 ft = "unstable", ≥ 1 below 500 ft = "unstable below
-//! 500 ft"). Gate checks use the FSF stabilised-approach values (±1 dot, 1000 fpm,
-//! Vref −5/+20). Sources: EASA SIB 2013-03 / Flight Safety Foundation ALAR briefing notes.
+//! (two levels S1/S2, each with a minimum duration; 1–2 criteria above the hard gate =
+//! "deviations", ≥ 3 above it = "unstable", ≥ 1 below it = "unstable below the hard
+//! gate"; the hard gate is `ApproachConfig::hard_gate_ft`, 500 ft by default). Gate checks
+//! use the FSF stabilised-approach values (±1 dot, 1000 fpm, Vref −5/+20); the 15° gate
+//! bank limit is not FSF (BN 7.1 has no bank number) but the D4S S1 level / FAA AFH ch. 9.
+//! Sources: EASA SIB 2013-03 / Data4Safety / Flight Safety Foundation ALAR briefing notes;
+//! the values and their sources per assessment profile: `docs/approach-profiles-sources.md`,
+//! the profiles themselves: [`crate::approach_profile`].
+//!
+//! Reference speed: the D4S speed levels are defined against VREF; VectaSim applies them
+//! (and the gate window) to the approach speed Vapp (the pilot's, the flown median or
+//! `vapp_vs0_factor` × VS0), which is about VREF + 5 kt. That is a VectaSim convention.
 //!
 //! Conventions:
 //! - Heights are HAT (height above the touchdown/threshold elevation, see
@@ -144,10 +152,15 @@ pub struct AircraftRef {
     pub landing_flaps_index: Option<i32>,
 }
 
-/// Thresholds. Defaults: EASA/D4S levels for the continuous checks, FSF values at the gates.
+/// Thresholds. Defaults: EASA/D4S levels for the continuous checks, FSF values at the gates
+/// (the "generic" assessment profile; the other profiles change a few of them, see
+/// [`crate::approach_profile`]).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ApproachConfig {
+    /// Assessment profile these thresholds come from (`generic` = this default).
+    #[serde(default = "d_profile_id")]
+    pub profile_id: String,
     /// Reference glidepath (assumed; no procedure data) and its threshold crossing height.
     pub glidepath_deg: f64,
     pub tch_ft: f64,
@@ -194,7 +207,8 @@ pub struct ApproachConfig {
     pub lat_intercept_lookback_s: f64,
     #[serde(default = "d_lat_overshoot_min")]
     pub lat_overshoot_min_dots: f64,
-    /// Speed window around the reference speed, kt (S1/S2 above and below).
+    /// Speed window around the reference speed, kt (S1/S2 above and below). D4S defines the
+    /// levels against VREF; VectaSim applies them to Vapp (≈ VREF + 5 kt), a VectaSim convention.
     pub speed_s1_above_kt: f64,
     pub speed_s1_below_kt: f64,
     pub speed_s2_above_kt: f64,
@@ -210,8 +224,14 @@ pub struct ApproachConfig {
     pub bank_duration_s: f64,
     /// Gear down = at least this %.
     pub gear_down_pct: f64,
-    /// Below this HAT the gear must be down and the flaps must not change.
+    /// Below this HAT the gear must be down and the flaps must not change; gates above it
+    /// (the 1000 ft gate with a 500 ft configuration gate) do not check gear and flaps.
     pub config_gate_ft: f64,
+    /// Hard gate: one exceedance below this HAT makes the approach "unstable below the hard
+    /// gate" (EASA/D4S: 500 ft; FAA AFH ch. 9 for light aircraft in the pattern: 300 ft). The
+    /// gate list keeps its fixed 1000/500 ft gates.
+    #[serde(default = "d_hard_gate_ft")]
+    pub hard_gate_ft: f64,
     /// Excursions shorter than this never count ("momentary excursions").
     pub momentary_s: f64,
     /// Band window: from this HAT down to `window_bottom_ft`.
@@ -220,7 +240,9 @@ pub struct ApproachConfig {
     /// "Stable from" is searched below this HAT, rounded down to `stable_round_ft`.
     pub stable_from_max_ft: f64,
     pub stable_round_ft: f64,
-    /// Gate values (FSF): |V/S|, speed window, glidepath/localizer dots, bank.
+    /// Gate values: |V/S| (FSF BN 7.1, 1000 fpm), speed window (FSF VREF … VREF + 20 applied to
+    /// Vapp as −5/+20), glidepath/localizer dots (FSF ±1 dot) and bank (15°: EASA Data4Safety S1 /
+    /// FAA AFH ch. 9 – FSF BN 7.1 gives no bank number).
     pub gate_max_vs_fpm: f64,
     pub gate_speed_below_kt: f64,
     pub gate_speed_above_kt: f64,
@@ -314,6 +336,10 @@ pub struct ApproachConfig {
     /// (the retard before the touchdown does not count). VectaSim convention for the value.
     #[serde(default = "d_thrust_min_n1")]
     pub thrust_min_n1_pct: f64,
+    /// The thrust check runs at all (false for turboprops: their gas-generator N1 stays high at
+    /// flight idle, so an N1 floor says nothing).
+    #[serde(default = "d_thrust_check")]
+    pub thrust_check: bool,
     #[serde(default = "d_thrust_duration")]
     pub thrust_duration_s: f64,
     #[serde(default = "d_thrust_floor")]
@@ -339,6 +365,7 @@ pub struct ApproachConfig {
 impl Default for ApproachConfig {
     fn default() -> Self {
         Self {
+            profile_id: d_profile_id(),
             glidepath_deg: 3.0,
             tch_ft: 50.0,
             gs_dot_deg: 0.35,
@@ -374,6 +401,7 @@ impl Default for ApproachConfig {
             bank_duration_s: 3.0,
             gear_down_pct: 95.0,
             config_gate_ft: 1000.0,
+            hard_gate_ft: d_hard_gate_ft(),
             momentary_s: 3.0,
             window_top_ft: 1000.0,
             window_bottom_ft: 50.0,
@@ -428,6 +456,7 @@ impl Default for ApproachConfig {
             wind_crosswind_kt: d_wind_crosswind_kt(),
             wind_shear_kt: d_wind_shear_kt(),
             thrust_min_n1_pct: d_thrust_min_n1(),
+            thrust_check: d_thrust_check(),
             thrust_duration_s: d_thrust_duration(),
             thrust_floor_ft: d_thrust_floor(),
             n1_valid_min_pct: d_n1_valid_min(),
@@ -439,6 +468,15 @@ impl Default for ApproachConfig {
     }
 }
 
+fn d_profile_id() -> String {
+    crate::approach_profile::GENERIC.to_string()
+}
+fn d_hard_gate_ft() -> f64 {
+    500.0
+}
+fn d_thrust_check() -> bool {
+    true
+}
 fn d_ils_min_share() -> f64 {
     0.6
 }
@@ -766,7 +804,8 @@ pub struct Exceedance {
     pub peak: f64,
     /// The S1 limit it crossed.
     pub limit: f64,
-    /// Counts below 500 ft (EASA: one criterion there makes the approach unstable).
+    /// Counts below the hard gate (`ApproachConfig::hard_gate_ft`, 500 ft by default; EASA: one
+    /// criterion there makes the approach unstable). Name kept for the stored/serialised form.
     pub below_500: bool,
 }
 
@@ -775,11 +814,12 @@ pub struct Exceedance {
 pub enum ApproachBand {
     /// No S1 criterion 1000 → 50 ft.
     Stable,
-    /// 1–2 criteria above 500 ft, none below.
+    /// 1–2 criteria above the hard gate, none below.
     Deviations,
-    /// ≥ 3 criteria above 500 ft, none below.
+    /// ≥ 3 criteria above the hard gate, none below.
     Unstable,
-    /// ≥ 1 criterion below 500 ft.
+    /// ≥ 1 criterion below the hard gate (`ApproachConfig::hard_gate_ft`; the name is the
+    /// stored/serialised form from when the gate was always 500 ft).
     UnstableBelow500,
 }
 
@@ -1536,7 +1576,7 @@ fn outside(v: f64, (lo, hi): (Option<f64>, Option<f64>)) -> bool {
 fn specs(cfg: &ApproachConfig) -> Vec<Spec> {
     let m = cfg.momentary_s;
     let sym = |a: f64| (Some(-a), Some(a));
-    vec![
+    let all = vec![
         Spec { kind: CriterionKind::Gear, s1: (Some(cfg.gear_down_pct), None), s2: None, dur1: m, dur2: m, floor_ft: 0.0, ceil_ft: cfg.config_gate_ft },
         Spec { kind: CriterionKind::FlapChange, s1: (None, Some(0.5)), s2: None, dur1: 0.0, dur2: 0.0, floor_ft: 0.0, ceil_ft: cfg.config_gate_ft },
         Spec {
@@ -1603,7 +1643,9 @@ fn specs(cfg: &ApproachConfig) -> Vec<Spec> {
             floor_ft: cfg.window_bottom_ft,
             ceil_ft: cfg.config_gate_ft,
         },
-    ]
+    ];
+    // the profile may switch the thrust check off (turboprops)
+    all.into_iter().filter(|s| cfg.thrust_check || s.kind != CriterionKind::Thrust).collect()
 }
 
 fn measure(kind: CriterionKind, pts: &[ApproachProfilePoint], l: usize) -> Option<f64> {
@@ -1680,7 +1722,7 @@ fn exceedances(pts: &[ApproachProfilePoint], lo: usize, hi: usize, top_ft: f64, 
                 (None, Some(h)) => h,
                 (None, None) => 0.0,
             };
-            let below: usize = (start..=end).filter(|&m| pts[idx[m]].hat_ft < 500.0).count();
+            let below: usize = (start..=end).filter(|&m| pts[idx[m]].hat_ft < cfg.hard_gate_ft).count();
             let below_500 = if sp.dur1 <= 0.0 { below > 0 } else { below as f64 + 1e-9 >= sp.dur1 };
             let (ps, pe) = (&pts[idx[start]], &pts[idx[end]]);
             out.push(Exceedance {
@@ -2189,18 +2231,22 @@ fn analyze_attempt(inp: &Input, a: &ApproachAttempt, lower: usize, index: usize)
         });
         gates.push(ApproachGate { kind: GateKind::Faf, reached: faf.is_some(), faf_reason, criteria, sample: faf.clone() });
     }
-    for (kind, g) in [(GateKind::Ft1000, &g1000), (GateKind::Ft500, &g500)] {
+    for (kind, gate_ft, g) in [(GateKind::Ft1000, 1000.0, &g1000), (GateKind::Ft500, 500.0, &g500)] {
         let criteria = g.as_ref().map_or_else(Vec::new, |s| {
-            let mut c = vec![
-                criterion(CriterionKind::Gear, Some(s.gear_pct), Some(cfg.gear_down_pct), None, None),
-                flaps_criterion(s),
+            // gear and landing flaps only from the configuration gate down (500 ft for GA)
+            let mut c = if gate_ft <= cfg.config_gate_ft + 1e-9 {
+                vec![criterion(CriterionKind::Gear, Some(s.gear_pct), Some(cfg.gear_down_pct), None, None), flaps_criterion(s)]
+            } else {
+                Vec::new()
+            };
+            c.extend([
                 criterion(CriterionKind::VerticalSpeed, Some(s.vs_fpm), Some(-cfg.gate_max_vs_fpm), Some(cfg.gate_max_vs_fpm), None),
                 criterion(CriterionKind::Speed, s.ias_dev_kt, Some(-cfg.gate_speed_below_kt), Some(cfg.gate_speed_above_kt), vapp),
                 criterion(CriterionKind::Glidepath, s.gs_dots, Some(-cfg.gate_dots), Some(cfg.gate_dots), Some(gp_ref)),
                 criterion(CriterionKind::Localizer, s.loc_dots, Some(-cfg.gate_dots), Some(cfg.gate_dots), None),
                 criterion(CriterionKind::Bank, Some(s.bank_deg.abs()), None, Some(cfg.gate_max_bank_deg), None),
-            ];
-            if has_n1 {
+            ]);
+            if has_n1 && cfg.thrust_check {
                 c.push(criterion(CriterionKind::Thrust, s.n1_pct, Some(cfg.thrust_min_n1_pct), None, None));
             }
             if has_spoilers {

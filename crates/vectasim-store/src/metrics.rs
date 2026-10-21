@@ -23,7 +23,10 @@
 //!   one): its number of exceedances (None when it never got below 1000 ft) and the gate
 //!   verdicts (failed → false, measured → true, nothing measurable / not reached → None).
 //!
-//! Stored per flight in `flight_metrics` (schema v18), one row per flight, versioned like
+//! - assessment profile: the profile that approach was assessed with (exceedances and gate
+//!   verdicts only compare within one profile).
+//!
+//! Stored per flight in `flight_metrics` (schema v18, `approach_profile` since v19), one row per flight, versioned like
 //! `approach_facts`: a row of another [`FLIGHT_METRICS_VERSION`] is stale. A flight without
 //! anything measurable still gets its row (all `None`), so it is not computed again.
 
@@ -38,7 +41,8 @@ use vectasim_core::landing::CheckStatus;
 
 /// Version of the stored metrics; bump when a rule above (or the approach analysis they read)
 /// changes, so old rows are recomputed.
-pub const FLIGHT_METRICS_VERSION: u32 = 1;
+/// 2: assessment profiles (exceedances and gates follow the flight's profile, `approach_profile`).
+pub const FLIGHT_METRICS_VERSION: u32 = 2;
 
 /// The thresholds shared with the frontend (`app/src/trackEvents.constants.json`).
 #[derive(Clone, Debug, PartialEq, Deserialize)]
@@ -95,6 +99,8 @@ pub struct ApproachSummary {
     pub exceedances: Option<u32>,
     pub stable_1000: Option<bool>,
     pub stable_500: Option<bool>,
+    /// Assessment profile id of the analysis.
+    pub profile: Option<String>,
 }
 
 impl From<&ApproachAnalysis> for ApproachSummary {
@@ -108,6 +114,7 @@ impl From<&ApproachAnalysis> for ApproachSummary {
             exceedances: a.band.map(|_| a.exceedances.len() as u32),
             stable_1000: verdict(GateKind::Ft1000),
             stable_500: verdict(GateKind::Ft500),
+            profile: Some(a.config.profile_id.clone()),
         }
     }
 }
@@ -143,6 +150,9 @@ pub struct FlightMetricsRow {
     pub exceedances: Option<u32>,
     pub stable_1000: Option<bool>,
     pub stable_500: Option<bool>,
+    /// Assessment profile of the landing approach (schema v19; None: no assessed approach).
+    #[serde(default)]
+    pub approach_profile: Option<String>,
 }
 
 fn pitch_rate(s: &[TrackSample], k: usize) -> f64 {
@@ -293,6 +303,7 @@ pub fn derive(samples: &[TrackSample], touchdowns: &[TouchdownRef], approaches: 
         exceedances: a.and_then(|a| a.exceedances),
         stable_1000: a.and_then(|a| a.stable_1000),
         stable_500: a.and_then(|a| a.stable_500),
+        approach_profile: a.and_then(|a| a.profile.clone()),
     }
 }
 
@@ -326,7 +337,8 @@ CREATE TABLE IF NOT EXISTS flight_metrics (
 "#;
 
 const METRIC_COLS: &str = "m.version, m.computed_ms, m.airport_icao, m.runway_ident, m.rotation_rate_deg_s, m.rotation_peak_deg_s,
-    m.rotation_duration_s, m.gear_down_agl_ft, m.gear_down_dist_nm, m.landing_flaps_agl_ft, m.exceedances, m.stable_1000, m.stable_500";
+    m.rotation_duration_s, m.gear_down_agl_ft, m.gear_down_dist_nm, m.landing_flaps_agl_ft, m.exceedances, m.stable_1000, m.stable_500,
+    m.approach_profile";
 
 /// Row from [`METRIC_COLS`] starting at column `o`; None when the flight has no row (LEFT JOIN).
 fn row_to_metrics(r: &Row<'_>, o: usize) -> rusqlite::Result<Option<FlightMetricsRow>> {
@@ -345,6 +357,7 @@ fn row_to_metrics(r: &Row<'_>, o: usize) -> rusqlite::Result<Option<FlightMetric
         exceedances: r.get::<_, Option<i64>>(o + 10)?.map(|v| v.max(0) as u32),
         stable_1000: r.get(o + 11)?,
         stable_500: r.get(o + 12)?,
+        approach_profile: r.get(o + 13)?,
     }))
 }
 
@@ -376,8 +389,8 @@ impl Store {
         conn.execute(
             "INSERT OR REPLACE INTO flight_metrics (flight_id, version, computed_ms, airport_icao, runway_ident, rotation_rate_deg_s,
                  rotation_peak_deg_s, rotation_duration_s, gear_down_agl_ft, gear_down_dist_nm, landing_flaps_agl_ft, exceedances,
-                 stable_1000, stable_500)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                 stable_1000, stable_500, approach_profile)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             params![
                 flight_id,
                 m.version,
@@ -392,7 +405,8 @@ impl Store {
                 m.landing_flaps_agl_ft,
                 m.exceedances,
                 m.stable_1000,
-                m.stable_500
+                m.stable_500,
+                m.approach_profile
             ],
         )?;
         Ok(true)
@@ -473,6 +487,7 @@ mod tests {
             exceedances: (!a["band"].is_null()).then(|| a["exceedances"].as_u64().unwrap() as u32),
             stable_1000: verdict(GateKind::Ft1000),
             stable_500: verdict(GateKind::Ft500),
+            profile: None,
         }
     }
 

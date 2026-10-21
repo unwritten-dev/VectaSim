@@ -18,6 +18,7 @@ import ReplayBar, { ReplayValues } from "./ReplayBar";
 import { ReplayContext, debriefReplay, debriefReplayPlan, useReplayStore } from "./replayStore";
 import {
   APPROACH_BAND_LABEL,
+  approachBandLabel,
   G_BAND_REASON,
   G_BANDS,
   INDEX_LABEL,
@@ -60,6 +61,8 @@ import { navigate } from "../airframes/navigation";
 import type { ApproachAnalysis } from "./approachTypes";
 import type { LandingAnalysis, LandingDebriefData } from "./types";
 import HistoryPanel from "./HistoryPanel";
+import AssessedWith from "./AssessedWith";
+import { profileName } from "./approachProfiles";
 import "./landing.css";
 import { gLoadProtocol } from "../gload";
 import { Modal } from "../ui/Modal";
@@ -455,7 +458,9 @@ function ApproachMethodItems({ a }: { a: ApproachAnalysis }) {
           stable: APPROACH_BAND_LABEL.stable,
           deviations: APPROACH_BAND_LABEL.deviations,
           unstable: APPROACH_BAND_LABEL.unstable,
-          unstableBelow500: APPROACH_BAND_LABEL.unstableBelow500,
+          unstableBelow500: approachBandLabel("unstableBelow500", c.hardGateFt),
+          gate: fmt(c.hardGateFt ?? 500, 0, "ft"),
+          profile: profileName(c.profileId, null, t),
         })}
       </li>
       <li>
@@ -491,6 +496,7 @@ function GoAroundBody({ a, flight, titleId }: { a: ApproachAnalysis; flight: Fli
               .filter(Boolean)
               .join(" · ")}
           </div>
+          <AssessedWith profileId={a.config.profileId} />
         </div>
       </header>
 
@@ -657,6 +663,7 @@ export function DebriefBody({ d, approach, titleId, onRunwayChanged }: { d: Land
               .filter(Boolean)
               .join(" · ")}
           </div>
+          {apr && <AssessedWith profileId={apr.config.profileId} />}
           <CardActions d={d} approach={apr} />
           {editing && editIcao && <RunwayEditor analysis={a} airportIcao={editIcao} onClose={closeEditor} onChanged={onRunwayChanged} />}
         </div>

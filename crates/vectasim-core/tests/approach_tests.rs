@@ -847,3 +847,68 @@ fn clock_stepping_back_inside_the_approach_does_not_panic() {
         }
     }
 }
+
+// ---- assessment profiles ------------------------------------------------------------------
+
+fn profile_cfg(id: &str) -> ApproachConfig {
+    vectasim_core::approach_profile::builtin(id).unwrap().config()
+}
+
+fn analyze_with(track: &[ApproachSample], tds: &[TouchdownReport], cfg: &ApproachConfig) -> ApproachAnalysis {
+    approach::analyze_flight(track, &[], tds, &both_ends(runway09()), &AircraftRef::default(), cfg).remove(0)
+}
+
+#[test]
+fn turboprop_profile_does_not_check_thrust() {
+    // the idle segment of `idle_thrust_and_extended_spoilers_are_criteria_with_their_durations`
+    let (mut track, tds) = straight_in(|_, _| 140.0, None);
+    with_v2(&mut track, 0.0, 0.0, |_| (90.0, 5.0), |h| if (400.0..=800.0).contains(&h) { 25.0 } else { 55.0 }, |_| 0.0);
+    let generic = analyze_with(&track, &tds, &ApproachConfig::default());
+    assert!(generic.exceedances.iter().any(|e| e.kind == CriterionKind::Thrust));
+    let a = analyze_with(&track, &tds, &profile_cfg("turboprop"));
+    assert_eq!(a.config.profile_id, "turboprop");
+    assert!(a.exceedances.iter().all(|e| e.kind != CriterionKind::Thrust), "{:#?}", a.exceedances);
+    assert!(!has(&a, GateKind::Ft500, CriterionKind::Thrust) && !has(&a, GateKind::Ft1000, CriterionKind::Thrust));
+    assert_eq!(a.band, Some(ApproachBand::Stable));
+}
+
+#[test]
+fn ga_hard_gate_is_300_ft() {
+    // 25 kt fast between 450 and 350 ft: below 500 ft, above 300 ft
+    let (track, tds) = straight_in(|h, _| if (350.0..=450.0).contains(&h) { 165.0 } else { 140.0 }, None);
+    let generic = analyze_with(&track, &tds, &ApproachConfig::default());
+    assert_eq!(generic.band, Some(ApproachBand::UnstableBelow500), "{:#?}", generic.exceedances);
+    let ga = analyze_with(&track, &tds, &profile_cfg("ga_piston"));
+    assert_eq!(ga.config.hard_gate_ft, 300.0);
+    assert!(ga.exceedances.iter().any(|e| e.kind == CriterionKind::Speed && !e.below_500), "{:#?}", ga.exceedances);
+    assert_eq!(ga.band, Some(ApproachBand::Deviations));
+    // the gate list keeps its 1000 / 500 ft gates
+    assert!(approach::gate(&ga, GateKind::Ft1000).unwrap().reached && approach::gate(&ga, GateKind::Ft500).unwrap().reached);
+}
+
+#[test]
+fn ga_configuration_gate_is_500_ft() {
+    // gear down only at 800 ft
+    let (mut track, tds) = straight_in(|_, _| 140.0, None);
+    for s in &mut track {
+        if s.altitude_agl_ft > 800.0 {
+            s.gear_pct = 0.0;
+        }
+    }
+    let generic = analyze_with(&track, &tds, &ApproachConfig::default());
+    assert!(generic.exceedances.iter().any(|e| e.kind == CriterionKind::Gear), "{:#?}", generic.exceedances);
+    assert_eq!(status(&generic, GateKind::Ft1000, CriterionKind::Gear), CheckStatus::Fail);
+    let ga = analyze_with(&track, &tds, &profile_cfg("ga_piston"));
+    assert!(ga.exceedances.iter().all(|e| e.kind != CriterionKind::Gear), "{:#?}", ga.exceedances);
+    assert!(!has(&ga, GateKind::Ft1000, CriterionKind::Gear) && !has(&ga, GateKind::Ft1000, CriterionKind::Flaps));
+    assert_eq!(status(&ga, GateKind::Ft500, CriterionKind::Gear), CheckStatus::Pass);
+    assert_eq!(ga.band, Some(ApproachBand::Stable));
+}
+
+#[test]
+fn airbus_gate_speed_is_vapp_plus_10() {
+    // 15 kt fast at the 1000 ft gate only: inside the generic +20, outside the Airbus +10
+    let (track, tds) = straight_in(|h, _| if (950.0..=1050.0).contains(&h) { 155.0 } else { 140.0 }, None);
+    assert_eq!(status(&analyze_with(&track, &tds, &ApproachConfig::default()), GateKind::Ft1000, CriterionKind::Speed), CheckStatus::Pass);
+    assert_eq!(status(&analyze_with(&track, &tds, &profile_cfg("airbus")), GateKind::Ft1000, CriterionKind::Speed), CheckStatus::Fail);
+}

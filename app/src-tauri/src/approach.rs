@@ -8,6 +8,13 @@
 //! yields the per-flight metrics (`flight_metrics`, see `crate::metrics`).
 //!
 //! Track decoding costs a few ms per flight, so both commands run on a blocking thread.
+//!
+//! Assessment profiles (`vectasim_core::approach_profile`): every analysis runs with the
+//! flight's profile (airframe choice → ICAO type → engine type → generic, see
+//! [`flight_config`]); `approach_profiles`, `import_approach_profile` and
+//! `delete_approach_profile` serve the settings. A changed profile drops the cached facts and
+//! metrics it affects; they are recomputed by the same lazy paths as after a version bump
+//! (`approach_facts_recent` inline, `flight_metrics_recent` in the background).
 
 use crate::landing::{aircraft_ref, resolve_runway, runway_ends_near, to_sample, user_runways_near};
 use crate::manager::ProviderManager;
@@ -17,6 +24,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use vectasim_core::approach::{
     self, ApproachAnalysis, ApproachBand, ApproachConfig, ApproachSample, ElevationSource, GoAroundSource, LateralBand, PhaseMark,
 };
+use vectasim_core::approach_profile::{self, ApproachProfile, EngineClass, OVERRIDE_KEYS, OverrideKey, OverrideValue};
 use vectasim_core::landing::{CriterionKind, LandingSample, RunwayEnd, RunwayGeometry, RunwayGeometrySource};
 use vectasim_data::AirportIndex;
 use vectasim_store::{
@@ -55,7 +63,7 @@ fn analyze_loaded(
 ) -> Vec<ApproachAnalysis> {
     let samples: Vec<ApproachSample> = track.iter().map(TrackSample::to_approach_sample).collect();
     let phases: Vec<PhaseMark> = detail.phases.iter().map(|p| PhaseMark { from: p.from, to: p.to, t_ms: p.timestamp_ms }).collect();
-    let cfg = ApproachConfig::default();
+    let cfg = flight_config(store, flight_id, track);
     // learn runways only from finished (not live), non-demo flights
     let remember = (!is_live && !matches!(detail.flight.provider.as_deref(), Some("mock" | "replay"))).then_some(flight_id);
 
@@ -107,6 +115,29 @@ fn analyze_loaded(
         }
     }
     out
+}
+
+/// What the recording tells about the engines: a v2 track whose N1 never left 0 in the air
+/// is a piston aircraft (piston engines report no turbine N1). The sim's `ENGINE TYPE` is not
+/// recorded, so turboprop and jet cannot be told apart here (both → None, the type mapping or
+/// generic decides).
+fn engine_hint(track: &[TrackSample], cfg: &ApproachConfig) -> Option<EngineClass> {
+    let mut airborne_n1 = track.iter().filter(|s| !s.on_ground).filter_map(|s| s.n1_pct).peekable();
+    airborne_n1.peek()?;
+    airborne_n1.all(|n| n <= cfg.n1_valid_min_pct).then_some(EngineClass::Piston)
+}
+
+/// The thresholds a flight is assessed with: its profile's config (generic when the logbook
+/// cannot tell).
+pub(crate) fn flight_config(store: &Store, flight_id: &str, track: &[TrackSample]) -> ApproachConfig {
+    let engine = engine_hint(track, &ApproachConfig::default());
+    match store.resolve_flight_profile(flight_id, engine, None) {
+        Ok((p, _)) => p.config(),
+        Err(e) => {
+            log::warn!("assessment profile of flight {flight_id}: {e}");
+            ApproachConfig::default()
+        }
+    }
 }
 
 /// Compute and store what a flight's track yields for the comparisons: the approach facts and
@@ -180,6 +211,8 @@ pub struct ApproachFact {
     /// Localizer RMS 1000 → 50 ft, dots (None: not measurable, derived runway, or cached before v4).
     pub loc_rms_dots: Option<f64>,
     pub lateral_band: Option<LateralBand>,
+    /// Hard gate of the profile the approach was assessed with, ft (None: cached before v6 = 500 ft).
+    pub hard_gate_ft: Option<f64>,
     pub aircraft_icao_type: Option<String>,
     pub aircraft_title: Option<String>,
     pub registration: Option<String>,
@@ -210,6 +243,7 @@ fn to_fact(f: &FlightRow, row: ApproachFactRow) -> ApproachFact {
         runway_source: d.as_ref().and_then(|d| d.runway_source),
         loc_rms_dots: d.as_ref().and_then(|d| d.loc_rms_dots),
         lateral_band: d.as_ref().and_then(|d| d.lateral_band),
+        hard_gate_ft: d.as_ref().and_then(|d| d.hard_gate_ft),
         aircraft_icao_type: icao_from_atc_model(&f.aircraft.atc_model),
         aircraft_title: non_empty(&f.aircraft.title),
         registration: f.airframe_reg.as_deref().and_then(normalize_registration).or_else(|| resolve_registration(None, Some(&f.aircraft.atc_id))),
@@ -266,4 +300,147 @@ pub async fn approach_facts_recent(
     let (store, airports) = (store.inner().clone(), airports.inner().clone());
     let include_demo = include_demo.unwrap_or(true);
     tauri::async_runtime::spawn_blocking(move || facts_recent(&store, &airports, limit, include_demo)).await.map_err(|e| e.to_string())?
+}
+
+// ---- assessment profiles (settings) --------------------------------------------------------
+
+/// One profile for the settings: the profile and its effective values that differ from generic
+/// (a custom profile's base included), in the order of the key table.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileInfo {
+    #[serde(flatten)]
+    pub profile: ApproachProfile,
+    pub effective: Vec<EffectiveValue>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EffectiveValue {
+    pub key: &'static str,
+    pub value: OverrideValue,
+    /// The generic value it replaces.
+    pub generic: Option<OverrideValue>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApproachProfiles {
+    /// Built-ins first (generic, airbus, boeing, turboprop, ga_piston), then the custom ones.
+    pub profiles: Vec<ProfileInfo>,
+    /// Every key a custom profile may set, with its range.
+    pub keys: &'static [OverrideKey],
+}
+
+fn info(p: ApproachProfile) -> ProfileInfo {
+    let generic = ApproachConfig::default();
+    let effective = p
+        .effective_overrides()
+        .into_iter()
+        .map(|(key, value)| EffectiveValue { key, value, generic: approach_profile::value_of(&generic, key) })
+        .collect();
+    ProfileInfo { profile: p, effective }
+}
+
+fn profiles_of(store: &Store) -> Result<ApproachProfiles, String> {
+    let custom = store.custom_approach_profiles().map_err(crate::lang::ui_error)?;
+    let profiles = approach_profile::builtins().into_iter().chain(custom).map(info).collect();
+    Ok(ApproachProfiles { profiles, keys: OVERRIDE_KEYS })
+}
+
+/// Built-in and custom assessment profiles with their values.
+#[tauri::command]
+pub fn approach_profiles(store: State<'_, Store>) -> Result<ApproachProfiles, String> {
+    profiles_of(&store)
+}
+
+/// What `import_approach_profile` answers.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileImport {
+    pub profile: ProfileInfo,
+    /// An existing custom profile with the same id was replaced.
+    pub replaced: bool,
+}
+
+const PROFILE_EXTENSIONS: &[&str] = &["json"];
+
+fn profiles_changed(app: &AppHandle) {
+    let _ = app.emit("approach:profiles", ());
+    // facts assessed with a replaced / deleted profile were dropped: the lists reload (and refill)
+    let _ = app.emit("approach:facts", ());
+    let _ = app.emit(crate::metrics::EVENT, ());
+}
+
+/// Import a custom profile from a JSON file (`docs/approach-profiles.md`); a profile with the
+/// same id is replaced. Refusals carry the reason (`store.approach_profile_invalid`).
+#[tauri::command]
+pub fn import_approach_profile(path: String, app: AppHandle, store: State<'_, Store>) -> Result<ProfileImport, String> {
+    let src = crate::data::check_path(&path, PROFILE_EXTENSIONS, &[])?;
+    let shown = src.display().to_string();
+    let meta = std::fs::metadata(&src).map_err(|e| format!("{shown}: {e}"))?;
+    if meta.len() > approach_profile::CUSTOM_MAX_BYTES as u64 {
+        let e = vectasim_store::StoreError::from(vectasim_store::Invalid::ApproachProfileInvalid {
+            cause: approach_profile::ProfileError::TooLarge { max_bytes: approach_profile::CUSTOM_MAX_BYTES },
+        });
+        return Err(crate::lang::ui_error(e));
+    }
+    let json = std::fs::read_to_string(&src).map_err(|e| format!("{shown}: {e}"))?;
+    let (p, replaced) = store.import_approach_profile(&json).map_err(crate::lang::ui_error)?;
+    log::info!("approach profile {} imported{}", p.id, if replaced { " (replaced)" } else { "" });
+    profiles_changed(&app);
+    Ok(ProfileImport { profile: info(p), replaced })
+}
+
+/// Delete a custom profile (airframes that used it go back to automatic).
+#[tauri::command]
+pub fn delete_approach_profile(id: String, app: AppHandle, store: State<'_, Store>) -> Result<bool, String> {
+    let ok = store.delete_approach_profile(&id).map_err(crate::lang::ui_error)?;
+    if ok {
+        log::info!("approach profile {id} deleted");
+        profiles_changed(&app);
+        let _ = app.emit("airframes:changed", "");
+    }
+    Ok(ok)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample(on_ground: bool, n1: Option<f64>) -> TrackSample {
+        TrackSample { on_ground, n1_pct: n1, ..Default::default() }
+    }
+
+    #[test]
+    fn piston_is_told_by_n1_zero_in_the_air() {
+        let cfg = ApproachConfig::default();
+        assert_eq!(engine_hint(&[], &cfg), None);
+        // v1 track: no N1 at all
+        assert_eq!(engine_hint(&[sample(false, None), sample(false, None)], &cfg), None);
+        assert_eq!(
+            engine_hint(&[sample(true, Some(60.0)), sample(false, Some(0.0)), sample(false, Some(0.0))], &cfg),
+            Some(EngineClass::Piston)
+        );
+        assert_eq!(engine_hint(&[sample(false, Some(0.0)), sample(false, Some(55.0))], &cfg), None);
+    }
+
+    #[test]
+    fn profiles_list_builtins_with_their_differences() {
+        let store = Store::open_in_memory().unwrap();
+        let list = profiles_of(&store).unwrap();
+        let ids: Vec<&str> = list.profiles.iter().map(|p| p.profile.id.as_str()).collect();
+        assert_eq!(ids, ["generic", "airbus", "boeing", "turboprop", "ga_piston"]);
+        let airbus = &list.profiles[1];
+        assert_eq!(airbus.effective.len(), 1);
+        let e = &airbus.effective[0];
+        assert_eq!((e.key, e.value, e.generic), ("gateSpeedAboveKt", OverrideValue::Number(10.0), Some(OverrideValue::Number(20.0))));
+        assert!(list.profiles[0].effective.is_empty() && list.profiles[2].effective.is_empty());
+        let v = serde_json::to_value(&list.profiles[4]).unwrap();
+        assert_eq!(v["id"], "ga_piston");
+        assert_eq!(v["overrides"]["hardGateFt"], 300.0);
+        assert_eq!(v["effective"][6]["key"], "hardGateFt");
+        let keys = serde_json::to_value(list.keys).unwrap();
+        assert!(keys.as_array().unwrap().iter().any(|k| k["key"] == "thrustCheck" && k["kind"] == "bool"));
+    }
 }

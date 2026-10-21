@@ -2555,9 +2555,33 @@ button.primary {
   min-width: 0;
 }
 .af-field input,
+.af-field select,
 .af-field textarea {
   width: 100%;
   box-sizing: border-box;
+}
+/* Settings → Approach assessment: one block per profile */
+.ap-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--sp-2) var(--sp-4);
+  margin-bottom: var(--sp-2);
+}
+.ap-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.ap-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.ap-values {
+  margin: 0;
+  padding-left: 1.1em;
 }
 .af-notes {
   grid-column: 1 / -1;

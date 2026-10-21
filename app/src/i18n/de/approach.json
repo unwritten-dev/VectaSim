@@ -265,6 +265,58 @@
       "fafFirst": "{first} zuerst · {dist} · {height}",
       "valuesOnly": "nur Werte",
       "windowNote": "{top} → {bottom}, nur zusammenhängende Abschnitte ab der Mindestdauer"
+    },
+    "assessment": {
+      "name": {
+        "generic": "Allgemeines Profil (FSF/EASA)",
+        "airbus": "Airbus-Profil",
+        "boeing": "Boeing-Profil",
+        "turboprop": "Turboprop-/Regional-Profil",
+        "ga_piston": "GA-Kolben-Profil"
+      },
+      "assessedWith": "Bewertet nach: {name}",
+      "unknown": "Profil „{id}“ (gelöscht)",
+      "differs": "Abweichend vom allgemeinen Profil (FSF/EASA):",
+      "sameAsGeneric": "Dieselben Grenzwerte wie das allgemeine Profil (FSF/EASA).",
+      "basedOn": "Basiert auf: {name}",
+      "valueChange": "{label}: {value} (allgemein {generic})",
+      "on": "an",
+      "off": "aus",
+      "key": {
+        "gateSpeedAboveKt": "Gate-Fahrt über Vapp",
+        "gateSpeedBelowKt": "Gate-Fahrt unter Vapp",
+        "gateMaxVsFpm": "Gate-Sinkrate",
+        "gateMaxBankDeg": "Gate-Querlage",
+        "gateDots": "Gate Gleitpfad/Kurs",
+        "speedS1AboveKt": "Fahrt S1 über Vapp",
+        "speedS1BelowKt": "Fahrt S1 unter Vapp",
+        "speedS2AboveKt": "Fahrt S2 über Vapp",
+        "speedS2BelowKt": "Fahrt S2 unter Vapp",
+        "speedDurationS": "Fahrt Mindestdauer",
+        "vsS1Fpm": "Sinkrate S1",
+        "vsS2Fpm": "Sinkrate S2",
+        "vsS1DurationS": "Sinkrate S1 Mindestdauer",
+        "vsS2DurationS": "Sinkrate S2 Mindestdauer",
+        "bankS1Deg": "Querlage S1",
+        "bankS2Deg": "Querlage S2",
+        "bankDurationS": "Querlage Mindestdauer",
+        "gsS1Dots": "Gleitpfad S1",
+        "gsS2Dots": "Gleitpfad S2",
+        "gsDurationS": "Gleitpfad Mindestdauer",
+        "locS1Dots": "Kurs S1",
+        "locS2Dots": "Kurs S2",
+        "locDurationS": "Kurs Mindestdauer",
+        "momentaryS": "Kurze Ausreißer bis",
+        "configGateFt": "Konfigurations-Gate",
+        "hardGateFt": "Harte Grenze (instabil darunter)",
+        "windowTopFt": "Obergrenze Bewertungsfenster",
+        "thrustCheck": "Schubprüfung",
+        "thrustMinN1Pct": "Schub mindestens N1",
+        "thrustDurationS": "Schub Mindestdauer",
+        "spoilersMaxPct": "Spoiler höchstens",
+        "statsSpeedAboveKt": "Statistikfenster über Vapp",
+        "statsSpeedBelowKt": "Statistikfenster unter Vapp"
+      }
     }
   }
 }

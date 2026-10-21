@@ -149,17 +149,21 @@ pub fn active_airframe(store: State<Store>) -> Result<Option<Airframe>, String> 
     }
 }
 
-/// Manual create/edit (name, type, airline, notes, Vapp, landing flaps).
+/// Manual create/edit (name, type, airline, notes, Vapp, landing flaps, assessment profile).
 #[tauri::command]
 pub fn upsert_airframe(edit: AirframeEdit, app: AppHandle, store: State<Store>) -> Result<Airframe, String> {
     reg_or_err(&edit.registration)?;
-    let refs_edited = edit.vapp_kt.is_some() || edit.landing_flaps.is_some();
-    let before = refs_edited.then(|| store.get_airframe(&edit.registration).ok().flatten().map(|a| (a.vapp_kt, a.landing_flaps)).unwrap_or_default());
+    let refs_edited = edit.vapp_kt.is_some() || edit.landing_flaps.is_some() || edit.approach_profile.is_some();
+    let before = refs_edited.then(|| {
+        store.get_airframe(&edit.registration).ok().flatten().map(|a| (a.vapp_kt, a.landing_flaps, a.approach_profile)).unwrap_or_default()
+    });
     let a = store.upsert_airframe(&edit, now()).map_err(err)?.ok_or(crate::lang::tr("Registrierung ungültig", "Invalid registration"))?;
     changed(&app, &a.registration);
-    // a new Vapp / landing flaps re-rate the approaches of this airframe: the strips reload their (recomputed) facts
-    if before.is_some_and(|b| b != (a.vapp_kt, a.landing_flaps)) {
+    // a new Vapp / landing flaps / assessment profile re-rate the approaches of this airframe:
+    // the strips and comparisons reload their (recomputed) facts and metrics
+    if before.is_some_and(|b| b != (a.vapp_kt, a.landing_flaps, a.approach_profile.clone())) {
         let _ = app.emit("approach:facts", a.registration.as_str());
+        let _ = app.emit(crate::metrics::EVENT, ());
     }
     Ok(safe(a))
 }

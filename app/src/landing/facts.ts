@@ -852,6 +852,14 @@ export const APPROACH_BAND_LABEL: Record<ApproachBand, string> = labels(["stable
   k === "unstableBelow500" ? t("facts.approachBand.unstableBelow500", { ft: fmt(500, 0, "ft") }) : t(`facts.approachBand.${k}`),
 );
 
+/**
+ * Band label with the hard gate of the profile the approach was assessed with ("Unstable below
+ * 300 ft" for the GA piston profile); 500 ft when not stated.
+ */
+export function approachBandLabel(band: ApproachBand, hardGateFt?: number | null): string {
+  return band === "unstableBelow500" ? t("facts.approachBand.unstableBelow500", { ft: fmt(hardGateFt ?? 500, 0, "ft") }) : APPROACH_BAND_LABEL[band];
+}
+
 /** CSS custom property per approach band: the band scale (stabil = sanft, Abweichungen = fest, instabil = hart). */
 export const APPROACH_BAND_VAR: Record<ApproachBand, string> = {
   stable: "var(--aband-stable)",
@@ -1113,7 +1121,8 @@ export function approachKeySentence(a: ApproachAnalysis): string {
   const out = [t("facts.approachKey.sentence", { clauses: first.join(", ") })];
   const main = mainExceedance(a);
   if (main) {
-    const ft = fmt(500, 0, "ft");
+    // the hard gate of the assessment profile (300 ft for GA piston)
+    const ft = fmt(a.config.hardGateFt ?? 500, 0, "ft");
     const lead =
       a.band === "unstableBelow500"
         ? t("facts.approachKey.unstableBelow500", { ft })

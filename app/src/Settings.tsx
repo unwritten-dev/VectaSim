@@ -41,6 +41,7 @@ import { OWN_AIRCRAFT, THEMES, type ThemeId } from "./themes";
 import LiveRawData from "./LiveRawData";
 import IntegrationsPanel from "./IntegrationsPanel";
 import ServerPanel from "./ServerPanel";
+import ApproachProfilesPanel from "./ApproachProfilesPanel";
 import { REPLAY_SPEEDS, diagPackageName, fmtBytes } from "./rawDiag";
 import SimConnectDownload from "./SimConnectDownload";
 import SimulatorSelect from "./SimulatorSelect";
@@ -702,6 +703,8 @@ export default function Settings({ providers, onProvider, online, status, flight
           <span className="detail">{t("settings.display.online.hint")}</span>
         </div>
       </Panel>
+
+      <ApproachProfilesPanel />
 
       <DataPanel onError={(e) => setError(e)} />
 

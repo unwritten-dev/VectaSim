@@ -20,6 +20,8 @@ export interface StripFact {
   stableFromFt?: number | null;
   /** Band of the landed approach; null = never below 1000 ft. */
   band?: ApproachBand | null;
+  /** Hard gate of the assessment profile, ft ("unstable below …"; null = 500 ft). */
+  hardGateFt?: number | null;
   /** Go-arounds flown on this flight. */
   goArounds?: number;
 }
@@ -257,7 +259,7 @@ function StableLine({ fact }: { fact?: StripFact | null }) {
   const text = stableText(fact, tr);
   if (!band || !text) return null;
   return (
-    <span className={`strip-stable ${STRIP_BAND_CLASS[band]}`} title={tr(STRIP_BAND_TITLE[band])}>
+    <span className={`strip-stable ${STRIP_BAND_CLASS[band]}`} title={tr(STRIP_BAND_TITLE[band], { ft: fmt(fact?.hardGateFt ?? 500, 0, "ft") })}>
       {text}
     </span>
   );

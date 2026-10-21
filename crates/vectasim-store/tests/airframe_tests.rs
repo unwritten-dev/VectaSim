@@ -341,3 +341,46 @@ fn an_airframe_with_a_vapp_survives_the_demo_purge() {
     assert_eq!(store.delete_demo_flights().unwrap(), 1);
     assert_eq!(store.get_airframe("D-AVCT").unwrap().unwrap().vapp_kt, Some(132.0));
 }
+
+#[test]
+fn approach_profile_per_airframe_resolves_and_invalidates() {
+    let store = Store::open_in_memory().unwrap();
+    let mut rec = FlightRecorder::new(
+        store.clone(),
+        RecorderContext { provider: "mock".into(), aircraft: Some(MockFlight::aircraft()), ..Default::default() },
+    );
+    run(&mut rec, 60.0);
+    let id = store.list_flights(1, 0).unwrap()[0].id.clone();
+    // automatic: the A20N maps to the Airbus profile
+    let inputs = store.flight_profile_inputs(&id).unwrap();
+    assert_eq!((inputs.airframe_choice, inputs.icao_type.as_deref()), (None, Some("A20N")));
+    let (p, origin) = store.resolve_flight_profile(&id, None, None).unwrap();
+    assert_eq!((p.id.as_str(), origin), ("airbus", vectasim_core::approach_profile::ProfileOrigin::Type));
+
+    // a cached fact is dropped when the airframe's profile changes
+    let row = vectasim_store::ApproachFactRow { outcome: "landed".into(), profile_id: Some("airbus".into()), ..Default::default() };
+    store.put_approach_facts(&id, vectasim_store::APPROACH_FACTS_VERSION, &[row]).unwrap();
+    let edit = |p: &str| AirframeEdit { registration: "D-AVCT".into(), approach_profile: Some(p.into()), ..Default::default() };
+    let a = store.upsert_airframe(&edit("ga_piston"), 5).unwrap().unwrap();
+    assert_eq!(a.approach_profile.as_deref(), Some("ga_piston"));
+    assert!(store.approach_facts_for_flight(&id).unwrap().is_empty(), "recomputed lazily");
+    let (p, origin) = store.resolve_flight_profile(&id, None, None).unwrap();
+    assert_eq!((p.id.as_str(), origin), ("ga_piston", vectasim_core::approach_profile::ProfileOrigin::Airframe));
+    // unknown ids are refused, nothing changes
+    assert!(store.upsert_airframe(&edit("no-such-profile"), 6).is_err());
+    assert_eq!(store.get_airframe("D-AVCT").unwrap().unwrap().approach_profile.as_deref(), Some("ga_piston"));
+
+    // a custom profile can be chosen; deleting it puts the airframe back on automatic
+    store.import_approach_profile(r#"{ "id": "my-va", "name": "My VA", "basedOn": "airbus", "overrides": { "vsS1Fpm": 1100 } }"#).unwrap();
+    store.upsert_airframe(&edit("my-va"), 7).unwrap();
+    assert_eq!(store.resolve_flight_profile(&id, None, None).unwrap().0.id, "my-va");
+    assert!(store.delete_approach_profile("my-va").unwrap());
+    assert_eq!(store.get_airframe("D-AVCT").unwrap().unwrap().approach_profile, None);
+    assert_eq!(store.resolve_flight_profile(&id, None, None).unwrap().0.id, "airbus");
+    // "" clears; merging fills the target from the source
+    store.upsert_airframe(&edit("turboprop"), 8).unwrap();
+    assert_eq!(store.upsert_airframe(&edit(""), 9).unwrap().unwrap().approach_profile, None);
+    store.upsert_airframe(&edit("boeing"), 10).unwrap();
+    store.merge_airframes("D-AVCT", "D-AINA", 11).unwrap();
+    assert_eq!(store.get_airframe("D-AINA").unwrap().unwrap().approach_profile.as_deref(), Some("boeing"));
+}

@@ -428,8 +428,14 @@ export interface ApproachProfilePoint {
   spoilersPct?: number | null;
 }
 
-/** Thresholds used (ApproachConfig::default in Rust). */
+/** Thresholds used (ApproachConfig in Rust: the default or the flight's assessment profile). */
 export interface ApproachConfig {
+  /** Assessment profile the thresholds come from (`generic` = the default; absent in older payloads). */
+  profileId?: string;
+  /** Hard gate, ft: one exceedance below it = "unstable below …" (500 ft; GA piston 300 ft). */
+  hardGateFt?: number;
+  /** The thrust check runs (false: turboprop profile). */
+  thrustCheck?: boolean;
   glidepathDeg: number;
   tchFt: number;
   gsDotDeg: number;
@@ -657,6 +663,10 @@ export interface ApproachFact {
   /** Localizer RMS 1000 → 50 ft, dots (null: not measurable, derived runway, cached before v4). */
   locRmsDots?: number | null;
   lateralBand?: LateralBand | null;
+  /** Assessment profile the approach was assessed with (null: cached before profiles = generic). */
+  profileId?: string | null;
+  /** Hard gate of that profile, ft (null: 500 ft). */
+  hardGateFt?: number | null;
   aircraftIcaoType: string | null;
   aircraftTitle: string | null;
   registration: string | null;

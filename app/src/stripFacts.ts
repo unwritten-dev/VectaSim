@@ -5,7 +5,7 @@ import type { StripFact } from "./FlightStrip";
 import type { ApproachFact } from "./landing/approachTypes";
 
 export type LandingStripFact = StripFact & { flightId: string; touchdownIndex: number };
-type ApproachStripInput = Pick<ApproachFact, "flightId" | "approachIndex" | "outcome" | "stableFromFt" | "band">;
+type ApproachStripInput = Pick<ApproachFact, "flightId" | "approachIndex" | "outcome" | "stableFromFt" | "band"> & Partial<Pick<ApproachFact, "hardGateFt">>;
 
 /**
  * Per flight: the landing is the last touchdown (highest index); the approach values come from
@@ -43,6 +43,7 @@ export function stripFactsFrom(landingFacts: LandingStripFact[], approachFacts: 
     out.set(id, {
       ...base,
       ...(a ? { stableFromFt: a.stableFromFt, band: a.band } : {}),
+      ...(a?.hardGateFt != null ? { hardGateFt: a.hardGateFt } : {}),
       goArounds: goArounds.get(id) ?? 0,
     });
   }
