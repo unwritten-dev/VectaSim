@@ -2,6 +2,14 @@
 
 Entries are in English from 2026-10-18 on; earlier entries were translated.
 
+## 0.6.1 – 2026-10-21 (Beta)
+
+Hotfix for the live map.
+
+### Map
+
+- The live map no longer draws a line across the map when a flight is loaded at another airport, the aircraft is slewed or teleported before or between flights: the own track starts afresh at the new position (same jump rule as the recorder: more than three times the distance the ground speed explains, plus 1 nm, time acceleration included).
+
 ## 0.6.0 – 2026-10-21 (Beta)
 
 The logbook learns to read your flying: markers along the flight path, a green approach from the gear extension on, a full-screen flight view, and your take-off and approach numbers compared with your other flights. On the live map a clicked online aircraft shows its filed route through the waypoints and up to two hours of flown track.

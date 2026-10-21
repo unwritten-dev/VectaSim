@@ -32,7 +32,7 @@ import {
   withProjection,
   type TrackPoint,
 } from "./common";
-import { ChunkedTrack, altToCurtainM } from "./trackChunks";
+import { ChunkedTrack, altToCurtainM, positionJumped } from "./trackChunks";
 import {
   addOnlineLayers,
   atcGeoJson,
@@ -915,6 +915,14 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
 
     const track = trackRef.current;
     if (telemetry.timestampMs - track.lastMs >= TRACK_POINT_INTERVAL_MS) {
+      // a flight loaded elsewhere, a slew or a teleport: start the track afresh here instead of
+      // drawing a line from the old position (the recorder treats the jump the same way)
+      const last = track.points[track.points.length - 1];
+      if (last && positionJumped(last, { lon, lat, tMs: telemetry.timestampMs }, telemetry.groundSpeedKt, telemetry.simRate)) {
+        track.reset();
+        drawTrack(map, track, true);
+        drawCurtain(map, track);
+      }
       const sample = { altFt: telemetry.altitudeMslFt, aglFt: telemetry.altitudeAglFt, onGround: telemetry.onGround };
       const closedChunk = track.push({ lon, lat, ...sample, hFt: track.heightFor(sample), tMs: telemetry.timestampMs });
       // a closed 10-min block moves to the history source as a diff (no full re-send)

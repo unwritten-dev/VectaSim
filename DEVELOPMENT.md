@@ -37,7 +37,8 @@ scripts/update-navaids.py   updates the embedded OurAirports navaids (`navaids.c
 scripts/update-countries.py updates the country list and country borders (Natural Earth, CLDR names)
 scripts/readme-pair-check.mjs checks that README.md and README.de.md have the same structure
 .github/workflows           ci.yml (Clippy, tests, cargo audit/deny, npm audit, ESLint, tsc, Vitest, README pair),
-                            release.yml (tag v* → version check + ci.yml, signed installer, draft release)
+                            release.yml (tag v* → version check, ci.yml and the signed installer in parallel, draft release;
+                            ci.yml's release-cache job keeps the release-profile cache warm on the public main)
 ```
 
 ## Prerequisites

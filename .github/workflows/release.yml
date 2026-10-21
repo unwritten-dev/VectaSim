@@ -5,8 +5,14 @@
 # Trigger: a tag like v0.2.0 on the public repository, created by the snapshot script
 # (docs/releasing.md). The `versions` job fails the run when the tag and the version fields
 # in the tree differ; the `ci` job runs every check of ci.yml (clippy, tests, cargo audit /
-# deny, npm audit, lint, tsc, README pair) on the tagged commit. The build starts only when
-# both have passed.
+# deny, npm audit, lint, tsc, README pair) on the tagged commit. The build runs in parallel
+# with those checks (it only needs `versions`); the result is a *draft*, and the run is red
+# when any check fails – publish the draft only from a green run (docs/releasing.md).
+#
+# Build time: a tag run can only restore caches saved on the default branch, so ci.yml keeps a
+# release-profile cache warm on the public main (`release-cache`, shared-key `release`); with
+# it the dependencies (tauri, webview2, …) come from the cache and only the workspace crates
+# compile. The tag run itself saves nothing (a cache saved on a tag is never read again).
 #
 # Every third-party action is pinned to a full commit SHA (the comment names the release):
 # the release job holds the updater signing key and a token that can write releases, so a
@@ -66,7 +72,7 @@ jobs:
     uses: ./.github/workflows/ci.yml
 
   release:
-    needs: [versions, ci]
+    needs: [versions]
     runs-on: windows-latest
     permissions:
       contents: write # tauri-action creates the draft release and uploads the assets
@@ -90,6 +96,8 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: ". -> target"
+          shared-key: release
+          save-if: false
 
       - run: npm ci
 

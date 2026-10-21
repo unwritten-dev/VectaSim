@@ -2,7 +2,7 @@
 
 VectaSim itself is licensed under the [MIT License](LICENSE). This document lists the third-party libraries, fonts, data and services the app uses at runtime, together with their licenses. The license texts of the packages are included in each package (npm: `node_modules/<package>/LICENSE`, Rust: the crates.io source). The installer places this file and VectaSim’s `LICENSE.txt` in the installation folder, next to `vectasim.exe`.
 
-Generated from `npx license-checker-rseidelsohn --production` (in `app/`) and `cargo tree --workspace -e normal --target x86_64-pc-windows-msvc` (as of version 0.6.0). Where a license is given with “OR”, VectaSim chooses the MIT option if available.
+Generated from `npx license-checker-rseidelsohn --production` (in `app/`) and `cargo tree --workspace -e normal --target x86_64-pc-windows-msvc` (as of version 0.6.1). Where a license is given with “OR”, VectaSim chooses the MIT option if available.
 
 ## Data and services
 

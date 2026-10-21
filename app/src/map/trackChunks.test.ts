@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ALT_BAND_FT, ChunkedTrack, bandedRuns, bandedTrackGeoJson, curtainGeoJson, curtainRuns, groundHeightFt, withGroundHeights, thinPoints, type TimedPoint } from "./trackChunks";
+import { ALT_BAND_FT, ChunkedTrack, bandedRuns, bandedTrackGeoJson, curtainGeoJson, curtainRuns, groundHeightFt, withGroundHeights, thinPoints, type TimedPoint, positionJumped } from "./trackChunks";
 
 const pt = (i: number, altFt: number): TimedPoint => ({ lon: i * 0.01, lat: 50, altFt, tMs: i * 1000 });
 
@@ -64,6 +64,24 @@ describe("thinPoints", () => {
     expect(t).toHaveLength(100);
     expect(t[0]).toBe(0);
     expect(t[99]).toBe(9999);
+  });
+});
+
+describe("positionJumped (live track teleport rule)", () => {
+  const p = (lon: number, lat: number, tMs: number) => ({ lon, lat, tMs });
+  it("a flight loaded at another airport is a jump, taxiing and cruising are not", () => {
+    // EDDF → Colombo while parked: thousands of nm in one second
+    expect(positionJumped(p(8.57, 50.03, 0), p(79.9, 7.2, 1000), 0)).toBe(true);
+    // 20 kt taxi, 1 s: ~0.006 nm
+    expect(positionJumped(p(8.57, 50.03, 0), p(8.5701, 50.03, 1000), 20)).toBe(false);
+    // 450 kt cruise, 60 s gap (reconnect): 7.5 nm flown, allowance 3× + 1 nm
+    expect(positionJumped(p(8, 50, 0), p(8.2, 50, 60_000), 450)).toBe(false);
+    expect(positionJumped(p(8, 50, 0), p(9.0, 50, 60_000), 450)).toBe(true);
+  });
+  it("time acceleration widens the allowance; NaN never jumps", () => {
+    // 450 kt at 4× for 60 s: 30 nm flown
+    expect(positionJumped(p(8, 50, 0), p(8.8, 50, 60_000), 450, 4)).toBe(false);
+    expect(positionJumped(p(8, 50, 0), p(NaN, 50, 1000), 0)).toBe(false);
   });
 });
 

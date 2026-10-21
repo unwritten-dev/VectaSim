@@ -9,6 +9,24 @@
 
 import type { TrackPoint } from "./common";
 import { unwrapLon } from "./geo";
+import { distanceBearing } from "./trafficInfo";
+
+/** Position jump allowance, as the recorder's teleport rule (vectasim-core flight.rs): GS·Δt·rate·3 + 1 nm. */
+export const TELEPORT_GS_FACTOR = 3;
+export const TELEPORT_MARGIN_NM = 1;
+
+/**
+ * True when `next` is further from `prev` than the aircraft could have flown in between
+ * (a flight loaded elsewhere, a slew, a teleport): the live track must not draw a line
+ * across. Time acceleration widens the allowance; NaN never counts as a jump.
+ */
+export function positionJumped(prev: { lon: number; lat: number; tMs: number }, next: { lon: number; lat: number; tMs: number }, gsKt: number, simRate = 1): boolean {
+  const dtS = Math.max(0.05, (next.tMs - prev.tMs) / 1000);
+  const gs = Math.max(0, Number.isFinite(gsKt) ? gsKt : 0);
+  const rate = Math.max(1, Number.isFinite(simRate) ? simRate : 1);
+  const allowed = (gs * dtS * rate) / 3600 * TELEPORT_GS_FACTOR + TELEPORT_MARGIN_NM;
+  return distanceBearing(prev, next).nm > allowed;
+}
 
 /** 600 points = 10 min at 1 Hz. */
 export const CHUNK_POINTS = 600;
