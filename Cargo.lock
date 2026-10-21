@@ -5241,7 +5241,7 @@ checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
 name = "vectasim"
-version = "0.5.3"
+version = "0.6.0"
 dependencies = [
  "discord-rich-presence",
  "glob",
@@ -5275,7 +5275,7 @@ dependencies = [
 
 [[package]]
 name = "vectasim-core"
-version = "0.5.3"
+version = "0.6.0"
 dependencies = [
  "log",
  "serde",
@@ -5283,7 +5283,7 @@ dependencies = [
 
 [[package]]
 name = "vectasim-data"
-version = "0.5.3"
+version = "0.6.0"
 dependencies = [
  "csv",
  "log",
@@ -5293,7 +5293,7 @@ dependencies = [
 
 [[package]]
 name = "vectasim-dump"
-version = "0.5.3"
+version = "0.6.0"
 dependencies = [
  "log",
  "serde",
@@ -5304,7 +5304,7 @@ dependencies = [
 
 [[package]]
 name = "vectasim-online"
-version = "0.5.3"
+version = "0.6.0"
 dependencies = [
  "log",
  "reqwest 0.12.28",
@@ -5316,7 +5316,7 @@ dependencies = [
 
 [[package]]
 name = "vectasim-photos"
-version = "0.5.3"
+version = "0.6.0"
 dependencies = [
  "log",
  "reqwest 0.12.28",
@@ -5328,7 +5328,7 @@ dependencies = [
 
 [[package]]
 name = "vectasim-server"
-version = "0.5.3"
+version = "0.6.0"
 dependencies = [
  "axum",
  "getrandom 0.3.4",
@@ -5344,7 +5344,7 @@ dependencies = [
 
 [[package]]
 name = "vectasim-simbrief"
-version = "0.5.3"
+version = "0.6.0"
 dependencies = [
  "log",
  "reqwest 0.12.28",
@@ -5356,7 +5356,7 @@ dependencies = [
 
 [[package]]
 name = "vectasim-simconnect"
-version = "0.5.3"
+version = "0.6.0"
 dependencies = [
  "libloading 0.8.9",
  "log",
@@ -5370,7 +5370,7 @@ dependencies = [
 
 [[package]]
 name = "vectasim-store"
-version = "0.5.3"
+version = "0.6.0"
 dependencies = [
  "log",
  "quick-xml",
@@ -5387,7 +5387,7 @@ dependencies = [
 
 [[package]]
 name = "vectasim-xplane"
-version = "0.5.3"
+version = "0.6.0"
 dependencies = [
  "base64 0.22.1",
  "log",

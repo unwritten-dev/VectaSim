@@ -1599,6 +1599,10 @@ span.strip-rate {
   gap: 0;
   border-top: 1px solid var(--hairline);
 }
+/* logbook detail: the flight's metrics under the track (rotation, gear, flaps, gates) */
+.flight-metrics {
+  margin: var(--sp-2) 0 var(--sp-3);
+}
 table.mini-table {
   width: 100%;
   border-collapse: collapse;

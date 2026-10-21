@@ -17,7 +17,13 @@
       "layers": "Map layers",
       "atcTitle": "Controllers at airports",
       "atcNeedsTraffic": "Switch on “Traffic” first",
-      "weather": "Weather"
+      "weather": "Weather",
+      "fullscreen": "Full screen",
+      "fullscreenTitle": "Full screen: track map, profile and replay bar fill the window (F)",
+      "fullscreenExit": "Exit full screen",
+      "fullscreenExitTitle": "Leave full screen (Esc or F)",
+      "fullscreenDialog": "Flight {route} in full screen",
+      "fullscreenClose": "Close"
     },
     "mapStyle": {
       "satellite": "Satellite",
@@ -128,6 +134,56 @@
     },
     "airport": {
       "label": "Airfield"
+    },
+    "markers": {
+      "menu": "Markers",
+      "menuTitle": "Choose which markers the flight path shows: gear, flaps, rotation, approach gates and criteria, touchdowns",
+      "menuLabel": "Markers on the flight path",
+      "note": "Labels from zoom {zoom}; click a marker to move the replay cursor there.",
+      "group": {
+        "gear": "Gear",
+        "flaps": "Flaps",
+        "rotation": "Rotation",
+        "gates": "Approach gates",
+        "criteria": "Approach criteria",
+        "touchdowns": "Touchdowns"
+      },
+      "groupTitle": {
+        "gear": "Where the gear went down and up (more than half extended, held for 2 s)",
+        "flaps": "Every flap handle change with height and speed",
+        "rotation": "Lift-off with the rotation rate: mean pitch rate from rotation start to lift-off",
+        "gates": "1000 ft and 500 ft gate (stable or not), “stable from” and go-around – from the approach assessment",
+        "criteria": "Stable-approach exceedances (speed, sink rate, glide path, course, bank, configuration, thrust, energy) as coloured stretches",
+        "touchdowns": "Touchdowns with the landing rate"
+      },
+      "label": {
+        "gearDown": "Gear down",
+        "gearUp": "Gear up",
+        "flaps": "Flaps {from} → {to}",
+        "rotation": "Rotation {rate}",
+        "liftoff": "Lift-off",
+        "gateStable": "{gate} stable",
+        "gateUnstable": "{gate} not stable",
+        "gateUnmeasured": "{gate} not measurable",
+        "stableFrom": "Stable from {height}",
+        "goAround": "Go-around",
+        "rotationBand": "Rotation {rate} · {band}",
+        "slow": "slow",
+        "fast": "fast"
+      },
+      "detail": {
+        "at": "{time} · {agl} AGL · IAS {ias}",
+        "rotation": "mean {rate}, peak {peak} over {dur} (pitch {from} → {to})",
+        "noRotation": "no pitch-up run measurable on the take-off roll",
+        "rotationTypical": "Normal band 1.5–4 °/s, airliners typically 2–3 °/s; below is slow, above is fast",
+        "gateFailed": "not met: {list}",
+        "gateOk": "all measurable criteria met",
+        "stableFrom": "from here down to 50 ft no criterion outside its tolerance",
+        "levelS1": "Level S1",
+        "levelS2": "Level S2 (beyond the second limit)",
+        "touchdown": "{rate} · {g}",
+        "click": "Click: replay cursor to this moment"
+      }
     }
   }
 }

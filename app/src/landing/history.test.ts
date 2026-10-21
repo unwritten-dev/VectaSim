@@ -1,16 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { NNBSP } from "../format";
 import { setLanguageSetting } from "../i18n";
-import type { TouchdownReport } from "../types";
+import type { FlightMetricsFact, TouchdownReport } from "../types";
 import type { ApproachFact } from "./approachTypes";
 import {
   approachFor,
   betterText,
   bucketOf,
   compareApproach,
+  compareFlightMetric,
+  compareGate500,
   compareLanding,
   defaultScope,
   demoFilter,
+  flightMetricLines,
   landingFor,
   median,
   monthCompare,
@@ -347,5 +350,102 @@ describe("wording", () => {
     expect(peersPhrase(1, "type", lf({}))).toBe("your last 1 landing in the A20N");
     expect(peersPhrase(5, "runway", lf({ runwayIdent: "" }))).toBe("your last 5 landings on this runway");
     expect(typeKey({ aircraftIcaoType: null, aircraftTitle: null })).toBe("Unknown");
+  });
+});
+
+// ---- per-flight metrics -------------------------------------------------------------------
+
+function mf(p: Partial<FlightMetricsFact>): FlightMetricsFact {
+  return {
+    flightId: "m",
+    timestampMs: T0,
+    aircraftIcaoType: "A20N",
+    aircraftTitle: null,
+    provider: "simconnect",
+    version: 1,
+    computedMs: 0,
+    airportIcao: "EDDF",
+    runwayIdent: "25C",
+    rotationRateDegS: null,
+    rotationPeakDegS: null,
+    rotationDurationS: null,
+    gearDownAglFt: null,
+    gearDownDistNm: null,
+    landingFlapsAglFt: null,
+    exceedances: null,
+    stable1000: null,
+    stable500: null,
+    ...p,
+  };
+}
+
+describe("flight metrics comparison", () => {
+  // current flight on EDDF 25C in an A20N; two more on the runway, three more of the type elsewhere
+  const cur = mf({ flightId: "cur", timestampMs: T0 + 10, rotationRateDegS: 2.3, gearDownAglFt: 1850, gearDownDistNm: 5.8, landingFlapsAglFt: 1200, exceedances: 2, stable1000: true, stable500: false });
+  const peers = [
+    mf({ flightId: "r1", rotationRateDegS: 2.5, gearDownAglFt: 2000, gearDownDistNm: 6, landingFlapsAglFt: 1500, exceedances: 0, stable500: true }),
+    mf({ flightId: "r2", rotationRateDegS: 2.7, gearDownAglFt: 2200, gearDownDistNm: 7, landingFlapsAglFt: 1500, exceedances: 1, stable500: true }),
+    mf({ flightId: "t1", airportIcao: "EDDM", runwayIdent: "26R", rotationRateDegS: 2.6, gearDownAglFt: 2100, gearDownDistNm: 6.5, landingFlapsAglFt: 1400, exceedances: 1, stable500: false }),
+    mf({ flightId: "t2", airportIcao: "EDDM", runwayIdent: "26R", rotationRateDegS: 2.6, gearDownAglFt: null, landingFlapsAglFt: 1600, exceedances: 2, stable500: true }),
+    mf({ flightId: "o1", aircraftIcaoType: "B738", airportIcao: "EDDM", runwayIdent: "26R", rotationRateDegS: 3.5, gearDownAglFt: 3000, exceedances: 5, stable500: true }),
+  ];
+  const all = [cur, ...peers];
+
+  it("median like the landing rate, the current flight left out", () => {
+    const r = compareFlightMetric(cur, all, (f) => f.rotationRateDegS, "type")!;
+    expect([r.scope, r.n, r.value]).toEqual(["type", 4, 2.3]);
+    expect(r.median).toBeCloseTo(2.6);
+    expect(r.delta).toBeCloseTo(-0.3);
+  });
+
+  it("widens runway → type → all until MIN_PEERS values exist", () => {
+    // only two other flights on EDDF 25C: the type is used
+    expect(compareFlightMetric(cur, all, (f) => f.rotationRateDegS, "runway")!.scope).toBe("type");
+    // gear: only three of the type have a value – still the type; without o1's type all
+    const gear = compareFlightMetric(cur, all, (f) => f.gearDownAglFt, "runway")!;
+    expect([gear.scope, gear.n, gear.median]).toEqual(["type", 3, 2100]);
+    const few = [cur, peers[0], peers[4]];
+    expect(compareFlightMetric(cur, few, (f) => f.gearDownAglFt, "runway")).toBeNull();
+    expect(compareFlightMetric(mf({ gearDownAglFt: null }), all, (f) => f.gearDownAglFt, "all")).toBeNull();
+  });
+
+  it("500 ft gate as a quota", () => {
+    expect(compareGate500(cur, all, "type")).toMatchObject({ current: false, yes: 3, total: 4, scope: "type" });
+    expect(compareGate500(mf({ stable500: null }), all, "all")).toBeNull();
+  });
+
+  it("sentences in English and German", () => {
+    setLanguageSetting("en");
+    const lines = flightMetricLines(cur, all, "type");
+    expect(lines.map((l) => l.id)).toEqual(["rotation", "gearDown", "landingFlaps", "exceedances", "gates"]);
+    const text = (id: string) => lines.find((l) => l.id === id)!.text.replace(new RegExp(NNBSP, "g"), " ");
+    expect(text("rotation")).toBe("Rotation 2.3 °/s – your median in the A20N is 2.6 °/s (4 flights)");
+    expect(text("gearDown")).toBe("Gear down at 1,850 ft AGL / 5.8 nm – your median in the A20N is 2,100 ft / 6.5 nm (3 flights)");
+    expect(text("landingFlaps")).toBe("Landing flaps set at 1,200 ft AGL – your median in the A20N is 1,500 ft (4 flights)");
+    expect(text("exceedances")).toBe("2 exceedances on final – your median in the A20N is 1 (4 flights)");
+    expect(text("gates")).toBe("Gates 1000 ft stable, 500 ft unstable – stable at 500 ft in 3 of 4 flights in the A20N");
+    expect(lines.find((l) => l.id === "gates")!.warn).toBe(true);
+    // all flights: no scope phrase
+    expect(flightMetricLines(cur, all, "all")[0].text.replace(new RegExp(NNBSP, "g"), " ")).toBe("Rotation 2.3 °/s – your median is 2.6 °/s (5 flights)");
+    setLanguageSetting("de");
+    const de = flightMetricLines(cur, all, "type").map((l) => l.text.replace(new RegExp(NNBSP, "g"), " "));
+    expect(de[0]).toBe("Rotation 2,3 °/s – dein Median mit A20N: 2,6 °/s (4 Flüge)");
+    expect(de[3]).toBe("2 Überschreitungen im Endanflug – dein Median mit A20N: 1 (4 Flüge)");
+    setLanguageSetting("en");
+  });
+
+  it("a rotation outside the band is flagged with the shared band word", () => {
+    setLanguageSetting("en");
+    const slow = mf({ flightId: "slow", timestampMs: T0 + 10, rotationRateDegS: 1.2 });
+    const l = flightMetricLines(slow, [slow, ...peers], "all")[0];
+    expect(l.warn).toBe(true);
+    expect(l.text).toContain("· slow");
+  });
+
+  it("trend series per flight, flights without the value left out", () => {
+    const tr = trendSeries([], "flight", { metrics: all });
+    expect(tr.rotation.map((p) => p.value)).toHaveLength(6);
+    expect(tr.gearDown.map((p) => p.value)).toHaveLength(5);
+    expect(tr.exceedances.map((p) => p.value)).toEqual([0, 1, 1, 2, 5, 2]);
   });
 });

@@ -64,6 +64,18 @@
   fill: var(--accent);
   flex: none;
 }
+/* the flight's metrics against the other flights (rotation, gear, flaps, gates) */
+.hist-metrics {
+  list-style: none;
+  margin: 0;
+  padding: var(--sp-2) 0 0;
+  border-top: 1px solid var(--hairline);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--fs-sm);
+  flex-basis: 100%;
+}
 .after-history {
   font-size: var(--fs-sm);
 }

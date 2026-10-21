@@ -193,6 +193,20 @@ describe("vertex strip", () => {
     expect(v[0].next[2]).toBe(10);
     expect(v[3].next).toEqual([0, 0, 0]);
   });
+  it("a tinted point keeps its colour instead of the ramp, through the spline too", () => {
+    const out = new Float32Array(2 * CURTAIN_FLOATS);
+    writeVertices([{ x: 0.5, y: 0.3, h: 1, alt: 10_000, tint: [0, 1, 0] }], null, null, ramp, out, 0);
+    expect(vertex(out, 0).rgb).toEqual([0, 1, 0]);
+    // toCPt carries TrackPoint.color; spline points between two tinted points are tinted
+    const a = toCPt({ lon: 8, lat: 50, altFt: 3000, color: "#00ff00" });
+    const b = toCPt({ lon: 8.01, lat: 50.01, altFt: 2000, color: "#00ff00" }, a.x);
+    expect(a.tint).toEqual([0, 1, 0]);
+    // a 45° turn at `a`: the segment a → b is bent and gets spline points
+    const curve = curveThrough([toCPt({ lon: 7.99, lat: 50, altFt: 4000 }, a.x), a, b]);
+    expect(curve.length).toBeGreaterThan(3);
+    expect(curve.filter((p) => p.tint).length).toBeGreaterThan(1);
+    expect(curve[0].tint).toBeUndefined();
+  });
   it("hi + lo keeps the Mercator position to well below a millimetre", () => {
     const x = 0.523456789012345;
     const out = new Float32Array(2 * CURTAIN_FLOATS);

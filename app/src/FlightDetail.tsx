@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import type { FlightDetail as Detail, FlightRow, Ofp, TouchdownReport, TrackSample } from "./types";
@@ -31,6 +32,8 @@ import { patternSeries } from "./landing/history";
 import { linear } from "./landing/dispersionStats";
 import AirframeCard from "./airframes/AirframeCard";
 import { navigate } from "./airframes/navigation";
+import { Modal } from "./ui/Modal";
+import { ROTATION_FAST_DEG_S, ROTATION_SLOW_DEG_S, flightMetrics, fmtDegS, rotationBand, trackEvents, type FlightMetrics } from "./trackEvents";
 
 /** The flight is the one being recorded (state active, not in the Papierkorb): it cannot be deleted. */
 export const isRecording = (f: Pick<FlightRow, "state">, trashed = false): boolean => f.state === "active" && !trashed;
@@ -239,11 +242,7 @@ export default function FlightDetail({ detail, track, onDelete, deleteRequest, o
       <NotesEditor flight={f} readOnly={trashed} />
 
       {detail.hasTrack || track.length > 0 ? (
-        <>
-          <TrackMap samples={track} touchdowns={detail.touchdowns} departure={departure} arrival={arrival} aircraft={f.aircraft} />
-          <ProfileChart samples={track} phases={detail.phases} touchdowns={detail.touchdowns} />
-          {track.length > 1 && <ReplayBar />}
-        </>
+        <FlightTrackView detail={detail} track={track} departure={departure} arrival={arrival} route={`${dep ?? "····"} → ${arr ?? "····"}`} />
       ) : (
         <div className="detail">{importedFrom ? t("logbook.detail.noTrackImported") : t("logbook.detail.noTrack")}</div>
       )}
@@ -601,6 +600,134 @@ const EXPORT_FORMATS = [
   { id: "csv", label: "CSV", title: "logbook.export.csvTitle", hint: "logbook.export.csvHint" },
   { id: "json", label: "JSON", title: "logbook.export.jsonTitle", hint: "logbook.export.jsonHint" },
 ] as const satisfies ReadonlyArray<{ id: string; label: string; title: TKey; hint: TKey }>;
+
+type Pos = { latitude: number; longitude: number } | null;
+
+/** The flight's approaches (approach_analysis) for the path markers; [] while recording or when unavailable. */
+function useApproaches(flightId: string, settled: boolean, hasTrack: boolean): ApproachAnalysis[] {
+  const [list, setList] = useState<{ id: string; list: ApproachAnalysis[] } | null>(null);
+  useEffect(() => {
+    if (!settled || !hasTrack) return;
+    let live = true;
+    invoke<ApproachAnalysis[]>("approach_analysis", { flightId })
+      .then((l) => live && setList({ id: flightId, list: l }))
+      .catch(() => live && setList({ id: flightId, list: [] }));
+    return () => {
+      live = false;
+    };
+  }, [flightId, settled, hasTrack]);
+  return list?.id === flightId ? list.list : EMPTY_APPROACHES;
+}
+const EMPTY_APPROACHES: ApproachAnalysis[] = [];
+
+/**
+ * Track map, profile chart and replay bar of a flight; "Vollbild" moves the same block (same
+ * map instance – the portal target node is re-parented, MapLibre's ResizeObserver resizes it)
+ * into a full-window modal and back. F toggles while the focus is inside, Esc closes.
+ */
+function FlightTrackView({ detail, track, departure, arrival, route }: { detail: Detail; track: TrackSample[]; departure: Pos; arrival: Pos; route: string }) {
+  const t = useT();
+  const f = detail.flight;
+  const approaches = useApproaches(f.id, f.state !== "active", track.length > 1);
+  const events = useMemo(() => trackEvents(track, approaches, detail.touchdowns), [track, approaches, detail.touchdowns]);
+  const metrics = useMemo(() => flightMetrics(track, approaches, detail.touchdowns), [track, approaches, detail.touchdowns]);
+  const [full, setFull] = useState(false);
+  const [host] = useState(() => (typeof document === "undefined" ? null : Object.assign(document.createElement("div"), { className: "flight-track-view" })));
+  const inlineRef = useRef<HTMLDivElement>(null);
+  const [fullSlot, setFullSlot] = useState<HTMLDivElement | null>(null);
+  const returnFocus = () => host?.querySelector<HTMLElement>("[data-track-fullscreen]") ?? null;
+  useLayoutEffect(() => {
+    const target = full ? fullSlot : inlineRef.current;
+    if (host && target && host.parentElement !== target) target.appendChild(host);
+    // MapLibre and the chart measure on resize; the new parent's size arrives with this event too
+    window.dispatchEvent(new Event("resize"));
+  }, [full, fullSlot, host]);
+  useEffect(() => setFull(false), [f.id]);
+  const toggle = () => setFull((v) => !v);
+  const isF = (e: { key: string; ctrlKey: boolean; altKey: boolean; metaKey: boolean; target: EventTarget | null }) =>
+    e.key.toLowerCase() === "f" && !e.ctrlKey && !e.altKey && !e.metaKey && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement);
+  const body = (
+    <div
+      className="flight-track-body"
+      onKeyDown={(e) => {
+        if (!full && isF(e)) {
+          e.preventDefault();
+          setFull(true);
+        }
+      }}
+    >
+      <TrackMap samples={track} touchdowns={detail.touchdowns} departure={departure} arrival={arrival} aircraft={f.aircraft} events={events} onFullscreen={toggle} fullscreen={full} />
+      <ProfileChart samples={track} phases={detail.phases} touchdowns={detail.touchdowns} events={events} />
+      {track.length > 1 && <ReplayBar />}
+    </div>
+  );
+  return (
+    <>
+      <div ref={inlineRef} className="flight-track-slot" />
+      <FlightMetricsRow m={metrics} />
+      {full && (
+        <Modal
+          className="track-fullscreen"
+          aria-label={t("map.toolbar.fullscreenDialog", { route })}
+          onClose={() => setFull(false)}
+          returnFocus={returnFocus}
+          onKeyDown={(e) => {
+            if (isF(e)) {
+              e.preventDefault();
+              setFull(false);
+            }
+          }}
+        >
+          <div className="track-fullscreen-head">
+            <h2 className="num">{route}</h2>
+            <button className="btn-sm" onClick={() => setFull(false)} title={t("map.toolbar.fullscreenExitTitle")}>
+              {t("map.toolbar.fullscreenClose")}
+            </button>
+          </div>
+          <div ref={setFullSlot} className="track-fullscreen-body" />
+        </Modal>
+      )}
+      {host ? createPortal(body, host) : body}
+    </>
+  );
+}
+
+/**
+ * The flight's metrics in one compact row under the track (the same derivation the backend
+ * stores for the comparisons): rotation, gear down, landing flaps, exceedances, gates. Hidden
+ * when nothing is determinable (no take-off and no landing in the track).
+ */
+function FlightMetricsRow({ m }: { m: FlightMetrics }) {
+  const t = useT();
+  const degS = fmtDegS;
+  const band = m.rotationRateDegS != null ? rotationBand(m.rotationRateDegS) : "normal";
+  const gate = (v: boolean | null) => (v == null ? "–" : t(v ? "landingHistory.metrics.stable" : "landingHistory.metrics.unstable"));
+  const any = [m.rotationRateDegS, m.gearDownAglFt, m.landingFlapsAglFt, m.exceedances, m.stable1000, m.stable500].some((v) => v != null);
+  if (!any) return null;
+  return (
+    <div className="stat-grid detail-grid flight-metrics" role="group" aria-label={t("flightMetrics.aria")}>
+      <Stat
+        size="sm"
+        label={t("flightMetrics.rotation")}
+        value={fmt(m.rotationRateDegS, 1)}
+        unit="°/s"
+        sub={m.rotationRateDegS != null ? t("flightMetrics.rotationSub", { peak: degS(m.rotationPeakDegS), duration: fmt(m.rotationDurationS, 0, "s") }) : undefined}
+        warn={band === "slow" ? t("flightMetrics.rotationSlow", { limit: degS(ROTATION_SLOW_DEG_S) }) : band === "fast" ? t("flightMetrics.rotationFast", { limit: degS(ROTATION_FAST_DEG_S) }) : null}
+      />
+      <Stat
+        size="sm"
+        label={t("flightMetrics.gearDown")}
+        value={fmt(m.gearDownAglFt, 0)}
+        unit="ft AGL"
+        sub={m.gearDownDistNm != null ? t("flightMetrics.gearDownSub", { dist: fmt(m.gearDownDistNm, 1, "nm") }) : undefined}
+      />
+      <Stat size="sm" label={t("flightMetrics.landingFlaps")} value={fmt(m.landingFlapsAglFt, 0)} unit="ft AGL" />
+      <Stat size="sm" label={t("flightMetrics.exceedances")} value={fmt(m.exceedances, 0)} sub={m.exceedances != null ? t("flightMetrics.exceedancesSub") : undefined} />
+      <Stat size="sm" label={t("flightMetrics.gate1000")} value={gate(m.stable1000)} warn={m.stable1000 === false ? t("flightMetrics.gateUnstable") : null} />
+      <Stat size="sm" label={t("flightMetrics.gate500")} value={gate(m.stable500)} warn={m.stable500 === false ? t("flightMetrics.gateUnstable") : null} />
+    </div>
+  );
+}
 
 /** Landed approach for the PIREP ("stabil ab"); null when the analysis is unavailable. */
 async function landedApproach(flightId: string): Promise<PirepApproach | null> {

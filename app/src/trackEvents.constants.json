@@ -1,0 +1,12 @@
+{
+  "$comment": "Thresholds of the track markers and the per-flight metrics. Single source for the frontend (trackEvents.ts) and the backend (crates/vectasim-store/src/metrics.rs, include_str!) – change them here only.",
+  "gearThresholdPct": 50,
+  "configHoldS": 2,
+  "rotStartDegS": 1,
+  "rotContDegS": 0.5,
+  "rotMinGsKt": 60,
+  "rollMinS": 10,
+  "airborneMinS": 10,
+  "rotationSlowDegS": 1.5,
+  "rotationFastDegS": 4
+}

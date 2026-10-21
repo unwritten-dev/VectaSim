@@ -4,7 +4,9 @@ import type { PhaseEventRow, TouchdownReport, TrackSample } from "./types";
 import { PHASE_LABEL } from "./format";
 import { fmt, fmtClock, fmtNum, fmtSigned } from "./i18n/number";
 import { useT } from "./i18n";
-import { PROFILE } from "./theme";
+import { COLOR, PROFILE } from "./theme";
+import { trackEventDetail, trackEventLabel, type TrackEvent, type TrackEventTone } from "./trackEvents";
+import { useTrackEventFilter } from "./map/TrackMarkersMenu";
 import { minMaxBucketIndices } from "./map/downsample";
 import { sampleAt, useReplayCursor, useReplayStore } from "./landing/replayStore";
 import { rateText } from "./landing/rated";
@@ -24,7 +26,12 @@ interface Props {
   samples: TrackSample[];
   phases: PhaseEventRow[];
   touchdowns: TouchdownReport[];
+  /** Flight-path markers (trackEvents.ts) as ticks along the top edge, filtered like the map. */
+  events?: TrackEvent[];
 }
+
+const toneColor = (tone: TrackEventTone) =>
+  tone === "accent" ? COLOR.accent : tone === "ok" ? COLOR.ok : tone === "warn" ? COLOR.warn : tone === "err" ? COLOR.err : COLOR.textMuted;
 
 /** 1/2/5 × 10^n step giving about `count` ticks over `range`. */
 function niceStep(range: number, count: number): number {
@@ -54,13 +61,14 @@ function kfmt(v: number): string {
   return `${fmtNum(k, Number.isInteger(k) ? 0 : 1)}k`;
 }
 
-export default function ProfileChart({ samples, phases, touchdowns }: Props) {
+export default function ProfileChart({ samples, phases, touchdowns, events = [] }: Props) {
   useThemeId(); // colours come from the active theme
   // callback ref: the wrapper element changes between the empty and the chart state
   const [wrap, setWrap] = useState<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(800);
   const store = useReplayStore();
   const t = useT();
+  const filter = useTrackEventFilter();
 
   useEffect(() => {
     if (!wrap) return;
@@ -264,6 +272,33 @@ export default function ProfileChart({ samples, phases, touchdowns }: Props) {
             store.setCursor(timeAt(e));
           }}
         />
+
+        {/* flight-path markers: ticks (runs as bars) along the top edge; click = cursor there */}
+        <g className="pc-events">
+          {events
+            .filter((e) => e.kind !== "touchdown" && filter[e.group] && e.tMs >= t0 && e.tMs <= t1)
+            .map((e) => {
+              const ex = x(e.tMs);
+              const c = toneColor(e.tone);
+              return (
+                <g
+                  key={e.id}
+                  className="pc-event"
+                  onClick={() => {
+                    store.pause();
+                    store.setCursor(e.tMs);
+                  }}
+                  onMouseEnter={() => store.hover(e.tMs)}
+                  onMouseLeave={() => store.hover(null)}
+                >
+                  <title>{[trackEventLabel(e), ...trackEventDetail(e)].join("\n")}</title>
+                  {e.endTMs != null && <rect x={ex} y={M.top + 1} width={Math.max(2, x(Math.min(e.endTMs, t1)) - ex)} height={3} fill={c} />}
+                  <line x1={ex} x2={ex} y1={M.top} y2={M.top + 9} stroke={c} strokeWidth={2} />
+                  <rect x={ex - 5} y={M.top} width={10} height={12} fill="transparent" />
+                </g>
+              );
+            })}
+        </g>
       </svg>
     </div>
   );

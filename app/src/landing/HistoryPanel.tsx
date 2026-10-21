@@ -1,7 +1,7 @@
 import { useMemo, useState, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { LandingFactsResult } from "../types";
+import type { FlightMetricsFact, FlightMetricsResult, LandingFactsResult } from "../types";
 import type { ApproachFact, ApproachFactsResult } from "./approachTypes";
 import { NNBSP, fmt, fmtNum } from "../i18n/number";
 import { useT, type TFunction } from "../i18n";
@@ -15,7 +15,9 @@ import {
   compareLanding,
   defaultScope,
   demoFilter,
+  flightMetricLines,
   landingFor,
+  metricsFor,
   peersPhrase,
   scopeOpts,
   scopePhrase,
@@ -28,7 +30,8 @@ import { isRated } from "./rated";
 
 // ---- shared facts store -------------------------------------------------------------------
 // One request per list for every consumer (debrief, logbook detail, after-flight card, trends);
-// reloaded on `logbook:changed` (landings + approaches) and `approach:facts` (approaches).
+// reloaded on `logbook:changed` (all), `approach:facts` (approaches) and `flight:metrics`
+// (per-flight metrics: at flight end and while older flights are filled in the background).
 
 /** Upper limit of both commands. */
 const FETCH_LIMIT = 200;
@@ -37,10 +40,12 @@ export interface HistoryFacts {
   /** Newest first, demo included (filtered per consumer). */
   landings: HistLanding[] | null;
   approaches: ApproachFact[] | null;
+  /** Per-flight metrics (rotation, gear, flaps, gates). */
+  metrics: FlightMetricsFact[] | null;
   error: string | null;
 }
 
-let state: HistoryFacts = { landings: null, approaches: null, error: null };
+let state: HistoryFacts = { landings: null, approaches: null, metrics: null, error: null };
 const subs = new Set<() => void>();
 let unlisten: Array<Promise<() => void>> = [];
 let stale = true;
@@ -64,6 +69,13 @@ function loadApproaches() {
     .catch(() => set({ approaches: state.approaches ?? [] }));
 }
 
+function loadMetrics() {
+  invoke<FlightMetricsResult>("flight_metrics_recent", { limit: FETCH_LIMIT, includeDemo: true })
+    .then((r) => set({ metrics: r.facts }))
+    // an extra like the approaches
+    .catch(() => set({ metrics: state.metrics ?? [] }));
+}
+
 function subscribe(cb: () => void): () => void {
   subs.add(cb);
   if (subs.size === 1) {
@@ -71,14 +83,17 @@ function subscribe(cb: () => void): () => void {
       listen("logbook:changed", () => {
         loadLandings();
         loadApproaches();
+        loadMetrics();
       }),
       listen("approach:facts", loadApproaches),
+      listen("flight:metrics", loadMetrics),
     ];
     // events were missed while nobody listened
     if (stale) {
       stale = false;
       loadLandings();
       loadApproaches();
+      loadMetrics();
     }
   }
   return () => {
@@ -190,6 +205,32 @@ function Tile({ label, value, median, delta, up, better, n }: TileProps) {
   );
 }
 
+/**
+ * The flight's own metrics (rotation, gear down, landing flaps, exceedances, gates) as
+ * sentences against the pilot's other flights, starting from the panel's scope.
+ */
+function MetricLines({ flightId, scope }: { flightId: string; scope: Scope }) {
+  const t = useT();
+  const { metrics } = useHistoryFacts();
+  const { showDemo } = usePrefs();
+  const lines = useMemo(() => {
+    const fact = metricsFor(metrics, flightId);
+    return fact && metrics ? flightMetricLines(fact, demoFilter(metrics, fact, showDemo), scope) : [];
+    // t: the sentences follow the language
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [metrics, flightId, showDemo, scope, t]);
+  if (!lines.length) return null;
+  return (
+    <ul className="hist-metrics" aria-label={t("landingHistory.metrics.aria")}>
+      {lines.map((l) => (
+        <li key={l.id} className={`hist-metric num${l.warn ? " warn-text" : ""}`}>
+          {l.text}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 interface Props {
   flightId: string;
   /** Touchdown to compare; default the flight's last landing with a fact (the full stop). */
@@ -201,7 +242,8 @@ interface Props {
 /**
  * "Einordnung": this landing against the pilot's own history – one sentence, three tiles
  * (landing rate, touchdown point, "stabil ab") as value vs median with percentile, and a switch
- * same runway / same type / all. Loads the facts itself; below three comparable landings a
+ * same runway / same type / all; below them the flight's metrics (rotation, gear, flaps,
+ * gates) against the same scope. Loads the facts itself; below three comparable landings a
  * single sentence.
  */
 export default function HistoryPanel({ flightId, touchdownIndex, approachIndex }: Props) {
@@ -216,6 +258,7 @@ export default function HistoryPanel({ flightId, touchdownIndex, approachIndex }
       <section className="hist hist-empty" aria-label={t("landingHistory.kicker")}>
         <span className="kicker">{t("landingHistory.kicker")}</span>
         <span className="detail">{t("landingHistory.noFact")}</span>
+        <MetricLines flightId={flightId} scope={c.scope} />
       </section>
     );
   }
@@ -246,6 +289,7 @@ export default function HistoryPanel({ flightId, touchdownIndex, approachIndex }
         <span className="kicker">{t("landingHistory.kicker")}</span>
         <span className="detail">{where ? t("landingHistory.tooFewWhere", { where }) : t("landingHistory.tooFew")}</span>
         {SCOPES.some((s) => c.counts[s] >= MIN_PEERS) && switcher}
+        <MetricLines flightId={flightId} scope={scope} />
       </section>
     );
   }
@@ -303,6 +347,7 @@ export default function HistoryPanel({ flightId, touchdownIndex, approachIndex }
           </div>
         )}
       </div>
+      <MetricLines flightId={flightId} scope={scope} />
     </section>
   );
 }

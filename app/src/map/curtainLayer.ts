@@ -64,11 +64,13 @@ export interface CPt {
   y: number;
   h: number;
   alt: number;
+  /** Fixed colour instead of the altitude ramp (TrackPoint.color). */
+  tint?: RGB;
 }
 
-type RGB = [number, number, number];
+export type RGB = [number, number, number];
 
-function hexRgb(hex: string): RGB {
+export function hexRgb(hex: string): RGB {
   const h = hex.replace("#", "");
   return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16) / 255) as RGB;
 }
@@ -103,7 +105,7 @@ export function toCPt(p: TrackPoint, refX?: number): CPt {
   const y = (180 - (180 / Math.PI) * Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360))) / 360;
   if (refX !== undefined) x += Math.round(refX - x);
   const hFt = p.hFt != null && Number.isFinite(p.hFt) ? p.hFt : Number.isFinite(p.altFt) ? p.altFt : 0;
-  return { x, y, h: altToCurtainM(hFt), alt: Number.isFinite(p.altFt) ? p.altFt : 0 };
+  return { x, y, h: altToCurtainM(hFt), alt: Number.isFinite(p.altFt) ? p.altFt : 0, ...(p.color ? { tint: hexRgb(p.color) } : {}) };
 }
 
 /** Metres per Mercator unit at Mercator y (C · cos φ). */
@@ -155,7 +157,7 @@ export function simplifyIndices(pts: CPt[], tolH = TOL_H_M, tolV = TOL_V_M): num
   return out;
 }
 
-const reflect = (a: CPt, b: CPt): CPt => ({ x: 2 * a.x - b.x, y: 2 * a.y - b.y, h: 2 * a.h - b.h, alt: a.alt });
+const reflect = (a: CPt, b: CPt): CPt => ({ x: 2 * a.x - b.x, y: 2 * a.y - b.y, h: 2 * a.h - b.h, alt: a.alt, tint: a.tint });
 
 function turnDeg(a: CPt, b: CPt, c: CPt): number {
   const ux = b.x - a.x, uy = b.y - a.y, vx = c.x - b.x, vy = c.y - b.y;
@@ -200,7 +202,7 @@ export function segmentPoints(p0: CPt | null, p1: CPt, p2: CPt, p3: CPt | null, 
     // straight: plain linear split (globe chords only)
     for (let i = 1; i < pieces; i++) {
       const f = i / pieces;
-      out.push({ x: p1.x + (p2.x - p1.x) * f, y: p1.y + (p2.y - p1.y) * f, h: p1.h + (p2.h - p1.h) * f, alt: p1.alt + (p2.alt - p1.alt) * f });
+      out.push({ x: p1.x + (p2.x - p1.x) * f, y: p1.y + (p2.y - p1.y) * f, h: p1.h + (p2.h - p1.h) * f, alt: p1.alt + (p2.alt - p1.alt) * f, tint: p1.tint });
     }
     return;
   }
@@ -211,7 +213,7 @@ export function segmentPoints(p0: CPt | null, p1: CPt, p2: CPt, p3: CPt | null, 
     const d = Math.hypot(to.x - from.x, to.y - from.y);
     if (d <= 4 * len) return to;
     const f = (4 * len) / d;
-    return { x: from.x + (to.x - from.x) * f, y: from.y + (to.y - from.y) * f, h: from.h + (to.h - from.h) * f, alt: to.alt };
+    return { x: from.x + (to.x - from.x) * f, y: from.y + (to.y - from.y) * f, h: from.h + (to.h - from.h) * f, alt: to.alt, tint: to.tint };
   };
   q0 = near(p1, q0);
   q3 = near(p2, q3);
@@ -237,6 +239,7 @@ export function segmentPoints(p0: CPt | null, p1: CPt, p2: CPt, p3: CPt | null, 
       y: comp(q0.y, p1.y, p2.y, q3.y, t),
       h: Math.max(hLo, Math.min(hHi, comp(q0.h, p1.h, p2.h, q3.h, t))),
       alt: p1.alt + (p2.alt - p1.alt) * f,
+      tint: p1.tint,
     });
   }
 }
@@ -262,7 +265,7 @@ export function writeVertices(pts: CPt[], prev: CPt | null, next: CPt | null, ra
     const pn = i < pts.length - 1 ? pts[i + 1] : next;
     const hx = Math.fround(p.x);
     const hy = Math.fround(p.y);
-    const [r, g, b] = rampColor(p.alt, ramp);
+    const [r, g, b] = p.tint ?? rampColor(p.alt, ramp);
     for (const side of [-1, 1]) {
       out[o++] = hx;
       out[o++] = hy;

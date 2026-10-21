@@ -890,6 +890,18 @@
       "tdz": {
         "title": "Aufsetzzone",
         "note": "Anteil in der Aufsetzzone"
+      },
+      "rotation": {
+        "title": "Rotation",
+        "note": "mittlere Nickrate beim Start"
+      },
+      "gearDown": {
+        "title": "Fahrwerk ausgefahren",
+        "note": "Höhe über Grund im Endanflug"
+      },
+      "exceedances": {
+        "title": "Überschreitungen",
+        "note": "Stabilitätskriterien im Endanflug, weniger ist besser"
       }
     },
     "chartAria": {
@@ -943,14 +955,18 @@
         "other": "gleitender Median ({count} Zeiträume)"
       },
       "iqr": "mittlere Hälfte (Quartile)",
-      "refs": "gestrichelt: Bandgrenzen (Landerate {rate}, stabil ab {stable}, Kurs {lateral})",
+      "refs": "gestrichelt: Bandgrenzen (Landerate {rate}, stabil ab {stable}, Kurs {lateral}, Rotation {rotation})",
       "timesUtc": "Zeiten in UTC",
       "timesLocal": "Datum in Ortszeit, Wochen und Monate nach UTC",
       "approaches": {
         "one": "{count} bewerteter Anflug",
         "other": "{count} bewertete Anflüge"
       },
-      "note": "{landings} · {approaches} · {times}"
+      "note": "{landings} · {approaches} · {times}",
+      "flights": {
+        "one": "{count} Flug mit Kennzahlen",
+        "other": "{count} Flüge mit Kennzahlen"
+      }
     },
     "table": {
       "caption": "Verlauf der Landungen, neueste zuerst",
@@ -959,7 +975,10 @@
       "neverStable": "nie stabil",
       "period": "Zeitraum",
       "landings": "Landungen",
-      "lateral": "Kurs"
+      "lateral": "Kurs",
+      "rotation": "Rotation",
+      "gearDown": "Fahrwerk",
+      "exceedances": "Überschr."
     }
   },
   "dispersion": {
@@ -1160,6 +1179,59 @@
       "tdzOut": "Aufsetzzone {yes}/{total} · du: außerhalb",
       "neverStable": "nie stabil",
       "notAssessed": "Anflug nicht bewertet"
+    },
+    "metrics": {
+      "aria": "Kennzahlen gegen deine anderen Flüge",
+      "rotation": {
+        "one": "Rotation {value} – dein Median: {median} ({count} Flug)",
+        "other": "Rotation {value} – dein Median: {median} ({count} Flüge)"
+      },
+      "rotationWhere": {
+        "one": "Rotation {value} – dein Median {where}: {median} ({count} Flug)",
+        "other": "Rotation {value} – dein Median {where}: {median} ({count} Flüge)"
+      },
+      "gearDown": {
+        "one": "Fahrwerk ausgefahren bei {value} – dein Median: {median} ({count} Flug)",
+        "other": "Fahrwerk ausgefahren bei {value} – dein Median: {median} ({count} Flüge)"
+      },
+      "gearDownWhere": {
+        "one": "Fahrwerk ausgefahren bei {value} – dein Median {where}: {median} ({count} Flug)",
+        "other": "Fahrwerk ausgefahren bei {value} – dein Median {where}: {median} ({count} Flüge)"
+      },
+      "landingFlaps": {
+        "one": "Landeklappen gesetzt bei {value} – dein Median: {median} ({count} Flug)",
+        "other": "Landeklappen gesetzt bei {value} – dein Median: {median} ({count} Flüge)"
+      },
+      "landingFlapsWhere": {
+        "one": "Landeklappen gesetzt bei {value} – dein Median {where}: {median} ({count} Flug)",
+        "other": "Landeklappen gesetzt bei {value} – dein Median {where}: {median} ({count} Flüge)"
+      },
+      "exceedances": {
+        "one": "{value} im Endanflug – dein Median: {median} ({count} Flug)",
+        "other": "{value} im Endanflug – dein Median: {median} ({count} Flüge)"
+      },
+      "exceedancesWhere": {
+        "one": "{value} im Endanflug – dein Median {where}: {median} ({count} Flug)",
+        "other": "{value} im Endanflug – dein Median {where}: {median} ({count} Flüge)"
+      },
+      "gates": {
+        "one": "Gates 1000 ft {g1000}, 500 ft {g500} – stabil bei 500 ft in {yes} von {count} Flug",
+        "other": "Gates 1000 ft {g1000}, 500 ft {g500} – stabil bei 500 ft in {yes} von {count} Flügen"
+      },
+      "gatesWhere": {
+        "one": "Gates 1000 ft {g1000}, 500 ft {g500} – stabil bei 500 ft in {yes} von {count} Flug {where}",
+        "other": "Gates 1000 ft {g1000}, 500 ft {g500} – stabil bei 500 ft in {yes} von {count} Flügen {where}"
+      },
+      "exceedanceCount": {
+        "one": "{count} Überschreitung",
+        "other": "{count} Überschreitungen"
+      },
+      "agl": "{height} über Grund",
+      "aglDist": "{height} über Grund / {dist}",
+      "heightDist": "{height} / {dist}",
+      "stable": "stabil",
+      "unstable": "instabil",
+      "unmeasured": "nicht messbar"
     }
   },
   "replay": {
@@ -1199,5 +1271,20 @@
     "valuesAria": "Werte am Cursor",
     "noCursor": "Kein Zeitpunkt gewählt – im Diagramm zeigen oder ▶ drücken.",
     "source": "gemessen (1 Hz, interpoliert)"
+  },
+  "flightMetrics": {
+    "aria": "Kennzahlen des Flugs",
+    "rotation": "Rotation",
+    "rotationSub": "Spitze {peak} · {duration}",
+    "rotationSlow": "Langsame Rotation: unter {limit} (üblich 2–3 °/s)",
+    "rotationFast": "Schnelle Rotation: über {limit} – weniger Abstand zum Tailstrike",
+    "gearDown": "Fahrwerk ausgefahren",
+    "gearDownSub": "{dist} vor der Schwelle",
+    "landingFlaps": "Landeklappen gesetzt",
+    "exceedances": "Überschreitungen",
+    "exceedancesSub": "im Endanflug 1000 → 50 ft",
+    "gate1000": "Gate 1000 ft",
+    "gate500": "Gate 500 ft",
+    "gateUnstable": "Am Gate nicht stabil"
   }
 }

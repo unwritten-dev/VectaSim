@@ -28,10 +28,23 @@ export interface TrackPoint {
   /** Height above ground from the sim and its on-ground flag (input of withGroundHeights). */
   aglFt?: number;
   onGround?: boolean;
+  /** Fixed colour (hex) instead of the altitude ramp: the approach from the landing gear extension on. */
+  color?: string;
 }
 
-export function samplesToPoints(samples: TrackSample[]): TrackPoint[] {
-  return samples.map((s) => ({ lon: s.longitude, lat: s.latitude, altFt: s.altitudeMslFt, aglFt: s.altitudeAglFt, onGround: s.onGround }));
+/**
+ * Track points of the samples; from index `tintFrom` on (the landing gear extension) they carry
+ * `tint` instead of the altitude colour.
+ */
+export function samplesToPoints(samples: TrackSample[], tintFrom = -1, tint?: string): TrackPoint[] {
+  return samples.map((s, i) => ({
+    lon: s.longitude,
+    lat: s.latitude,
+    altFt: s.altitudeMslFt,
+    aglFt: s.altitudeAglFt,
+    onGround: s.onGround,
+    ...(tint && tintFrom >= 0 && i >= tintFrom ? { color: tint } : {}),
+  }));
 }
 
 /**
@@ -60,9 +73,10 @@ export function segmentFeature(a: TrackPoint, b: TrackPoint): GeoJSON.Feature {
   };
 }
 
-/** Altitude colour expression (ft MSL) from the active theme's single-hue ramp. */
+/** Altitude colour expression (ft MSL) from the active theme's single-hue ramp; a feature's own `color` wins. */
 export function trackColorExpr(): maplibregl.ExpressionSpecification {
-  return ["interpolate", ["linear"], ["coalesce", ["get", "alt"], 0], ...TRACK_RAMP.flat()] as unknown as maplibregl.ExpressionSpecification;
+  const ramp = ["interpolate", ["linear"], ["coalesce", ["get", "alt"], 0], ...TRACK_RAMP.flat()];
+  return ["case", ["has", "color"], ["to-color", ["get", "color"]], ramp] as unknown as maplibregl.ExpressionSpecification;
 }
 
 /**

@@ -48,11 +48,12 @@ export function bandedRuns(points: TrackPoint[], from = 0, to = points.length - 
   const out: GeoJSON.Feature[] = [];
   let coords: number[][] | null = null;
   let curBand = 0;
+  let curColor: string | undefined;
   const flush = () => {
     if (!coords) return;
     const f: GeoJSON.Feature = {
       type: "Feature",
-      properties: { alt: (curBand + 0.5) * bandFt },
+      properties: { alt: (curBand + 0.5) * bandFt, ...(curColor ? { color: curColor } : {}) },
       geometry: { type: "LineString", coordinates: coords },
     };
     if (idBase !== undefined) f.id = idBase + out.length;
@@ -63,9 +64,12 @@ export function bandedRuns(points: TrackPoint[], from = 0, to = points.length - 
     const a = points[i - 1];
     const b = points[i];
     const bd = band((a.altFt + b.altFt) / 2, bandFt);
-    if (!coords || bd !== curBand) {
+    // a fixed colour (gear down for landing) starts with the segment that leaves the tinted point
+    const color = a.color;
+    if (!coords || bd !== curBand || color !== curColor) {
       flush();
       curBand = bd;
+      curColor = color;
       // a new run starts at the previous run's last point: no gap in the line
       coords = [[a.lon, a.lat]];
     }

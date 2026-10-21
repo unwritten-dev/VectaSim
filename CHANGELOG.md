@@ -2,7 +2,17 @@
 
 Entries are in English from 2026-10-18 on; earlier entries were translated.
 
-## Unreleased
+## 0.6.0 – 2026-10-21 (Beta)
+
+The logbook learns to read your flying: markers along the flight path, a green approach from the gear extension on, a full-screen flight view, and your take-off and approach numbers compared with your other flights.
+
+### Logbook
+
+- Markers along the flight path on the track map: gear down/up, every flap change (“Flaps 1 → 2”), the take-off rotation, touchdowns and the stable-approach findings – the 1000 ft and 500 ft gates (stable or not), “stable from”, go-around and every exceedance as a coloured stretch with criterion and peak. Hovering shows time, height above ground and IAS; a click moves the replay cursor there; the profile chart shows the same markers as ticks. The new *Markers* menu in the map toolbar filters them and remembers the choice.
+- From the landing gear extension on, the flight path is drawn green instead of altitude-coloured (2D line and 3D curtain), so the final approach stands out at a glance. Fixed-gear aircraft and flights without a retraction keep the altitude colours.
+- Rotation rate at lift-off: mean pitch rate from the start of the rotation to lift-off, plus the peak. The normal band is 1.5–4 °/s (airliners typically 2–3 °/s); slower is marked “slow”, faster “fast”.
+- Full-screen view of a logbook flight (⛶ in the map toolbar, or F): the track map with the altitude/speed profile and the replay bar fills the window; Esc or F closes it.
+- Your flying compared with your other flights, like the landing rate: the landing debrief and the flight detail now also rank the take-off rotation rate, the height and distance to the threshold at which the gear went down, the height at which the landing flaps were set, the exceedances on final and the 1000/500 ft gates against the same runway, the same type or all flights (“Rotation 2.3 °/s – your median in the A20N is 2.6 °/s (12 flights)”). The flight detail shows the values in a compact row under the track, and *Landings → Trends* has curves for rotation rate, gear-down height and exceedances with the same filters. Flights already in the logbook are worked out in the background the first time the comparison is opened.
 
 ## 0.5.3 – 2026-10-21 (Beta)
 

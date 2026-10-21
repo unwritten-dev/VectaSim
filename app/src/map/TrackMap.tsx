@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as maplibregl from "maplibre-gl";
 import type { StyleSpecification } from "maplibre-gl";
 import { followLanguage, loadBasemapStyle } from "./basemap";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./maplibreWorker";
+import "./trackView.css";
 import type { AircraftInfo, TouchdownReport, TrackSample } from "../types";
 import {
   addCurtainLayers,
@@ -36,6 +37,9 @@ import { pointsBounds } from "./geo";
 import { addLayerOnce, addSourceOnce, removeCustomLayers, replaceCustomLayer } from "./styleOnce";
 import MapUnavailable from "./MapUnavailable";
 import { useHintIds } from "./hint";
+import { landingGearDownIndex, touchdownEvents, trackEventDetail, trackEventLabel, type TrackEvent } from "../trackEvents";
+import { EVENTS_LAYER, EVENTS_SOURCE, RUNS_LAYER, addTrackEventLayers, applyTrackEventFilter, trackEventsGeoJson } from "./trackEventLayers";
+import TrackMarkersMenu, { useTrackEventFilter } from "./TrackMarkersMenu";
 
 /** First draw of a long track: this many points at most; the full line follows once idle. */
 const QUICK_POINTS = 1500;
@@ -47,6 +51,30 @@ interface Props {
   arrival?: { latitude: number; longitude: number } | null;
   /** Flown aircraft: picks the 3D model's shape and size (generic narrow-body without it). */
   aircraft?: AircraftInfo | null;
+  /**
+   * Flight-path markers (trackEvents.ts) with the "Markers" filter menu; without it only the
+   * touchdowns are marked (landing debrief) and the menu stays away.
+   */
+  events?: TrackEvent[];
+  /** Full-screen button (logbook flight detail only): shown when given. */
+  onFullscreen?: () => void;
+  fullscreen?: boolean;
+}
+
+/** Tooltip of a marker: label, then the detail lines (text only, no HTML from data). */
+function eventPopupNode(e: TrackEvent, clickHint: string): HTMLElement {
+  const el = document.createElement("div");
+  el.className = "track-event-tip";
+  const head = document.createElement("div");
+  head.className = "track-event-tip-head";
+  head.textContent = trackEventLabel(e);
+  el.appendChild(head);
+  for (const line of [...trackEventDetail(e), clickHint]) {
+    const d = document.createElement("div");
+    d.textContent = line;
+    el.appendChild(d);
+  }
+  return el;
 }
 
 /** Pixel radius around the track within which a click picks the nearest moment. */
@@ -71,7 +99,7 @@ function cursorElement(): HTMLDivElement {
  * points, and the shared replay cursor (landing/replayStore.ts) as an arrow on the track;
  * a click near the track sets the cursor to that moment.
  */
-export default function TrackMap({ samples, touchdowns, departure, arrival, aircraft }: Props) {
+export default function TrackMap({ samples, touchdowns, departure, arrival, aircraft, events, onFullscreen, fullscreen = false }: Props) {
   const t = useT();
   const store = useReplayStore();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -137,12 +165,37 @@ export default function TrackMap({ samples, touchdowns, departure, arrival, airc
             "circle-stroke-width": ["match", ["get", "kind"], "touchdown", 1.5, 2],
           },
         });
+        addTrackEventLayers(map);
+        applyTrackEventFilter(map, filterRef.current);
         const model = new AircraftModelLayer("aircraft-model", { body: COLOR.ownAircraft, dark: COLOR.aircraftEdge, light: getMapTheme().scheme === "light" });
         replaceCustomLayer(map, model);
         modelRef.current = model;
         model.setEnabled(view3dRef.current);
       };
       map.on("click", (e) => clickRef.current(e));
+      // marker tooltips (hover); the click is handled in onClick (cursor to the marker's time)
+      const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 12, className: "track-event-popup", maxWidth: "280px" });
+      let hoverId: string | null = null;
+      const onHover = (e: maplibregl.MapLayerMouseEvent) => {
+        const id = e.features?.[0]?.properties?.id as string | undefined;
+        const ev = id ? eventsRef.current.find((x) => x.id === id) : undefined;
+        if (!ev) return;
+        map.getCanvas().style.cursor = "pointer";
+        if (hoverId !== id) {
+          hoverId = id ?? null;
+          popup.setDOMContent(eventPopupNode(ev, tRef.current("map.markers.detail.click")));
+        }
+        popup.setLngLat(e.lngLat).addTo(map);
+      };
+      const onLeave = () => {
+        hoverId = null;
+        map.getCanvas().style.cursor = "";
+        popup.remove();
+      };
+      for (const l of [EVENTS_LAYER, RUNS_LAYER]) {
+        map.on("mousemove", l, onHover);
+        map.on("mouseleave", l, onLeave);
+      }
       // dragging takes the camera (only a user's drag carries an originalEvent)
       map.on("dragstart", (e) => {
         if (e.originalEvent && followRef.current) setFollowFlag(false);
@@ -217,7 +270,8 @@ export default function TrackMap({ samples, touchdowns, departure, arrival, airc
     const map = mapRef.current;
     if (!map || !readyRef.current) return;
     placeRef.current();
-    const points = samplesToPoints(samples);
+    // from the landing gear extension on, the path is green (2D line and 3D curtain alike)
+    const points = samplesToPoints(samples, landingGearDownIndex(samples), COLOR.ok);
     const trackSrc = () => map.getSource("track") as maplibregl.GeoJSONSource | undefined;
     // 3D curtain: built once per track (thinned, smoothed; map/curtainLayer.ts)
     drawCurtainTrack(map, "track-3d", view3dRef.current ? withGroundHeights(points) : [], null);
@@ -236,8 +290,10 @@ export default function TrackMap({ samples, touchdowns, departure, arrival, airc
     const markers: GeoJSON.Feature[] = [];
     if (departure) markers.push(pointFeature(departure.longitude, departure.latitude, { kind: "dep" }));
     if (arrival) markers.push(pointFeature(arrival.longitude, arrival.latitude, { kind: "arr" }));
-    for (const t of touchdowns) markers.push(pointFeature(t.longitude, t.latitude, { kind: "touchdown" }));
     (map.getSource("markers") as maplibregl.GeoJSONSource | undefined)?.setData({ type: "FeatureCollection", features: markers });
+    // touchdowns are markers of their own (filter group "touchdowns"), drawn by the event layer
+    (map.getSource(EVENTS_SOURCE) as maplibregl.GeoJSONSource | undefined)?.setData(trackEventsGeoJson(eventsRef.current, samples));
+    for (const td of touchdowns) markers.push(pointFeature(td.longitude, td.latitude, { kind: "touchdown" }));
 
     const id = samples.length ? `${samples[0].tMs}` : `${departure?.latitude},${departure?.longitude},${arrival?.latitude},${arrival?.longitude}`;
     if (id === fittedRef.current) return;
@@ -264,7 +320,21 @@ export default function TrackMap({ samples, touchdowns, departure, arrival, airc
   samplesRef.current = samples;
   const drawRef = useRef(draw);
   drawRef.current = draw;
-  useEffect(draw, [samples, touchdowns, departure, arrival]);
+  const shownEvents = useMemo(() => events ?? touchdownEvents(samples, touchdowns), [events, samples, touchdowns]);
+  const eventsRef = useRef(shownEvents);
+  eventsRef.current = shownEvents;
+  const tRef = useRef(t);
+  tRef.current = t;
+  useEffect(draw, [samples, touchdowns, departure, arrival, shownEvents, t]);
+  // the shared "Markers" filter (also the profile chart's); without the menu every group shows
+  const storedFilter = useTrackEventFilter();
+  const filter = useMemo(() => (events ? storedFilter : { ...storedFilter, touchdowns: true }), [events, storedFilter]);
+  const filterRef = useRef(filter);
+  filterRef.current = filter;
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map && readyRef.current) applyTrackEventFilter(map, filter);
+  }, [filter]);
 
   // shared cursor → marker; outside the subscription no React render per playback frame
   const placeCursor = () => {
@@ -339,6 +409,15 @@ export default function TrackMap({ samples, touchdowns, departure, arrival, airc
     const map = mapRef.current;
     const list = samplesRef.current;
     if (!map || list.length === 0) return;
+    // a marker: the replay cursor to its moment
+    const layers = [EVENTS_LAYER, RUNS_LAYER].filter((l) => map.getLayer(l));
+    const hit = layers.length ? map.queryRenderedFeatures(e.point, { layers })[0] : undefined;
+    const hitT = hit?.properties?.tMs as number | undefined;
+    if (hitT != null) {
+      store.pause();
+      store.setCursor(Math.min(list[list.length - 1].tMs, Math.max(list[0].tMs, hitT)));
+      return;
+    }
     let best = -1;
     let bestD = PICK_PX * PICK_PX;
     for (let i = 0; i < list.length; i++) {
@@ -377,6 +456,7 @@ export default function TrackMap({ samples, touchdowns, departure, arrival, airc
   const hints = useHintIds();
   const followHint = hints("follow", t("map.toolbar.followTitle"));
   const view3dHint = hints("3d", view3d ? t("map.toolbar.flatten") : t("map.toolbar.tilt"));
+  const fullscreenHint = hints("fullscreen", fullscreen ? t("map.toolbar.fullscreenExitTitle") : t("map.toolbar.fullscreenTitle"));
   return (
     <div className="track-map-wrap">
       <div ref={containerRef} className="map track-map" />
@@ -398,6 +478,23 @@ export default function TrackMap({ samples, touchdowns, departure, arrival, airc
         {view3dHint.node}
         <GlobeToggle />
         <MapStyleToggle />
+        {events && <TrackMarkersMenu />}
+        {onFullscreen && (
+          <>
+            <button
+              className="toggle track-fullscreen-btn"
+              onClick={onFullscreen}
+              aria-pressed={fullscreen}
+              aria-label={fullscreen ? t("map.toolbar.fullscreenExit") : t("map.toolbar.fullscreen")}
+              title={fullscreen ? t("map.toolbar.fullscreenExitTitle") : t("map.toolbar.fullscreenTitle")}
+              aria-describedby={fullscreenHint.describedBy}
+              data-track-fullscreen=""
+            >
+              <span aria-hidden="true">⛶</span>
+            </button>
+            {fullscreenHint.node}
+          </>
+        )}
       </div>
     </div>
   );

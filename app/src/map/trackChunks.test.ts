@@ -31,6 +31,18 @@ describe("bandedRuns", () => {
     expect(joined(f)).toEqual(pts.map((p) => [p.lon, p.lat]));
   });
 
+  it("splits at a fixed colour and carries it on the run", () => {
+    // level flight, the last 10 points tinted (gear down for landing): two runs, the second coloured
+    const pts = Array.from({ length: 30 }, (_, i) => ({ ...pt(i, 3000), ...(i >= 20 ? { color: "#00ff00" } : {}) }));
+    const f = bandedRuns(pts);
+    expect(f).toHaveLength(2);
+    expect(f[0].properties?.color).toBeUndefined();
+    expect(f[1].properties?.color).toBe("#00ff00");
+    // the coloured run starts at the first tinted point, no gap
+    expect((f[1].geometry as GeoJSON.LineString).coordinates[0]).toEqual([pts[20].lon, pts[20].lat]);
+    expect(joined(f)).toEqual(pts.map((p) => [p.lon, p.lat]));
+  });
+
   it("handles empty and single-point input", () => {
     expect(bandedRuns([])).toEqual([]);
     expect(bandedRuns([pt(0, 0)])).toEqual([]);

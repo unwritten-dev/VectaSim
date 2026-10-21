@@ -418,6 +418,7 @@ impl Store {
         )?;
         tx.execute("DELETE FROM landing_facts WHERE flight_id IN (?1, ?2)", params![first_id, second_id])?;
         tx.execute("DELETE FROM approach_facts WHERE flight_id IN (?1, ?2)", params![first_id, second_id])?;
+        tx.execute("DELETE FROM flight_metrics WHERE flight_id IN (?1, ?2)", params![first_id, second_id])?;
 
         let mut samples = track_a;
         samples.extend(track_b);

@@ -1216,3 +1216,89 @@ fn migration_v14_adds_the_user_columns_and_is_idempotent() {
     assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
     assert_eq!(store.get_flight(&id).unwrap().unwrap().flight.notes.as_deref(), Some("bleibt"));
 }
+
+// ---- per-flight metrics (schema v18) ----------------------------------------------------
+
+#[test]
+fn flight_metrics_of_the_mock_circuit_are_stored_and_cascade() {
+    use vectasim_core::approach::{self, AircraftRef, ApproachConfig, PhaseMark};
+    use vectasim_store::{FLIGHT_METRICS_VERSION, metrics};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("vectasim.db");
+    let store = Store::open(&path).unwrap();
+    record_mock_flight(&store, 10.0);
+    let recent = store.recent_flight_metrics(20, true).unwrap();
+    assert_eq!(recent.len(), 1);
+    assert!(recent[0].has_track && recent[0].metrics.is_none() && recent[0].is_stale());
+    assert!(store.recent_flight_metrics(20, false).unwrap().is_empty(), "mock flights are demo flights");
+    let id = recent[0].flight.id.clone();
+
+    let detail = store.get_flight(&id).unwrap().unwrap();
+    let track = store.get_track(&id).unwrap().unwrap();
+    let samples: Vec<_> = track.iter().map(TrackSample::to_approach_sample).collect();
+    let phases: Vec<PhaseMark> = detail.phases.iter().map(|p| PhaseMark { from: p.from, to: p.to, t_ms: p.timestamp_ms }).collect();
+    let analyses = approach::analyze_flight(
+        &samples,
+        &phases,
+        &detail.touchdowns,
+        &[MockFlight::runway()],
+        &AircraftRef::default(),
+        &ApproachConfig::default(),
+    );
+    let m = metrics::derive_from_analysis(&track, &detail.touchdowns, &analyses);
+    // the mock rotates at a normal rate, lowers the gear on the approach and flies it stable
+    let rate = m.rotation_rate_deg_s.expect("rotation");
+    assert!((1.0..=5.0).contains(&rate), "{m:?}");
+    assert!(m.rotation_peak_deg_s.unwrap() >= rate && m.rotation_duration_s.unwrap() > 0.0, "{m:?}");
+    assert!(m.gear_down_agl_ft.unwrap() > 300.0 && m.gear_down_dist_nm.unwrap() > 0.5, "{m:?}");
+    assert!(m.landing_flaps_agl_ft.unwrap() > 0.0, "{m:?}");
+    assert_eq!((m.exceedances, m.stable_1000, m.stable_500), (Some(0), Some(true), Some(true)), "{m:?}");
+    assert_eq!((m.airport_icao.as_deref(), m.runway_ident.as_deref()), (Some("EDDF"), Some("25C")));
+
+    assert!(store.put_flight_metrics(&id, &m).unwrap());
+    assert!(!store.put_flight_metrics("nope", &m).unwrap());
+    let back = store.flight_metrics(&id).unwrap().unwrap();
+    assert!(back.computed_ms > 0);
+    assert_eq!(vectasim_store::FlightMetricsRow { computed_ms: 0, ..back }, m);
+    let r = store.recent_flight_metrics(20, true).unwrap().remove(0);
+    assert!(!r.is_stale());
+    // an older version is stale
+    store.put_flight_metrics(&id, &vectasim_store::FlightMetricsRow { version: FLIGHT_METRICS_VERSION + 1, ..m.clone() }).unwrap();
+    assert!(store.recent_flight_metrics(20, true).unwrap()[0].is_stale());
+    // new runway geometry at the airport: recomputed
+    store.put_flight_metrics(&id, &m).unwrap();
+    store.invalidate_runway_facts(Some("EDDF")).unwrap();
+    assert!(store.flight_metrics(&id).unwrap().is_none());
+
+    store.put_flight_metrics(&id, &m).unwrap();
+    assert!(store.delete_flight_permanently(&id).unwrap());
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    let left: i64 = conn.query_row("SELECT COUNT(*) FROM flight_metrics", [], |r| r.get(0)).unwrap();
+    assert_eq!(left, 0, "metrics go with the flight");
+}
+
+#[test]
+fn migration_v18_adds_flight_metrics_after_a_backup_and_is_idempotent() {
+    const { assert!(SCHEMA_VERSION >= 18) };
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("vectasim.db");
+    let backups = dir.path().join("backups");
+    {
+        let store = Store::open_with_backup_dir(&path, &backups).unwrap();
+        record_mock_flight(&store, 10.0);
+    }
+    // a v17 file: no flight_metrics table
+    rusqlite::Connection::open(&path).unwrap().execute_batch("DROP TABLE flight_metrics; UPDATE schema_version SET version = 17;").unwrap();
+    let store = Store::open_with_backup_dir(&path, &backups).unwrap();
+    assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
+    let list = backups_in(&backups);
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].schema_from, Some(17));
+    let recent = store.recent_flight_metrics(20, true).unwrap();
+    assert_eq!(recent.len(), 1, "the flight is there, its metrics are not computed yet");
+    assert!(recent[0].metrics.is_none());
+    drop(store);
+    // the table exists but the file says v17 (rolled back version number): migrates again
+    rusqlite::Connection::open(&path).unwrap().execute("UPDATE schema_version SET version = 17", []).unwrap();
+    assert_eq!(Store::open_with_backup_dir(&path, &backups).unwrap().schema_version().unwrap(), SCHEMA_VERSION);
+}

@@ -25,6 +25,7 @@ pub mod csvimport;
 pub mod error;
 pub mod export;
 pub mod merge;
+pub mod metrics;
 pub mod recorder;
 pub mod store;
 pub mod track;
@@ -38,6 +39,7 @@ pub use csvimport::{ColumnMapping, CsvField, CsvImportOptions, CsvImportReport, 
 pub use error::{BackupStep, Field, Invalid};
 pub use export::ExportFormat;
 pub use merge::{MergeCandidate, MergeReport, ResumeCandidate};
+pub use metrics::{FLIGHT_METRICS_VERSION, FlightMetricsRow, RecentMetrics};
 pub use recorder::{FlightRecorder, LiveTrack, PlannedSlot, RecorderContext};
 pub use store::{
     g_load_from_track,

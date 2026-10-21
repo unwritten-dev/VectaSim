@@ -4,7 +4,8 @@
 //!
 //! `approach_facts_recent`: the flat facts of the last approaches for the flight strip and
 //! the approach scatter, cached per flight in `approach_facts` (versioned, filled lazily
-//! here and right after a flight ends by [`spawn_store_facts`]).
+//! here and right after a flight ends by [`spawn_store_facts`]). The same analysis also
+//! yields the per-flight metrics (`flight_metrics`, see `crate::metrics`).
 //!
 //! Track decoding costs a few ms per flight, so both commands run on a blocking thread.
 
@@ -19,8 +20,8 @@ use vectasim_core::approach::{
 use vectasim_core::landing::{CriterionKind, LandingSample, RunwayEnd, RunwayGeometry, RunwayGeometrySource};
 use vectasim_data::AirportIndex;
 use vectasim_store::{
-    APPROACH_FACTS_VERSION, ApproachFactRow, FlightRow, RecentApproaches, Store, TrackSample, icao_from_atc_model, normalize_registration,
-    resolve_registration,
+    APPROACH_FACTS_VERSION, ApproachFactRow, FlightDetail, FlightMetricsRow, FlightRow, RecentApproaches, Store, TrackSample,
+    icao_from_atc_model, metrics, normalize_registration, resolve_registration,
 };
 
 const FACTS_DEFAULT_LIMIT: u32 = 20;
@@ -40,6 +41,18 @@ pub(crate) fn analyze(store: &Store, airports: &AirportIndex, flight_id: &str, l
     {
         track = live;
     }
+    Ok(analyze_loaded(store, airports, flight_id, &detail, &track, is_live))
+}
+
+/// [`analyze`] over an already loaded flight and track (the metrics read the same track).
+fn analyze_loaded(
+    store: &Store,
+    airports: &AirportIndex,
+    flight_id: &str,
+    detail: &FlightDetail,
+    track: &[TrackSample],
+    is_live: bool,
+) -> Vec<ApproachAnalysis> {
     let samples: Vec<ApproachSample> = track.iter().map(TrackSample::to_approach_sample).collect();
     let phases: Vec<PhaseMark> = detail.phases.iter().map(|p| PhaseMark { from: p.from, to: p.to, t_ms: p.timestamp_ms }).collect();
     let cfg = ApproachConfig::default();
@@ -62,8 +75,7 @@ pub(crate) fn analyze(store: &Store, airports: &AirportIndex, flight_id: &str, l
     let mut landing_samples: Option<Vec<LandingSample>> = None;
     for a in approach::find_attempts(&samples, &phases, &detail.touchdowns, &cfg) {
         if let Some(k) = a.outcome.touchdown_index() {
-            let track_ref = &track;
-            let load = || landing_samples.get_or_insert_with(|| track_ref.iter().map(to_sample).collect()).clone();
+            let load = || landing_samples.get_or_insert_with(|| track.iter().map(to_sample).collect()).clone();
             if let Some(mut c) = resolve_runway(store, airports, &detail.touchdowns, k, load, remember) {
                 if c.geometry.source == RunwayGeometrySource::Database {
                     c.end.elevation_ft = airport_elevation(&c.end.airport);
@@ -94,25 +106,38 @@ pub(crate) fn analyze(store: &Store, airports: &AirportIndex, flight_id: &str, l
             approach::apply_runway_geometry(a, &geometry[i]);
         }
     }
-    Ok(out)
+    out
 }
 
-/// Compute and cache the approach facts of a flight; returns the rows written.
-pub(crate) fn store_facts(store: &Store, airports: &AirportIndex, flight_id: &str) -> Result<Vec<ApproachFactRow>, String> {
-    let rows: Vec<ApproachFactRow> = analyze(store, airports, flight_id, None)?.iter().map(ApproachFactRow::from_analysis).collect();
+/// Compute and store what a flight's track yields for the comparisons: the approach facts and
+/// the per-flight metrics (`vectasim_store::metrics`), from one track decode and one analysis.
+/// Returns the approach rows and the metrics written.
+pub(crate) fn store_facts(
+    store: &Store,
+    airports: &AirportIndex,
+    flight_id: &str,
+) -> Result<(Vec<ApproachFactRow>, FlightMetricsRow), String> {
+    let detail = store.get_flight(flight_id).map_err(|e| e.to_string())?.ok_or("Flug nicht gefunden")?;
+    let track = store.get_track(flight_id).map_err(|e| e.to_string())?.unwrap_or_default();
+    let analyses = analyze_loaded(store, airports, flight_id, &detail, &track, false);
+    let rows: Vec<ApproachFactRow> = analyses.iter().map(ApproachFactRow::from_analysis).collect();
     store.put_approach_facts(flight_id, APPROACH_FACTS_VERSION, &rows).map_err(|e| e.to_string())?;
-    Ok(rows)
+    let m = metrics::derive_from_analysis(&track, &detail.touchdowns, &analyses);
+    store.put_flight_metrics(flight_id, &m).map_err(|e| e.to_string())?;
+    Ok((rows, m))
 }
 
-/// After a flight ended: compute its approach facts in the background so the logbook strip
-/// has them at once, then emit `approach:facts` with the flight id.
+/// After a flight ended: compute its approach facts and metrics in the background so the
+/// logbook strip and the debrief comparison have them at once, then emit `approach:facts` and
+/// `flight:metrics` with the flight id.
 pub(crate) fn spawn_store_facts(app: AppHandle, store: Store, flight_id: String) {
     let spawned = std::thread::Builder::new().name("approach-facts".into()).spawn(move || {
         let Some(airports) = app.try_state::<Arc<AirportIndex>>().map(|s| s.inner().clone()) else { return };
         match store_facts(&store, &airports, &flight_id) {
-            Ok(rows) => {
-                log::info!("approach facts of flight {flight_id}: {} approach(es)", rows.len());
+            Ok((rows, _)) => {
+                log::info!("approach facts and metrics of flight {flight_id}: {} approach(es)", rows.len());
                 let _ = app.emit("approach:facts", flight_id.as_str());
+                let _ = app.emit(crate::metrics::EVENT, flight_id.as_str());
             }
             Err(e) => log::warn!("approach facts of flight {flight_id}: {e}"),
         }
@@ -210,7 +235,7 @@ fn facts_recent(store: &Store, airports: &AirportIndex, limit: usize, include_de
             Vec::new()
         } else {
             match store_facts(store, airports, &f.flight.id) {
-                Ok(rows) => rows,
+                Ok((rows, _)) => rows,
                 Err(e) => {
                     log::warn!("approach facts of flight {}: {e}", f.flight.id);
                     Vec::new()

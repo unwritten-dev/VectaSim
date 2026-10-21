@@ -1,0 +1,96 @@
+/* Flight-path markers (trackEventLayers.ts, TrackMarkersMenu.tsx), the profile ticks and the
+   logbook track view's full screen (FlightDetail.tsx → FlightTrackView). Theme tokens only. */
+
+.markers-menu {
+  min-width: 190px;
+}
+.map-toolbar .traffic-split button.markers-trigger {
+  border-radius: var(--r-sm);
+  border-left: none;
+}
+.map-toolbar button.track-fullscreen-btn {
+  min-width: 26px;
+  justify-content: center;
+  font-size: var(--fs-md, 14px);
+  line-height: 1;
+}
+
+.track-event-popup .maplibregl-popup-content {
+  background: var(--overlay);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 6px 10px;
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+  box-shadow: var(--shadow-overlay);
+  pointer-events: none;
+}
+.track-event-popup .maplibregl-popup-tip {
+  display: none;
+}
+.track-event-tip-head {
+  color: var(--text);
+  font-weight: 600;
+  font-size: var(--fs-sm);
+}
+.track-event-tip > div:last-child {
+  color: var(--text-faint);
+}
+
+.pc-event {
+  cursor: pointer;
+}
+.pc-event:hover line {
+  stroke-width: 3;
+}
+
+/* the block (map, profile, replay bar) keeps the detail's spacing in both places */
+.flight-track-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.track-fullscreen {
+  position: fixed;
+  inset: var(--titlebar-h, 0) 0 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4) var(--sp-4);
+  background: var(--bg);
+}
+.track-fullscreen-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+.track-fullscreen-head h2 {
+  margin: 0;
+  font-size: var(--fs-lg, 16px);
+}
+.track-fullscreen-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.track-fullscreen-body .flight-track-view,
+.track-fullscreen-body .flight-track-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.track-fullscreen-body .track-map-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.track-fullscreen-body .track-map-wrap > .track-map {
+  flex: 1;
+  height: auto;
+}

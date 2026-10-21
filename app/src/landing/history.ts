@@ -1,17 +1,19 @@
 // "Du gegen dich": a landing / approach compared with the pilot's own history, trends over
 // time and the touchdowns of one flight as a series (circuits). Pure (history.test.ts).
 //
-// Input are the cached facts (`landing_facts_recent`, `approach_facts_recent`, newest first).
+// Input are the cached facts (`landing_facts_recent`, `approach_facts_recent`,
+// `flight_metrics_recent`, newest first).
 // `null` always means "not measurable" and is left out of every median / quota – never
 // counted as good or bad. The centreline offset is typed as a number in the backend mirror,
 // but older caches may hold null, so it is treated as nullable here.
 
-import type { LandingFact, TouchdownReport } from "../types";
+import type { FlightMetricsFact, LandingFact, TouchdownReport } from "../types";
 import type { ApproachFact } from "./approachTypes";
 import { isDerivedSource } from "./types";
 import { isRated } from "./rated";
 import { t } from "../i18n";
-import { NNBSP, fmtNum } from "../i18n/number";
+import { NNBSP, fmt, fmtNum } from "../i18n/number";
+import { fmtDegS, rotationBand } from "../trackEvents";
 
 /** A landing fact whose centreline offset may be missing. */
 export type HistLanding = Omit<LandingFact, "centerlineOffsetM"> & { centerlineOffsetM: number | null };
@@ -260,6 +262,62 @@ export function defaultScope(fact: HistLanding, facts: HistLanding[], limit = DE
   return "all";
 }
 
+// ---- per-flight metrics (rotation, gear, flaps, gates) ----------------------------------
+
+/** A per-flight metric as a number (null = not determinable). */
+export type FlightMetricGetter = (f: FlightMetricsFact) => number | null | undefined;
+
+export interface FlightMetricCompare extends MetricCompare {
+  /** Comparison set actually used: the asked one, or the next wider with enough peers. */
+  scope: Scope;
+}
+
+/**
+ * Peers of a flight's metric: the pilot's other flights in `scope` that have a value, newest
+ * first, at most `limit`.
+ */
+function metricPeers(fact: FlightMetricsFact, facts: FlightMetricsFact[], scope: Scope, has: (f: FlightMetricsFact) => boolean, limit: number): FlightMetricsFact[] {
+  const rk = runwayKey(fact);
+  const tk = typeKey(fact);
+  return facts
+    .filter((f) => f.flightId !== fact.flightId && has(f))
+    .filter((f) => scope !== "runway" || (rk != null && runwayKey(f) === rk))
+    .filter((f) => scope !== "type" || typeKey(f) === tk)
+    .sort((a, b) => b.timestampMs - a.timestampMs)
+    .slice(0, limit);
+}
+
+/** Scopes from `scope` outwards (runway → type → all). */
+const widening = (scope: Scope): Scope[] => SCOPES.slice(SCOPES.indexOf(scope));
+
+/**
+ * One metric of a flight against the same metric of the pilot's other flights – median and
+ * quartiles like the landing rate, in `scope` or, with fewer than MIN_PEERS values there, the
+ * next wider scope. null without a value or without enough peers anywhere.
+ */
+export function compareFlightMetric(fact: FlightMetricsFact, facts: FlightMetricsFact[], get: FlightMetricGetter, scope: Scope, limit = DEFAULT_PEERS): FlightMetricCompare | null {
+  const v = get(fact);
+  if (!isNum(v)) return null;
+  for (const s of widening(scope)) {
+    const peers = metricPeers(fact, facts, s, (f) => isNum(get(f)), limit);
+    if (peers.length >= MIN_PEERS) return { ...metric(v, peers.map(get), null), scope: s };
+  }
+  return null;
+}
+
+/** The 500 ft gate of a flight against the pilot's stable-at-500-ft quota (same widening). */
+export function compareGate500(fact: FlightMetricsFact, facts: FlightMetricsFact[], scope: Scope, limit = DEFAULT_PEERS): { current: boolean; yes: number; total: number; scope: Scope } | null {
+  if (fact.stable500 == null) return null;
+  for (const s of widening(scope)) {
+    const peers = metricPeers(fact, facts, s, (f) => f.stable500 != null, limit);
+    if (peers.length >= MIN_PEERS) return { current: fact.stable500, ...quota(peers.map((f) => f.stable500)), scope: s };
+  }
+  return null;
+}
+
+/** The metrics row of a flight, or null. */
+export const metricsFor = (facts: FlightMetricsFact[] | null | undefined, flightId: string): FlightMetricsFact | null => facts?.find((f) => f.flightId === flightId) ?? null;
+
 // ---- trends -----------------------------------------------------------------------------
 
 export type Bucket = "flight" | "week" | "month";
@@ -295,6 +353,12 @@ export interface TrendSeries {
   lateral: TrendPoint[];
   /** TDZ quota 0..1. */
   tdz: TrendPoint[];
+  /** Take-off rotation, mean pitch rate °/s (flight metrics; empty without). */
+  rotation: TrendPoint[];
+  /** Gear-down height above ground, ft (flight metrics). */
+  gearDown: TrendPoint[];
+  /** Stable-approach exceedances on final, count (flight metrics). */
+  exceedances: TrendPoint[];
 }
 
 const DAY_MS = 86_400_000;
@@ -353,13 +417,22 @@ function series(raw: Raw[], bucket: Bucket, window: number, kind: "median" | "qu
 /**
  * Trend series oldest first: per landing (moving median over `window` landings), per ISO week or
  * per month (median of the bucket, moving median over `window` buckets). "stabil ab" comes from
- * the approach facts (never-stable approaches left out, as everywhere).
+ * the approach facts (never-stable approaches left out, as everywhere), rotation, gear-down
+ * height and exceedances from the flight metrics (flights without the value left out).
  */
-export function trendSeries(facts: HistLanding[], bucket: Bucket = "flight", opts: { approaches?: ApproachFact[]; window?: number } = {}): TrendSeries {
+export function trendSeries(facts: HistLanding[], bucket: Bucket = "flight", opts: { approaches?: ApproachFact[]; metrics?: FlightMetricsFact[]; window?: number } = {}): TrendSeries {
   const window = Math.max(1, opts.window ?? (bucket === "flight" ? 5 : 3));
   const key = (f: HistLanding) => `${f.flightId}#${f.touchdownIndex}`;
   const raw = (v: (f: HistLanding) => number | null): Raw[] => facts.map((f) => ({ key: key(f), tMs: f.timestampMs, v: v(f) }));
   const approaches = (opts.approaches ?? []).filter(assessed);
+  // flights without the value are left out (a gap, not a zero)
+  const metricSeries = (get: (m: FlightMetricsFact) => number | null) =>
+    series(
+      (opts.metrics ?? []).filter((m) => isNum(get(m))).map((m) => ({ key: `${m.flightId}#m`, tMs: m.timestampMs, v: get(m) })),
+      bucket,
+      window,
+      "median",
+    );
   return {
     bucket,
     window,
@@ -381,6 +454,9 @@ export function trendSeries(facts: HistLanding[], bucket: Bucket = "flight", opt
       "median",
     ),
     tdz: series(raw((f) => (f.inTouchdownZone ? 1 : 0)), bucket, window, "quota"),
+    rotation: metricSeries((m) => m.rotationRateDegS),
+    gearDown: metricSeries((m) => m.gearDownAglFt),
+    exceedances: metricSeries((m) => m.exceedances),
   };
 }
 
@@ -504,4 +580,73 @@ export function betterText(p: number | null | undefined): string | null {
 /** "deiner letzten 20 Landungen auf EDDF 25C" (genitive, for the after-flight line). */
 export function peersPhrase(n: number, scope: Scope, f: Parameters<typeof scopePhrase>[1]): string {
   return [t("landingHistory.peers", { count: n }), scopePhrase(scope, f)].filter(Boolean).join(" ");
+}
+
+export type MetricLineId = "rotation" | "gearDown" | "landingFlaps" | "exceedances" | "gates";
+
+export interface MetricLine {
+  id: MetricLineId;
+  text: string;
+  /** Outside the normal band (rotation) / not stable at a gate. */
+  warn: boolean;
+}
+
+const degS = fmtDegS;
+const countText = (v: number | null) => (v == null ? fmt(v) : fmtNum(v, Number.isInteger(v) ? 0 : 1));
+const gateWord = (v: boolean | null) => t(v == null ? "landingHistory.metrics.unmeasured" : v ? "landingHistory.metrics.stable" : "landingHistory.metrics.unstable");
+
+/**
+ * The flight's metrics as sentences against the pilot's other flights, in the style of the
+ * landing-rate line: "Rotation 2.3 °/s – your median in the A20N is 2.6 °/s (12 flights)".
+ * Each metric uses `scope` or the next wider one with enough values; a metric without a value
+ * or without MIN_PEERS comparable flights is left out. `facts` should already be demo-filtered.
+ */
+export function flightMetricLines(fact: FlightMetricsFact, facts: FlightMetricsFact[], scope: Scope): MetricLine[] {
+  const out: MetricLine[] = [];
+  const where = (s: Scope) => scopePhrase(s, fact);
+
+  const rot = compareFlightMetric(fact, facts, (f) => f.rotationRateDegS, scope);
+  if (rot && rot.value != null) {
+    const band = rotationBand(rot.value);
+    const value = band === "normal" ? degS(rot.value) : `${degS(rot.value)} · ${t(band === "slow" ? "map.markers.label.slow" : "map.markers.label.fast")}`;
+    const vars = { value, median: degS(rot.median), count: rot.n };
+    const w = where(rot.scope);
+    out.push({ id: "rotation", warn: band !== "normal", text: w ? t("landingHistory.metrics.rotationWhere", { ...vars, where: w }) : t("landingHistory.metrics.rotation", vars) });
+  }
+
+  const gear = compareFlightMetric(fact, facts, (f) => f.gearDownAglFt, scope);
+  if (gear) {
+    const dist = compareFlightMetric(fact, facts, (f) => f.gearDownDistNm, gear.scope);
+    const height = fmt(gear.value, 0, "ft");
+    const value = dist?.value != null ? t("landingHistory.metrics.aglDist", { height, dist: fmt(dist.value, 1, "nm") }) : t("landingHistory.metrics.agl", { height });
+    const median =
+      dist?.value != null && dist.scope === gear.scope
+        ? t("landingHistory.metrics.heightDist", { height: fmt(gear.median, 0, "ft"), dist: fmt(dist.median, 1, "nm") })
+        : fmt(gear.median, 0, "ft");
+    const vars = { value, median, count: gear.n };
+    const w = where(gear.scope);
+    out.push({ id: "gearDown", warn: false, text: w ? t("landingHistory.metrics.gearDownWhere", { ...vars, where: w }) : t("landingHistory.metrics.gearDown", vars) });
+  }
+
+  const flaps = compareFlightMetric(fact, facts, (f) => f.landingFlapsAglFt, scope);
+  if (flaps) {
+    const vars = { value: t("landingHistory.metrics.agl", { height: fmt(flaps.value, 0, "ft") }), median: fmt(flaps.median, 0, "ft"), count: flaps.n };
+    const w = where(flaps.scope);
+    out.push({ id: "landingFlaps", warn: false, text: w ? t("landingHistory.metrics.landingFlapsWhere", { ...vars, where: w }) : t("landingHistory.metrics.landingFlaps", vars) });
+  }
+
+  const exc = compareFlightMetric(fact, facts, (f) => f.exceedances, scope);
+  if (exc && exc.value != null) {
+    const vars = { value: t("landingHistory.metrics.exceedanceCount", { count: exc.value }), median: countText(exc.median), count: exc.n };
+    const w = where(exc.scope);
+    out.push({ id: "exceedances", warn: false, text: w ? t("landingHistory.metrics.exceedancesWhere", { ...vars, where: w }) : t("landingHistory.metrics.exceedances", vars) });
+  }
+
+  const g = compareGate500(fact, facts, scope);
+  if (g) {
+    const vars = { g1000: gateWord(fact.stable1000), g500: gateWord(fact.stable500), yes: g.yes, count: g.total };
+    const w = where(g.scope);
+    out.push({ id: "gates", warn: fact.stable1000 === false || fact.stable500 === false, text: w ? t("landingHistory.metrics.gatesWhere", { ...vars, where: w }) : t("landingHistory.metrics.gates", vars) });
+  }
+  return out;
 }

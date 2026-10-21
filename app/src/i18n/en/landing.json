@@ -890,6 +890,18 @@
       "tdz": {
         "title": "Touchdown zone",
         "note": "share in the touchdown zone"
+      },
+      "rotation": {
+        "title": "Rotation",
+        "note": "mean pitch rate on take-off"
+      },
+      "gearDown": {
+        "title": "Gear down",
+        "note": "height above ground on final"
+      },
+      "exceedances": {
+        "title": "Exceedances",
+        "note": "stability criteria on final, fewer is better"
       }
     },
     "chartAria": {
@@ -943,14 +955,18 @@
         "other": "moving median ({count} periods)"
       },
       "iqr": "middle half (quartiles)",
-      "refs": "dashed: band limits (landing rate {rate}, stable from {stable}, lateral track {lateral})",
+      "refs": "dashed: band limits (landing rate {rate}, stable from {stable}, lateral track {lateral}, rotation {rotation})",
       "timesUtc": "times in UTC",
       "timesLocal": "dates in local time, weeks and months by UTC",
       "approaches": {
         "one": "{count} assessed approach",
         "other": "{count} assessed approaches"
       },
-      "note": "{landings} · {approaches} · {times}"
+      "note": "{landings} · {approaches} · {times}",
+      "flights": {
+        "one": "{count} flight with metrics",
+        "other": "{count} flights with metrics"
+      }
     },
     "table": {
       "caption": "Landing trends, newest first",
@@ -959,7 +975,10 @@
       "neverStable": "never stable",
       "period": "Period",
       "landings": "Landings",
-      "lateral": "Lateral track"
+      "lateral": "Lateral track",
+      "rotation": "Rotation",
+      "gearDown": "Gear down",
+      "exceedances": "Exceed."
     }
   },
   "dispersion": {
@@ -1160,6 +1179,59 @@
       "tdzOut": "Touchdown zone {yes}/{total} · you: outside",
       "neverStable": "never stable",
       "notAssessed": "Approach not assessed"
+    },
+    "metrics": {
+      "aria": "Metrics against your other flights",
+      "rotation": {
+        "one": "Rotation {value} – your median is {median} ({count} flight)",
+        "other": "Rotation {value} – your median is {median} ({count} flights)"
+      },
+      "rotationWhere": {
+        "one": "Rotation {value} – your median {where} is {median} ({count} flight)",
+        "other": "Rotation {value} – your median {where} is {median} ({count} flights)"
+      },
+      "gearDown": {
+        "one": "Gear down at {value} – your median is {median} ({count} flight)",
+        "other": "Gear down at {value} – your median is {median} ({count} flights)"
+      },
+      "gearDownWhere": {
+        "one": "Gear down at {value} – your median {where} is {median} ({count} flight)",
+        "other": "Gear down at {value} – your median {where} is {median} ({count} flights)"
+      },
+      "landingFlaps": {
+        "one": "Landing flaps set at {value} – your median is {median} ({count} flight)",
+        "other": "Landing flaps set at {value} – your median is {median} ({count} flights)"
+      },
+      "landingFlapsWhere": {
+        "one": "Landing flaps set at {value} – your median {where} is {median} ({count} flight)",
+        "other": "Landing flaps set at {value} – your median {where} is {median} ({count} flights)"
+      },
+      "exceedances": {
+        "one": "{value} on final – your median is {median} ({count} flight)",
+        "other": "{value} on final – your median is {median} ({count} flights)"
+      },
+      "exceedancesWhere": {
+        "one": "{value} on final – your median {where} is {median} ({count} flight)",
+        "other": "{value} on final – your median {where} is {median} ({count} flights)"
+      },
+      "gates": {
+        "one": "Gates 1000 ft {g1000}, 500 ft {g500} – stable at 500 ft in {yes} of {count} flight",
+        "other": "Gates 1000 ft {g1000}, 500 ft {g500} – stable at 500 ft in {yes} of {count} flights"
+      },
+      "gatesWhere": {
+        "one": "Gates 1000 ft {g1000}, 500 ft {g500} – stable at 500 ft in {yes} of {count} flight {where}",
+        "other": "Gates 1000 ft {g1000}, 500 ft {g500} – stable at 500 ft in {yes} of {count} flights {where}"
+      },
+      "exceedanceCount": {
+        "one": "{count} exceedance",
+        "other": "{count} exceedances"
+      },
+      "agl": "{height} AGL",
+      "aglDist": "{height} AGL / {dist}",
+      "heightDist": "{height} / {dist}",
+      "stable": "stable",
+      "unstable": "unstable",
+      "unmeasured": "not measurable"
     }
   },
   "replay": {
@@ -1199,5 +1271,20 @@
     "valuesAria": "Values at the cursor",
     "noCursor": "No time selected – point in a chart or press ▶.",
     "source": "measured (1 Hz, interpolated)"
+  },
+  "flightMetrics": {
+    "aria": "Metrics of the flight",
+    "rotation": "Rotation",
+    "rotationSub": "peak {peak} · {duration}",
+    "rotationSlow": "Slow rotation: below {limit} (typical 2–3 °/s)",
+    "rotationFast": "Fast rotation: above {limit} – less tail-strike margin",
+    "gearDown": "Gear down",
+    "gearDownSub": "{dist} before the threshold",
+    "landingFlaps": "Landing flaps set",
+    "exceedances": "Exceedances",
+    "exceedancesSub": "on final 1000 → 50 ft",
+    "gate1000": "1000 ft gate",
+    "gate500": "500 ft gate",
+    "gateUnstable": "Not stable at the gate"
   }
 }

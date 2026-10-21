@@ -671,6 +671,41 @@ export interface LandingFactsResult {
   skipped: number;
 }
 
+/**
+ * Per-flight metrics (`flight_metrics_recent`, app/src-tauri/src/metrics.rs; rules in
+ * crates/vectasim-store/src/metrics.rs and `flightMetrics` in trackEvents.ts). null = not
+ * determinable.
+ */
+export interface FlightMetricsFact {
+  flightId: string;
+  /** Landing (else block / creation) time, epoch ms. */
+  timestampMs: number;
+  aircraftIcaoType?: string | null;
+  aircraftTitle?: string | null;
+  provider?: string | null;
+  version: number;
+  computedMs: number;
+  /** Runway of the landing approach. */
+  airportIcao: string | null;
+  runwayIdent: string | null;
+  rotationRateDegS: number | null;
+  rotationPeakDegS: number | null;
+  rotationDurationS: number | null;
+  gearDownAglFt: number | null;
+  gearDownDistNm: number | null;
+  landingFlapsAglFt: number | null;
+  exceedances: number | null;
+  stable1000: boolean | null;
+  stable500: boolean | null;
+}
+
+export interface FlightMetricsResult {
+  /** Newest first. */
+  facts: FlightMetricsFact[];
+  /** Older flights still being computed in the background (event `flight:metrics` follows). */
+  pending: number;
+}
+
 // ---- Diagnostics → Live raw data (`diagnostics_snapshot`, event `diag:raw`) ----
 
 export interface VarDiag {

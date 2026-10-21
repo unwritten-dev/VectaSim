@@ -9,6 +9,7 @@ mod discord;
 mod landing;
 mod logging;
 mod manager;
+mod metrics;
 mod notes;
 mod notify;
 mod online;
@@ -1009,6 +1010,7 @@ pub fn run() {
             landing::delete_user_runway,
             approach::approach_analysis,
             approach::approach_facts_recent,
+            metrics::flight_metrics_recent,
             airframes::list_airframes,
             airframes::get_airframe,
             airframes::airframe_flights,

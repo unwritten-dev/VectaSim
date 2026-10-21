@@ -416,6 +416,10 @@ impl Store {
                         "DELETE FROM approach_facts WHERE flight_id IN (SELECT id FROM flights WHERE airframe_reg = ?1)",
                         params![reg],
                     )?;
+                    conn.execute(
+                        "DELETE FROM flight_metrics WHERE flight_id IN (SELECT id FROM flights WHERE airframe_reg = ?1)",
+                        params![reg],
+                    )?;
                 }
             }
             if let Some(v) = flaps {
@@ -425,6 +429,10 @@ impl Store {
                     // same as the Vapp: the gate checks change
                     conn.execute(
                         "DELETE FROM approach_facts WHERE flight_id IN (SELECT id FROM flights WHERE airframe_reg = ?1)",
+                        params![reg],
+                    )?;
+                    conn.execute(
+                        "DELETE FROM flight_metrics WHERE flight_id IN (SELECT id FROM flights WHERE airframe_reg = ?1)",
                         params![reg],
                     )?;
                 }

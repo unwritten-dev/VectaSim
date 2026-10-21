@@ -876,7 +876,7 @@ impl RunwayGeo {
 }
 
 /// After the runways of an airport changed: its cached landing facts (and the ones that matched
-/// nothing) go, its approach facts are marked stale – as `Store::invalidate_runway_facts`.
+/// nothing) go, its approach facts are marked stale and its flight metrics go – as `Store::invalidate_runway_facts`.
 fn invalidate_airport(tx: &Transaction<'_>, icao: &str) -> Result<()> {
     tx.execute("DELETE FROM landing_facts WHERE matched = 0 OR airport_icao = ?1", params![icao])?;
     tx.execute(
@@ -884,6 +884,7 @@ fn invalidate_airport(tx: &Transaction<'_>, icao: &str) -> Result<()> {
             SELECT flight_id FROM approach_facts WHERE airport_icao IS NULL OR airport_icao = ?1)",
         params![icao],
     )?;
+    tx.execute("DELETE FROM flight_metrics WHERE airport_icao IS NULL OR airport_icao = ?1", params![icao])?;
     Ok(())
 }
 

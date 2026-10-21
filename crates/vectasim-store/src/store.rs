@@ -15,7 +15,7 @@ use vectasim_core::{AircraftInfo, FlightPhase, FlightSummary, IntegrityFlags, La
 
 /// Newest schema this build writes. A file with a higher version is refused
 /// ([`StoreError::NewerSchema`]) instead of being opened by an older app.
-pub const SCHEMA_VERSION: i64 = 17;
+pub const SCHEMA_VERSION: i64 = 18;
 
 /// Days a deleted flight stays in the Papierkorb before `purge_deleted` removes it.
 pub const TRASH_RETENTION_DAYS: u32 = 30;
@@ -543,6 +543,9 @@ const MIGRATIONS: &[MigrationStep] = &[
     },
     // idempotent like v9-v16 (trigger IF NOT EXISTS, the orphan sweep finds nothing the second time)
     MigrationStep { to: 17, apply: |c| Ok(c.execute_batch(MIGRATION_V17)?) },
+    // per-flight metrics (`metrics.rs`); idempotent (IF NOT EXISTS). Rows are filled at flight end
+    // and, for the flights already in the logbook, by the app in the background.
+    MigrationStep { to: 18, apply: |c| Ok(c.execute_batch(crate::metrics::MIGRATION_V18)?) },
 ];
 
 /// Schema version of an open file; 0 = empty (no `schema_version` table yet).
@@ -2155,8 +2158,9 @@ impl Store {
     }
 
     /// After the runways known at an airport changed: drop the cached landing facts that
-    /// matched nothing or matched at `airport_icao`, and mark the approach facts of flights
-    /// with such an approach stale, so both are recomputed lazily with the new geometry.
+    /// matched nothing or matched at `airport_icao`, mark the approach facts of flights
+    /// with such an approach stale and drop their flight metrics, so all are recomputed
+    /// lazily with the new geometry.
     pub fn invalidate_runway_facts(&self, airport_icao: Option<&str>) -> Result<()> {
         let icao = airport_icao.map(runway_key);
         let mut conn = self.conn();
@@ -2167,6 +2171,8 @@ impl Store {
                 SELECT flight_id FROM approach_facts WHERE airport_icao IS NULL OR (?1 IS NOT NULL AND airport_icao = ?1))",
             params![icao],
         )?;
+        // the gear-down distance and the gates of the metrics come from the same runway match
+        tx.execute("DELETE FROM flight_metrics WHERE airport_icao IS NULL OR (?1 IS NOT NULL AND airport_icao = ?1)", params![icao])?;
         tx.commit()?;
         Ok(())
     }

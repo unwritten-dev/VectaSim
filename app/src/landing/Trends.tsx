@@ -8,8 +8,10 @@ import { openDebrief } from "./debriefStore";
 import { linear } from "./dispersionStats";
 import { niceStep, ticks, useWidth } from "./chartUtils";
 import { useHistoryFacts } from "./HistoryPanel";
-import { approachFor, demoFilter, monthCompare, trendSeries, typeKey, type Bucket, type HistLanding, type PeriodStats, type TrendPoint } from "./history";
+import { approachFor, demoFilter, metricsFor, monthCompare, trendSeries, typeKey, type Bucket, type HistLanding, type PeriodStats, type TrendPoint } from "./history";
 import type { ApproachFact } from "./approachTypes";
+import type { FlightMetricsFact } from "../types";
+import { ROTATION_FAST_DEG_S, ROTATION_SLOW_DEG_S, fmtDegS } from "../trackEvents";
 import "./dispersion.css";
 import "./trends.css";
 
@@ -38,7 +40,7 @@ function options(xs: string[]): Array<{ key: string; count: number }> {
   return [...m.entries()].map(([key, count]) => ({ key, count })).sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
 }
 
-type ChartId = "rate" | "distance" | "stableFrom" | "lateral" | "tdz";
+type ChartId = "rate" | "distance" | "stableFrom" | "lateral" | "tdz" | "rotation" | "gearDown" | "exceedances";
 
 interface ChartDef {
   id: ChartId;
@@ -65,6 +67,10 @@ const CHARTS: ChartDef[] = [
   { id: "stableFrom", unit: "ft", scale: (v) => v, floor: 0, refs: [500, 1000] },
   { id: "lateral", unit: "dots", scale: (v) => v, floor: 0, refs: [0.3, 0.6], digits: 2 },
   { id: "tdz", unit: "%", scale: (v) => v * 100, floor: 0, ceil: 100 },
+  // per-flight metrics (flight_metrics_recent); the rotation band is the track markers' one
+  { id: "rotation", unit: "°/s", scale: (v) => v, floor: 0, refs: [ROTATION_SLOW_DEG_S, ROTATION_FAST_DEG_S], digits: 1 },
+  { id: "gearDown", unit: "ft", scale: (v) => v, floor: 0 },
+  { id: "exceedances", unit: "", scale: (v) => v, floor: 0 },
 ];
 
 const unitText = (t: TFunction, unit: string) => (unit === "dots" ? t("trends.unitDots") : unit);
@@ -289,14 +295,14 @@ function MonthTiles({ m }: { m: ReturnType<typeof monthCompare> }) {
 }
 
 /**
- * Logbook → Landungen → "Verlauf": landing rate, touchdown distance, "stabil ab" and the TDZ
- * quota over time (per landing, week or month) with a moving median, filters type / airport /
+ * Logbook → Landungen → "Verlauf": landing rate, touchdown distance, "stabil ab", the TDZ
+ * quota, take-off rotation, gear-down height and exceedances over time (per landing, week or month) with a moving median, filters type / airport /
  * period, this month vs the previous one, and the values as a table.
  */
 export default function Trends() {
   const t = useT();
   const { showDemo, timeLocal } = usePrefs();
-  const { landings, approaches, error } = useHistoryFacts();
+  const { landings, approaches, metrics, error } = useHistoryFacts();
   const [type, setType] = useState<string | null>(null);
   const [airport, setAirport] = useState<string | null>(null);
   const [limit, setLimit] = useState<Limit>(50);
@@ -306,6 +312,7 @@ export default function Trends() {
 
   const allL = useMemo(() => demoFilter(landings ?? [], null, showDemo), [landings, showDemo]);
   const allA = useMemo(() => demoFilter(approaches ?? [], null, showDemo), [approaches, showDemo]);
+  const allM = useMemo(() => demoFilter(metrics ?? [], null, showDemo), [metrics, showDemo]);
   const typeOpts = useMemo(() => options(allL.map(typeKey)), [allL]);
   const airportOpts = useMemo(() => options(allL.map((f) => f.airportIcao)), [allL]);
   const activeType = type && typeOpts.some((o) => o.key === type) ? type : null;
@@ -319,14 +326,27 @@ export default function Trends() {
     () => allA.filter((f) => (!activeType || typeKey(f) === activeType) && (!activeAirport || f.airportIcao === activeAirport)),
     [allA, activeType, activeAirport],
   );
+  // same type / airport filter (airport of the landing runway)
+  const filteredM = useMemo(
+    () => allM.filter((f) => (!activeType || typeKey(f) === activeType) && (!activeAirport || f.airportIcao === activeAirport)),
+    [allM, activeType, activeAirport],
+  );
   const facts = useMemo(() => filteredL.slice(0, limit), [filteredL, limit]);
   // approaches of the same period as the landings shown
   const aFacts = useMemo(() => {
     const oldest = facts.length ? facts[facts.length - 1].timestampMs : Infinity;
     return filteredA.filter((a) => a.endedMs >= oldest - 3_600_000).slice(0, limit);
   }, [filteredA, facts, limit]);
+  // flight metrics of the same period as the landings shown
+  const mFacts = useMemo(() => {
+    const oldest = facts.length ? facts[facts.length - 1].timestampMs : Infinity;
+    return filteredM.filter((m) => m.timestampMs >= oldest - 3_600_000).slice(0, limit);
+  }, [filteredM, facts, limit]);
   const win = limit === 20 ? 5 : 10;
-  const series = useMemo(() => trendSeries(facts, bucket, { approaches: aFacts, window: bucket === "flight" ? win : 3 }), [facts, aFacts, bucket, win]);
+  const series = useMemo(
+    () => trendSeries(facts, bucket, { approaches: aFacts, metrics: mFacts, window: bucket === "flight" ? win : 3 }),
+    [facts, aFacts, mFacts, bucket, win],
+  );
   const month = useMemo(() => monthCompare(filteredL, filteredA, Date.now()), [filteredL, filteredA]);
 
   if (error && !landings?.length) {
@@ -437,24 +457,37 @@ export default function Trends() {
                 rate: `${[150, 300, 600].map((v) => fmtNum(v, 0)).join(" / ")}${NNBSP}fpm`,
                 stable: `${[500, 1000].map((v) => fmtNum(v, 0)).join(" / ")}${NNBSP}ft`,
                 lateral: `${[0.3, 0.6].map((v) => fmtNum(v, 1)).join(" / ")}${NNBSP}${t("trends.unitDots")}`,
+                rotation: `${[ROTATION_SLOW_DEG_S, ROTATION_FAST_DEG_S].map((v) => fmtNum(v, 1)).join(" / ")}${NNBSP}°/s`,
               })}
             </span>
             <span className="dp-note">
               {t("trends.legend.note", {
                 landings: t("count.landings", { count: facts.length }),
-                approaches: t("trends.legend.approaches", { count: aFacts.filter((a) => a.band != null).length }),
+                approaches: `${t("trends.legend.approaches", { count: aFacts.filter((a) => a.band != null).length })} · ${t("trends.legend.flights", { count: mFacts.length })}`,
                 times: timeLocal ? t("trends.legend.timesLocal") : t("trends.legend.timesUtc"),
               })}
             </span>
           </div>
-          <TrendTable facts={facts} approaches={aFacts} bucket={bucket} series={series} />
+          <TrendTable facts={facts} approaches={aFacts} metrics={mFacts} bucket={bucket} series={series} />
         </>
       )}
     </section>
   );
 }
 
-function TrendTable({ facts, approaches, bucket, series }: { facts: HistLanding[]; approaches: ApproachFact[]; bucket: Bucket; series: ReturnType<typeof trendSeries> }) {
+function TrendTable({
+  facts,
+  approaches,
+  metrics,
+  bucket,
+  series,
+}: {
+  facts: HistLanding[];
+  approaches: ApproachFact[];
+  metrics: FlightMetricsFact[];
+  bucket: Bucket;
+  series: ReturnType<typeof trendSeries>;
+}) {
   const t = useT();
   if (bucket === "flight") {
     return (
@@ -481,6 +514,15 @@ function TrendTable({ facts, approaches, bucket, series }: { facts: HistLanding[
                 <th scope="col" className="num-col">
                   {t("trends.table.stableFrom")}
                 </th>
+                <th scope="col" className="num-col">
+                  {t("trends.table.rotation")}
+                </th>
+                <th scope="col" className="num-col">
+                  {t("trends.table.gearDown")}
+                </th>
+                <th scope="col" className="num-col" title={t("trends.chart.exceedances.title")}>
+                  {t("trends.table.exceedances")}
+                </th>
                 <th scope="col">
                   <span className="sr-only">{t("dispersion.table.action")}</span>
                 </th>
@@ -489,6 +531,7 @@ function TrendTable({ facts, approaches, bucket, series }: { facts: HistLanding[
             <tbody>
               {facts.map((f) => {
                 const a = approachFor(approaches, f.flightId, f.touchdownIndex);
+                const m = metricsFor(metrics, f.flightId);
                 return (
                   <tr key={`${f.flightId}#${f.touchdownIndex}`}>
                     <td className="num">{fmtDate(f.timestampMs)}</td>
@@ -501,6 +544,9 @@ function TrendTable({ facts, approaches, bucket, series }: { facts: HistLanding[
                     <td className="num num-col">{f.centerlineOffsetM != null ? fmt(Math.abs(f.centerlineOffsetM), 0, "m") : DASH}</td>
                     <td>{f.inTouchdownZone ? t("dispersion.table.yes") : t("dispersion.table.no")}</td>
                     <td className="num num-col">{a?.stableFromFt != null ? fmt(a.stableFromFt, 0, "ft") : a?.band ? t("trends.table.neverStable") : DASH}</td>
+                    <td className="num num-col">{fmtDegS(m?.rotationRateDegS)}</td>
+                    <td className="num num-col">{fmt(m?.gearDownAglFt, 0, "ft")}</td>
+                    <td className="num num-col">{fmt(m?.exceedances, 0)}</td>
                     <td>
                       <button className="btn-sm" onClick={() => openDebrief(f.flightId, f.touchdownIndex)}>
                         {t("dispersion.table.debrief")}
@@ -521,7 +567,12 @@ function TrendTable({ facts, approaches, bucket, series }: { facts: HistLanding[
   const stab = byKey(series.stableFrom);
   const tdz = byKey(series.tdz);
   const lat = byKey(series.lateral);
-  const keys = [...new Set([...series.rate.map((p) => p.key), ...series.stableFrom.map((p) => p.key), ...series.lateral.map((p) => p.key)])].sort().reverse();
+  const rot = byKey(series.rotation);
+  const gear = byKey(series.gearDown);
+  const exc = byKey(series.exceedances);
+  const keys = [...new Set([...series.rate, ...series.stableFrom, ...series.lateral, ...series.rotation, ...series.gearDown, ...series.exceedances].map((p) => p.key))]
+    .sort()
+    .reverse();
   const rate = byKey(series.rate);
   return (
     <details className="dp-table">
@@ -553,11 +604,20 @@ function TrendTable({ facts, approaches, bucket, series }: { facts: HistLanding[
               <th scope="col" className="num-col" title={t("trends.chart.lateral.hint")}>
                 {t("trends.table.lateral")}
               </th>
+              <th scope="col" className="num-col">
+                {t("trends.table.rotation")}
+              </th>
+              <th scope="col" className="num-col">
+                {t("trends.table.gearDown")}
+              </th>
+              <th scope="col" className="num-col" title={t("trends.chart.exceedances.title")}>
+                {t("trends.table.exceedances")}
+              </th>
             </tr>
           </thead>
           <tbody>
             {keys.map((k) => {
-              const p = rate.get(k) ?? stab.get(k) ?? lat.get(k)!;
+              const p = rate.get(k) ?? stab.get(k) ?? lat.get(k) ?? rot.get(k) ?? gear.get(k) ?? exc.get(k)!;
               const tz = tdz.get(k)?.value;
               return (
                 <tr key={k}>
@@ -569,6 +629,9 @@ function TrendTable({ facts, approaches, bucket, series }: { facts: HistLanding[
                   <td className="num num-col">{tz != null ? `${fmtNum(tz * 100, 0)}${NNBSP}%` : DASH}</td>
                   <td className="num num-col">{fmt(stab.get(k)?.value, 0, "ft")}</td>
                   <td className="num num-col">{fmt(lat.get(k)?.value, 2, t("trends.unitDots"))}</td>
+                  <td className="num num-col">{fmtDegS(rot.get(k)?.value)}</td>
+                  <td className="num num-col">{fmt(gear.get(k)?.value, 0, "ft")}</td>
+                  <td className="num num-col">{fmt(exc.get(k)?.value, 1)}</td>
                 </tr>
               );
             })}

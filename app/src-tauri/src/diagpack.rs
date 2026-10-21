@@ -235,6 +235,7 @@ fn db_stats(path: &Path) -> rusqlite::Result<Value> {
         "airframes": count("SELECT COUNT(*) FROM airframes"),
         "approachFacts": count("SELECT COUNT(*) FROM approach_facts"),
         "landingFacts": count("SELECT COUNT(*) FROM landing_facts"),
+        "flightMetrics": count("SELECT COUNT(*) FROM flight_metrics"),
     });
 
     let mut stmt = conn.prepare(

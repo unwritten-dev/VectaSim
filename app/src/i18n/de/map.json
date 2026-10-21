@@ -17,7 +17,13 @@
       "layers": "Kartenebenen",
       "atcTitle": "Lotsen an Flughäfen",
       "atcNeedsTraffic": "Erst „Verkehr“ einschalten",
-      "weather": "Wetter"
+      "weather": "Wetter",
+      "fullscreen": "Vollbild",
+      "fullscreenTitle": "Vollbild: Trackkarte, Profil und Wiedergabeleiste füllen das Fenster (F)",
+      "fullscreenExit": "Vollbild verlassen",
+      "fullscreenExitTitle": "Vollbild verlassen (Esc oder F)",
+      "fullscreenDialog": "Flug {route} im Vollbild",
+      "fullscreenClose": "Schließen"
     },
     "mapStyle": {
       "satellite": "Satellit",
@@ -128,6 +134,56 @@
     },
     "airport": {
       "label": "Flugplatz"
+    },
+    "markers": {
+      "menu": "Marker",
+      "menuTitle": "Wählen, welche Marker die Fluglinie zeigt: Fahrwerk, Klappen, Rotation, Anflug-Gates und -Kriterien, Aufsetzer",
+      "menuLabel": "Marker auf der Fluglinie",
+      "note": "Beschriftung ab Zoom {zoom}; Klick auf einen Marker setzt den Replay-Cursor dorthin.",
+      "group": {
+        "gear": "Fahrwerk",
+        "flaps": "Klappen",
+        "rotation": "Rotation",
+        "gates": "Anflug-Gates",
+        "criteria": "Anflug-Kriterien",
+        "touchdowns": "Aufsetzer"
+      },
+      "groupTitle": {
+        "gear": "Wo das Fahrwerk aus- und eingefahren wurde (mehr als halb ausgefahren, 2 s gehalten)",
+        "flaps": "Jede Änderung des Klappenhebels mit Höhe und Geschwindigkeit",
+        "rotation": "Abheben mit der Rotationsrate: mittlere Nickrate vom Rotationsbeginn bis zum Abheben",
+        "gates": "Gate 1000 ft und 500 ft (stabil oder nicht), „stabil ab“ und Durchstarten – aus der Anflugauswertung",
+        "criteria": "Überschreitungen des stabilisierten Anflugs (Geschwindigkeit, Sinkrate, Gleitpfad, Kurs, Querlage, Konfiguration, Schub, Energie) als farbige Abschnitte",
+        "touchdowns": "Aufsetzer mit der Landerate"
+      },
+      "label": {
+        "gearDown": "Fahrwerk aus",
+        "gearUp": "Fahrwerk ein",
+        "flaps": "Klappen {from} → {to}",
+        "rotation": "Rotation {rate}",
+        "liftoff": "Abheben",
+        "gateStable": "{gate} stabil",
+        "gateUnstable": "{gate} nicht stabil",
+        "gateUnmeasured": "{gate} nicht messbar",
+        "stableFrom": "Stabil ab {height}",
+        "goAround": "Durchstarten",
+        "rotationBand": "Rotation {rate} · {band}",
+        "slow": "langsam",
+        "fast": "schnell"
+      },
+      "detail": {
+        "at": "{time} · {agl} AGL · IAS {ias}",
+        "rotation": "Mittel {rate}, Spitze {peak} über {dur} (Nicklage {from} → {to})",
+        "noRotation": "kein Aufrichten auf dem Startlauf messbar",
+        "rotationTypical": "Normalbereich 1,5–4 °/s, Verkehrsflugzeuge typisch 2–3 °/s; darunter langsam, darüber schnell",
+        "gateFailed": "nicht erfüllt: {list}",
+        "gateOk": "alle messbaren Kriterien erfüllt",
+        "stableFrom": "ab hier bis 50 ft kein Kriterium außerhalb der Toleranz",
+        "levelS1": "Stufe S1",
+        "levelS2": "Stufe S2 (über der zweiten Grenze)",
+        "touchdown": "{rate} · {g}",
+        "click": "Klick: Replay-Cursor auf diesen Moment"
+      }
     }
   }
 }
