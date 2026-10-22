@@ -1312,7 +1312,13 @@ mod tests {
         let m = ProviderManager::new();
         m.set_diag_stream(true);
         m.start_with(out.clone(), store.clone(), Arc::new(NoAirports), Box::new(ReplayProvider::new(fixture, 0.0, false))).unwrap();
-        wait_for("end of replay", || m.snapshot().state == "disconnected" && m.snapshot().frames > 4_000);
+        // the replay disconnects twice: first with the dump's own end line ("mock: end of dump"),
+        // then with its own "Replay beendet …" – wait for the last one, or a slow machine reads
+        // the snapshot in between
+        wait_for("end of replay", || {
+            let s = m.snapshot();
+            s.state == "disconnected" && s.frames > 4_000 && s.detail.starts_with("Replay beendet")
+        });
         let touchdowns: Vec<serde_json::Value> = lock(&out.emitted)
             .iter()
             .filter(|(e, v)| e == "sim:flight-event" && v["kind"] == "touchdown")
