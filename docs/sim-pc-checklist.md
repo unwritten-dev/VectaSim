@@ -32,7 +32,7 @@ UI labels are given as they appear in the English UI (*Settings → Display → 
 - [ ] Static data: note title, ATC model (token?), ATC type, registration, airline, flight number.
 - [ ] Note the **data rate** (expected 30–60 Hz) and the sim FPS at the same time.
 - [ ] Parking brake on/off, lights, engine on/off: do the values change?
-- [ ] **Pitch and bank sign (MSFS):** in the climb after take-off and in a right turn, read *Live raw data* and watch the 3D map (3D on): the yellow model must pitch **nose up** in the climb and bank **right wing down** in a right turn. VectaSim assumes pitch nose-up positive and bank right-down positive; SimConnect documents `PLANE PITCH DEGREES` as nose-down positive – if the model pitches down in the climb, note it (one sign in the decoder fixes app-wide pitch values).
+- [ ] **Pitch and bank sign (MSFS):** in the climb after take-off and in a right turn, read *Live raw data* and watch the 3D map (3D on): the yellow model must pitch **nose up** in the climb and bank **right wing down** in a right turn. (Confirmed broken on 2026-10-22 with 0.6.3 – the model pitched down in the climb; the decoder negates SimConnect's nose-down/left-down values since 0.6.4, old MSFS tracks are read with the sign flipped. Re-check once with 0.6.4: model nose up in the climb, right wing down in a right turn, and the flight detail's rotation rate of that take-off is positive.)
 
 ## Step 3 – GA circuit with touch-and-go (30 min) → dump “ga-pattern”
 

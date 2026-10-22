@@ -16,7 +16,12 @@
 //!   stored as 0 and decodes to `None`. Slowly changing columns delta to 0 and cost
 //!   almost nothing after zstd.
 //!
-//! The encoder always writes v2; the decoder reads v1 (all optional fields `None`) and v2.
+//! - v3: the same layout as v2. The version only says that pitch and bank are stored in
+//!   VectaSim's convention (nose-up / right-wing-down positive). Up to 0.6.3 the SimConnect
+//!   decoder stored the sim's raw sign (nose-down / left-wing-down positive), so a v1/v2 blob of a
+//!   `simconnect` flight is read with pitch and bank negated ([`decode_track_from`]).
+//!
+//! The encoder always writes v3; the decoder reads v1 (all optional fields `None`), v2 and v3.
 
 use serde::{Deserialize, Serialize};
 use std::io::Read;
@@ -25,7 +30,9 @@ use vectasim_core::approach::nav_flags;
 
 const MAGIC: &[u8; 4] = b"VSTK";
 /// Version the encoder writes.
-pub const VERSION: u8 = 2;
+pub const VERSION: u8 = 3;
+/// Blobs below this version of a `simconnect` flight carry the sim's raw pitch/bank sign.
+const ATTITUDE_FIXED_VERSION: u8 = 3;
 const ZSTD_LEVEL: i32 = 3;
 /// Upper bound for one decoded track: 200 000 samples are 55 h at the recorder's 1 Hz.
 pub const MAX_SAMPLES: usize = 200_000;
@@ -378,13 +385,32 @@ fn read_column(raw: &[u8], pos: &mut usize, samples: &mut [TrackSample], mut app
 }
 
 pub fn decode_track(blob: &[u8]) -> Result<Vec<TrackSample>, TrackError> {
+    decode_track_versioned(blob).map(|(_, s)| s)
+}
+
+/// Decode for a flight of `provider`: a pre-v3 blob of a `simconnect` flight gets pitch and bank
+/// negated (the decoder stored the sim's raw sign until 0.6.3). Other providers and imports are
+/// returned as stored.
+pub fn decode_track_from(blob: &[u8], provider: Option<&str>) -> Result<Vec<TrackSample>, TrackError> {
+    let (version, mut samples) = decode_track_versioned(blob)?;
+    if version < ATTITUDE_FIXED_VERSION && provider == Some("simconnect") {
+        for s in &mut samples {
+            s.pitch_deg = -s.pitch_deg;
+            s.bank_deg = -s.bank_deg;
+        }
+    }
+    Ok(samples)
+}
+
+fn decode_track_versioned(blob: &[u8]) -> Result<(u8, Vec<TrackSample>), TrackError> {
     let mut raw = Vec::new();
     // bounded read: a corrupt or hostile blob must not decompress into gigabytes
     zstd::Decoder::new(blob)?.take(MAX_RAW_BYTES as u64 + 1).read_to_end(&mut raw)?;
     if raw.len() > MAX_RAW_BYTES {
         return Err(TrackError::TooLarge);
     }
-    decode_raw(&raw)
+    let version = raw.get(4).copied().unwrap_or(0);
+    decode_raw(&raw).map(|s| (version, s))
 }
 
 fn decode_raw(raw: &[u8]) -> Result<Vec<TrackSample>, TrackError> {
@@ -397,7 +423,7 @@ fn decode_raw(raw: &[u8]) -> Result<Vec<TrackSample>, TrackError> {
     let version = raw[4];
     let columns = match version {
         1 => COLUMNS.len(),
-        2 => V2_COLUMNS,
+        2 | 3 => V2_COLUMNS,
         v => return Err(TrackError::Version(v)),
     };
     let count = u32::from_le_bytes([raw[5], raw[6], raw[7], raw[8]]) as usize;
@@ -612,9 +638,9 @@ mod tests {
         v1.extend_from_slice(&[0; 3 * 16]);
         assert_eq!(decode_track(&zstd::encode_all(v1.as_slice(), 1).unwrap()).unwrap(), vec![TrackSample::default(); 3]);
         // unknown versions are refused
-        let mut v3 = v1.clone();
-        v3[4] = 3;
-        assert!(matches!(decode_track(&zstd::encode_all(v3.as_slice(), 1).unwrap()), Err(TrackError::Version(3))));
+        let mut v4 = v1.clone();
+        v4[4] = 4;
+        assert!(matches!(decode_track(&zstd::encode_all(v4.as_slice(), 1).unwrap()), Err(TrackError::Version(4))));
     }
 
     /// Two hand-checkable samples (small integers, so every delta is one varint byte).
@@ -671,7 +697,7 @@ mod tests {
         s[1].gs_error_deg = Some(-0.002);
         let raw = raw_track(&s);
         let mut expected = GOLDEN_V1.to_vec();
-        expected[4] = 2;
+        expected[4] = VERSION; // v3: the v2 layout, attitude in VectaSim's convention
         // presence: sample 0 = bit 0 | bit 9 (tas, flags) = 513, sample 1 = bits 0, 2, 3, 4 = 29
         let mut tail = Vec::new();
         for v in [zigzag(513), zigzag(29 - 513)] {
@@ -796,6 +822,30 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn pre_v3_simconnect_tracks_are_read_with_the_attitude_sign_flipped() {
+        let mut rng = Rng(7);
+        let track = random_track(&mut rng, 20);
+        let good = encode_track(&track);
+        // the same stream stamped as v2 (what 0.6.3 and earlier wrote)
+        let mut raw = Vec::new();
+        zstd::Decoder::new(good.as_slice()).unwrap().read_to_end(&mut raw).unwrap();
+        assert_eq!(raw[4], VERSION);
+        raw[4] = 2;
+        let v2 = zstd::encode_all(raw.as_slice(), 1).unwrap();
+        let flipped = decode_track_from(&v2, Some("simconnect")).unwrap();
+        let plain = decode_track_from(&v2, Some("xplane")).unwrap();
+        let v3 = decode_track_from(&good, Some("simconnect")).unwrap();
+        for i in 0..track.len() {
+            assert!((flipped[i].pitch_deg + plain[i].pitch_deg).abs() < 1e-9, "pitch sign at {i}");
+            assert!((flipped[i].bank_deg + plain[i].bank_deg).abs() < 1e-9, "bank sign at {i}");
+            assert_eq!(v3[i].pitch_deg, plain[i].pitch_deg, "v3 is stored in VectaSim's convention");
+            assert_eq!(flipped[i].altitude_msl_ft, plain[i].altitude_msl_ft);
+        }
+        // imports and unknown providers: as stored
+        assert_eq!(decode_track_from(&v2, None).unwrap()[3].pitch_deg, plain[3].pitch_deg);
     }
 
     #[test]

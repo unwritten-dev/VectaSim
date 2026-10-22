@@ -42,7 +42,7 @@ use vectasim_core::landing::CheckStatus;
 /// Version of the stored metrics; bump when a rule above (or the approach analysis they read)
 /// changes, so old rows are recomputed.
 /// 2: assessment profiles (exceedances and gates follow the flight's profile, `approach_profile`).
-pub const FLIGHT_METRICS_VERSION: u32 = 2;
+pub const FLIGHT_METRICS_VERSION: u32 = 3;
 
 /// The thresholds shared with the frontend (`app/src/trackEvents.constants.json`).
 #[derive(Clone, Debug, PartialEq, Deserialize)]

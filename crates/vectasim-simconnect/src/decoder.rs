@@ -680,8 +680,11 @@ impl Decoder {
         set(&mut t.vertical_speed_fpm, v[7]);
         set(&mut t.heading_mag_deg, v[8]);
         set(&mut t.heading_true_deg, v[9]);
-        set(&mut t.pitch_deg, v[10]);
-        set(&mut t.bank_deg, v[11]);
+        // SimConnect counts PLANE PITCH DEGREES positive nose-DOWN and PLANE BANK DEGREES positive
+        // left-wing-down; VectaSim (like X-Plane's theta/phi) uses nose-up and right-wing-down
+        // positive everywhere downstream (3D model, rotation rate, landing pitch, KML tilt/roll)
+        set(&mut t.pitch_deg, -v[10]);
+        set(&mut t.bank_deg, -v[11]);
         set(&mut t.g_force, v[12]);
         set_flag(&mut t.on_ground, v[13]);
         set(&mut t.touchdown_vs_fpm, v[14] * 60.0);

@@ -2,6 +2,14 @@
 
 Entries are in English from 2026-10-18 on; earlier entries were translated.
 
+## 0.6.4 – 2026-10-22 (Beta)
+
+Hotfix for MSFS: pitch and bank had the wrong sign.
+
+### Recording
+
+- **MSFS pitch and bank had the wrong sign.** SimConnect reports pitch positive nose-down and bank positive left-wing-down; VectaSim read the values as nose-up / right-wing-down (the convention it uses for X-Plane and everywhere else). Effects until 0.6.3 on MSFS flights: the 3D model pointed down in the climb and banked the wrong way, the take-off rotation rate was never found (no "pitch-up" run, so the metrics row showed "–" and the rotation marker was missing), the landing pitch in the debrief and the KML tilt/roll were inverted. The decoder now converts the sign; tracks recorded earlier are read with pitch and bank flipped (track format v3 marks corrected blobs), and the cached approach facts and flight metrics are recomputed in the background, so rotation rates appear for old MSFS flights too.
+
 ## 0.6.3 – 2026-10-22 (Beta)
 
 The third audit, fixed in full: all eight medium findings, the 32 low findings and the 56 notes (a few are documented as accepted residual risks) – no ghost flights from the MSFS load screen, a held pushback keeps the flight, profile changes re-assess everything they touch, the live map draws no lines across position jumps, the overlay token stays off the page for local requests, full licence texts in the installer, and measured resource figures in the README.

@@ -2,7 +2,7 @@
 //! The connection lives behind a mutex so the recorder thread and Tauri
 //! commands can share one `Store` clone.
 
-use crate::track::{TrackSample, decode_track};
+use crate::track::{TrackSample, decode_track_from};
 use crate::{Field, Invalid, Result, StoreError};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
@@ -293,7 +293,7 @@ const MIGRATION_V19_COLUMNS: &[(&str, &str, &str)] =
 /// 5: track v2 – sim ILS as glidepath/localizer reference, thrust/spoiler/landing-flap
 ///    criteria, Vapp from VS0 × 1.3, energy band and sim wind in the detail.
 /// 6: assessment profiles – thresholds per profile, `profile_id` column, hard gate in the detail.
-pub const APPROACH_FACTS_VERSION: u32 = 6;
+pub const APPROACH_FACTS_VERSION: u32 = 7;
 
 /// Which end of a flight a stored METAR describes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -568,7 +568,7 @@ const MIGRATIONS: &[MigrationStep] = &[
     // and, for the flights already in the logbook, by the app in the background.
     MigrationStep { to: 18, apply: |c| Ok(c.execute_batch(crate::metrics::MIGRATION_V18)?) },
     // assessment profiles; idempotent like v9-v16. The cached facts are recomputed through their
-    // versions (APPROACH_FACTS_VERSION 6, FLIGHT_METRICS_VERSION 2), not here.
+    // versions (APPROACH_FACTS_VERSION 7, FLIGHT_METRICS_VERSION 3 – 7/3 after the SimConnect pitch/bank sign fix), not here.
     MigrationStep {
         to: 19,
         apply: |c| {
@@ -1880,11 +1880,16 @@ impl Store {
     }
 
     fn track_blob(&self, id: &str, column: &str) -> Result<Option<Vec<TrackSample>>> {
-        let blob: Option<Vec<u8>> = self
+        // the provider decides how a pre-v3 blob's pitch/bank sign is read (track.rs)
+        let row: Option<(Vec<u8>, Option<String>)> = self
             .conn()
-            .query_row(&format!("SELECT {column} FROM tracks WHERE flight_id = ?1"), params![id], |r| r.get(0))
+            .query_row(
+                &format!("SELECT t.{column}, f.provider FROM tracks t LEFT JOIN flights f ON f.id = t.flight_id WHERE t.flight_id = ?1"),
+                params![id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
             .optional()?;
-        blob.map(|b| decode_track(&b).map_err(StoreError::from)).transpose()
+        row.map(|(b, provider)| decode_track_from(&b, provider.as_deref()).map_err(StoreError::from)).transpose()
     }
 
     /// The pilot's notes, tags, rating and corrections of a flight (see [`FlightUserEdit`]).
