@@ -59,9 +59,12 @@
 //!
 //! Ground sessions are no flights ([`FlightState::Discarded`]): a recording that ends without
 //! the aircraft ever having flown – airborne qualified (> 500 ft AGL, 60 s, or 5 s above 50 ft),
-//! a confirmed lift-off out of the Takeoff phase ([`PhaseEngine::lifted_off`]: a hop that stayed
-//! below 50 ft for 10 s), a take-off time, a touchdown or a start in the air – is discarded
-//! instead of `Completed` / `Interrupted`.
+//! a confirmed lift-off out of the Takeoff phase ([`PhaseEngine::lifted_off`]: a hop out of the
+//! take-off roll that stayed below 50 ft for 10 s; it lands with take-off and landing time), a
+//! take-off time, a touchdown or a start in the air that moved (see below) – is discarded instead
+//! of `Completed` / `Interrupted`. Only out of the Takeoff phase: a hover below 50 ft that never
+//! got there (Takeoff needs > 40 kt or > 50 ft AGL, e.g. a helicopter at 20 ft over the pad)
+//! stays a ground session.
 //! That covers taxiing around and shutting down again, a provider stop on the ground, and the
 //! "scenery test": a flight loaded at airport A (taxied a bit, so it started), then a new flight
 //! loaded at airport B. Up to 0.5.0 that was stitched into one flight A → B. Now the A part ends
@@ -92,7 +95,21 @@
 //! the start of the recording (block time from there; the recorder resolves the departure
 //! airport within its usual radius, else none), `takeoff_ms` stays empty (no lift-off seen,
 //! so no flight time), and the touchdown detector requalifies after a short stretch of air
-//! time like after a reset in the air. No teleport flag – nothing jumped.
+//! time like after a reset in the air. No teleport flag – nothing jumped. Such a flight counts
+//! as flown once it has moved like an aircraft for [`MS_AIRBORNE_START_MOVING`] (3 s at more than
+//! 30 kt GS or 100 fpm V/S; or with a touchdown), not on the first sample: being high up is no
+//! proof (its air time and height qualify the Landing gate, not "flown"). A start in the air
+//! that never moved before the next `FlightLoaded` is discarded like a ground session.
+//!
+//! Placeholder positions ([`Telemetry::placeholder_position`], within 0.01° of 0° N / 0° E):
+//! MSFS reports one for several seconds while it loads a flight. Such samples are ignored
+//! completely – no phase, no flight, no distance, and they are no reference for the teleport
+//! and continuity checks either.
+//!
+//! A push held on the parking brake ([`PhaseEngine::push_held`]: Pushback → Preflight, engines
+//! not started yet) keeps the flight open: the next "leaving the blocks" continues it with its
+//! original off-block instead of starting a new one. A push given up (15 min more parked like
+//! that, Preflight → Shutdown) ends it as a ground session.
 //!
 //! Thresholds:
 //! - teleport: position jump between two samples > `GS·Δt·rate·3 + 1 nm` (GS = the larger of
@@ -161,6 +178,12 @@ pub const RESUME_PARKED_KT: f64 = 5.0;
 /// After a continuous hole up to this long (or a frozen sim) the V/S before it may rate a
 /// landing right after it, ms.
 const RESUME_VS_MAX_GAP_MS: u64 = 10_000;
+/// A flight started in the air counts as flown after moving this long, ms …
+pub const MS_AIRBORNE_START_MOVING: u64 = 3_000;
+/// … faster than this GS, kt …
+const KT_AIRBORNE_START_MOVING: f64 = 30.0;
+/// … or climbing/descending faster than this, fpm.
+const FPM_AIRBORNE_START_MOVING: f64 = 100.0;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -419,6 +442,12 @@ pub struct FlightSession {
     gload: GLoadTracker,
     /// ... on top of what a resumed flight brought along (`summary.g_load` = both merged).
     gload_base: GLoadStats,
+    /// Start in the air: since when the aircraft moves like one (see the module doc).
+    airborne_start_moving_since: Option<u64>,
+    /// Start in the air: it moved long enough to count as flown.
+    airborne_start_moved: bool,
+    /// The last sample was a placeholder position (logged once per stretch).
+    in_placeholder: bool,
 }
 
 impl FlightSession {
@@ -603,14 +632,32 @@ impl FlightSession {
 
     /// Latch "this flight has flown" (see the module doc).
     fn note_flown(&mut self) {
-        if self.summary.state == FlightState::Active
-            && (self.engine.airborne_qualified()
-                || self.engine.lifted_off()
-                || self.engine.started_airborne()
-                || self.summary.takeoff_ms.is_some()
-                || !self.summary.touchdowns.is_empty())
-        {
+        // a start in the air is high up from its first sample: only movement shows it flies
+        let flew = if self.engine.started_airborne() {
+            self.airborne_start_moved
+        } else {
+            self.engine.airborne_qualified() || self.engine.lifted_off()
+        };
+        if self.summary.state == FlightState::Active && (flew || self.summary.takeoff_ms.is_some() || !self.summary.touchdowns.is_empty()) {
             self.flown = true;
+        }
+    }
+
+    /// Start in the air: latch `airborne_start_moved` after
+    /// [`MS_AIRBORNE_START_MOVING`] of movement (see the module doc). Skipped samples (pause,
+    /// slew, time acceleration) start the stretch over.
+    fn track_airborne_start(&mut self, t: &Telemetry, now: u64) {
+        if self.summary.state != FlightState::Active || !self.engine.started_airborne() || self.airborne_start_moved {
+            return;
+        }
+        // NaN compares false: no movement
+        let moving = self.engine.last_skip().is_none()
+            && !ground_contact_corroborated(t)
+            && (t.ground_speed_kt > KT_AIRBORNE_START_MOVING || t.vertical_speed_fpm.abs() > FPM_AIRBORNE_START_MOVING);
+        if !moving {
+            self.airborne_start_moving_since = None;
+        } else if now.saturating_sub(*self.airborne_start_moving_since.get_or_insert(now)) >= MS_AIRBORNE_START_MOVING {
+            self.airborne_start_moved = true;
         }
     }
 
@@ -634,6 +681,14 @@ impl FlightSession {
     pub fn update(&mut self, t: &Telemetry) -> Vec<FlightEvent> {
         let mut events = Vec::new();
         if self.sim_stopped {
+            return events;
+        }
+        // a sim's placeholder while it loads: not the aircraft, nothing to evaluate (module doc)
+        let placeholder = t.placeholder_position();
+        if placeholder != std::mem::replace(&mut self.in_placeholder, placeholder) && placeholder {
+            log::info!("placeholder position (0° N / 0° E): samples ignored until a real position comes");
+        }
+        if placeholder {
             return events;
         }
         let forced;
@@ -697,6 +752,7 @@ impl FlightSession {
         if self.engine.airborne_qualified() {
             self.resumed_airborne = false;
         }
+        self.track_airborne_start(t, now);
         self.note_flown();
         self.note_integrity(t, now);
 
@@ -837,6 +893,12 @@ impl FlightSession {
                 started = Some(FlightEvent::FlightStarted { timestamp_ms: tr.timestamp_ms });
             }
         }
+        if tr.from == Pushback && tr.to == Preflight && self.summary.state == FlightState::Active {
+            // a push held on the brake before the engine start: the flight goes on, and the next
+            // off-block continues it with the push's off-block (see the module doc)
+            log::info!("push held on the parking brake: the flight stays open until the engines start");
+            self.resume_pending = true;
+        }
         match tr.to {
             // a flight that started in the air has no lift-off to take the time from
             Climb if self.summary.takeoff_ms.is_none() && !self.engine.started_airborne() => {
@@ -868,6 +930,8 @@ impl FlightSession {
                 self.summary.on_block_ms = Some(tr.timestamp_ms);
                 self.summary.fuel_end_kg = Some(t.fuel_total_kg);
                 if self.summary.state == FlightState::Active {
+                    // a held push given up: nothing left to continue
+                    self.resume_pending = false;
                     // taxied around and shut down without flying: a ground session, no flight
                     self.summary.state = if self.flown { FlightState::Completed } else { FlightState::Discarded };
                     ended = Some(FlightEvent::FlightEnded { timestamp_ms: tr.timestamp_ms, interrupted: false });
@@ -893,6 +957,8 @@ impl FlightSession {
         self.last_fuel_kg = None;
         self.resumed_airborne = false;
         self.flown = false;
+        self.airborne_start_moving_since = None;
+        self.airborne_start_moved = false;
         // the previous flight's touchdowns are gone with its summary
         self.pending_touchdown = None;
         self.landing_phase_ms = None;

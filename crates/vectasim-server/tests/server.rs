@@ -272,8 +272,19 @@ fn the_start_page_carries_the_token_for_obs_links() {
     let page = request(port, "GET", "/", &[("Host", lan_host.as_str()), ("Cookie", jar.as_str())]);
     assert_eq!(page.status, 200);
     assert!(page.body.contains(&meta), "token for the copy URLs");
-    // this PC (opened from the app) gets it as well
-    assert!(get(port, "/").body.contains(&meta));
+    // the same with the token in the URL or a header
+    let with_query = format!("/?token={TOKEN}");
+    assert!(request(port, "GET", &with_query, &[("Host", lan_host.as_str())]).body.contains(&meta));
+    assert!(request(port, "GET", "/", &[("X-VectaSim-Token", TOKEN)]).body.contains(&meta));
+    // this PC without a token: served, but the token is not handed out to every local process
+    let local = get(port, "/");
+    assert_eq!(local.status, 200);
+    assert!(!local.body.contains(TOKEN), "no token for a token-free loopback request");
+    assert!(local.body.contains(r#"<meta name="vectasim-token" content="">"#));
+    // a wrong token from this PC: still served (it needs none), but without the real one
+    let wrong = request(port, "GET", "/", &[("X-VectaSim-Token", "WrongTokenWrongTokenWron")]);
+    assert_eq!(wrong.status, 200);
+    assert!(!wrong.body.contains(TOKEN));
     // no token, no page; the overlays themselves never carry it
     assert!(!request(port, "GET", "/", &[("Host", lan_host.as_str())]).body.contains(TOKEN));
     assert!(!get(port, "/overlay/hud").body.contains(TOKEN));
@@ -419,6 +430,32 @@ fn idle_local_connections_give_way_to_a_new_request() {
         assert!(started.elapsed() < Duration::from_secs(1), "answered after {:?}", started.elapsed());
     }
     drop(idle);
+    server.stop();
+}
+
+#[test]
+fn half_sent_request_heads_give_way_to_a_new_request() {
+    // a local program fills the pool with connections that send only part of a request head
+    // (the header timeout is still 10 s); a local GET must not wait for that timeout
+    let limits = Limits { max_connections: 4, local_slot_wait: Duration::from_secs(2), ..Limits::default() };
+    let server =
+        Server::start_with_limits(Config { port: 0, lan: false, token: String::new() }, Arc::new(Fake::default()), limits).unwrap();
+    let port = server.local_addr().port();
+    let half: Vec<TcpStream> = (0..8)
+        .map(|_| {
+            let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            s.write_all(b"GET /api/v1/status HTTP/1.1\r\nHost: 127.0.0.1\r\n").unwrap();
+            s
+        })
+        .collect();
+    std::thread::sleep(Duration::from_millis(300));
+    for _ in 0..3 {
+        let started = std::time::Instant::now();
+        let r = get(port, "/api/v1/status");
+        assert_eq!(r.status, 200, "{}", r.head);
+        assert!(started.elapsed() < Duration::from_millis(1500), "answered after {:?}", started.elapsed());
+    }
+    drop(half);
     server.stop();
 }
 

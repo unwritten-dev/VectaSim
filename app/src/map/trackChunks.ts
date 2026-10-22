@@ -28,6 +28,36 @@ export function positionJumped(prev: { lon: number; lat: number; tMs: number }, 
   return distanceBearing(prev, next).nm > allowed;
 }
 
+/** Upper bound of the time acceleration a seed pair may imply (MSFS goes up to 128×). */
+const SEED_MAX_RATE = 128;
+
+/**
+ * Index of the first seed sample after the last position jump (0: none). The recorder's samples
+ * carry no sim rate, so each pair is judged with the rate its neighbouring pairs imply (distance
+ * over GS·Δt): steady time acceleration widens the allowance on both sides of a pair, while a
+ * one-off teleport stands out against normal neighbours.
+ */
+export function seedStartAfterJump(seed: ReadonlyArray<{ lon: number; lat: number; tMs: number; gsKt: number }>): number {
+  const implied = (i: number): number => {
+    // pair (i-1, i)
+    if (i < 1 || i >= seed.length) return 1;
+    const a = seed[i - 1];
+    const b = seed[i];
+    const gs = Math.max(a.gsKt, b.gsKt);
+    const dtS = (b.tMs - a.tMs) / 1000;
+    if (!(gs > 30) || !(dtS > 0)) return 1;
+    const r = distanceBearing(a, b).nm / ((gs * dtS) / 3600);
+    return Number.isFinite(r) ? Math.min(SEED_MAX_RATE, Math.max(1, r)) : 1;
+  };
+  for (let i = seed.length - 1; i >= 1; i--) {
+    const a = seed[i - 1];
+    const b = seed[i];
+    const rate = Math.max(implied(i - 1), implied(i + 1));
+    if (positionJumped(a, b, Math.max(a.gsKt, b.gsKt), rate)) return i;
+  }
+  return 0;
+}
+
 /** 600 points = 10 min at 1 Hz. */
 export const CHUNK_POINTS = 600;
 /** Altitude band for merging; finer than any visible step of the colour ramp. */
@@ -196,7 +226,8 @@ export function curtainRuns(points: TrackPoint[]): GeoJSON.Feature[] {
     ];
     out.push({
       type: "Feature",
-      properties: { alt: altFt, hM, ribbonM: Math.max(15, hM * 0.02) },
+      // a fixed colour (gear down) from the tinted point on, as bandedRuns (trackColorExpr)
+      properties: { alt: altFt, hM, ribbonM: Math.max(15, hM * 0.02), ...(a.color ? { color: a.color } : {}) },
       geometry: { type: "Polygon", coordinates: [ring] },
     });
   }

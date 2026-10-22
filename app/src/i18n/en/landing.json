@@ -978,12 +978,13 @@
       "lateral": "Lateral track",
       "rotation": "Rotation",
       "gearDown": "Gear down",
-      "exceedances": "Exceed."
+      "exceedances": "Exceed.",
+      "otherProfile": "Assessed with {name} – not compared with the charts above"
     },
     "profile": {
       "aria": "Assessment profile",
       "only": "Approaches assessed with this profile: {count}",
-      "note": "Stable from and exceedances: only approaches assessed with the {name}"
+      "note": "Stable from and exceedances: only approaches assessed with: {name}"
     }
   },
   "dispersion": {
@@ -1220,12 +1221,12 @@
         "other": "{value} on final – your median {where} is {median} ({count} flights)"
       },
       "gates": {
-        "one": "Gates 1000 ft {g1000}, 500 ft {g500} – stable at 500 ft in {yes} of {count} flight",
-        "other": "Gates 1000 ft {g1000}, 500 ft {g500} – stable at 500 ft in {yes} of {count} flights"
+        "one": "Gates {gate1000} {g1000}, {gate500} {g500} – stable at {gate500} in {yes} of {count} flight",
+        "other": "Gates {gate1000} {g1000}, {gate500} {g500} – stable at {gate500} in {yes} of {count} flights"
       },
       "gatesWhere": {
-        "one": "Gates 1000 ft {g1000}, 500 ft {g500} – stable at 500 ft in {yes} of {count} flight {where}",
-        "other": "Gates 1000 ft {g1000}, 500 ft {g500} – stable at 500 ft in {yes} of {count} flights {where}"
+        "one": "Gates {gate1000} {g1000}, {gate500} {g500} – stable at {gate500} in {yes} of {count} flight {where}",
+        "other": "Gates {gate1000} {g1000}, {gate500} {g500} – stable at {gate500} in {yes} of {count} flights {where}"
       },
       "exceedanceCount": {
         "one": "{count} exceedance",
@@ -1238,7 +1239,7 @@
       "unstable": "unstable",
       "unmeasured": "not measurable"
     },
-    "profileScope": "Approach values compared only with approaches assessed with the {name}."
+    "profileScope": "Approach values compared only with approaches assessed with the same profile: {name}."
   },
   "replay": {
     "aria": "Approach playback",
@@ -1288,9 +1289,9 @@
     "gearDownSub": "{dist} before the threshold",
     "landingFlaps": "Landing flaps set",
     "exceedances": "Exceedances",
-    "exceedancesSub": "on final 1000 → 50 ft",
-    "gate1000": "1000 ft gate",
-    "gate500": "500 ft gate",
-    "gateUnstable": "Not stable at the gate"
+    "exceedancesSub": "on final {top} → {bottom}",
+    "gate": "{gate} gate",
+    "gateUnstable": "Not stable at the gate",
+    "unitAgl": "ft AGL"
   }
 }

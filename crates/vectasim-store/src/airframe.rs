@@ -255,6 +255,24 @@ struct FlightFacts {
 
 const FLIGHT_FACTS_SQL: &str = "SELECT id, ofp_json, atc_id, atc_model, aircraft_title, atc_airline, created_ms FROM flights";
 
+/// Drop the cached approach facts and flight metrics of every flight booked onto `reg`: what
+/// assesses them changed (assessment profile – chosen or from the type –, Vapp, landing flaps).
+/// The lazy paths recompute them with the current inputs (`approach_facts_recent`, the metrics
+/// backfill, the detail view). Every change of those inputs goes through here or
+/// [`invalidate_flight_results`]; the app then emits `approach:facts` and `flight:metrics`.
+pub(crate) fn invalidate_airframe_results(conn: &Connection, reg: &str) -> Result<()> {
+    conn.execute("DELETE FROM approach_facts WHERE flight_id IN (SELECT id FROM flights WHERE airframe_reg = ?1)", params![reg])?;
+    conn.execute("DELETE FROM flight_metrics WHERE flight_id IN (SELECT id FROM flights WHERE airframe_reg = ?1)", params![reg])?;
+    Ok(())
+}
+
+/// [`invalidate_airframe_results`] for one flight (booked onto another airframe, or unbooked).
+pub(crate) fn invalidate_flight_results(conn: &Connection, flight_id: &str) -> Result<()> {
+    conn.execute("DELETE FROM approach_facts WHERE flight_id = ?1", params![flight_id])?;
+    conn.execute("DELETE FROM flight_metrics WHERE flight_id = ?1", params![flight_id])?;
+    Ok(())
+}
+
 fn row_to_facts(r: &Row<'_>) -> rusqlite::Result<FlightFacts> {
     Ok(FlightFacts {
         id: r.get(0)?,
@@ -407,10 +425,7 @@ impl Store {
             )?;
             let set = |col: &str, v: &Option<String>| -> Result<()> {
                 if let Some(v) = v {
-                    let mut v = v.trim().to_string();
-                    if col == "icao_type" {
-                        v = v.to_uppercase();
-                    }
+                    let v = v.trim().to_string();
                     conn.execute(
                         &format!("UPDATE airframes SET {col} = ?2, updated_ms = ?3 WHERE registration = ?1"),
                         params![reg, non_empty(&v), now_ms as i64],
@@ -418,7 +433,21 @@ impl Store {
                 }
                 Ok(())
             };
-            set("icao_type", &edit.icao_type)?;
+            if let Some(v) = &edit.icao_type {
+                let upper = v.trim().to_uppercase();
+                let v = non_empty(&upper).map(str::to_owned);
+                let before: Option<String> =
+                    conn.query_row("SELECT icao_type FROM airframes WHERE registration = ?1", params![reg], |r| r.get(0))?;
+                if before != v {
+                    conn.execute(
+                        "UPDATE airframes SET icao_type = ?2, updated_ms = ?3 WHERE registration = ?1",
+                        params![reg, v, now_ms as i64],
+                    )?;
+                    // the type picks the automatic assessment profile: recomputed lazily
+                    self.results_changed();
+                    invalidate_airframe_results(&conn, &reg)?;
+                }
+            }
             set("title", &edit.title)?;
             set("airline", &edit.airline)?;
             set("custom_name", &edit.custom_name)?;
@@ -428,14 +457,8 @@ impl Store {
                 if before != v {
                     conn.execute("UPDATE airframes SET vapp_kt = ?2, updated_ms = ?3 WHERE registration = ?1", params![reg, v, now_ms as i64])?;
                     // the cached approach facts were assessed against the old reference: recomputed lazily
-                    conn.execute(
-                        "DELETE FROM approach_facts WHERE flight_id IN (SELECT id FROM flights WHERE airframe_reg = ?1)",
-                        params![reg],
-                    )?;
-                    conn.execute(
-                        "DELETE FROM flight_metrics WHERE flight_id IN (SELECT id FROM flights WHERE airframe_reg = ?1)",
-                        params![reg],
-                    )?;
+                    self.results_changed();
+                    invalidate_airframe_results(&conn, &reg)?;
                 }
             }
             if let Some(v) = profile {
@@ -447,14 +470,8 @@ impl Store {
                         params![reg, v, now_ms as i64],
                     )?;
                     // other thresholds: recomputed lazily, like after a Vapp change
-                    conn.execute(
-                        "DELETE FROM approach_facts WHERE flight_id IN (SELECT id FROM flights WHERE airframe_reg = ?1)",
-                        params![reg],
-                    )?;
-                    conn.execute(
-                        "DELETE FROM flight_metrics WHERE flight_id IN (SELECT id FROM flights WHERE airframe_reg = ?1)",
-                        params![reg],
-                    )?;
+                    self.results_changed();
+                    invalidate_airframe_results(&conn, &reg)?;
                 }
             }
             if let Some(v) = flaps {
@@ -462,14 +479,8 @@ impl Store {
                 if before != v {
                     conn.execute("UPDATE airframes SET landing_flaps = ?2, updated_ms = ?3 WHERE registration = ?1", params![reg, v, now_ms as i64])?;
                     // same as the Vapp: the gate checks change
-                    conn.execute(
-                        "DELETE FROM approach_facts WHERE flight_id IN (SELECT id FROM flights WHERE airframe_reg = ?1)",
-                        params![reg],
-                    )?;
-                    conn.execute(
-                        "DELETE FROM flight_metrics WHERE flight_id IN (SELECT id FROM flights WHERE airframe_reg = ?1)",
-                        params![reg],
-                    )?;
+                    self.results_changed();
+                    invalidate_airframe_results(&conn, &reg)?;
                 }
             }
         }
@@ -491,6 +502,9 @@ impl Store {
     pub fn set_flight_airframe(&self, flight_id: &str, registration: Option<&str>, now_ms: u64) -> Result<bool> {
         let conn = self.conn();
         let Some(raw) = registration.filter(|r| !r.trim().is_empty()) else {
+            // unbooked: no airframe choice, Vapp or landing flaps any more (recomputed lazily)
+            self.results_changed();
+            invalidate_flight_results(&conn, flight_id)?;
             return Ok(conn.execute(
                 "UPDATE flights SET airframe_reg = NULL, updated_ms = MAX(updated_ms, ?2) WHERE id = ?1",
                 params![flight_id, now_ms as i64],
@@ -503,8 +517,8 @@ impl Store {
         let (_, hint) = facts.hint();
         upsert_from_hint(&conn, &reg, &hint, now_ms)?;
         // another airframe may mean another assessment profile (and Vapp): recomputed lazily
-        conn.execute("DELETE FROM approach_facts WHERE flight_id = ?1", params![flight_id])?;
-        conn.execute("DELETE FROM flight_metrics WHERE flight_id = ?1", params![flight_id])?;
+        self.results_changed();
+        invalidate_flight_results(&conn, flight_id)?;
         // bumping updated_ms lets open views reload the flight
         Ok(conn.execute(
             "UPDATE flights SET airframe_reg = ?2, updated_ms = MAX(updated_ms, ?3) WHERE id = ?1",
@@ -527,6 +541,11 @@ impl Store {
             if !exists {
                 return Ok(None);
             }
+            // the flights of `from` get the profile, Vapp and flaps of `into`, and `into` may fill
+            // its gaps (type, Vapp, flaps, profile) from `from`: both sets are assessed anew
+            self.results_changed();
+            invalidate_airframe_results(&tx, &from)?;
+            invalidate_airframe_results(&tx, &into)?;
             tx.execute(
                 "INSERT INTO airframes (registration, created_ms, updated_ms)
                  SELECT ?2, created_ms, ?3 FROM airframes WHERE registration = ?1
@@ -561,12 +580,18 @@ impl Store {
     /// Delete an airframe; its flights stay in the logbook, unbooked.
     pub fn delete_airframe(&self, registration: &str) -> Result<bool> {
         let Some(reg) = normalize_registration(registration) else { return Ok(false) };
-        let conn = self.conn();
-        conn.execute(
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        // unbooked, its flights lose the airframe's profile, Vapp and flaps: recomputed lazily
+        self.results_changed();
+        invalidate_airframe_results(&tx, &reg)?;
+        tx.execute(
             "UPDATE flights SET airframe_reg = NULL, updated_ms = MAX(updated_ms, ?2) WHERE airframe_reg = ?1",
             params![reg, crate::now_ms_i64()],
         )?;
-        Ok(conn.execute("DELETE FROM airframes WHERE registration = ?1", params![reg])? > 0)
+        let deleted = tx.execute("DELETE FROM airframes WHERE registration = ?1", params![reg])? > 0;
+        tx.commit()?;
+        Ok(deleted)
     }
 
     /// Record a photo lookup: `Some` stores the photo, `None` stores a miss.

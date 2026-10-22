@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { NNBSP } from "../format";
 import { setLanguageSetting } from "../i18n";
 import { hardGateOf, profileDiffLines, profileName, profileOf, profileTooltip, profileValueText, type ApproachProfilesResult } from "./approachProfiles";
-import { approachBandLabel } from "./facts";
+import { approachBandLabel, approachBandLegendLabel } from "./facts";
 
 const NN = new RegExp(NNBSP, "g");
 const list: ApproachProfilesResult = {
@@ -41,7 +41,7 @@ describe("approach profiles", () => {
     expect(profileName("my-va", list)).toBe("My VA SOP");
     expect(profileName("gone", list)).toBe("profile “gone” (deleted)");
     setLanguageSetting("de");
-    expect(profileName("airbus", null)).toBe("Airbus-Profil");
+    expect(profileName("airbus", null)).toBe("Profil nach Airbus-Art");
     expect(profileOf({ profileId: null })).toBe("generic");
   });
 
@@ -63,5 +63,10 @@ describe("approach profiles", () => {
     expect(approachBandLabel("unstableBelow500", null).replace(NN, " ")).toBe("unstable below 500 ft");
     expect(approachBandLabel("stable", 300)).toBe("stable");
     expect(hardGateOf({})).toBe(500);
+    // the dispersion legend over approaches of several profiles
+    expect(approachBandLegendLabel("unstableBelow500", [300, 300]).replace(NN, " ")).toBe("unstable below 300 ft");
+    expect(approachBandLegendLabel("unstableBelow500", [500, 300, null]).replace(NN, " ")).toBe("unstable below 300 / 500 ft");
+    expect(approachBandLegendLabel("unstableBelow500", []).replace(NN, " ")).toBe("unstable below 500 ft");
+    expect(approachBandLegendLabel("deviations", [300])).toBe("with deviations");
   });
 });

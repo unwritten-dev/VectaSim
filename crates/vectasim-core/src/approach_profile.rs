@@ -541,16 +541,16 @@ impl ProfileError {
             }
             Self::NameInvalid { max } => {
                 if de {
-                    format!("„name“ fehlt oder ist länger als {max} Zeichen")
+                    format!("„name“ fehlt, ist länger als {max} Zeichen oder enthält Steuerzeichen")
                 } else {
-                    format!("\"name\" is missing or longer than {max} characters")
+                    format!("\"name\" is missing, longer than {max} characters or contains control characters")
                 }
             }
             Self::SourceTooLong { max } => {
                 if de {
-                    format!("„source“ ist länger als {max} Zeichen")
+                    format!("„source“ ist länger als {max} Zeichen oder enthält Steuerzeichen")
                 } else {
-                    format!("\"source\" is longer than {max} characters")
+                    format!("\"source\" is longer than {max} characters or contains control characters")
                 }
             }
             Self::BasedOnUnknown { based_on } => {
@@ -607,6 +607,25 @@ impl std::fmt::Display for ProfileError {
     }
 }
 
+/// Longest echo of an imported value in an error message, in characters (longer ones end in "…").
+pub const ECHO_MAX_CHARS: usize = 60;
+
+/// `s` cut to [`ECHO_MAX_CHARS`] for an error message: an import file can put anything there.
+pub fn clip_echo(s: &str) -> String {
+    if s.chars().count() <= ECHO_MAX_CHARS {
+        return s.to_string();
+    }
+    let mut out: String = s.chars().take(ECHO_MAX_CHARS - 1).collect();
+    out.push('…');
+    out
+}
+
+/// A control character or a bidi embedding / override / isolate (U+202A–202E, U+2066–2069):
+/// not allowed in a profile's name or source, they could reorder or hide text in the UI.
+fn is_forbidden_text_char(c: char) -> bool {
+    c.is_control() || ('\u{202a}'..='\u{202e}').contains(&c) || ('\u{2066}'..='\u{2069}').contains(&c)
+}
+
 fn valid_id(id: &str) -> bool {
     let len = id.chars().count();
     (2..=40).contains(&len)
@@ -619,25 +638,25 @@ fn valid_id(id: &str) -> bool {
 pub fn validate(doc: CustomProfileDoc) -> Result<ApproachProfile, ProfileError> {
     let id = doc.id.trim().to_string();
     if !valid_id(&id) {
-        return Err(ProfileError::IdInvalid { id });
+        return Err(ProfileError::IdInvalid { id: clip_echo(&id) });
     }
     if is_builtin(&id) {
         return Err(ProfileError::IdReserved { id });
     }
     let name = doc.name.trim().to_string();
-    if name.is_empty() || name.chars().count() > NAME_MAX_CHARS || name.chars().any(char::is_control) {
+    if name.is_empty() || name.chars().count() > NAME_MAX_CHARS || name.chars().any(is_forbidden_text_char) {
         return Err(ProfileError::NameInvalid { max: NAME_MAX_CHARS });
     }
     let source = doc.source.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-    if source.as_ref().is_some_and(|s| s.chars().count() > SOURCE_MAX_CHARS) {
+    if source.as_ref().is_some_and(|s| s.chars().count() > SOURCE_MAX_CHARS || s.chars().any(is_forbidden_text_char)) {
         return Err(ProfileError::SourceTooLong { max: SOURCE_MAX_CHARS });
     }
     let based_on = doc.based_on.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).unwrap_or_else(|| GENERIC.to_string());
     if !is_builtin(&based_on) {
-        return Err(ProfileError::BasedOnUnknown { based_on });
+        return Err(ProfileError::BasedOnUnknown { based_on: clip_echo(&based_on) });
     }
     for (key, v) in &doc.overrides {
-        let Some(spec) = override_key(key) else { return Err(ProfileError::UnknownKey { key: key.clone() }) };
+        let Some(spec) = override_key(key) else { return Err(ProfileError::UnknownKey { key: clip_echo(key) }) };
         match (spec.kind, v) {
             (KeyKind::Bool, OverrideValue::Bool(_)) => {}
             (KeyKind::Number { min, max, .. }, OverrideValue::Number(x)) => {
@@ -849,6 +868,34 @@ mod tests {
         let mut d = doc("my-va", &[]);
         d.name = "  ".into();
         assert_eq!(validate(d).unwrap_err().code(), "nameInvalid");
+    }
+
+    #[test]
+    fn imported_texts_refuse_control_and_bidi_characters_and_echoes_are_short() {
+        for bad in ["a\u{7}b", "SOP \u{202e}4.2", "x\u{2066}y", "x\u{2069}"] {
+            let mut d = doc("my-va", &[]);
+            d.name = bad.into();
+            assert_eq!(validate(d).unwrap_err().code(), "nameInvalid", "{bad:?}");
+            let mut d = doc("my-va", &[]);
+            d.source = Some(bad.into());
+            assert_eq!(validate(d).unwrap_err().code(), "sourceTooLong", "{bad:?}");
+        }
+        let mut d = doc("my-va", &[]);
+        d.source = Some("SOP 4.2 – Ä ✓".into());
+        assert!(validate(d).is_ok());
+        let long = "k".repeat(500);
+        let ProfileError::UnknownKey { key } = validate(doc("my-va", &[(long.as_str(), OverrideValue::Number(1.0))])).unwrap_err() else {
+            panic!()
+        };
+        assert_eq!(key.chars().count(), ECHO_MAX_CHARS);
+        assert!(key.ends_with('…'));
+        let ProfileError::IdInvalid { id } = validate(doc(&"X".repeat(300), &[])).unwrap_err() else { panic!() };
+        assert_eq!(id.chars().count(), ECHO_MAX_CHARS);
+        let mut d = doc("my-va", &[]);
+        d.based_on = Some("b".repeat(300));
+        let ProfileError::BasedOnUnknown { based_on } = validate(d).unwrap_err() else { panic!() };
+        assert_eq!(based_on.chars().count(), ECHO_MAX_CHARS);
+        assert_eq!(clip_echo("short"), "short");
     }
 
     #[test]

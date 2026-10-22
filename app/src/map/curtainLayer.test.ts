@@ -124,6 +124,30 @@ describe("Douglas-Peucker (3D)", () => {
     expect(idx[idx.length - 1]).toBe(49);
     expect(idx.length).toBeLessThanOrEqual(50);
   });
+  it("N-1: keeps the point where the tint changes", () => {
+    const pts = line(200, (i) => i * 2).map((p, i) => (i >= 100 ? { ...p, tint: [0, 1, 0] as [number, number, number] } : p));
+    expect(simplifyIndices(pts)).toEqual([0, 100, 199]);
+  });
+});
+
+describe("N-1: green approach in the curtain starts at the first tinted point", () => {
+  it("a straight, even descent tinted from point 100 has its first tinted vertex at point 100", () => {
+    const v = 70 / 111_320;
+    const pts: TrackPoint[] = Array.from({ length: 300 }, (_, i) => ({
+      lon: 8.5,
+      lat: 50 + i * v,
+      altFt: 5000 - i * 10,
+      aglFt: 5000 - i * 10,
+      ...(i >= 100 ? { color: "#00ff00" } : {}),
+    }));
+    const g = new CurtainGeometry(RAMP);
+    g.sync(withGroundHeights(pts));
+    const first = vertices(g).find((q) => q.rgb[0] === 0 && q.rgb[1] === 1 && q.rgb[2] === 0)!;
+    const want = toCPt(pts[100]);
+    expect(first).toBeDefined();
+    expect(first.y).toBeCloseTo(want.y, 9);
+    expect(first.x).toBeCloseTo(want.x, 9);
+  });
 });
 
 describe("spline between the samples", () => {

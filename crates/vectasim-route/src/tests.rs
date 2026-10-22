@@ -59,6 +59,19 @@ fn idents(r: &RouteResolution) -> Vec<String> {
 }
 
 #[test]
+fn without_any_reference_only_an_unambiguous_ident_is_placed() {
+    // neither departure nor arrival known (no reference point): an ident that exists in several
+    // regions is not placed on whichever candidate came first; a unique one still resolves
+    let mut src = Fake::new(SourceId::Navaids, vec![("ABCDE", 50.0, 8.0), ("ABCDE", -30.0, 150.0), ("XYZ", 50.5, 8.5)]);
+    let per_source = vec![src.candidates(&["ABCDE".to_string(), "XYZ".to_string()])];
+    assert!(choose(&per_source, "ABCDE", None).is_none());
+    assert_eq!(choose(&per_source, "XYZ", None).map(|c| c.lat), Some(50.5));
+    // with a reference the nearest ABCDE wins as before
+    let near = Candidate { ident: "REF".into(), lat: 49.0, lon: 8.0, region: String::new(), source: SourceId::Coord };
+    assert_eq!(choose(&per_source, "ABCDE", Some(&near)).map(|c| c.lat), Some(50.0));
+}
+
+#[test]
 fn nearest_candidate_wins_and_far_ones_are_rejected() {
     // ROLIS exists near Frankfurt and in Australia; FARAW only in Australia
     let mut src =
@@ -156,9 +169,9 @@ fn xplane_fixture_as_source() {
     let mut idx = xplane::XpIndex::default();
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures").join("xplane");
     let rd = |n: &str| std::io::BufReader::new(std::fs::File::open(dir.join(n)).unwrap());
-    idx.add_fixes(rd("earth_fix.dat"));
-    idx.add_navaids(rd("earth_nav.dat"));
-    idx.add_airways(rd("earth_awy.dat"));
+    idx.add_fixes(rd("earth_fix.dat")).unwrap();
+    idx.add_navaids(rd("earth_nav.dat")).unwrap();
+    idx.add_airways(rd("earth_awy.dat")).unwrap();
     let mut xp = XPlaneSource(Arc::new(idx));
     let r = resolve("EDDF", "EDDM", "N0450F350 ANEKI/N0450F350 UZ650 DIBIR DCT ROLIS", airports(), &mut [&mut xp]);
     assert_eq!(idents(&r), ["EDDF", "ANEKI", "KOPOR", "FFM", "DIBIR", "ROLIS", "EDDM"]);

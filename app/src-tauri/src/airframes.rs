@@ -103,6 +103,14 @@ fn changed(app: &AppHandle, reg: &str) {
     let _ = app.emit("airframes:changed", reg);
 }
 
+/// The store dropped cached approach facts and flight metrics (another assessment profile, Vapp
+/// or landing flaps for some flights): the strips, comparisons and trends reload theirs, which
+/// are recomputed by the lazy paths.
+fn results_invalidated(app: &AppHandle, reg: &str) {
+    let _ = app.emit("approach:facts", reg);
+    let _ = app.emit(crate::metrics::EVENT, ());
+}
+
 /// Only a Planespotters page as the credit link: rows written before the check
 /// came in (lookup cache, earlier imports) may carry any URL, and the UI opens it in the browser.
 /// Checked on every read, so nothing older reaches the webview.
@@ -153,17 +161,21 @@ pub fn active_airframe(store: State<Store>) -> Result<Option<Airframe>, String> 
 #[tauri::command]
 pub fn upsert_airframe(edit: AirframeEdit, app: AppHandle, store: State<Store>) -> Result<Airframe, String> {
     reg_or_err(&edit.registration)?;
-    let refs_edited = edit.vapp_kt.is_some() || edit.landing_flaps.is_some() || edit.approach_profile.is_some();
+    let refs_edited = edit.vapp_kt.is_some() || edit.landing_flaps.is_some() || edit.approach_profile.is_some() || edit.icao_type.is_some();
     let before = refs_edited.then(|| {
-        store.get_airframe(&edit.registration).ok().flatten().map(|a| (a.vapp_kt, a.landing_flaps, a.approach_profile)).unwrap_or_default()
+        store
+            .get_airframe(&edit.registration)
+            .ok()
+            .flatten()
+            .map(|a| (a.vapp_kt, a.landing_flaps, a.approach_profile, a.icao_type))
+            .unwrap_or_default()
     });
     let a = store.upsert_airframe(&edit, now()).map_err(err)?.ok_or(crate::lang::tr("Registrierung ungültig", "Invalid registration"))?;
     changed(&app, &a.registration);
-    // a new Vapp / landing flaps / assessment profile re-rate the approaches of this airframe:
-    // the strips and comparisons reload their (recomputed) facts and metrics
-    if before.is_some_and(|b| b != (a.vapp_kt, a.landing_flaps, a.approach_profile.clone())) {
-        let _ = app.emit("approach:facts", a.registration.as_str());
-        let _ = app.emit(crate::metrics::EVENT, ());
+    // a new Vapp / landing flaps / assessment profile / ICAO type (it picks the automatic
+    // profile) re-rate the approaches of this airframe
+    if before.is_some_and(|b| b != (a.vapp_kt, a.landing_flaps, a.approach_profile.clone(), a.icao_type.clone())) {
+        results_invalidated(&app, &a.registration);
     }
     Ok(safe(a))
 }
@@ -178,6 +190,8 @@ pub fn set_flight_airframe(flight_id: String, registration: Option<String>, app:
     if ok {
         let _ = app.emit("logbook:changed", ());
         changed(&app, registration.as_deref().unwrap_or_default());
+        // booked elsewhere or unbooked: assessed with another profile / Vapp / flaps
+        results_invalidated(&app, registration.as_deref().unwrap_or_default());
     }
     Ok(ok)
 }
@@ -189,6 +203,7 @@ pub fn merge_airframes(from: String, into: String, app: AppHandle, store: State<
     let a = store.merge_airframes(&from, &into, now()).map_err(err)?.ok_or(crate::lang::tr("Flugzeug nicht gefunden", "Aircraft not found"))?;
     let _ = app.emit("logbook:changed", ());
     changed(&app, &a.registration);
+    results_invalidated(&app, &a.registration);
     Ok(safe(a))
 }
 
@@ -198,6 +213,7 @@ pub fn delete_airframe(registration: String, app: AppHandle, store: State<Store>
     if ok {
         let _ = app.emit("logbook:changed", ());
         changed(&app, &registration);
+        results_invalidated(&app, &registration);
     }
     Ok(ok)
 }

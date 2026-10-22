@@ -63,6 +63,19 @@ export function mergeHint(c: MergeCandidate): { text: string; detail: string } {
   };
 }
 
+/**
+ * The store's merge refusals (`Invalid::Merge*`, `FlightNotFound`, the running flight in
+ * `lib.rs merge_flights`) arrive already in the UI language and say why – shown as they are.
+ * Anything else (SQLite, I/O) is technical: null, the caller shows it behind "Details".
+ */
+const MERGE_REFUSAL_RE =
+  /^(Flug nicht gefunden|Flight not found|Ein Flug lässt sich nicht mit sich selbst|A flight cannot be merged with itself|Flüge im Papierkorb|Flights in the trash|Nur ein unterbrochener Flug|Only an interrupted flight|Vom ersten Flug ist kein Ende|The end of the first flight|Der zweite Flug beginnt|The second flight starts|Zwischen den Flügen liegen|There are \d+ min between the flights|Die Position(en)? (am Übergang|liegen)|The position(s are| at the transition)|Der laufende Flug|The running flight)/;
+
+export function mergeRefusal(raw: string): string | null {
+  const s = raw.trim();
+  return MERGE_REFUSAL_RE.test(s) && !s.includes("\n") ? s : null;
+}
+
 /** Stable key of a candidate pair (for "Ignorieren"). */
 export function mergeKey(c: MergeCandidate): string {
   return `${c.first.id}>${c.second.id}`;

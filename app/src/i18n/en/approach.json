@@ -275,6 +275,31 @@
         "ga_piston": "GA piston profile"
       },
       "assessedWith": "Assessed with: {name}",
+      "source": {
+        "generic": "FSF ALAR Briefing Note 7.1, EASA AMC1/GM1 CAT.OP.MPA.115, EASA Data4Safety",
+        "airbus": "Airbus FOBN “Flying Stabilized Approaches” (AB-STAB), table 4",
+        "boeing": "Boeing publishes no values of its own (BOE-AERO refers to the FSF ALAR tool kit); therefore the same as the generic profile",
+        "turboprop": "ATR Flight Safety 2021 (±5 kt); thrust check off (VectaSim convention)",
+        "ga_piston": "FAA Airplane Flying Handbook, chapter 9 (AFH9); FSF go-around study 2017"
+      },
+      "sourceKey": {
+        "airbus": {
+          "gateSpeedAboveKt": "AB-STAB table 4: Vapp −5 / +10 kt"
+        },
+        "turboprop": {
+          "gateSpeedAboveKt": "ATR 2021: ±5 kt",
+          "thrustCheck": "VectaSim convention: a turboprop's gas-generator N1 stays high at flight idle"
+        },
+        "ga_piston": {
+          "gateSpeedAboveKt": "AFH9 p. 9-6: +10 / −5 KIAS",
+          "speedS1AboveKt": "AFH9 tolerance (S1 = the handbook's limit, VectaSim convention)",
+          "speedS2AboveKt": "VectaSim convention: twice S1",
+          "vsS1Fpm": "AFH9: 500–1000 fpm (VectaSim convention)",
+          "vsS2Fpm": "VectaSim convention",
+          "configGateFt": "AFH9: gate at 500 ft in visual conditions, full flaps once on final (VMC assumed)",
+          "hardGateFt": "AFH9 / FSF GA: go around if not stable below 300 ft above ground"
+        }
+      },
       "unknown": "profile “{id}” (deleted)",
       "differs": "Differs from the generic profile (FSF/EASA):",
       "sameAsGeneric": "Same thresholds as the generic profile (FSF/EASA).",

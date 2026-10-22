@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { countsInStats, type StatsRow } from "./flightStats";
 
-const row = (p: Partial<StatsRow>): StatsRow => ({ state: "completed", provider: "simconnect", takeoffMs: null, landingCount: 0, ...p });
+const row = (p: Partial<StatsRow>): StatsRow => ({ state: "completed", provider: "simconnect", takeoffMs: null, landingCount: 0, phase: "shutdown", distanceNm: 0, ...p });
 
 describe("countsInStats", () => {
   it("never counts a discarded ground session", () => {
@@ -20,6 +20,16 @@ describe("countsInStats", () => {
     expect(countsInStats(row({}))).toBe(false);
     expect(countsInStats(row({ state: "interrupted" }))).toBe(false);
     expect(countsInStats(row({ provider: null }))).toBe(false);
+  });
+  it("counts a flight that ended in the air only once it covered a distance (no ghost rows)", () => {
+    // start in the air, interrupted in cruise after 120 nm: counts
+    expect(countsInStats(row({ state: "interrupted", phase: "cruise", distanceNm: 120 }))).toBe(true);
+    // MSFS load placeholder: "climb" at 0° N / 0° E, 0 nm → never counts
+    expect(countsInStats(row({ state: "interrupted", phase: "climb", distanceNm: 0 }))).toBe(false);
+    expect(countsInStats(row({ state: "interrupted", phase: "climb", distanceNm: 0.9 }))).toBe(false);
+    expect(countsInStats(row({ state: "interrupted", phase: "final", distanceNm: 1 }))).toBe(true);
+    // a ground phase with distance is still a taxi-only recording
+    expect(countsInStats(row({ state: "completed", phase: "taxiIn", distanceNm: 5 }))).toBe(false);
   });
   it("always counts an imported flight", () => {
     expect(countsInStats(row({ provider: "import:vectasim" }))).toBe(true);

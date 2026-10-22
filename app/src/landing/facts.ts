@@ -860,6 +860,17 @@ export function approachBandLabel(band: ApproachBand, hardGateFt?: number | null
   return band === "unstableBelow500" ? t("facts.approachBand.unstableBelow500", { ft: fmt(hardGateFt ?? 500, 0, "ft") }) : APPROACH_BAND_LABEL[band];
 }
 
+/**
+ * Legend label for a set of approaches: the hard gates of the profiles they were assessed with
+ * ("unstable below 300 / 500 ft" when GA piston and generic approaches are mixed).
+ */
+export function approachBandLegendLabel(band: ApproachBand, hardGates: ReadonlyArray<number | null | undefined>): string {
+  if (band !== "unstableBelow500") return APPROACH_BAND_LABEL[band];
+  const gates = [...new Set(hardGates.map((g) => g ?? 500))].sort((a, b) => a - b);
+  if (gates.length <= 1) return approachBandLabel(band, gates[0]);
+  return t("facts.approachBand.unstableBelow500", { ft: `${gates.map((g) => fmtNum(g, 0)).join(" / ")}${NNBSP}ft` });
+}
+
 /** CSS custom property per approach band: the band scale (stabil = sanft, Abweichungen = fest, instabil = hart). */
 export const APPROACH_BAND_VAR: Record<ApproachBand, string> = {
   stable: "var(--aband-stable)",

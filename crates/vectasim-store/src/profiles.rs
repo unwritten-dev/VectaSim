@@ -8,7 +8,7 @@
 //! (the same way a Vapp change does). Deleting also puts airframes that used it back on
 //! "automatic".
 
-use crate::airframe::{icao_from_atc_model, ofp_facts};
+use crate::airframe::{icao_from_atc_model, invalidate_airframe_results, ofp_facts};
 use crate::{Invalid, Result, Store};
 use rusqlite::{OptionalExtension, params};
 use vectasim_core::approach_profile::{
@@ -35,9 +35,21 @@ pub fn parse_custom_profile(json: &str) -> Result<ApproachProfile> {
     if json.len() > CUSTOM_MAX_BYTES {
         return Err(invalid(ProfileError::TooLarge { max_bytes: CUSTOM_MAX_BYTES }));
     }
-    let doc: CustomProfileDoc =
-        serde_json::from_str(json.trim_start_matches('\u{feff}')).map_err(|e| invalid(ProfileError::Format { detail: e.to_string() }))?;
+    let doc: CustomProfileDoc = serde_json::from_str(json.trim_start_matches('\u{feff}'))
+        .map_err(|e| invalid(ProfileError::Format { detail: format_detail(&e) }))?;
     approach_profile::validate(doc).map_err(invalid)
+}
+
+/// The parser's message for the pilot, with what it quotes from the file cut to
+/// [`approach_profile::ECHO_MAX_CHARS`] (serde quotes unexpected values in full) and the
+/// position kept.
+fn format_detail(e: &serde_json::Error) -> String {
+    let full = e.to_string();
+    let at = format!(" at line {} column {}", e.line(), e.column());
+    match full.strip_suffix(&at) {
+        Some(msg) => format!("{}{at}", approach_profile::clip_echo(msg)),
+        None => approach_profile::clip_echo(&full),
+    }
 }
 
 impl Store {
@@ -102,37 +114,39 @@ impl Store {
         if list.len() == before {
             return Ok(false);
         }
-        self.put_custom_approach_profiles(&list)?;
         {
-            let conn = self.conn();
-            conn.execute(
-                "DELETE FROM approach_facts WHERE flight_id IN (SELECT f.id FROM flights f JOIN airframes a ON a.registration = f.airframe_reg
-                    WHERE a.approach_profile = ?1)",
-                params![id],
+            // one transaction: the setting, the airframes and the caches change together (an
+            // error leaves no airframe pointing at a deleted profile)
+            let mut conn = self.conn();
+            let tx = conn.transaction()?;
+            tx.execute(
+                "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                params![SETTING_KEY, serde_json::to_string(&list)?],
             )?;
-            conn.execute(
-                "DELETE FROM flight_metrics WHERE flight_id IN (SELECT f.id FROM flights f JOIN airframes a ON a.registration = f.airframe_reg
-                    WHERE a.approach_profile = ?1)",
-                params![id],
-            )?;
-            conn.execute(
+            // the airframes that used it go back to automatic: their flights are assessed anew
+            let regs: Vec<String> = {
+                let mut stmt = tx.prepare("SELECT registration FROM airframes WHERE approach_profile = ?1")?;
+                stmt.query_map(params![id], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?
+            };
+            for reg in &regs {
+                self.results_changed();
+                invalidate_airframe_results(&tx, reg)?;
+            }
+            tx.execute(
                 "UPDATE airframes SET approach_profile = NULL, updated_ms = ?2 WHERE approach_profile = ?1",
                 params![id, crate::now_ms_i64()],
             )?;
+            self.results_changed();
+            invalidate_profile_results(&tx, id)?;
+            tx.commit()?;
         }
-        self.invalidate_profile_results(id)?;
         Ok(true)
     }
 
     /// Drop the cached approach facts and metrics assessed with profile `id`.
     fn invalidate_profile_results(&self, id: &str) -> Result<()> {
-        let conn = self.conn();
-        conn.execute(
-            "DELETE FROM approach_facts WHERE flight_id IN (SELECT flight_id FROM approach_facts WHERE profile_id = ?1)",
-            params![id],
-        )?;
-        conn.execute("DELETE FROM flight_metrics WHERE approach_profile = ?1", params![id])?;
-        Ok(())
+        self.results_changed();
+        invalidate_profile_results(&self.conn(), id)
     }
 
     /// What the logbook knows for a flight's profile (empty for an unknown flight).
@@ -173,6 +187,15 @@ impl Store {
         let custom = self.custom_approach_profiles()?;
         Ok(approach_profile::resolve(inputs.airframe_choice.as_deref(), inputs.icao_type.as_deref(), engine, engine_count, &custom))
     }
+}
+
+fn invalidate_profile_results(conn: &rusqlite::Connection, id: &str) -> Result<()> {
+    conn.execute(
+        "DELETE FROM approach_facts WHERE flight_id IN (SELECT flight_id FROM approach_facts WHERE profile_id = ?1)",
+        params![id],
+    )?;
+    conn.execute("DELETE FROM flight_metrics WHERE approach_profile = ?1", params![id])?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -217,6 +240,28 @@ mod tests {
         assert_eq!(code(r#"{ "id": "generic", "name": "x" }"#), "idReserved");
         assert_eq!(code(r#"{ "id": "My VA", "name": "x" }"#), "idInvalid");
         assert_eq!(code(&format!(r#"{{ "id": "my-va", "name": "x", "source": "{}" }}"#, "a".repeat(20_000))), "tooLarge");
+        assert_eq!(code(r#"{ "id": "my-va", "name": "x", "source": "SOP \u202e 4.2" }"#), "sourceTooLong");
         assert!(store.custom_approach_profiles().unwrap().is_empty());
+    }
+
+    #[test]
+    fn parser_messages_do_not_echo_long_values() {
+        // serde quotes an unexpected value in full: any local .json could come back as the error
+        let secret = "s".repeat(5_000);
+        let json = format!(r#"{{ "id": "my-va", "name": "x", "overrides": {{ "vsS1Fpm": "{secret}" }} }}"#);
+        let crate::StoreError::Invalid(Invalid::ApproachProfileInvalid { cause: ProfileError::Format { detail } }) =
+            parse_custom_profile(&json).unwrap_err()
+        else {
+            panic!()
+        };
+        assert!(detail.chars().count() < 100, "{detail}");
+        assert!(detail.contains('…') && detail.contains(" at line 1 column"), "{detail}");
+        // a short one stays whole
+        let crate::StoreError::Invalid(Invalid::ApproachProfileInvalid { cause: ProfileError::Format { detail } }) =
+            parse_custom_profile("not json").unwrap_err()
+        else {
+            panic!()
+        };
+        assert_eq!(detail, "expected ident at line 1 column 2");
     }
 }

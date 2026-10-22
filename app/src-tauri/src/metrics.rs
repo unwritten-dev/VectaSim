@@ -109,6 +109,10 @@ fn start_backfill(app: AppHandle, store: Store, airports: Arc<AirportIndex>, ids
         let started = std::time::Instant::now();
         let mut done = 0usize;
         for (i, id) in ids.iter().enumerate() {
+            // `approach_facts_recent` may have computed it inline since the list was read
+            if store.flight_results_fresh(id).unwrap_or(false) {
+                continue;
+            }
             if let Err(e) = approach::store_facts(&store, &airports, id) {
                 log::warn!("flight metrics of flight {id}: {e}");
                 // settle it anyway, so a broken track is not retried on every read

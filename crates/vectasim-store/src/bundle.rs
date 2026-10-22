@@ -35,7 +35,7 @@ use std::collections::HashSet;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, Write};
 use std::path::{Path, PathBuf};
-use vectasim_core::Lang;
+use vectasim_core::{Lang, approach_profile};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, DateTime, ZipArchive, ZipWriter};
 
@@ -778,6 +778,7 @@ fn import_airframes<R: Read + Seek>(
     zip: &mut ZipArchive<R>,
     cols: &Cols,
     lines: &[AirframeLine],
+    profiles: &HashSet<String>,
     opts: &ImportOptions,
     report: &mut ImportReport,
 ) -> Result<()> {
@@ -798,11 +799,20 @@ fn import_airframes<R: Read + Seek>(
         match existing {
             None => {
                 let image = image_values(zip, line, opts.images_dir.as_deref(), &mut report.warnings, opts.lang)?;
-                let extra: Vec<(&str, SqlValue)> = match &image {
+                let mut extra: Vec<(&str, SqlValue)> = match &image {
                     Some((v, _)) => v.clone(),
                     // no picture here: cleared, so the app looks it up again
                     None => IMAGE_COLS.iter().map(|k| (*k, SqlValue::Null)).collect(),
                 };
+                if let Some(id) = str_of(a, "approach_profile").filter(|id| !approach_profile::is_builtin(id) && !profiles.contains(*id)) {
+                    let (lang, id) = (opts.lang, approach_profile::clip_echo(id));
+                    report.warnings.push(ltr!(
+                        lang,
+                        "Bewertungsprofil „{id}“ von {reg} gibt es hier nicht: automatisch gewählt",
+                        "Assessment profile \"{id}\" of {reg} does not exist here: set to automatic"
+                    ));
+                    extra.push(("approach_profile", SqlValue::Null));
+                }
                 insert_row(tx, "airframes", &cols.airframes, a, &[], &extra)?;
                 report.airframes_added += 1;
                 if image.is_some_and(|(_, file)| file) {
@@ -1047,6 +1057,8 @@ fn run_import(store: &Store, path: &Path, opts: &ImportOptions) -> Result<Import
     // a merge skips duplicates kept here under another id: their runway landings too
     let skip = if opts.mode == ImportMode::Merge { duplicates_under_other_ids(&store.conn(), &parsed.flights)? } else { HashSet::new() };
     let bundle_ids: Vec<String> = parsed.flights.iter().filter_map(|l| str_of(&l.flight, "id").map(str::to_owned)).collect();
+    // remembered runways and replaced airframes change what cached results were computed with
+    store.results_changed();
     let imported = import_flights(store, &mut zip, parsed.flights, &parsed.airframes, &parsed.runways, &skip, size, opts, &mut report);
     if imported.is_err() {
         // a later batch failed: the runway landings of bundle flights that never arrived go
@@ -1097,6 +1109,9 @@ fn import_flights(
     opts: &ImportOptions,
     report: &mut ImportReport,
 ) -> Result<()> {
+    // custom profiles are settings and stay out of the bundle: an airframe's choice of one this
+    // logbook does not have goes back to automatic (read before the import holds the connection)
+    let profiles: HashSet<String> = store.custom_approach_profiles()?.into_iter().map(|p| p.id).collect();
     let mut flights = flights.into_iter().peekable();
     let mut first = true;
     while first || flights.peek().is_some() {
@@ -1116,7 +1131,7 @@ fn import_flights(
                 tx.execute("DELETE FROM user_runways", [])?;
                 tx.execute("DELETE FROM user_runway_landings", [])?;
             }
-            import_airframes(&tx, zip, &cols, airframes, opts, report)?;
+            import_airframes(&tx, zip, &cols, airframes, &profiles, opts, report)?;
             import_runways(&tx, &cols, runways, skip, report, opts.lang)?;
             first = false;
         }

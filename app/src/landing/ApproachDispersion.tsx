@@ -13,7 +13,6 @@ import type { ApproachFact, ApproachFactsResult } from "./approachTypes";
 import { clamp, ellipsePoints, linear, sigmaEllipse } from "./dispersionStats";
 import {
   APPROACH_BANDS,
-  APPROACH_BAND_LABEL,
   GATE_LABEL,
   GATE_TOLERANCE,
   SCATTER_GATES,
@@ -34,7 +33,7 @@ import {
   type ScatterGate,
 } from "./approachStats";
 import { BandSwatch, ShapeMark } from "./BandMark";
-import { approachBandLabel, type BandShape } from "./facts";
+import { approachBandLabel, approachBandLegendLabel, type BandShape } from "./facts";
 import "./dispersion.css";
 import "./approachDispersion.css";
 
@@ -147,6 +146,8 @@ export default function ApproachDispersion({ limit = 20 }: { limit?: number }) {
     [filter, aircraftOpts, airportOpts],
   );
   const facts = useMemo(() => applyApproachFilter(all, active, limit), [all, active, limit]);
+  // the legend names the hard gates of the profiles the shown approaches were assessed with
+  const legendGates = useMemo(() => facts.filter((f) => f.band != null).map((f) => f.hardGateFt), [facts]);
   const summary = useMemo(() => approachSummary(facts), [facts]);
   const nav = usePointNav(facts.length);
 
@@ -502,7 +503,7 @@ export default function ApproachDispersion({ limit = 20 }: { limit?: number }) {
         {APPROACH_BANDS.map((b) => (
           <span key={b}>
             <BandSwatch shape={shapeOf(b)} color={bandVar(b)} />
-            {APPROACH_BAND_LABEL[b]}
+            {approachBandLegendLabel(b, legendGates)}
           </span>
         ))}
         <span className="dp-legend-sep" aria-hidden="true" />

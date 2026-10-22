@@ -237,7 +237,8 @@ async function loadTile(url: string, abort: AbortController): Promise<{ data: Im
     // clouds: IR grey → cloud colour; radar: the colour scheme's magenta step → white – off the
     // main thread (a pixel loop plus a GPU read-back per 256² tile, 1–3 ms each: a pan over many
     // tiles stuttered), on it only where no worker can be started
-    return { data: await remapTile(bitmap, url.startsWith(`${CLOUDS_PROTOCOL}://`), scheme) };
+    // (an aborted tile – panned away – is dropped from the worker's queue)
+    return { data: await remapTile(bitmap, url.startsWith(`${CLOUDS_PROTOCOL}://`), scheme, abort.signal) };
   } catch (e) {
     if (isAbort(e)) throw e;
     // blocked, rate-limited, offline, undecodable: an empty tile, the legend shows the state

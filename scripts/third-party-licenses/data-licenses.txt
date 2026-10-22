@@ -1,0 +1,77 @@
+OurAirports (https://ourairports.com/data/)
+Used for: airports, runways, the continent per country and the radio navaids embedded in
+vectasim.exe (crates/vectasim-data/data: airports.csv, runways.csv, countries.csv,
+navaids.csv.zst).
+
+OurAirports (David Megginson et al.) releases all of its data files into the public domain:
+there are no restrictions on their use, and they come with no guarantee of accuracy or fitness
+for any purpose. No attribution is required; VectaSim credits OurAirports in
+THIRD-PARTY-NOTICES.md and in the app.
+
+--------------------------------------------------------------------------------
+Natural Earth (https://www.naturalearthdata.com/)
+Used for: the country outlines of the "Countries" view, 1:110m Admin-0 Countries, simplified and
+embedded in vectasim.exe (crates/vectasim-data/data/countries.geojson.zst).
+
+According to the Natural Earth terms of use
+(https://www.naturalearthdata.com/about/terms-of-use/), all versions of Natural Earth raster and
+vector map data are in the public domain. They may be used in any manner, including modifying
+the content and design, electronic dissemination and offset printing, without permission.
+Crediting the authors is not required; VectaSim names the source on the map.
+
+--------------------------------------------------------------------------------
+Unicode CLDR (https://cldr.unicode.org/)
+Used for: the German and English country names in countries.csv, embedded in vectasim.exe
+(crates/vectasim-data/data/countries.csv).
+
+UNICODE LICENSE V3
+
+COPYRIGHT AND PERMISSION NOTICE
+
+Copyright © 1991-2026 Unicode, Inc.
+
+NOTICE TO USER: Carefully read the following legal agreement. BY
+DOWNLOADING, INSTALLING, COPYING OR OTHERWISE USING DATA FILES, AND/OR
+SOFTWARE, YOU UNEQUIVOCALLY ACCEPT, AND AGREE TO BE BOUND BY, ALL OF THE
+TERMS AND CONDITIONS OF THIS AGREEMENT. IF YOU DO NOT AGREE, DO NOT
+DOWNLOAD, INSTALL, COPY, DISTRIBUTE OR USE THE DATA FILES OR SOFTWARE.
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of data files and any associated documentation (the "Data Files") or
+software and any associated documentation (the "Software") to deal in the
+Data Files or Software without restriction, including without limitation
+the rights to use, copy, modify, merge, publish, distribute, and/or sell
+copies of the Data Files or Software, and to permit persons to whom the
+Data Files or Software are furnished to do so, provided that either (a)
+this copyright and permission notice appear with all copies of the Data
+Files or Software, or (b) this copyright and permission notice appear in
+associated Documentation.
+
+THE DATA FILES AND SOFTWARE ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY
+KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF
+THIRD PARTY RIGHTS.
+
+IN NO EVENT SHALL THE COPYRIGHT HOLDER OR HOLDERS INCLUDED IN THIS NOTICE
+BE LIABLE FOR ANY CLAIM, OR ANY SPECIAL INDIRECT OR CONSEQUENTIAL DAMAGES,
+OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,
+WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,
+ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THE DATA
+FILES OR SOFTWARE.
+
+Except as contained in this notice, the name of a copyright holder shall
+not be used in advertising or otherwise to promote the sale, use or other
+dealings in these Data Files or Software without prior written
+authorization of the copyright holder.
+
+SPDX-License-Identifier: Unicode-3.0
+
+--------------------------------------------------------------------------------
+Map data, imagery, weather and online feeds
+
+The base map (OpenStreetMap data, ODbL 1.0; OpenMapTiles schema, CC-BY 4.0; OpenFreeMap), the
+satellite imagery (EOxCloudless 2017, CC BY 4.0), the weather layers (RainViewer, EUMETSAT) and
+the online feeds (VATSIM, IVAO, aviationweather.gov, SimBrief, Planespotters.net) are not part of
+the installer: the app loads them at runtime. Their terms and the required attributions are
+listed in THIRD-PARTY-NOTICES.md; the attributions are also shown on the map. SimConnect.dll is
+not shipped either (Microsoft Flight Simulator SDK EULA, see THIRD-PARTY-NOTICES.md).

@@ -7,7 +7,7 @@ use crate::{Config, Limits, STREAM_INTERVAL, Source, overlay};
 use axum::Router;
 use axum::body::Body;
 use axum::extract::ws::{Message, Utf8Bytes, WebSocket, WebSocketUpgrade};
-use axum::extract::{ConnectInfo, Query, Request, State};
+use axum::extract::{ConnectInfo, Extension, Query, Request, State};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -33,6 +33,9 @@ const LOGBOOK_MAX: usize = 50;
 const CLIENT_BACKLOG: usize = 64;
 /// Longest wait for open connections after the stop signal.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
+/// How long a loopback connection asked to give its slot away ([`Pools::evict_idle`]) may take
+/// to close on its own before it is dropped (no request in flight).
+const KICK_GRACE: Duration = Duration::from_millis(250);
 
 #[derive(Clone)]
 pub(crate) struct AppState {
@@ -296,9 +299,20 @@ pub(crate) async fn serve(listener: std::net::TcpListener, state: AppState, limi
                     let _ = conn.await;
                 }
                 _ = kicked(conn_state.as_deref()) => {
-                    // a newer loopback connection needs the slot: an idle keep-alive closes at once
+                    // a newer loopback connection needs the slot: an idle keep-alive closes at once;
+                    // one that sent only part of a request head (graceful shutdown would wait for
+                    // it until the header timeout) is dropped after a short grace, unless a request
+                    // got under way in the meantime – that one is answered first
                     conn.as_mut().graceful_shutdown();
-                    let _ = conn.await;
+                    loop {
+                        if tokio::time::timeout(KICK_GRACE, conn.as_mut()).await.is_ok() {
+                            break;
+                        }
+                        if conn_state.as_ref().is_none_or(|c| c.busy.load(Ordering::Acquire) == 0) {
+                            log::debug!("overlay server: idle connection from {peer} closed for a new one");
+                            break;
+                        }
+                    }
                 }
             }
             drop(local_slot);
@@ -370,7 +384,7 @@ fn error(status: StatusCode, message: &str) -> Response {
 
 /// Every request: access rules ([`auth::check`]), CORS for allowed origins, and the headers
 /// that keep answers out of caches, referrers and MIME sniffing.
-async fn guard(State(st): State<AppState>, ConnectInfo(peer): ConnectInfo<SocketAddr>, req: Request, next: Next) -> Response {
+async fn guard(State(st): State<AppState>, ConnectInfo(peer): ConnectInfo<SocketAddr>, mut req: Request, next: Next) -> Response {
     let h = req.headers();
     let origin = header_str(h, header::ORIGIN).map(str::to_owned);
     let host = header_str(h, header::HOST).map(str::to_owned);
@@ -404,6 +418,11 @@ async fn guard(State(st): State<AppState>, ConnectInfo(peer): ConnectInfo<Socket
         r.headers_mut().insert(header::CONNECTION, HeaderValue::from_static("close"));
         clear_cookies(r.headers_mut(), &stale);
         return r;
+    }
+    // the request itself carried the valid LAN token (query, header or cookie): only then may the
+    // start page hand it back ([`with_token`]) – a token-free loopback request does not get it
+    if token.as_deref().is_some_and(|t| st.cfg.lan_token().is_some_and(|e| auth::token_eq(t, e))) {
+        req.extensions_mut().insert(TokenPresented);
     }
     let preflight = req.method() == Method::OPTIONS;
     let mut res = if preflight { StatusCode::NO_CONTENT.into_response() } else { next.run(req).await };
@@ -462,13 +481,19 @@ pub(crate) fn localized(body: &'static str, lang: Lang) -> String {
     body.replacen("<html lang=\"de\">", &format!("<html lang=\"{}\">", lang.code()), 1)
 }
 
+/// Marks a request that carried the valid LAN token itself (set by [`guard`]).
+#[derive(Clone, Copy)]
+struct TokenPresented;
+
 /// The empty token element of the start page ([`with_token`]).
 const TOKEN_META: &str = r#"<meta name="vectasim-token" content="">"#;
 
 /// The start page with the LAN token in its `<meta name="vectasim-token">`:
-/// the page is only served to an authorised request (this PC, or a device that sent the token
-/// as query, header or cookie), so it hands back nothing the reader did not have, and the copy
-/// URLs for OBS on another PC carry the token even after a bookmark load through the cookie.
+/// only for a request that sent the valid token itself (query, header or cookie –
+/// [`TokenPresented`]), so it hands back nothing the reader did not have, and the copy URLs for
+/// OBS on another PC carry the token even after a bookmark load through the cookie. A loopback
+/// request without a token (this PC needs none) gets the empty element: the token is not
+/// readable by every local process with a plain `GET /`; the app shows the LAN URLs itself.
 /// `overlay.js` reads the element and removes it. Only tokens of the URL-safe alphabet.
 pub(crate) fn with_token(page: String, token: Option<&str>) -> String {
     match token.filter(|t| auth::valid_token(t)) {
@@ -494,8 +519,14 @@ fn page_with(h: &HeaderMap, html: String) -> Response {
     r
 }
 
-async fn page_index(State(st): State<AppState>, Query(q): Query<PageQuery>, h: HeaderMap) -> Response {
-    page_with(&h, with_token(localized(overlay::INDEX_HTML, page_lang(&st, &q)), st.cfg.lan_token()))
+async fn page_index(
+    State(st): State<AppState>,
+    Query(q): Query<PageQuery>,
+    presented: Option<Extension<TokenPresented>>,
+    h: HeaderMap,
+) -> Response {
+    let token = presented.and(st.cfg.lan_token());
+    page_with(&h, with_token(localized(overlay::INDEX_HTML, page_lang(&st, &q)), token))
 }
 async fn page_hud(State(st): State<AppState>, Query(q): Query<PageQuery>, h: HeaderMap) -> Response {
     page(&h, overlay::HUD_HTML, page_lang(&st, &q))

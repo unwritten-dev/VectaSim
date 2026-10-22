@@ -506,7 +506,7 @@ export const TILE_COORD_LIMIT = 30_000;
  * the map's zoom, one level coarser at a time until every instance (`pts`, Mercator, already in
  * the world copy nearest the centre) lies within TILE_COORD_LIMIT tile units of it.
  */
-export function trafficRefTile(cx: number, cy: number, zoom: number, pts: ReadonlyArray<readonly [number, number]>): { tx: number; ty: number; tz: number } {
+export function trafficRefTile(cx: number, cy: number, zoom: number, pts: ReadonlyArray<readonly [number, number]>): { tx: number; ty: number; tz: number; wrap: number } {
   const xy = new Float64Array(pts.length * 2);
   pts.forEach(([x, y], i) => {
     xy[2 * i] = x;
@@ -515,16 +515,24 @@ export function trafficRefTile(cx: number, cy: number, zoom: number, pts: Readon
   return trafficRefTileFlat(cx, cy, zoom, xy, pts.length);
 }
 
-/** trafficRefTile over `count` points stored flat (x0, y0, x1, y1, …): the per-frame form, no pair arrays. */
-export function trafficRefTileFlat(cx: number, cy: number, zoom: number, xy: ArrayLike<number>, count: number): { tx: number; ty: number; tz: number } {
+/**
+ * trafficRefTile over `count` points stored flat (x0, y0, x1, y1, …): the per-frame form, no pair
+ * arrays. `wrap` is the world copy of the centre (a camera beyond ±180°, following across the date
+ * line, is not wrapped back): the tile is picked inside that copy, as curtainLayer.pickTile does,
+ * instead of being clamped to the last tile column (which then coarsened the zoom for nothing).
+ * Tile-local x of a point: ((x − wrap)·2^tz − tx)·8192.
+ */
+export function trafficRefTileFlat(cx: number, cy: number, zoom: number, xy: ArrayLike<number>, count: number): { tx: number; ty: number; tz: number; wrap: number } {
+  const wrap = Number.isFinite(cx) ? Math.floor(cx) : 0;
+  const fx = cx - wrap;
   let z = Math.max(0, Math.min(18, Math.floor(zoom)));
   for (;;) {
     const n = 2 ** z;
-    const tx = Math.min(n - 1, Math.max(0, Math.floor(cx * n)));
+    const tx = Math.min(n - 1, Math.max(0, Math.floor(fx * n)));
     const ty = Math.min(n - 1, Math.max(0, Math.floor(cy * n)));
     let reach = 0;
-    for (let i = 0; i < count; i++) reach = Math.max(reach, Math.abs(xy[2 * i] * n - tx), Math.abs(xy[2 * i + 1] * n - ty));
-    if (z === 0 || !(reach * 8192 > TILE_COORD_LIMIT)) return { tx, ty, tz: z };
+    for (let i = 0; i < count; i++) reach = Math.max(reach, Math.abs((xy[2 * i] - wrap) * n - tx), Math.abs(xy[2 * i + 1] * n - ty));
+    if (z === 0 || !(reach * 8192 > TILE_COORD_LIMIT)) return { tx, ty, tz: z, wrap };
     z--;
   }
 }

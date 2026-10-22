@@ -662,7 +662,10 @@ export default function App() {
     // no OFP loaded is the normal state; a failure here means the same for the user
     invoke<Ofp | null>("get_current_ofp").then(setOfp).catch(() => {});
     // the online panel shows "VATSIM aus" until the first summary arrives
-    invoke<OnlineSummary>("online_summary").then(setOnline).catch(() => {});
+    // (an `online:summary` event that came first is newer: the answer only fills the gap)
+    invoke<OnlineSummary>("online_summary")
+      .then((s) => setOnline((cur) => cur ?? s))
+      .catch(() => {});
 
     const unlisteners = [
       listen<StatusSnapshot>("sim:status", (e) => onStatusRef.current(e.payload)),

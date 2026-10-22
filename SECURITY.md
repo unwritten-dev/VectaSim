@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-VectaSim is in beta. Security fixes go into the latest release only; the app offers it as an update automatically (*Settings → Updates*). Please check that a problem still exists in the [latest release](https://github.com/unwritten-dev/VectaSim/releases/latest) before reporting it.
+VectaSim is in beta. Security fixes go into the latest release only. The built-in updater (*Settings → Updates*, also checked at every start) reads this repository’s public releases: once a release is published there, installed apps are offered it after the next start, and installing needs your confirmation. Please check that a problem still exists in the [latest release](https://github.com/unwritten-dev/VectaSim/releases/latest) before reporting it.
 
 ## Reporting a vulnerability
 

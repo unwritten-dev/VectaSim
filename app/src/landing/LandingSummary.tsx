@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import "./shared.css";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { fmt } from "../i18n/number";
 import { useT } from "../i18n";
@@ -8,32 +9,56 @@ import { sideLabel } from "./geometry";
 import AssessedWith from "./AssessedWith";
 import type { LandingDebriefData } from "./types";
 import type { ApproachAnalysis } from "./approachTypes";
+import { useApproachRevision } from "./approachChanges";
+import { latestOnly } from "../latest";
 
 /**
  * Compact debrief of a flight's last landing for the logbook detail, loaded automatically;
  * the button opens the full debrief.
  */
-export default function LandingSummary({ flightId, touchdowns, updatedMs }: { flightId: string; touchdowns: number; updatedMs: number }) {
+export default function LandingSummary({
+  flightId,
+  registration = null,
+  touchdowns,
+  updatedMs,
+}: {
+  flightId: string;
+  /** Booked airframe: its fleet changes (Vapp, landing flaps, profile) re-rate the approach. */
+  registration?: string | null;
+  touchdowns: number;
+  updatedMs: number;
+}) {
   const t = useT();
   const [data, setData] = useState<LandingDebriefData | null>(null);
   const [approaches, setApproaches] = useState<ApproachAnalysis[] | null>(null);
   const [failed, setFailed] = useState(false);
+  // a profile / Vapp / flaps change or a runway correction re-rates the shown flight
+  const rev = useApproachRevision(flightId, registration);
+  const [latest] = useState(latestOnly);
+  /** Flight whose values are shown: a reload of the same flight keeps them until the answer. */
+  const shownFor = useRef<string | null>(null);
   useEffect(() => {
-    let alive = true;
-    setData(null);
-    setApproaches(null);
-    setFailed(false);
+    const fresh = shownFor.current !== flightId;
+    shownFor.current = flightId;
+    const isLatest = latest();
+    if (fresh) {
+      setData(null);
+      setApproaches(null);
+      setFailed(false);
+    }
     invoke<LandingDebriefData>("landing_analysis", { flightId, touchdownIndex: null })
-      .then((d) => alive && setData(d))
-      .catch(() => alive && setFailed(true));
+      .then((d) => {
+        if (!isLatest()) return;
+        setData(d);
+        setFailed(false);
+      })
+      // a failed reload keeps the values shown
+      .catch(() => isLatest() && fresh && setFailed(true));
     // the approach is an extra line; the summary works without it
     invoke<ApproachAnalysis[]>("approach_analysis", { flightId })
-      .then((a) => alive && setApproaches(a))
-      .catch(() => alive && setApproaches([]));
-    return () => {
-      alive = false;
-    };
-  }, [flightId, touchdowns, updatedMs]);
+      .then((a) => isLatest() && setApproaches(a))
+      .catch(() => isLatest() && fresh && setApproaches([]));
+  }, [flightId, touchdowns, updatedMs, rev, latest]);
   const goArounds = approaches?.filter((x) => x.outcome.kind === "goAround").length ?? 0;
   const last = (xs: ApproachAnalysis[] | null | undefined): ApproachAnalysis | null => (xs && xs.length ? xs[xs.length - 1] : null);
   const landedApproach = last(approaches?.filter((x) => x.outcome.kind === "landed")) ?? last(approaches);

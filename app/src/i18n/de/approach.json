@@ -269,12 +269,37 @@
     "assessment": {
       "name": {
         "generic": "Allgemeines Profil (FSF/EASA)",
-        "airbus": "Airbus-Profil",
-        "boeing": "Boeing-Profil",
+        "airbus": "Profil nach Airbus-Art",
+        "boeing": "Profil nach Boeing-Art",
         "turboprop": "Turboprop-/Regional-Profil",
         "ga_piston": "GA-Kolben-Profil"
       },
       "assessedWith": "Bewertet nach: {name}",
+      "source": {
+        "generic": "FSF ALAR Briefing Note 7.1, EASA AMC1/GM1 CAT.OP.MPA.115, EASA Data4Safety",
+        "airbus": "Airbus FOBN „Flying Stabilized Approaches“ (AB-STAB), Tabelle 4",
+        "boeing": "Boeing veröffentlicht keine eigenen Werte (BOE-AERO verweist auf das FSF-ALAR-Toolkit); daher gleich dem allgemeinen Profil",
+        "turboprop": "ATR Flight Safety 2021 (±5 kt); Schubprüfung aus (VectaSim-Konvention)",
+        "ga_piston": "FAA Airplane Flying Handbook, Kapitel 9 (AFH9); FSF-Studie zum Durchstarten 2017"
+      },
+      "sourceKey": {
+        "airbus": {
+          "gateSpeedAboveKt": "AB-STAB Tabelle 4: Vapp −5 / +10 kt"
+        },
+        "turboprop": {
+          "gateSpeedAboveKt": "ATR 2021: ±5 kt",
+          "thrustCheck": "VectaSim-Konvention: Bei Turboprops bleibt das N1 des Gasgenerators auch im Flugleerlauf hoch"
+        },
+        "ga_piston": {
+          "gateSpeedAboveKt": "AFH9 S. 9-6: +10 / −5 KIAS",
+          "speedS1AboveKt": "AFH9-Toleranz (S1 = Grenze des Handbuchs, VectaSim-Konvention)",
+          "speedS2AboveKt": "VectaSim-Konvention: doppelte S1",
+          "vsS1Fpm": "AFH9: 500–1000 fpm (VectaSim-Konvention)",
+          "vsS2Fpm": "VectaSim-Konvention",
+          "configGateFt": "AFH9: Gate bei 500 ft unter Sichtflugbedingungen, volle Klappen ab dem Endanflug (VMC angenommen)",
+          "hardGateFt": "AFH9 / FSF-GA: Durchstarten, wenn unter 300 ft über Grund nicht stabil"
+        }
+      },
       "unknown": "Profil „{id}“ (gelöscht)",
       "differs": "Abweichend vom allgemeinen Profil (FSF/EASA):",
       "sameAsGeneric": "Dieselben Grenzwerte wie das allgemeine Profil (FSF/EASA).",

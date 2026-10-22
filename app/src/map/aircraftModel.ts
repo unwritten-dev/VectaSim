@@ -357,6 +357,8 @@ export class AircraftModelLayer implements maplibregl.CustomLayerInterface {
   /** New target pose; null removes the aircraft. Blends from the pose currently drawn. */
   setPose(p: ModelPose | null, nowMs = performance.now()) {
     if (!p) {
+      // already none (the 2D replay sets null every frame): no repaint
+      if (!this.from && !this.to) return;
       this.from = this.to = null;
       this.map?.triggerRepaint();
       return;

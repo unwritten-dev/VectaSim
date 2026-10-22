@@ -504,3 +504,32 @@ fn imported_credit_links_are_planespotters_pages_only() {
     assert_eq!(link("D-HTTP"), None);
     assert_eq!(b.get_airframe("D-EVIL").unwrap().unwrap().image_url.as_deref(), Some("https://t.plnspttrs.net/1.jpg"));
 }
+
+#[test]
+fn an_airframe_profile_this_logbook_does_not_have_goes_back_to_automatic() {
+    // custom profiles are settings and stay home: the target fell back silently and the fleet
+    // showed an unknown id
+    let dir = tempfile::tempdir().unwrap();
+    let a = Store::open(&dir.path().join("a.db")).unwrap();
+    a.import_approach_profile(r#"{ "id": "my-va", "name": "My VA", "basedOn": "airbus" }"#).unwrap();
+    a.import_approach_profile(r#"{ "id": "their-va", "name": "Theirs" }"#).unwrap();
+    let edit = |reg: &str, p: &str| AirframeEdit { registration: reg.into(), approach_profile: Some(p.into()), ..Default::default() };
+    a.upsert_airframe(&edit("D-AIBL", "my-va"), T0).unwrap();
+    a.upsert_airframe(&edit("D-AINA", "ga_piston"), T0).unwrap();
+    a.upsert_airframe(&edit("D-AINB", "their-va"), T0).unwrap();
+    let file = dir.path().join("x.vectasim");
+    a.export_bundle_at(&file, &all_opts(), T0).unwrap();
+
+    // a logbook that has "their-va" but not "my-va"
+    let b = Store::open(&dir.path().join("b.db")).unwrap();
+    b.import_approach_profile(r#"{ "id": "their-va", "name": "Theirs" }"#).unwrap();
+    let mut opts = merge(&dir.path().join("img"));
+    opts.lang = Lang::En;
+    let r = b.import_bundle(&file, &opts).unwrap();
+    assert_eq!(r.airframes_added, 3);
+    let profile = |reg: &str| b.get_airframe(reg).unwrap().unwrap().approach_profile;
+    assert_eq!(profile("D-AIBL"), None, "unknown here: automatic");
+    assert_eq!(profile("D-AINA").as_deref(), Some("ga_piston"), "built-ins always exist");
+    assert_eq!(profile("D-AINB").as_deref(), Some("their-va"));
+    assert_eq!(r.warnings, vec!["Assessment profile \"my-va\" of D-AIBL does not exist here: set to automatic".to_string()]);
+}

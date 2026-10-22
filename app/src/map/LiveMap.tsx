@@ -20,6 +20,7 @@ import {
   addRouteLayers,
   addCurtainLayers,
   drawCurtainTrack,
+  markCurtainsLost,
   firstSymbolLayer,
   addTrackLayers,
   applyProjection,
@@ -32,7 +33,7 @@ import {
   withProjection,
   type TrackPoint,
 } from "./common";
-import { ChunkedTrack, altToCurtainM, positionJumped } from "./trackChunks";
+import { ChunkedTrack, altToCurtainM, positionJumped, seedStartAfterJump } from "./trackChunks";
 import {
   addOnlineLayers,
   atcGeoJson,
@@ -48,7 +49,7 @@ import TrafficCard, { type TrafficRouteState } from "./TrafficCard";
 import { trafficRouteCoords, trafficRouteDraw, trafficRouteGeoJson, type TrafficRouteDraw } from "./trafficRoute";
 import { useTrafficSelection } from "./trafficHooks";
 import { MOVE_REFRESH, boundedDebounce } from "./debounce";
-import { SELECT_TRAFFIC_EVENT, greatCircle, sameTraffic, type SelectTrafficDetail, type TrafficRef } from "./trafficInfo";
+import { SELECT_TRAFFIC_EVENT, greatCircle, networkShown, sameTraffic, type SelectTrafficDetail, type TrafficRef } from "./trafficInfo";
 import { addAirportDiagramLayers } from "./airportDiagram";
 import AirportReadout from "./AirportReadout";
 import { COLOR, getMapTheme } from "../theme";
@@ -720,8 +721,10 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
         invoke<TrackSample[]>("get_live_track")
           .then((samples) => {
             if (mapRef.current !== map) return;
+            // only the part after the last position jump (a teleport before this mount): no line across it
+            const from = seedStartAfterJump(samples.map((s) => ({ lon: s.longitude, lat: s.latitude, tMs: s.tMs, gsKt: s.groundSpeedKt })));
             trackRef.current.seed(
-              samples.map((s) => ({ lon: s.longitude, lat: s.latitude, altFt: s.altitudeMslFt, aglFt: s.altitudeAglFt, onGround: s.onGround, tMs: s.tMs })),
+              samples.slice(from).map((s) => ({ lon: s.longitude, lat: s.latitude, altFt: s.altitudeMslFt, aglFt: s.altitudeAglFt, onGround: s.onGround, tMs: s.tMs })),
             );
             drawTrack(map, trackRef.current, true);
             if (view3dRef.current) drawCurtain(map, trackRef.current);
@@ -750,6 +753,9 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
         // the model is gone: the flat symbol must not stay hidden for it (`m: 1`, ownAircraft.ts)
         dropped: () => {
           modelRef.current = null;
+          // a lost context removes the custom layers without onRemove: stop feeding the old instances
+          markCurtainsLost(map);
+          traffic3dRef.current?.contextLost();
         },
         loadStyle: () => loadBasemapStyle().then((style) => withProjection(style, globeRef.current, COLOR.bg)),
         alive: () => mapRef.current === map,
@@ -914,15 +920,17 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
     drawOwn();
 
     const track = trackRef.current;
+    // a flight loaded elsewhere, a slew or a teleport: start the track afresh here instead of
+    // drawing a line from the old position (the recorder treats the jump the same way). Checked on
+    // every sample, not only when a track point is due: the 3D head below would otherwise span a
+    // wall across the jump until the next point (N-2). After the reset the point is due at once.
+    const last = track.points[track.points.length - 1];
+    if (last && positionJumped(last, { lon, lat, tMs: telemetry.timestampMs }, telemetry.groundSpeedKt, telemetry.simRate)) {
+      track.reset();
+      drawTrack(map, track, true);
+      drawCurtain(map, track);
+    }
     if (telemetry.timestampMs - track.lastMs >= TRACK_POINT_INTERVAL_MS) {
-      // a flight loaded elsewhere, a slew or a teleport: start the track afresh here instead of
-      // drawing a line from the old position (the recorder treats the jump the same way)
-      const last = track.points[track.points.length - 1];
-      if (last && positionJumped(last, { lon, lat, tMs: telemetry.timestampMs }, telemetry.groundSpeedKt, telemetry.simRate)) {
-        track.reset();
-        drawTrack(map, track, true);
-        drawCurtain(map, track);
-      }
       const sample = { altFt: telemetry.altitudeMslFt, aglFt: telemetry.altitudeAglFt, onGround: telemetry.onGround };
       const closedChunk = track.push({ lon, lat, ...sample, hFt: track.heightFor(sample), tMs: telemetry.timestampMs });
       // a closed 10-min block moves to the history source as a diff (no full re-send)
@@ -1003,6 +1011,8 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
   const dep = sel?.pilot?.departure ?? "";
   const arr = sel?.pilot?.arrival ?? "";
   const filedRoute = sel?.pilot?.route ?? "";
+  /** Selection whose route the camera was already fitted to: a changed flight plan only redraws. */
+  const routeFittedRef = useRef<string | null>(null);
   useEffect(() => {
     let alive = true;
     const draw = (d: TrafficRouteDraw | null) => {
@@ -1013,6 +1023,7 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
     if (!routeShown || !dep || !arr) {
       draw(null);
       setTrafficRoute(null);
+      if (!routeShown) routeFittedRef.current = null;
       return;
     }
     setTrafficRoute({ status: "resolving" });
@@ -1038,7 +1049,10 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
         draw(d);
         const points = trafficRouteCoords(d);
         const map = mapRef.current;
-        if (map && points.length >= 2) {
+        // once per shown route: the pilot changing the flight plan (or a style load) only redraws,
+        // it does not take the camera (and the own follow) again
+        if (map && points.length >= 2 && routeFittedRef.current !== selKeyRef.current) {
+          routeFittedRef.current = selKeyRef.current;
           // both ends in view (unwrapped longitudes keep an antimeridian route in one box)
           const bounds = points.reduce((bb, p) => bb.extend(p), new maplibregl.LngLatBounds(points[0], points[0]));
           suspendOwnFollow();
@@ -1087,6 +1101,19 @@ export default function LiveMap({ aircraft, route, onOnlineView, trafficOn = fal
   useEffect(() => {
     if (!trafficOn) closeTraffic();
   }, [trafficOn, closeTraffic]);
+
+  // the network of the selection no longer shown (e.g. "both" → VATSIM with an IVAO card open):
+  // trafficOn stays true, but the aircraft is gone from the map – close the card, ring and route
+  useEffect(() => {
+    if (!trafficRef) return;
+    const network = trafficRef.network;
+    const unlisten = listen<OnlineSummary>("online:summary", (e) => {
+      if (!networkShown(e.payload, network)) closeTraffic();
+    });
+    return () => {
+      unlisten.then((u) => u());
+    };
+  }, [trafficRef, closeTraffic]);
 
   const toggleFollowTraffic = () => {
     const next = !followTrafficRef.current;

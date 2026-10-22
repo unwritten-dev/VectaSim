@@ -7,6 +7,7 @@ import { showToast } from "../ui/Toast";
 import { Modal } from "../ui/Modal";
 import { RUNWAY_SOURCE_SHORT, runwaySourceOf } from "./facts";
 import { isDerivedSource, type LandingAnalysis, type UserRunway, type UserRunwayEdit } from "./types";
+import { notifyApproachDataChanged } from "./approachChanges";
 
 const EARTH_R_M = 6_371_008.8;
 /** Aiming point a derived threshold assumes (vectasim_core::landing::DERIVE_DEFAULT_AIM_M). */
@@ -197,6 +198,8 @@ export default function RunwayEditor({ analysis: a, airportIcao, onClose, onChan
       const saved = await invoke<UserRunway>("save_user_runway", { edit });
       showToast({ tone: "ok", title: t("runwayEditor.savedTitle", { airport: saved.airportIcao, ident: saved.ident }), body: t("runwayEditor.savedBody") });
       void emit("logbook:changed");
+      // the backend drops the runway's facts without an event: the shown flight detail re-rates
+      notifyApproachDataChanged();
       onChanged();
       onClose();
     } catch (e) {
@@ -217,6 +220,8 @@ export default function RunwayEditor({ analysis: a, airportIcao, onClose, onChan
         body: t("runwayEditor.forgotBody"),
       });
       void emit("logbook:changed");
+      // the backend drops the runway's facts without an event: the shown flight detail re-rates
+      notifyApproachDataChanged();
       onChanged();
       if (row === rowOfMatch) onClose();
       else await loadRows();

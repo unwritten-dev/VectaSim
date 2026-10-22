@@ -414,7 +414,7 @@
     "online": {
       "off": "Online-Verkehr ist aus. Netzwerk auch auf der Karte neben „Verkehr“ wählbar.",
       "enable": "{name} aktivieren",
-      "hidden": "Verkehr ist auf der Karte ausgeblendet – {networks} läuft im Hintergrund weiter (Strecke angeklickter Flugzeuge bis zu zwei Stunden).",
+      "hidden": "Verkehr ist auf der Karte ausgeblendet – der Abruf von {networks} läuft im Hintergrund weiter (Strecke angeklickter Flugzeuge bis zu zwei Stunden).",
       "show": "Auf der Karte zeigen",
       "counts": "{pilots} Piloten · {controllers} Lotsen",
       "nextAttempt": "Nächster Versuch in {seconds} s.",

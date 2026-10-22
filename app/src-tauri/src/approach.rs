@@ -117,14 +117,33 @@ fn analyze_loaded(
     out
 }
 
+/// Below this median IAS low over the ground (≤ [`PISTON_LOW_AGL_FT`]) a flight without turbine
+/// N1 is taken for a piston aircraft.
+const PISTON_MAX_LOW_IAS_KT: f64 = 120.0;
+const PISTON_LOW_AGL_FT: f64 = 1_000.0;
+
 /// What the recording tells about the engines: a v2 track whose N1 never left 0 in the air
-/// is a piston aircraft (piston engines report no turbine N1). The sim's `ENGINE TYPE` is not
-/// recorded, so turboprop and jet cannot be told apart here (both → None, the type mapping or
-/// generic decides).
+/// and that flew slowly low over the ground (median IAS below 1000 ft AGL under 120 kt) is a
+/// piston aircraft (piston engines report no turbine N1). Without the speed check a jet whose
+/// add-on leaves `TURB ENG N1` at 0 was assessed with the GA piston gates. The sim's
+/// `ENGINE TYPE` is not recorded, so turboprop and jet cannot be told apart here (both → None,
+/// the type mapping or generic decides).
 fn engine_hint(track: &[TrackSample], cfg: &ApproachConfig) -> Option<EngineClass> {
     let mut airborne_n1 = track.iter().filter(|s| !s.on_ground).filter_map(|s| s.n1_pct).peekable();
     airborne_n1.peek()?;
-    airborne_n1.all(|n| n <= cfg.n1_valid_min_pct).then_some(EngineClass::Piston)
+    if !airborne_n1.all(|n| n <= cfg.n1_valid_min_pct) {
+        return None;
+    }
+    let mut low_ias: Vec<f64> = track
+        .iter()
+        .filter(|s| !s.on_ground && s.altitude_agl_ft <= PISTON_LOW_AGL_FT && s.ias_kt.is_finite() && s.ias_kt > 0.0)
+        .map(|s| s.ias_kt)
+        .collect();
+    if low_ias.is_empty() {
+        return None;
+    }
+    low_ias.sort_by(f64::total_cmp);
+    (low_ias[low_ias.len() / 2] < PISTON_MAX_LOW_IAS_KT).then_some(EngineClass::Piston)
 }
 
 /// The thresholds a flight is assessed with: its profile's config (generic when the logbook
@@ -142,20 +161,43 @@ pub(crate) fn flight_config(store: &Store, flight_id: &str, track: &[TrackSample
 
 /// Compute and store what a flight's track yields for the comparisons: the approach facts and
 /// the per-flight metrics (`vectasim_store::metrics`), from one track decode and one analysis.
-/// Returns the approach rows and the metrics written.
+/// Returns the approach rows and the metrics computed.
+///
+/// The write is conditional ([`Store::put_flight_results`]): when the pilot changed a profile,
+/// a Vapp, a runway … while the analysis ran, the invalidation already dropped the old row and
+/// this result (computed with the old inputs) is not stored; the next lazy read computes it
+/// again. Both parts are written in one transaction.
 pub(crate) fn store_facts(
     store: &Store,
     airports: &AirportIndex,
     flight_id: &str,
 ) -> Result<(Vec<ApproachFactRow>, FlightMetricsRow), String> {
+    let epoch = store.results_epoch();
     let detail = store.get_flight(flight_id).map_err(|e| e.to_string())?.ok_or("Flug nicht gefunden")?;
     let track = store.get_track(flight_id).map_err(|e| e.to_string())?.unwrap_or_default();
     let analyses = analyze_loaded(store, airports, flight_id, &detail, &track, false);
     let rows: Vec<ApproachFactRow> = analyses.iter().map(ApproachFactRow::from_analysis).collect();
-    store.put_approach_facts(flight_id, APPROACH_FACTS_VERSION, &rows).map_err(|e| e.to_string())?;
     let m = metrics::derive_from_analysis(&track, &detail.touchdowns, &analyses);
-    store.put_flight_metrics(flight_id, &m).map_err(|e| e.to_string())?;
+    if !store.put_flight_results(flight_id, epoch, APPROACH_FACTS_VERSION, &rows, &m).map_err(|e| e.to_string())? {
+        log::info!("approach facts of flight {flight_id}: inputs changed during the analysis, not stored (recomputed on the next read)");
+    }
     Ok((rows, m))
+}
+
+/// [`store_facts`] for the lazy paths (`approach_facts_recent` inline, the metrics backfill):
+/// both see the same missing flights after a version bump and ran the same analysis twice.
+/// A flight the other path stored meanwhile is taken from the cache instead.
+pub(crate) fn store_facts_unless_fresh(
+    store: &Store,
+    airports: &AirportIndex,
+    flight_id: &str,
+) -> Result<(Vec<ApproachFactRow>, FlightMetricsRow), String> {
+    if store.flight_results_fresh(flight_id).map_err(|e| e.to_string())? {
+        let rows = store.approach_facts_for_flight(flight_id).map_err(|e| e.to_string())?;
+        let m = store.flight_metrics(flight_id).map_err(|e| e.to_string())?.unwrap_or_default();
+        return Ok((rows, m));
+    }
+    store_facts(store, airports, flight_id)
 }
 
 /// After a flight ended: compute its approach facts and metrics in the background so the
@@ -268,7 +310,7 @@ fn facts_recent(store: &Store, airports: &AirportIndex, limit: usize, include_de
             }
             Vec::new()
         } else {
-            match store_facts(store, airports, &f.flight.id) {
+            match store_facts_unless_fresh(store, airports, &f.flight.id) {
                 Ok((rows, _)) => rows,
                 Err(e) => {
                     log::warn!("approach facts of flight {}: {e}", f.flight.id);
@@ -412,17 +454,34 @@ mod tests {
         TrackSample { on_ground, n1_pct: n1, ..Default::default() }
     }
 
+    fn low(ias: f64, n1: Option<f64>) -> TrackSample {
+        TrackSample { on_ground: false, n1_pct: n1, ias_kt: ias, altitude_agl_ft: 800.0, ..Default::default() }
+    }
+
     #[test]
-    fn piston_is_told_by_n1_zero_in_the_air() {
+    fn piston_is_told_by_n1_zero_in_the_air_and_a_slow_approach() {
         let cfg = ApproachConfig::default();
         assert_eq!(engine_hint(&[], &cfg), None);
         // v1 track: no N1 at all
         assert_eq!(engine_hint(&[sample(false, None), sample(false, None)], &cfg), None);
         assert_eq!(
-            engine_hint(&[sample(true, Some(60.0)), sample(false, Some(0.0)), sample(false, Some(0.0))], &cfg),
+            engine_hint(&[sample(true, Some(60.0)), low(85.0, Some(0.0)), low(75.0, Some(0.0)), low(70.0, Some(0.0))], &cfg),
             Some(EngineClass::Piston)
         );
-        assert_eq!(engine_hint(&[sample(false, Some(0.0)), sample(false, Some(55.0))], &cfg), None);
+        assert_eq!(engine_hint(&[low(85.0, Some(0.0)), low(85.0, Some(55.0))], &cfg), None);
+    }
+
+    #[test]
+    fn a_jet_without_n1_is_not_taken_for_a_piston() {
+        // an add-on that leaves TURB ENG N1 at 0: 140 kt on the approach is no piston single
+        let cfg = ApproachConfig::default();
+        let cruise = TrackSample { on_ground: false, n1_pct: Some(0.0), ias_kt: 280.0, altitude_agl_ft: 30_000.0, ..Default::default() };
+        assert_eq!(engine_hint(&[cruise.clone(), low(150.0, Some(0.0)), low(140.0, Some(0.0)), low(135.0, Some(0.0))], &cfg), None);
+        // never low over the ground: cannot tell
+        assert_eq!(engine_hint(&[cruise], &cfg), None);
+        // a fast piston cruise, slow approach: still a piston
+        let fast = TrackSample { on_ground: false, n1_pct: Some(0.0), ias_kt: 170.0, altitude_agl_ft: 8_000.0, ..Default::default() };
+        assert_eq!(engine_hint(&[fast, low(90.0, Some(0.0)), low(80.0, Some(0.0))], &cfg), Some(EngineClass::Piston));
     }
 
     #[test]

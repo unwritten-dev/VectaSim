@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TrackSample } from "../types";
-import { addCurtainLayers, drawCurtainTrack, routeGeoJson, segmentsGeoJson, setCurtainVisible, trackHeightAt, trackPoseAt } from "./common";
+import { addCurtainLayers, drawCurtainTrack, flightPointsCache, markCurtainsLost, routeGeoJson, segmentsGeoJson, setCurtainVisible, trackHeightAt, trackPoseAt } from "./common";
 import type { CurtainLayer } from "./curtainLayer";
 
 const sample = (tMs: number, over: Partial<TrackSample> = {}): TrackSample => ({
@@ -160,5 +160,41 @@ describe("H-7: drawCurtainTrack skips a removed curtain layer", () => {
     layer.onRemove(m as never, { deleteBuffer() {}, deleteProgram() {} } as never);
     drawCurtainTrack(m as never, "c", [{ lon: 8, lat: 50, altFt: 1000, hFt: 600 }], null);
     expect(sync).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("H-2: flightPointsCache (TrackMap builds the curtain once per flight)", () => {
+  it("same samples and tint: the same arrays; new samples or another tint: new ones", () => {
+    const tintFrom = vi.fn(() => 1);
+    const cache = flightPointsCache(tintFrom);
+    const track = [sample(0), sample(1000, { longitude: 8.01 }), sample(2000, { longitude: 8.02 })];
+    const a = cache(track, "#00ff00");
+    expect(a.points.map((p) => p.color)).toEqual([undefined, "#00ff00", "#00ff00"]);
+    const g = a.ground();
+    const b = cache(track, "#00ff00");
+    expect(b.points).toBe(a.points);
+    expect(b.ground()).toBe(g);
+    expect(tintFrom).toHaveBeenCalledTimes(1);
+    expect(cache(track, "#11ff11").points).not.toBe(a.points);
+    expect(cache([...track], "#11ff11").points).not.toBe(a.points);
+  });
+});
+
+describe("H-1: a lost WebGL context marks the curtain instances removed", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it("drawCurtainTrack stops syncing them until a style load adds new ones", () => {
+    vi.stubGlobal("window", { setTimeout, clearTimeout, devicePixelRatio: 1 });
+    const m = new FakeMap();
+    addCurtainLayers(m as never, "c");
+    const layer = m.getLayer("c") as unknown as CurtainLayer;
+    const sync = vi.spyOn(layer, "sync");
+    markCurtainsLost(m as never);
+    expect(layer.removed).toBe(true);
+    drawCurtainTrack(m as never, "c", [{ lon: 8, lat: 50, altFt: 1000, hFt: 600 }], null);
+    expect(sync).not.toHaveBeenCalled();
+    addCurtainLayers(m as never, "c");
+    const fresh = m.getLayer("c") as unknown as CurtainLayer;
+    expect(fresh).not.toBe(layer);
+    expect(fresh.removed).toBe(false);
   });
 });

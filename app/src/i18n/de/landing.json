@@ -978,7 +978,8 @@
       "lateral": "Kurs",
       "rotation": "Rotation",
       "gearDown": "Fahrwerk",
-      "exceedances": "Überschr."
+      "exceedances": "Überschr.",
+      "otherProfile": "Bewertet nach: {name} – nicht mit den Charts darüber vergleichbar"
     },
     "profile": {
       "aria": "Bewertungsprofil",
@@ -1220,12 +1221,12 @@
         "other": "{value} im Endanflug – dein Median {where}: {median} ({count} Flüge)"
       },
       "gates": {
-        "one": "Gates 1000 ft {g1000}, 500 ft {g500} – stabil bei 500 ft in {yes} von {count} Flug",
-        "other": "Gates 1000 ft {g1000}, 500 ft {g500} – stabil bei 500 ft in {yes} von {count} Flügen"
+        "one": "Gates {gate1000} {g1000}, {gate500} {g500} – stabil bei {gate500} in {yes} von {count} Flug",
+        "other": "Gates {gate1000} {g1000}, {gate500} {g500} – stabil bei {gate500} in {yes} von {count} Flügen"
       },
       "gatesWhere": {
-        "one": "Gates 1000 ft {g1000}, 500 ft {g500} – stabil bei 500 ft in {yes} von {count} Flug {where}",
-        "other": "Gates 1000 ft {g1000}, 500 ft {g500} – stabil bei 500 ft in {yes} von {count} Flügen {where}"
+        "one": "Gates {gate1000} {g1000}, {gate500} {g500} – stabil bei {gate500} in {yes} von {count} Flug {where}",
+        "other": "Gates {gate1000} {g1000}, {gate500} {g500} – stabil bei {gate500} in {yes} von {count} Flügen {where}"
       },
       "exceedanceCount": {
         "one": "{count} Überschreitung",
@@ -1288,9 +1289,9 @@
     "gearDownSub": "{dist} vor der Schwelle",
     "landingFlaps": "Landeklappen gesetzt",
     "exceedances": "Überschreitungen",
-    "exceedancesSub": "im Endanflug 1000 → 50 ft",
-    "gate1000": "Gate 1000 ft",
-    "gate500": "Gate 500 ft",
-    "gateUnstable": "Am Gate nicht stabil"
+    "exceedancesSub": "im Endanflug {top} → {bottom}",
+    "gate": "Gate {gate}",
+    "gateUnstable": "Am Gate nicht stabil",
+    "unitAgl": "ft über Grund"
   }
 }

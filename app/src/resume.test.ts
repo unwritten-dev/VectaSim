@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { RESUME_MAX_AGE_MS, gapTitle, mergeHint, mergeKey, resumeCandidate } from "./resume";
+import { RESUME_MAX_AGE_MS, gapTitle, mergeHint, mergeKey, mergeRefusal, resumeCandidate } from "./resume";
 import type { FlightRow, MergeCandidate, ResumeCandidate } from "./types";
 import { setLanguageSetting } from "./i18n";
 
@@ -106,5 +106,24 @@ describe("in English", () => {
     expect(p?.body).toContain("1.2");
     expect(p?.body).toContain("new flight");
     expect(gapTitle(row({ state: "interrupted" }))).toMatch(/^Recording interrupted\. Ended without shutdown/);
+  });
+});
+
+describe("merge refusals", () => {
+  it("the store's readable refusals stay the text, technical errors do not", () => {
+    for (const s of [
+      "Zwischen den Flügen liegen 75 min (höchstens 60 min).",
+      "There are 75 min between the flights (at most 60 min).",
+      "Die Positionen liegen 7,3 nm auseinander (höchstens 5 nm).",
+      "The positions are 7.3 nm apart (at most 5 nm).",
+      "Der zweite Flug beginnt vor dem Ende des ersten.",
+      "The running flight can only be merged once the recording has ended.",
+      "Flug nicht gefunden",
+    ]) {
+      expect(mergeRefusal(s)).toBe(s);
+    }
+    expect(mergeRefusal("database is locked")).toBeNull();
+    expect(mergeRefusal(String.raw`I/O error: C:\Users\pilot\AppData\vectasim.db: os error 5`)).toBeNull();
+    expect(mergeRefusal("Flug nicht gefunden\nat store.rs:12")).toBeNull();
   });
 });

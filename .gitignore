@@ -33,3 +33,8 @@ Thumbs.db
 *.zip
 # full exports (a ZIP with the whole logbook and your own images)
 *.vectasim
+# unpacked diagnostics packages (db.json, system.json, settings.json, logs: personal data)
+Debug_*/
+VectaSim-Diagnose*/
+VectaSim-Diagnostics*/
+*-diagnostics/

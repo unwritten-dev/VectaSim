@@ -8,11 +8,12 @@ import { openDebrief } from "./debriefStore";
 import { linear } from "./dispersionStats";
 import { niceStep, ticks, useWidth } from "./chartUtils";
 import { useHistoryFacts } from "./HistoryPanel";
-import { approachFor, demoFilter, metricsFor, monthCompare, trendSeries, typeKey, type Bucket, type HistLanding, type PeriodStats, type TrendPoint } from "./history";
+import { approachFor, demoFilter, metricsFor, metricsProfileOf, monthCompare, trendProfiles, trendSeries, typeKey, type Bucket, type HistLanding, type PeriodStats, type TrendPoint } from "./history";
 import type { ApproachFact } from "./approachTypes";
 import { profileName, profileOf, profileTooltip, useApproachProfiles } from "./approachProfiles";
 import type { FlightMetricsFact } from "../types";
 import { ROTATION_FAST_DEG_S, ROTATION_SLOW_DEG_S, fmtDegS } from "../trackEvents";
+import ProfileTip from "./ProfileTip";
 import "./dispersion.css";
 import "./trends.css";
 
@@ -334,15 +335,14 @@ export default function Trends() {
     () => allM.filter((f) => (!activeType || typeKey(f) === activeType) && (!activeAirport || f.airportIcao === activeAirport)),
     [allM, activeType, activeAirport],
   );
-  // "stabil ab" and exceedances only compare within one assessment profile: the chosen one, else the most frequent
-  const profileOpts = useMemo(() => options(filteredA.filter((a) => a.band != null).map(profileOf)), [filteredA]);
-  const activeProfile = profile && profileOpts.some((o) => o.key === profile) ? profile : (profileOpts[0]?.key ?? null);
   const facts = useMemo(() => filteredL.slice(0, limit), [filteredL, limit]);
   // approaches of the same period as the landings shown
   const aFacts = useMemo(() => {
     const oldest = facts.length ? facts[facts.length - 1].timestampMs : Infinity;
     return filteredA.filter((a) => a.endedMs >= oldest - 3_600_000).slice(0, limit);
   }, [filteredA, facts, limit]);
+  // "stabil ab" and exceedances only compare within one assessment profile (trendProfiles)
+  const { options: profileOpts, active: activeProfile } = useMemo(() => trendProfiles(aFacts, filteredA, profile), [aFacts, filteredA, profile]);
   // flight metrics of the same period as the landings shown
   const mFacts = useMemo(() => {
     const oldest = facts.length ? facts[facts.length - 1].timestampMs : Infinity;
@@ -439,9 +439,9 @@ export default function Trends() {
         )}
       </div>
       {activeProfile && (
-        <div className="detail tr-profile-note" title={profileTooltip(activeProfile, profiles, t)}>
+        <ProfileTip as="div" className="detail tr-profile-note" tip={profileTooltip(activeProfile, profiles, t)}>
           {t("trends.profile.note", { name: profileName(activeProfile, profiles, t) })}
-        </div>
+        </ProfileTip>
       )}
 
       {/* nothing to compare without landings in either month */}
@@ -490,7 +490,7 @@ export default function Trends() {
               })}
             </span>
           </div>
-          <TrendTable facts={facts} approaches={aFacts} metrics={mFacts} bucket={bucket} series={series} />
+          <TrendTable facts={facts} approaches={aFacts} metrics={mFacts} bucket={bucket} series={series} profile={activeProfile} />
         </>
       )}
     </section>
@@ -503,15 +503,21 @@ function TrendTable({
   metrics,
   bucket,
   series,
+  profile,
 }: {
   facts: HistLanding[];
   approaches: ApproachFact[];
   metrics: FlightMetricsFact[];
   bucket: Bucket;
   series: ReturnType<typeof trendSeries>;
+  /** Profile of the charts: "stabil ab" and exceedances of other profiles stay empty here too. */
+  profile: string | null;
 }) {
   const t = useT();
+  const profiles = useApproachProfiles();
   if (bucket === "flight") {
+    // same rule as the charts above: a value rated against other thresholds is not shown
+    const otherProfile = (id: string) => (profile != null && id !== profile ? t("trends.table.otherProfile", { name: profileName(id, profiles, t) }) : null);
     return (
       <details className="dp-table">
         <summary>{t("dispersion.table.asTable", { count: facts.length })}</summary>
@@ -554,6 +560,8 @@ function TrendTable({
               {facts.map((f) => {
                 const a = approachFor(approaches, f.flightId, f.touchdownIndex);
                 const m = metricsFor(metrics, f.flightId);
+                const aOther = a ? otherProfile(profileOf(a)) : null;
+                const mOther = m ? otherProfile(metricsProfileOf(m)) : null;
                 return (
                   <tr key={`${f.flightId}#${f.touchdownIndex}`}>
                     <td className="num">{fmtDate(f.timestampMs)}</td>
@@ -565,10 +573,14 @@ function TrendTable({
                     <td className="num num-col">{fmt(f.touchdownDistanceM, 0, "m")}</td>
                     <td className="num num-col">{f.centerlineOffsetM != null ? fmt(Math.abs(f.centerlineOffsetM), 0, "m") : DASH}</td>
                     <td>{f.inTouchdownZone ? t("dispersion.table.yes") : t("dispersion.table.no")}</td>
-                    <td className="num num-col">{a?.stableFromFt != null ? fmt(a.stableFromFt, 0, "ft") : a?.band ? t("trends.table.neverStable") : DASH}</td>
+                    <td className="num num-col" title={aOther ?? undefined}>
+                      {aOther ? DASH : a?.stableFromFt != null ? fmt(a.stableFromFt, 0, "ft") : a?.band ? t("trends.table.neverStable") : DASH}
+                    </td>
                     <td className="num num-col">{fmtDegS(m?.rotationRateDegS)}</td>
                     <td className="num num-col">{fmt(m?.gearDownAglFt, 0, "ft")}</td>
-                    <td className="num num-col">{fmt(m?.exceedances, 0)}</td>
+                    <td className="num num-col" title={mOther ?? undefined}>
+                      {mOther ? DASH : fmt(m?.exceedances, 0)}
+                    </td>
                     <td>
                       <button className="btn-sm" onClick={() => openDebrief(f.flightId, f.touchdownIndex)}>
                         {t("dispersion.table.debrief")}

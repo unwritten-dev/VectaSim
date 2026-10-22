@@ -446,7 +446,8 @@ export function subscribeTrackEventFilter(l: () => void): () => void {
 
 // ---- wording -----------------------------------------------------------------------------
 
-const GATE_SHORT: Partial<Record<GateKind, string>> = { ft1000: "1000 ft", ft500: "500 ft" };
+/** Gate heights (ft) of the gates the markers name; formatted per language ("1 000 ft" / "1,000 ft"). */
+const GATE_FT: Partial<Record<GateKind, number>> = { ft1000: 1000, ft500: 500 };
 /** Pitch rate as the markers write it: "2.6 °/s" ("–" without value). */
 export const fmtDegS = (v: number | null | undefined): string => (v == null || !Number.isFinite(v) ? fmt(v) : `${fmtNum(v, 1)}${NNBSP}°/s`);
 const degS = fmtDegS;
@@ -465,7 +466,8 @@ export function trackEventLabel(e: TrackEvent): string {
       if (e.rotation.band === "normal") return t("map.markers.label.rotation", { rate: degS(e.rotation.rateDegS) });
       return t("map.markers.label.rotationBand", { rate: degS(e.rotation.rateDegS), band: t(e.rotation.band === "slow" ? "map.markers.label.slow" : "map.markers.label.fast") });
     case "gate": {
-      const gate = GATE_SHORT[e.gate!.kind] ?? e.gate!.kind;
+      const ft = GATE_FT[e.gate!.kind];
+      const gate = ft != null ? fmt(ft, 0, "ft") : e.gate!.kind;
       const s = e.gate!.stable;
       return t(s ? "map.markers.label.gateStable" : s === false ? "map.markers.label.gateUnstable" : "map.markers.label.gateUnmeasured", { gate });
     }

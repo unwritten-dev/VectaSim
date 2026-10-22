@@ -175,6 +175,8 @@ fn point(c: &Candidate, gap_before: bool, airway: Option<&str>) -> RoutePoint {
 }
 
 /// Nearest candidate to `reference` within [`MAX_LEG_NM`], from the first source that has one.
+/// Without a reference (neither airport known) only an unambiguous ident resolves: a name that
+/// exists in several regions would otherwise be placed on whichever came first.
 fn choose(per_source: &[HashMap<String, Vec<Candidate>>], ident: &str, reference: Option<&Candidate>) -> Option<Candidate> {
     for map in per_source {
         let Some(cands) = map.get(ident) else { continue };
@@ -185,7 +187,8 @@ fn choose(per_source: &[HashMap<String, Vec<Candidate>>], ident: &str, reference
                 .filter(|(_, d)| *d <= MAX_LEG_NM)
                 .min_by(|a, b| a.1.total_cmp(&b.1))
                 .map(|(c, _)| c),
-            None => cands.first(),
+            None if cands.len() == 1 => cands.first(),
+            None => None,
         };
         if let Some(c) = best {
             return Some(c.clone());

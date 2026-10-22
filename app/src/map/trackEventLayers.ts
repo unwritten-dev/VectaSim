@@ -11,6 +11,7 @@ import { COLOR, TRACK_MARKER } from "../theme";
 import type { TrackSample } from "../types";
 import { trackEventLabel, type TrackEvent, type TrackEventFilter, type TrackEventTone } from "../trackEvents";
 import { addLayerOnce, addSourceOnce } from "./styleOnce";
+import { unwrapPath } from "./geo";
 
 export const EVENTS_SOURCE = "track-events";
 export const EVENTS_LAYER = "track-events";
@@ -192,7 +193,8 @@ export function trackEventsGeoJson(events: readonly TrackEvent[], samples: reado
   for (const e of events) {
     const props = { id: e.id, group: e.group, tone: e.tone, tMs: e.tMs };
     if (e.endTMs != null) {
-      const coords = samples.filter((s) => s.tMs >= e.tMs && s.tMs <= e.endTMs!).map((s) => [s.longitude, s.latitude]);
+      // unwrapped across ±180 (a run over the antimeridian takes the short way, not around the world)
+      const coords = unwrapPath(samples.filter((s) => s.tMs >= e.tMs && s.tMs <= e.endTMs!).map((s) => [s.longitude, s.latitude] as [number, number]));
       if (coords.length >= 2) features.push({ type: "Feature", properties: props, geometry: { type: "LineString", coordinates: coords } });
     }
     features.push({

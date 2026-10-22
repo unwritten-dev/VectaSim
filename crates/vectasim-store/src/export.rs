@@ -21,7 +21,7 @@ use crate::store::{FlightDetail, FlightRow, Store};
 use crate::track::TrackSample;
 use serde::Serialize;
 use std::fmt::Write as _;
-use vectasim_core::TouchdownReport;
+use vectasim_core::{Lang, TouchdownReport};
 
 const FT_TO_M: f64 = 0.3048;
 const KT_TO_MS: f64 = 1852.0 / 3600.0;
@@ -55,12 +55,13 @@ impl ExportFormat {
     }
 }
 
-/// Render one flight in the given format.
-pub fn export_flight(format: ExportFormat, detail: &FlightDetail, samples: &[TrackSample]) -> crate::Result<String> {
+/// Render one flight in the given format. `lang` is the language of the texts a format
+/// carries for people (the KML placemarks); the data columns stay as they are.
+pub fn export_flight(format: ExportFormat, detail: &FlightDetail, samples: &[TrackSample], lang: Lang) -> crate::Result<String> {
     Ok(match format {
         ExportFormat::Csv => export_csv(samples),
         ExportFormat::Gpx => export_gpx(&detail.flight, samples),
-        ExportFormat::Kml => export_kml(&detail.flight, samples, &detail.touchdowns),
+        ExportFormat::Kml => export_kml(&detail.flight, samples, &detail.touchdowns, lang),
         ExportFormat::Json => export_json(detail, samples)?,
     })
 }
@@ -330,7 +331,8 @@ pub fn export_gpx(flight: &FlightRow, samples: &[TrackSample]) -> String {
 
 // ---- KML -------------------------------------------------------------------------------
 
-pub fn export_kml(flight: &FlightRow, samples: &[TrackSample], touchdowns: &[TouchdownReport]) -> String {
+/// KML of a flight; placemark names and descriptions in `lang`.
+pub fn export_kml(flight: &FlightRow, samples: &[TrackSample], touchdowns: &[TouchdownReport], lang: Lang) -> String {
     let mut out = String::with_capacity(1024 + samples.len() * 120);
     out.push_str(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -350,23 +352,29 @@ pub fn export_kml(flight: &FlightRow, samples: &[TrackSample], touchdowns: &[Tou
     );
     let air = has_air_data(samples);
     if air {
-        out.push_str(
+        let wind_dir = lang.tr("Wind aus (° wahr)", "Wind from (° true)");
+        let _ = write!(
+            out,
             r#"  <Schema id="air" name="air">
     <gx:SimpleArrayField name="tas_kt" type="float"><displayName>TAS (kt)</displayName></gx:SimpleArrayField>
-    <gx:SimpleArrayField name="wind_dir_true_deg" type="float"><displayName>Wind aus (° wahr)</displayName></gx:SimpleArrayField>
+    <gx:SimpleArrayField name="wind_dir_true_deg" type="float"><displayName>{wind_dir}</displayName></gx:SimpleArrayField>
     <gx:SimpleArrayField name="wind_kt" type="float"><displayName>Wind (kt)</displayName></gx:SimpleArrayField>
   </Schema>
-"#,
+"#
         );
     }
 
     let dep = flight.dep_lat.zip(flight.dep_lon).or(samples.first().map(|s| (s.latitude, s.longitude)));
     if let Some((lat, lon)) = dep {
         let label = flight.dep_icao.as_deref().unwrap_or("");
-        point_placemark(&mut out, &format!("Abflug {label}"), "airport", lat, lon, flight.off_block_ms, None);
+        point_placemark(&mut out, &format!("{} {label}", lang.tr("Abflug", "Departure")), "airport", lat, lon, flight.off_block_ms, None);
     }
 
-    out.push_str("  <Placemark>\n    <name>Flugweg</name>\n    <styleUrl>#track</styleUrl>\n    <gx:Track>\n      <altitudeMode>absolute</altitudeMode>\n");
+    let _ = write!(
+        out,
+        "  <Placemark>\n    <name>{}</name>\n    <styleUrl>#track</styleUrl>\n    <gx:Track>\n      <altitudeMode>absolute</altitudeMode>\n",
+        lang.tr("Flugweg", "Flight path")
+    );
     for s in samples {
         let _ = writeln!(out, "      <when>{}</when>", iso_utc(s.t_ms));
     }
@@ -405,22 +413,28 @@ pub fn export_kml(flight: &FlightRow, samples: &[TrackSample], touchdowns: &[Tou
         let rate = if t.landing_rate_source.is_rated() {
             format!("{:.0} fpm", t.landing_rate_fpm)
         } else {
-            "Landerate nicht bewertbar".to_owned()
+            lang.tr("Landerate nicht bewertbar", "Landing rate not assessable").to_owned()
+        };
+        let bounce = match lang {
+            Lang::De => "Bounce",
+            Lang::En if t.bounces == 1 => "bounce",
+            Lang::En => "bounces",
         };
         let desc = format!(
-            "{rate} · {:.2} g · {:.0} kt · {} Bounce{}",
+            "{rate} · {:.2} g · {:.0} kt · {} {bounce}{}",
             t.peak_g,
             t.ground_speed_kt,
             t.bounces,
             if t.touch_and_go { " · Touch-and-go" } else { "" }
         );
-        point_placemark(&mut out, &format!("Aufsetzen {}", n + 1), "touchdown", t.latitude, t.longitude, Some(t.timestamp_ms), Some(&desc));
+        let name = format!("{} {}", lang.tr("Aufsetzen", "Touchdown"), n + 1);
+        point_placemark(&mut out, &name, "touchdown", t.latitude, t.longitude, Some(t.timestamp_ms), Some(&desc));
     }
 
     let arr = flight.arr_lat.zip(flight.arr_lon).or(samples.last().map(|s| (s.latitude, s.longitude)));
     if let Some((lat, lon)) = arr.filter(|_| flight.on_block_ms.is_some() || flight.arr_lat.is_some()) {
         let label = flight.arr_icao.as_deref().unwrap_or("");
-        point_placemark(&mut out, &format!("Ankunft {label}"), "airport", lat, lon, flight.on_block_ms, None);
+        point_placemark(&mut out, &format!("{} {label}", lang.tr("Ankunft", "Arrival")), "airport", lat, lon, flight.on_block_ms, None);
     }
 
     out.push_str("</Document>\n</kml>\n");
@@ -775,7 +789,7 @@ mod tests {
     fn kml_parses_with_matching_track_arrays() {
         let s = samples(15);
         let tds = [touchdown(T0 + 48_000), touchdown(T0 + 50_000)];
-        let kml = export_kml(&flight(), &s, &tds);
+        let kml = export_kml(&flight(), &s, &tds, Lang::De);
         let (names, texts, _) = walk(&kml);
 
         // departure + track + 2 touchdowns + arrival
@@ -813,7 +827,7 @@ mod tests {
 
     #[test]
     fn kml_without_samples_is_still_valid() {
-        let kml = export_kml(&FlightRow::default(), &[], &[]);
+        let kml = export_kml(&FlightRow::default(), &[], &[], Lang::En);
         let (names, _, _) = walk(&kml);
         assert_eq!(names.iter().filter(|n| *n == "Placemark").count(), 1);
     }

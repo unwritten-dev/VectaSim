@@ -21,6 +21,9 @@ impl Sim {
             parking_brake: false,
             altitude_msl_ft: 400.0,
             fuel_total_kg: 5000.0,
+            // a position at 0/0 is a sim placeholder, ignored by the session
+            latitude: 50.0,
+            longitude: 8.0,
             ..Default::default()
         };
         Self { t_ms: 1_000_000, step_ms, base }

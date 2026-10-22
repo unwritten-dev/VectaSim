@@ -119,7 +119,20 @@ pub struct Telemetry {
     pub design_vc_kt: Option<f64>,
 }
 
+/// Half-width of the box around 0° N / 0° E in which a position is never the own aircraft's, °
+/// (about 0.6 nm of open sea in the Gulf of Guinea, no airfield anywhere near).
+pub const PLACEHOLDER_POSITION_DEG: f64 = 0.01;
+
 impl Telemetry {
+    /// The position is a sim's placeholder, not the aircraft: within [`PLACEHOLDER_POSITION_DEG`]
+    /// of 0° N / 0° E (exactly 0/0 included). MSFS hands one out for several seconds while it
+    /// loads a flight (0/0 at roughly FL540, standing still); taken for real, it started a flight
+    /// in the air that the following `FlightLoaded` cut off. The flight session and the recorder
+    /// ignore such samples entirely.
+    pub fn placeholder_position(&self) -> bool {
+        self.latitude.abs() < PLACEHOLDER_POSITION_DEG && self.longitude.abs() < PLACEHOLDER_POSITION_DEG
+    }
+
     /// Sim rate other than 1× (time acceleration or slow motion). 0 means "not reported"
     /// and counts as real time. The phase engine and the touchdown detector both skip such
     /// samples, so neither a cruise nor a landing can be faked by fast-forwarding.

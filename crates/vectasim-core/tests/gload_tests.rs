@@ -34,6 +34,9 @@ impl Sim {
                 altitude_agl_ft: self.agl,
                 altitude_msl_ft: 400.0 + self.agl,
                 g_force: 1.0,
+                // a position at 0/0 is a sim placeholder, ignored by the session
+                latitude: 50.0,
+                longitude: 8.0,
                 ..Default::default()
             };
             f(&mut t, i as f64 * STEP_MS as f64 / 1000.0);

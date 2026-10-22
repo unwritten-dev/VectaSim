@@ -378,38 +378,42 @@ impl RecentMetrics {
     }
 }
 
+/// [`Store::put_flight_metrics`] on an open connection (or transaction).
+pub(crate) fn write_flight_metrics(conn: &rusqlite::Connection, flight_id: &str, m: &FlightMetricsRow) -> Result<bool> {
+    let exists: bool = conn.query_row("SELECT EXISTS (SELECT 1 FROM flights WHERE id = ?1)", params![flight_id], |r| r.get(0))?;
+    if !exists {
+        return Ok(false);
+    }
+    conn.execute(
+        "INSERT OR REPLACE INTO flight_metrics (flight_id, version, computed_ms, airport_icao, runway_ident, rotation_rate_deg_s,
+             rotation_peak_deg_s, rotation_duration_s, gear_down_agl_ft, gear_down_dist_nm, landing_flaps_agl_ft, exceedances,
+             stable_1000, stable_500, approach_profile)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+        params![
+            flight_id,
+            m.version,
+            vectasim_core::now_ms() as i64,
+            m.airport_icao,
+            m.runway_ident,
+            m.rotation_rate_deg_s,
+            m.rotation_peak_deg_s,
+            m.rotation_duration_s,
+            m.gear_down_agl_ft,
+            m.gear_down_dist_nm,
+            m.landing_flaps_agl_ft,
+            m.exceedances,
+            m.stable_1000,
+            m.stable_500,
+            m.approach_profile
+        ],
+    )?;
+    Ok(true)
+}
+
 impl Store {
     /// Store the metrics of a flight (replaces its row). False if the flight does not exist.
     pub fn put_flight_metrics(&self, flight_id: &str, m: &FlightMetricsRow) -> Result<bool> {
-        let conn = self.conn();
-        let exists: bool = conn.query_row("SELECT EXISTS (SELECT 1 FROM flights WHERE id = ?1)", params![flight_id], |r| r.get(0))?;
-        if !exists {
-            return Ok(false);
-        }
-        conn.execute(
-            "INSERT OR REPLACE INTO flight_metrics (flight_id, version, computed_ms, airport_icao, runway_ident, rotation_rate_deg_s,
-                 rotation_peak_deg_s, rotation_duration_s, gear_down_agl_ft, gear_down_dist_nm, landing_flaps_agl_ft, exceedances,
-                 stable_1000, stable_500, approach_profile)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
-            params![
-                flight_id,
-                m.version,
-                vectasim_core::now_ms() as i64,
-                m.airport_icao,
-                m.runway_ident,
-                m.rotation_rate_deg_s,
-                m.rotation_peak_deg_s,
-                m.rotation_duration_s,
-                m.gear_down_agl_ft,
-                m.gear_down_dist_nm,
-                m.landing_flaps_agl_ft,
-                m.exceedances,
-                m.stable_1000,
-                m.stable_500,
-                m.approach_profile
-            ],
-        )?;
-        Ok(true)
+        write_flight_metrics(&self.conn(), flight_id, m)
     }
 
     /// The stored metrics of one flight (None: not computed yet).

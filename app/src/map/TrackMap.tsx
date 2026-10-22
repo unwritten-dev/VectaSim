@@ -10,10 +10,11 @@ import {
   addCurtainLayers,
   addTrackLayers,
   drawCurtainTrack,
+  flightPointsCache,
+  markCurtainsLost,
   applyProjection,
   firstSymbolLayer,
   pointFeature,
-  samplesToPoints,
   setCurtainVisible,
   setPitched,
   trackHeightAt,
@@ -22,7 +23,7 @@ import {
   withProjection,
 } from "./common";
 import { useReplayStore } from "../landing/replayStore";
-import { bandedTrackGeoJson, thinPoints, withGroundHeights } from "./trackChunks";
+import { bandedTrackGeoJson, thinPoints } from "./trackChunks";
 import { addAirportDiagramLayers } from "./airportDiagram";
 import { COLOR, TRACK_MARKER, getMapTheme } from "../theme";
 import { useT } from "../i18n";
@@ -130,6 +131,8 @@ export default function TrackMap({ samples, touchdowns, departure, arrival, airc
   const icao = icaoFromAtcModel(aircraft?.atcModel);
   const cat = wakeCategory(icao, aircraft?.title);
   const kind = modelKind(icao, aircraft?.title);
+  /** Track points of the flight, cached per samples (one curtain build per flight). */
+  const [flightPoints] = useState(() => flightPointsCache(landingGearDownIndex));
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -185,7 +188,9 @@ export default function TrackMap({ samples, touchdowns, departure, arrival, airc
           hoverId = id ?? null;
           popup.setDOMContent(eventPopupNode(ev, tRef.current("map.markers.detail.click")));
         }
-        popup.setLngLat(e.lngLat).addTo(map);
+        popup.setLngLat(e.lngLat);
+        // addTo removes and rebuilds the popup (DOM, focus): only when it is not open yet
+        if (!popup.isOpen()) popup.addTo(map);
       };
       const onLeave = () => {
         hoverId = null;
@@ -226,6 +231,9 @@ export default function TrackMap({ samples, touchdowns, departure, arrival, airc
       // style load re-adds everything, like a theme change
       map.on("webglcontextlost", () => {
         readyRef.current = false;
+        // dropped without onRemove: the old curtain and model get nothing more
+        markCurtainsLost(map);
+        modelRef.current = null;
       });
       map.on("webglcontextrestored", reloadStyle);
       // basemap names follow the UI language (map/basemap.ts)
@@ -266,15 +274,16 @@ export default function TrackMap({ samples, touchdowns, departure, arrival, airc
     };
   }, []);
 
-  const draw = () => {
+  /** The track, its curtain, the departure / arrival markers and the first fit (per flight, not per marker or language change). */
+  const drawTrackAll = () => {
     const map = mapRef.current;
     if (!map || !readyRef.current) return;
     placeRef.current();
     // from the landing gear extension on, the path is green (2D line and 3D curtain alike)
-    const points = samplesToPoints(samples, landingGearDownIndex(samples), COLOR.ok);
+    const { points, ground } = flightPoints(samples, COLOR.ok);
     const trackSrc = () => map.getSource("track") as maplibregl.GeoJSONSource | undefined;
     // 3D curtain: built once per track (thinned, smoothed; map/curtainLayer.ts)
-    drawCurtainTrack(map, "track-3d", view3dRef.current ? withGroundHeights(points) : [], null);
+    drawCurtainTrack(map, "track-3d", view3dRef.current ? ground() : [], null);
     // Altitude-banded runs (a few hundred features instead of one per sample). Long tracks are
     // first drawn thinned so the map appears at once; the full resolution follows when the
     // map is idle (after the fit below) – it only matters when zoomed in.
@@ -291,8 +300,6 @@ export default function TrackMap({ samples, touchdowns, departure, arrival, airc
     if (departure) markers.push(pointFeature(departure.longitude, departure.latitude, { kind: "dep" }));
     if (arrival) markers.push(pointFeature(arrival.longitude, arrival.latitude, { kind: "arr" }));
     (map.getSource("markers") as maplibregl.GeoJSONSource | undefined)?.setData({ type: "FeatureCollection", features: markers });
-    // touchdowns are markers of their own (filter group "touchdowns"), drawn by the event layer
-    (map.getSource(EVENTS_SOURCE) as maplibregl.GeoJSONSource | undefined)?.setData(trackEventsGeoJson(eventsRef.current, samples));
     for (const td of touchdowns) markers.push(pointFeature(td.longitude, td.latitude, { kind: "touchdown" }));
 
     const id = samples.length ? `${samples[0].tMs}` : `${departure?.latitude},${departure?.longitude},${arrival?.latitude},${arrival?.longitude}`;
@@ -311,6 +318,13 @@ export default function TrackMap({ samples, touchdowns, departure, arrival, airc
     }
   };
 
+  /** The flight-path markers (touchdowns are markers of their own, filter group "touchdowns"); labels follow the language. */
+  const drawEvents = () => {
+    const map = mapRef.current;
+    if (!map || !readyRef.current) return;
+    (map.getSource(EVENTS_SOURCE) as maplibregl.GeoJSONSource | undefined)?.setData(trackEventsGeoJson(eventsRef.current, samples));
+  };
+
   useEffect(() => {
     const map = mapRef.current;
     if (map && readyRef.current) applyProjection(map, globe);
@@ -318,6 +332,11 @@ export default function TrackMap({ samples, touchdowns, departure, arrival, airc
 
   const samplesRef = useRef(samples);
   samplesRef.current = samples;
+  // a new style's sources start empty: everything again
+  const draw = () => {
+    drawTrackAll();
+    drawEvents();
+  };
   const drawRef = useRef(draw);
   drawRef.current = draw;
   const shownEvents = useMemo(() => events ?? touchdownEvents(samples, touchdowns), [events, samples, touchdowns]);
@@ -325,7 +344,9 @@ export default function TrackMap({ samples, touchdowns, departure, arrival, airc
   eventsRef.current = shownEvents;
   const tRef = useRef(t);
   tRef.current = t;
-  useEffect(draw, [samples, touchdowns, departure, arrival, shownEvents, t]);
+  useEffect(drawTrackAll, [samples, touchdowns, departure, arrival, flightPoints]);
+  // marker data arrives later (approach analysis) and labels follow the language: only the event source
+  useEffect(drawEvents, [samples, shownEvents, t]);
   // the shared "Markers" filter (also the profile chart's); without the menu every group shows
   const storedFilter = useTrackEventFilter();
   const filter = useMemo(() => (events ? storedFilter : { ...storedFilter, touchdowns: true }), [events, storedFilter]);
@@ -446,7 +467,8 @@ export default function TrackMap({ samples, touchdowns, departure, arrival, airc
     const map = mapRef.current;
     if (!map || !readyRef.current) return;
     setCurtainVisible(map, "track-3d", next);
-    drawCurtainTrack(map, "track-3d", next ? withGroundHeights(samplesToPoints(samplesRef.current)) : [], null);
+    // the same (tinted) points as the 2D line: green from the gear extension on
+    drawCurtainTrack(map, "track-3d", next ? flightPoints(samplesRef.current, COLOR.ok).ground() : [], null);
     modelRef.current?.setEnabled(next);
     placeRef.current();
     setPitched(map, next);

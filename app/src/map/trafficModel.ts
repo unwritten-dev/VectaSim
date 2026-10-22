@@ -434,15 +434,15 @@ export class TrafficModelLayer implements maplibregl.CustomLayerInterface {
       merc[2 * i] = mx + wraps[i];
       merc[2 * i + 1] = mercatorY(it.lat);
     }
-    const { tx, ty, tz } = trafficRefTileFlat(cx, cy, zoom, merc, count);
+    const { tx, ty, tz, wrap } = trafficRefTileFlat(cx, cy, zoom, merc, count);
     const n = 2 ** tz;
     const instances = this.instances;
     instances.reset();
     for (let i = 0; i < count; i++) {
       const it = items[i];
-      instances.push(it.kind, (merc[2 * i] * n - tx) * EXTENT, (merc[2 * i + 1] * n - ty) * EXTENT, altToCurtainM(it.hFt), it.headingDeg, it.size, it.selected);
+      instances.push(it.kind, ((merc[2 * i] - wrap) * n - tx) * EXTENT, (merc[2 * i + 1] * n - ty) * EXTENT, altToCurtainM(it.hFt), it.headingDeg, it.size, it.selected);
     }
-    const data = args.getProjectionData({ tileID: { canonical: { x: tx, y: ty, z: tz }, wrap: 0 }, applyGlobeMatrix: true });
+    const data = args.getProjectionData({ tileID: { canonical: { x: tx, y: ty, z: tz }, wrap }, applyGlobeMatrix: true });
 
     const px = MODEL_PX * TRAFFIC_MODEL_SCALE;
     const tilePerUnit = (px / (512 * 2 ** zoom)) * n * EXTENT;
@@ -652,6 +652,14 @@ export class Traffic3D {
     this.drawCurtain(null);
     this.applyLayers();
     if (this.timer === undefined) this.timer = window.setInterval(() => this.tick(), TICK_MS);
+  }
+
+  /**
+   * WebGL context lost: MapLibre drops the model layer without `onRemove` – mark it removed, so
+   * the loop and the tick pause until `attach` on the style load after the restore (audit 3 H-1).
+   */
+  contextLost() {
+    if (this.layer) this.layer.removed = true;
   }
 
   dispose() {

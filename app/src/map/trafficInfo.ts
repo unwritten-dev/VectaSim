@@ -21,6 +21,15 @@ export function sameTraffic(a: TrafficRef | null | undefined, b: TrafficRef | nu
   return !!a && !!b && a.network === b.network && a.cid === b.cid;
 }
 
+/**
+ * Does the map show `network`'s traffic (OnlineSummary.shown, older builds: `network`)? A card of
+ * a network that is no longer shown (e.g. "both" → VATSIM with an IVAO card open) closes (N-4).
+ */
+export function networkShown(summary: { network: "off" | Network | "both"; shown?: "off" | Network | "both" }, network: Network): boolean {
+  const s = summary.shown ?? summary.network;
+  return s === "both" || s === network;
+}
+
 /** One feed position of the selected pilot (for the V/S trend). */
 export interface TrackSample {
   atMs: number;

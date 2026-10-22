@@ -36,19 +36,30 @@ VectaSim läuft neben Microsoft Flight Simulator 2020/2024 und X-Plane 12.1.1 od
 | **Deine Daten** | Eine SQLite-Datei auf deinem PC, tägliche Sicherung in einen Ordner deiner Wahl (OneDrive, NAS …), Papierkorb, Export als CSV, GPX, KML und JSON, Import alter Logbücher (Volanta, SimToolkitPro, VA-CSV). |
 | **Sprachen** | Deutsche und englische Oberfläche, nach der Windows-Anzeigesprache oder von Hand gewählt. |
 
+<p align="center">
+  <img src="docs/screenshots/de/traffic-route.png" alt="Live-Karte mit VATSIM-Verkehr: Flugkarte eines Verkehrsflugzeugs mit Foto, Höhe und Entfernung und seiner Route laut Flugplan durch die aufgelösten Wegpunkte, gestrichelt über Lücken" width="900">
+</p>
+
 ## Anflug und Landung
 
 <p align="center">
   <img src="docs/screenshots/de/debrief.png" alt="Landeauswertung: Kernsatz, Landerate, Aufsetzpunkt, g-Last und Anflugbewertung mit „stabil ab“" width="900">
 </p>
 
-- **Der ganze Anflug zählt**, nicht nur das Aufsetzen: Gleitpfad und Kurs (Ablage zur verlängerten Mittellinie) in Dots, Speed gegen die geflogene Referenz, Sinkrate, Bank und Konfiguration an jedem Gate – nach den EASA-Kriterien für stabilisierte Anflüge, in vier Bändern von „stabil“ bis „instabil unter 500 ft“; mit Daten aus dem Sim auch gegen das ILS des Simulators statt der 3°-Annahme, mit Sim-Wind im Endanflug, Schub, Spoilern und Landeklappen. ILS-Referenz und Sim-Wind gelten für Flüge, die mit dieser Version aufgezeichnet wurden; ältere Flüge und X-Plane-Flüge werden über die Pistengeometrie und die 3°-Annahme bewertet. Der Kurs – die Ablage zur verlängerten Mittellinie – bekommt dazu eine eigene Kennzahl mit eigenem Band (RMS und max. in Dots, Ablage bei 500 ft und über der Schwelle, Überschießen beim Eindrehen, S-Kurven). Die Grenzwerte kommen aus einem Bewertungsprofil, das nach Flugzeugtyp gewählt wird – allgemein (FSF/EASA), Airbus, Boeing, Turboprop oder GA-Kolben, jeder Wert aus einer öffentlichen Quelle, oder ein eigenes als JSON importiertes Profil. Die Auswertung nennt es („Bewertet nach: Airbus-Profil“), Vergleiche bleiben innerhalb eines Profils, und in der Flotte wählst du pro Flugzeug ein anderes.
+- **Der ganze Anflug zählt**, nicht nur das Aufsetzen: Gleitpfad und Kurs (Ablage zur verlängerten Mittellinie) in Dots, Speed gegen die geflogene Referenz, Sinkrate, Bank und Konfiguration an jedem Gate – nach den EASA-Kriterien für stabilisierte Anflüge, in vier Bändern von „stabil“ bis „instabil unter dem harten Gate“ (500 ft, GA-Kolben 300 ft); mit Daten aus dem Sim auch gegen das ILS des Simulators statt der 3°-Annahme, mit Sim-Wind im Endanflug, Schub, Spoilern und Landeklappen. ILS-Referenz und Sim-Wind gelten für Flüge, die mit dieser Version aufgezeichnet wurden; ältere Flüge und X-Plane-Flüge werden über die Pistengeometrie und die 3°-Annahme bewertet. Der Kurs – die Ablage zur verlängerten Mittellinie – bekommt dazu eine eigene Kennzahl mit eigenem Band (RMS und max. in Dots, Ablage bei 500 ft und über der Schwelle, Überschießen beim Eindrehen, S-Kurven). Die Grenzwerte kommen aus einem Bewertungsprofil, das nach Flugzeugtyp gewählt wird – allgemein (FSF/EASA), Airbus, Boeing, Turboprop oder GA-Kolben, jeder veröffentlichte Wert mit seiner öffentlichen Quelle belegt (einige Grenzen sind VectaSim-Konventionen und als solche gekennzeichnet), oder ein eigenes als JSON importiertes Profil. Die Auswertung nennt es („Bewertet nach: Airbus-Profil“), Vergleiche bleiben innerhalb eines Profils, und in der Flotte wählst du pro Flugzeug ein anderes.
 - **Energie und Wind:** ein Energieband von 10 nm bis 1000 ft, dazu Hinweise auf Rückenwind, Seitenwind und Windscherung im Endanflug.
 - **Landerate nach festen, dokumentierten Regeln:** Sim-Wert mit Rückfall auf die letzte Sinkrate in der Luft, härtester Kontakt bei Bounces, kein Flug-Peak – die G-Last über den ganzen Flug steht getrennt davon im Flugdetail. Jede Zahl zeigt ihre Herkunft (Sim · gemessen · abgeleitet).
 - **Pisten-Draufsicht** mit Aufsetzpunkt, Mittellinien-Versatz, Aufsetzzone und Zielpunkt, **Anflugprofil** gegen den 3°-Gleitpfad mit Replay-Cursor, Abfangen, Rollout und der Wind aus dem METAR zum Landezeitpunkt. Pisten, die in der Flughafendatenbank fehlen, leitet VectaSim aus deiner Bodenspur ab (markiert als „abgeleitet“, Schwelle ±50 m); mit *Piste korrigieren …* setzt du Schwelle und Ende genau.
 - **Durchstarten ist eine Entscheidung:** Ein Go-around bekommt seinen eigenen Debrief mit tiefstem Punkt, der abgebrochene Anflug wird vollständig bewertet. *Platzrunden* im Flugdetail listet jedes Touch-and-go auf.
 - **Du gegen dich:** Jede Landung wird gegen deine eigenen eingeordnet („besser als 70 % deiner letzten 20 auf EDDF 25C“), *Landungen → Verlauf* zeigt den gleitenden Median über Wochen und Monate, das Streubild die letzten 20 Aufsetzpunkte und Anflüge. Derselbe Vergleich gilt dafür, wie du geflogen bist: Rotationsrate beim Start, die Höhe (und Entfernung zur Schwelle) beim Ausfahren des Fahrwerks, wo die Landeklappen gesetzt waren und das Ergebnis der Anflugstabilität („Rotation 2,3 °/s – dein Median mit A20N: 2,6 °/s (12 Flüge)“), Rotation, Fahrwerkshöhe und Überschreitungen auch als eigene Verlaufskurven.
 - **Landekarte zum Teilen** (1200 × 675 PNG) mit Runway, Mini-Anflugprofil, den vier Kennzahlen und Wind – in die Zwischenablage oder als Datei, auf Wunsch nach jeder Landung automatisch; dazu eine **Anflugkarte** mit Band, Gates, Profil und Kurs, die bei eingeschaltetem automatischem Speichern neben der Landekarte mitgespeichert wird.
+
+<table align="center">
+  <tr>
+    <td><img src="docs/screenshots/de/flight-metrics.png" alt="Flugdetail: Kennzahlen-Zeile mit Rotation, Fahrwerkshöhe, Landeklappen, Überschreitungen und Gates sowie die Landezusammenfassung mit „Bewertet nach: Airbus-Profil“" width="440"></td>
+    <td><img src="docs/screenshots/de/settings-approach.png" alt="Einstellungen → Anflugbewertung: automatische Profilwahl und die eingebauten Profile mit den vom allgemeinen Satz abweichenden Werten und ihren Quellen" width="440"></td>
+  </tr>
+</table>
 
 <table align="center">
   <tr>
@@ -66,7 +77,7 @@ VectaSim läuft neben Microsoft Flight Simulator 2020/2024 und X-Plane 12.1.1 od
 ## Logbuch, Flotte und Länder
 
 <p align="center">
-  <img src="docs/screenshots/de/logbook.png" alt="Logbuch mit Flight-Strips, Suche und Filtern sowie Flugdetail mit Track-Karte" width="900">
+  <img src="docs/screenshots/de/logbook.png" alt="Logbuch mit Flight-Strips, Suche und Filtern sowie Flugdetail mit Track-Karte: Marker-Menü offen, die Spur ab dem Ausfahren des Fahrwerks grün" width="900">
 </p>
 
 - **Flight-Strips:** Rufzeichen und Muster, Route mit Blockzeiten, Landerate, „stabil ab … ft“, Go-arounds und eine kleine Runway mit dem Aufsetzpunkt – eine Liste, die Muster zeigt. Suche und Filter über alles, auch Notizen und Tags.
@@ -77,6 +88,13 @@ VectaSim läuft neben Microsoft Flight Simulator 2020/2024 und X-Plane 12.1.1 od
 - **SimBrief:** Mit hinterlegter Pilot-ID lädt VectaSim den aktuellen Flugplan von selbst, zeigt die Route auf der Karte und vergleicht Plan und Ist.
 - **Import:** Alte Flüge aus Volanta (Import-CSV), SimToolkitPro, VA-Exporten oder dem eigenen Logbuch-CSV – mit Spaltenzuordnung, Vorschau und Duplikaterkennung. Trennzeichen, Zeichenkodierung und Format werden automatisch erkannt; gängige Datumsformate, Zeiten in UTC oder Ortszeit, Gewichte in kg oder lb, Dateien bis 50 MB. Eine Landerate aus der Datei landet in den Notizen; importierte Flüge bekommen den Tag `import` und zählen für Stunden, Strecken, Flotte und Länder.
 - **Jahresrückblick: Story-Karten als PNG** („Dein Jahr 2026“, Logbuch → Jahr): sieben Karten – Überblick, Strecken mit Weltkarte, Flotte, Landungen mit Jahres-Streubild, Anflüge, Monate, Länder – plus eine optionale achte, „Mit Sternchen“ (Flüge mit Pause, Zeitraffer, Slew oder Positionssprung). Im Story-Hochformat 1080 × 1920 oder quer 1200 × 675, für ein Kalenderjahr oder die letzten 12 Monate. Einzeln speichern oder kopieren, mit *Alle einzeln speichern* in einen Ordner oder mit *Alle als ein langes Bild* als Hochformat-Stapel; der Streamer-Modus maskiert die Kennzeichen.
+
+<table align="center">
+  <tr>
+    <td><img src="docs/screenshots/de/track-3d.png" alt="Track-Karte im Flugdetail in 3D: eine ganze Platzrunde als Höhenvorhang mit Markern für Fahrwerk, Klappen, Abheben, Aufsetzen und die Tore des stabilisierten Anflugs" width="440"></td>
+    <td><img src="docs/screenshots/de/fullscreen.png" alt="Vollbild-Ansicht des Flugs: 3D-Track-Karte mit Markern über dem Höhen- und Speed-Profil, Replay-Cursor im Endanflug" width="440"></td>
+  </tr>
+</table>
 
 <p align="center">
   <img src="docs/screenshots/de/fleet.png" alt="Flotte nach Kennzeichen mit Fotos, Flügen, Blockzeit und Landerate" width="900">
@@ -109,6 +127,20 @@ VectaSim läuft neben Microsoft Flight Simulator 2020/2024 und X-Plane 12.1.1 od
 - Eine Internetverbindung für die Karte und Online-Daten (Wetter, Verkehr, Flugpläne, Fotos).
 - Ein Fenster von mindestens 1024 × 640.
 
+### Ressourcenverbrauch
+
+VectaSim ist eine native App: ein Rust-Kern ohne Laufzeitumgebung, das Fenster ist das in Windows vorhandene WebView2 statt einer mitgelieferten Browser-Engine, die Karte zeichnet höchstens 30 fps und nur, solange sich etwas bewegt, 15 fps ohne Fokus und gar nichts, solange das Fenster minimiert oder im Tray ist, und der Installer ist 11 MB groß. Gemessen mit dem Release-Build 0.6.3 auf einem 16-Kern-Rechner **ohne GPU-Beschleunigung** (der Kartenanteil an der CPU ist damit eine Obergrenze; mit Grafikkarte liegt er niedriger), 30-Sekunden-Mittel über alle 7 Prozesse (App + WebView2):
+
+| Zustand | Arbeitsspeicher (privat) | CPU |
+|---|---|---|
+| Leerlauf, kein Simulator, Logbuch offen | ≈ 350 MB | ≈ 1 % eines Kerns |
+| Leerlauf, kein Simulator, Live-Karte mit VATSIM-Verkehr | ≈ 330 MB | ≈ 2 % eines Kerns |
+| Aufzeichnung, 2D-Karte folgt dem Flugzeug | ≈ 470 MB | ≈ 20 % eines Kerns (1,3 % des Rechners) |
+| Aufzeichnung, 3D-Karte mit Verkehr | ≈ 500 MB | ≈ 29 % eines Kerns (1,8 % des Rechners) |
+| Aufzeichnung, Fenster minimiert oder im Tray | ≈ 460 MB | ≈ 8 % eines Kerns (0,5 % des Rechners) |
+
+Messskript und Methode liegen in `scripts/measure-resources.ps1`; die Zahlen werden für Releases, die Karte oder Rekorder ändern, neu gemessen. Werte anderer Programme stehen hier bewusst nicht – wer vergleichen will, misst beide nebeneinander im Task-Manager.
+
 ## Installation
 
 1. Unter [Releases](https://github.com/unwritten-dev/VectaSim/releases) die neueste Version öffnen und `VectaSim_<version>_x64-setup.exe` herunterladen (Windows 10/11, 64-bit).
@@ -123,8 +155,8 @@ Updates meldet VectaSim beim Start und installiert sie nach Bestätigung. Mehr D
 ## Deine Daten & Datenschutz
 
 - Dein Logbuch liegt in `%APPDATA%\io.vectasim.app\`; Protokolle und der Standardordner für Sicherungen liegen in `%LOCALAPPDATA%\io.vectasim.app\`.
-- VectaSim nimmt nur Kontakt auf zu: OpenFreeMap (Kartenkacheln), EOX (Satellitenkacheln, nur mit „Satellit“), RainViewer und EUMETSAT (Radar und Wolken, nur wenn eingeschaltet), aviationweather.gov (METAR; fällt es aus und VATSIM-Verkehr ist an, `metar.vatsim.net`), VATSIM und IVAO (Verkehr, nur solange das Netz in den Einstellungen eingeschaltet ist – dann auch bei auf der Karte ausgeblendetem Verkehr, alle 60 s statt 15 s; die VATSIM-Datenadresse wird nur auf vatsim.net akzeptiert), SimBrief (nur mit deiner Pilot-ID), Planespotters.net (Flugzeugfotos, abschaltbar), GitHub (Updates), dem SDK-Server von Microsoft (nur für den SimConnect-Download) und Discord (nur der lokale Discord-Client, nur mit eingeschaltetem Discord-Status).
-- Für die Route eines angeklickten Online-Flugzeugs fragt VectaSim einen laufenden MSFS über SimConnect und liest auf diesem PC die X-Plane-Installationsliste (`%LOCALAPPDATA%\x-plane_install_12.txt` / `_11.txt`) und die Navigationsdaten dieses X-Plane (`earth_fix.dat`, `earth_nav.dat`, `earth_awy.dat`) an Ort und Stelle – nichts davon wird kopiert oder irgendwohin gesendet.
+- VectaSim nimmt nur Kontakt auf zu: OpenFreeMap (Kartenkacheln), EOX (Satellitenkacheln, nur mit „Satellit“), RainViewer und EUMETSAT (Radar und Wolken, nur wenn eingeschaltet), aviationweather.gov (METAR; fällt es aus und VATSIM-Verkehr ist an, `metar.vatsim.net`), VATSIM und IVAO (Verkehr, nur solange das Netz in den Einstellungen eingeschaltet ist – dann ab App-Start, auch bei auf der Karte ausgeblendetem Verkehr oder minimiertem Fenster, alle 60 s statt 15 s; die VATSIM-Datenadresse wird nur auf vatsim.net akzeptiert), SimBrief (nur mit deiner Pilot-ID), Planespotters.net (Flugzeugfotos, abschaltbar), GitHub (Updates), dem SDK-Server von Microsoft (nur für den SimConnect-Download) und Discord (nur der lokale Discord-Client, nur mit eingeschaltetem Discord-Status).
+- Für die Route eines angeklickten Online-Flugzeugs fragt VectaSim einen laufenden MSFS über SimConnect und liest auf diesem PC die X-Plane-Installationsliste (`%LOCALAPPDATA%\x-plane_install_12.txt` / `_11.txt`) und die Navigationsdaten dieses X-Plane (`earth_fix.dat`, `earth_nav.dat`, `earth_awy.dat`) an Ort und Stelle – nichts davon wird kopiert oder irgendwohin gesendet; über das Netz geht für Online-Flugzeuge nur der VATSIM-/IVAO-Feed selbst.
 
 ## Deinstallieren
 
@@ -145,7 +177,7 @@ Windows-*Einstellungen → Apps → VectaSim → Deinstallieren*. Dein Logbuch b
 
 ## Status
 
-Beta 0.5 – MSFS 2020/2024 und X-Plane 12.1.1+ (Web API), Oberfläche auf Deutsch und Englisch. Geplant: Volanta-Import aus dem JSON-Export, Code-Signing – Ideen gern als [Issue](https://github.com/unwritten-dev/VectaSim/issues). Was sich geändert hat, steht im [CHANGELOG](CHANGELOG.md) (englisch).
+Beta 0.6 – MSFS 2020/2024 und X-Plane 12.1.1+ (Web API), Oberfläche auf Deutsch und Englisch. Geplant: Volanta-Import aus dem JSON-Export, Code-Signing – Ideen gern als [Issue](https://github.com/unwritten-dev/VectaSim/issues). Was sich geändert hat, steht im [CHANGELOG](CHANGELOG.md) (englisch).
 
 ## Mitmachen
 
@@ -159,7 +191,7 @@ SimConnect ist Bestandteil des Microsoft Flight Simulator SDK und wird nicht mit
 
 Danke an **npooky** für den ersten Flugtest im echten Simulator.
 
-Lizenzen der verwendeten Bibliotheken, Schriften und Daten: [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+Lizenzen der verwendeten Bibliotheken, Schriften und Daten: [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md), die vollständigen Lizenztexte mit Copyright-Vermerken in [THIRD-PARTY-LICENSES.txt](THIRD-PARTY-LICENSES.txt). Der Installer legt beide neben `vectasim.exe` (standardmäßig `%LOCALAPPDATA%\VectaSim\`).
 
 ## Lizenz
 

@@ -23,6 +23,7 @@ import {
   quartiles,
   quota,
   scopeOpts,
+  trendProfiles,
   trendSeries,
   typeKey,
   type HistLanding,
@@ -423,7 +424,8 @@ describe("flight metrics comparison", () => {
     expect(text("gearDown")).toBe("Gear down at 1,850 ft AGL / 5.8 nm – your median in the A20N is 2,100 ft / 6.5 nm (3 flights)");
     expect(text("landingFlaps")).toBe("Landing flaps set at 1,200 ft AGL – your median in the A20N is 1,500 ft (4 flights)");
     expect(text("exceedances")).toBe("2 exceedances on final – your median in the A20N is 1 (4 flights)");
-    expect(text("gates")).toBe("Gates 1000 ft stable, 500 ft unstable – stable at 500 ft in 3 of 4 flights in the A20N");
+    // gate heights in the language's number format, like the debrief tiles
+    expect(text("gates")).toBe("Gates 1,000 ft stable, 500 ft unstable – stable at 500 ft in 3 of 4 flights in the A20N");
     expect(lines.find((l) => l.id === "gates")!.warn).toBe(true);
     // all flights: no scope phrase
     expect(flightMetricLines(cur, all, "all")[0].text.replace(new RegExp(NNBSP, "g"), " ")).toBe("Rotation 2.3 °/s – your median is 2.6 °/s (5 flights)");
@@ -431,7 +433,22 @@ describe("flight metrics comparison", () => {
     const de = flightMetricLines(cur, all, "type").map((l) => l.text.replace(new RegExp(NNBSP, "g"), " "));
     expect(de[0]).toBe("Rotation 2,3 °/s – dein Median mit A20N: 2,6 °/s (4 Flüge)");
     expect(de[3]).toBe("2 Überschreitungen im Endanflug – dein Median mit A20N: 1 (4 Flüge)");
+    expect(de[4]).toMatch(/^Gates 1 000 ft \S+, 500 ft /);
     setLanguageSetting("en");
+  });
+
+  it("the rotation never compares by the landing runway (the take-off runway is not stored)", () => {
+    setLanguageSetting("en");
+    // three more take-offs that landed on EDDF 25C: enough for the runway scope, still not used
+    const onRwy = [2.0, 2.1, 2.2].map((v, i) => mf({ flightId: `rw${i}`, aircraftIcaoType: "C172", rotationRateDegS: v }));
+    const me = mf({ flightId: "me", timestampMs: T0 + 10, rotationRateDegS: 2.3 });
+    const lines = flightMetricLines(me, [me, ...onRwy, ...peers], "runway");
+    const rot = lines.find((l) => l.id === "rotation")!.text.replace(new RegExp(NNBSP, "g"), " ");
+    expect(rot).toBe("Rotation 2.3 °/s – your median in the A20N is 2.6 °/s (4 flights)");
+    // the landing metrics keep the runway scope
+    const fl = mf({ flightId: "fl", timestampMs: T0 + 10, landingFlapsAglFt: 1000 });
+    const flaps = [1100, 1200, 1300].map((v, i) => mf({ flightId: `fr${i}`, landingFlapsAglFt: v }));
+    expect(compareFlightMetric(fl, [fl, ...flaps], (f) => f.landingFlapsAglFt, "runway")!.scope).toBe("runway");
   });
 
   it("a rotation outside the band is flagged with the shared band word", () => {
@@ -496,5 +513,29 @@ describe("assessment profiles keep comparisons apart", () => {
     const p = trendSeries(landings, "flight", { approaches, metrics, profile: "ga_piston" });
     expect(p.stableFrom.map((x) => x.value)).toEqual([400]);
     expect(p.exceedances.map((x) => x.value)).toEqual([6]);
+  });
+});
+
+describe("trend profile chips follow the period shown", () => {
+  const period = [af({ flightId: "p1", profileId: "airbus" }), af({ flightId: "p2", profileId: "airbus" }), af({ flightId: "p3" }), af({ flightId: "p4", band: null, profileId: "boeing" })];
+  const older = [af({ flightId: "o1", profileId: "ga_piston" }), af({ flightId: "o2", profileId: "ga_piston" }), af({ flightId: "o3", profileId: "ga_piston" })];
+  const all = [...period, ...older];
+
+  it("chips and counts from the assessed approaches of the period, not from all", () => {
+    const r = trendProfiles(period, all, null);
+    expect(r.options).toEqual([
+      { key: "airbus", count: 2 },
+      { key: "generic", count: 1 },
+    ]);
+    expect(r.active).toBe("airbus");
+    expect(trendProfiles(period, all, "generic").active).toBe("generic");
+    // a profile only outside the period (or unassessed in it) is no choice there
+    expect(trendProfiles(period, all, "ga_piston").active).toBe("airbus");
+    expect(trendProfiles(period, all, "boeing").active).toBe("airbus");
+  });
+
+  it("nothing assessed in the period: the most frequent overall (month tiles stay within one profile)", () => {
+    expect(trendProfiles([], all, null)).toEqual({ options: [], active: "ga_piston" });
+    expect(trendProfiles([], [], null)).toEqual({ options: [], active: null });
   });
 });

@@ -224,6 +224,20 @@ impl Synth {
     }
 
     fn step(&mut self, rec: &mut FlightRecorder, f: &dyn Fn(&mut Telemetry)) {
+        let ok = self.try_step(rec, f);
+        if self.fail_path.is_none() {
+            assert!(ok, "recorder write failed");
+        }
+    }
+
+    /// `secs` of samples while writes may fail; returns how many samples reported an error.
+    fn run_failing(&mut self, rec: &mut FlightRecorder, secs: f64, f: impl Fn(&mut Telemetry)) -> usize {
+        let n = (secs * 1000.0 / SYNTH_STEP_MS as f64).round() as u64;
+        (0..n).filter(|_| !self.try_step(rec, &f)).count()
+    }
+
+    /// One sample through session and recorder; false when the recorder reported an error.
+    fn try_step(&mut self, rec: &mut FlightRecorder, f: &dyn Fn(&mut Telemetry)) -> bool {
         self.wall_ms += SYNTH_STEP_MS;
         let dt = SYNTH_STEP_MS as f64 / 1000.0;
         self.sim_s += dt;
@@ -242,15 +256,17 @@ impl Synth {
         f(&mut t);
         self.lat += t.ground_speed_kt * dt / 3_600.0 / 60.0;
         let events = self.session.update(&t);
-        let r = rec.on_telemetry(&t, self.session.summary(), &events);
-        if self.fail_path.is_none() {
-            r.unwrap();
-        }
+        let ok = rec.on_telemetry(&t, self.session.summary(), &events).is_ok();
         let outs = self.session.take_touchdown_outcomes();
         if !outs.is_empty() {
             rec.on_touchdown_outcomes(&outs).unwrap();
             self.outcomes.extend(outs);
         }
+        let discarded = self.session.take_discarded_flights();
+        if !discarded.is_empty() {
+            rec.on_discarded(&discarded, self.wall_ms).unwrap();
+        }
+        ok
     }
 
     fn climb(&mut self, rec: &mut FlightRecorder, from: f64, to: f64, fpm: f64, gs: f64) {
@@ -530,4 +546,157 @@ fn a_late_discard_finds_the_closed_flight_by_off_block() {
     assert_eq!(rec.on_discarded(&[ev], wall).unwrap(), std::slice::from_ref(&id));
     let trash = store.list_deleted_flights().unwrap();
     assert_eq!((trash.len(), trash[0].flight.state.as_str()), (1, "discarded"));
+}
+
+fn synth() -> Synth {
+    Synth { wall_ms: T0, sim_s: 36_000.0, lat: 50.0, session: FlightSession::new(), outcomes: Vec::new(), fail_path: None }
+}
+
+fn parked(t: &mut Telemetry) {
+    ground(0.0)(t);
+    t.engines_running = 0;
+    t.parking_brake = true;
+}
+
+/// Taxi, take off, a short circuit and a landing; ends rolling out at 10 kt.
+fn circuit(sim: &mut Synth, rec: &mut FlightRecorder) {
+    sim.run(rec, 10.0, ground(12.0));
+    sim.run(rec, 5.0, ground(90.0));
+    sim.climb(rec, 10.0, 1_500.0, 1_500.0, 130.0);
+    sim.run(rec, 30.0, air(1_500.0, 0.0, 130.0));
+    sim.short_final_from(rec, 1_500.0);
+    sim.roll(rec, 10.0, 80.0, 20.0, 150.0);
+    sim.run(rec, 10.0, ground(10.0));
+}
+
+#[test]
+fn failed_flight_end_is_retried_with_a_backoff_and_handed_out_once_written() {
+    // a full disk retried the end (and recompressed the whole track) with every sample
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("vectasim.db");
+    let store = Store::open(&path).unwrap();
+    let mut rec = recorder(&store);
+    let mut sim = synth();
+    circuit(&mut sim, &mut rec);
+    let id = rec.current_flight_id().unwrap().to_owned();
+    assert!(rec.take_closed().is_empty(), "nothing closed yet");
+    fail_inserts(&path, "tracks", true);
+    sim.fail_path = Some(path.clone());
+    // shutdown at the stand: the end cannot be written
+    let failed_at_end = sim.run_failing(&mut rec, 10.0, parked);
+    assert_eq!(rec.ending_flight_id(), Some(id.as_str()));
+    assert!(failed_at_end >= 1);
+    assert!(rec.take_closed().is_empty(), "no approach facts from a track that is not written");
+    // 30 s at 4 Hz: 120 samples, retried after 1, 2, 4, 8 … s
+    let retries = sim.run_failing(&mut rec, 30.0, parked);
+    assert!((3..=5).contains(&retries), "backoff: {retries} attempts in 30 s");
+    assert!(rec.take_closed().is_empty());
+    fail_inserts(&path, "tracks", false);
+    sim.fail_path = None;
+    // the next attempt (at most 32 s later) succeeds
+    sim.run(&mut rec, 35.0, parked);
+    assert_eq!(rec.ending_flight_id(), None);
+    assert_eq!(rec.take_closed(), vec![id.clone()], "handed out once, after the end is written");
+    assert!(rec.take_closed().is_empty());
+    let f = store.get_flight(&id).unwrap().unwrap();
+    assert_eq!(f.flight.state, "completed");
+    assert!(f.has_track);
+}
+
+#[test]
+fn failed_flight_start_is_retried_with_a_backoff_without_a_flight_event() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("vectasim.db");
+    let store = Store::open(&path).unwrap();
+    let mut rec = recorder(&store);
+    let mut sim = synth();
+    fail_inserts(&path, "flights", true);
+    sim.fail_path = Some(path.clone());
+    let failed = sim.run_failing(&mut rec, 20.0, ground(12.0));
+    assert_eq!(sim.session.summary().state, vectasim_core::FlightState::Active);
+    assert_eq!(rec.current_flight_id(), None);
+    // the start itself plus retries after 1, 2, 4, 8 s – not 4 per second
+    assert!((3..=6).contains(&failed), "{failed} failures in 20 s");
+    fail_inserts(&path, "flights", false);
+    sim.fail_path = None;
+    // no flight event in these samples: the recorder starts the flight on its own
+    sim.run(&mut rec, 20.0, ground(12.0));
+    let id = rec.current_flight_id().expect("started by the retry").to_owned();
+    assert_eq!(store.active_flight_id().unwrap().as_deref(), Some(id.as_str()));
+}
+
+#[test]
+fn discarded_ground_session_is_not_handed_out_for_approach_facts() {
+    let store = Store::open_in_memory().unwrap();
+    let mut rec = recorder(&store);
+    let mut sim = synth();
+    sim.run(&mut rec, 20.0, ground(12.0));
+    sim.run(&mut rec, 40.0, parked);
+    assert_eq!(sim.session.summary().state, vectasim_core::FlightState::Discarded);
+    assert!(rec.take_closed().is_empty(), "a ground session gets no approach facts");
+    // a real flight is handed out
+    circuit(&mut sim, &mut rec);
+    let id = rec.current_flight_id().unwrap().to_owned();
+    sim.run(&mut rec, 10.0, parked);
+    assert_eq!(rec.take_closed(), vec![id]);
+}
+
+#[test]
+fn placeholder_position_never_goes_into_the_track() {
+    // MSFS loads in the middle of the recording: the samples at 0/0 are no part of the flight
+    let store = Store::open_in_memory().unwrap();
+    let mut rec = recorder(&store);
+    let mut sim = synth();
+    sim.run(&mut rec, 10.0, ground(12.0));
+    sim.run(&mut rec, 5.0, ground(90.0));
+    sim.climb(&mut rec, 10.0, 1_500.0, 1_500.0, 130.0);
+    sim.run(&mut rec, 5.0, |t| {
+        air(53_819.0, 0.0, 0.0)(t);
+        t.latitude = 0.0;
+        t.longitude = 0.0;
+    });
+    sim.run(&mut rec, 20.0, air(1_500.0, 0.0, 130.0));
+    let id = rec.current_flight_id().unwrap().to_owned();
+    let track = rec.live_track();
+    let track = track.lock().unwrap();
+    assert!(track.len() > 30);
+    assert!(track.iter().all(|s| s.latitude > 49.0), "no sample at 0/0");
+    drop(track);
+    let f = store.get_flight(&id).unwrap().unwrap().flight;
+    assert!(f.max_alt_msl_ft < 2_000.0, "{}", f.max_alt_msl_ft);
+}
+
+#[test]
+fn ghost_flight_of_a_load_placeholder_never_counts_in_statistics() {
+    use vectasim_core::{FlightEvent, FlightPhase, FlightState, FlightSummary};
+    // after a flight MSFS reports 0/0 at FL538 for ~9 s, then FlightLoaded: nothing is recorded
+    let store = Store::open_in_memory().unwrap();
+    let mut rec = recorder(&store);
+    let mut sim = synth();
+    sim.run(&mut rec, 9.0, |t| {
+        air(53_819.0, 0.0, 0.0)(t);
+        t.latitude = 0.0;
+        t.longitude = 0.0;
+    });
+    let events = sim.session.on_sim_event(&vectasim_core::SimEvent::FlightLoaded { path: "b.FLT".into() });
+    rec.on_events(sim.session.summary(), &events, sim.wall_ms).unwrap();
+    assert!(store.list_flights(10, 0).unwrap().is_empty());
+    // rows recorded that way before (interrupted in Cruise, 9 samples, 0 nm) no longer count …
+    let started = FlightSummary { state: FlightState::Active, phase: FlightPhase::Cruise, off_block_ms: Some(T0), ..Default::default() };
+    rec.on_events(&started, &[FlightEvent::FlightStarted { timestamp_ms: T0 }], T0).unwrap();
+    let ghost = rec.current_flight_id().unwrap().to_owned();
+    let ended = FlightSummary { state: FlightState::Interrupted, ..started.clone() };
+    rec.on_events(&ended, &[FlightEvent::FlightEnded { timestamp_ms: T0 + 9_000, interrupted: true }], T0 + 9_000).unwrap();
+    // … a start in the air that flew on does
+    rec.on_events(&started, &[FlightEvent::FlightStarted { timestamp_ms: T0 + 60_000 }], T0 + 60_000).unwrap();
+    let flew = rec.current_flight_id().unwrap().to_owned();
+    let ended = FlightSummary { state: FlightState::Interrupted, distance_nm: 12.0, ..started.clone() };
+    rec.on_events(&ended, &[FlightEvent::FlightEnded { timestamp_ms: T0 + 300_000, interrupted: true }], T0 + 300_000).unwrap();
+    let rows = store.list_flights(10, 0).unwrap();
+    let row = |id: &str| rows.iter().find(|f| f.id == id).unwrap();
+    assert_eq!((row(&ghost).state.as_str(), row(&ghost).phase), ("interrupted", FlightPhase::Cruise));
+    assert!(!row(&ghost).counts_in_stats());
+    assert!(row(&flew).counts_in_stats());
+    let totals = store.totals().unwrap();
+    assert_eq!(totals.flights, 1, "only the one that flew");
 }

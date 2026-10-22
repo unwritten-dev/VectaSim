@@ -691,7 +691,7 @@ fn parse_format(format: &str) -> Result<ExportFormat, String> {
 fn render_export(id: &str, format: ExportFormat, store: &Store) -> Result<String, String> {
     let detail = store.get_flight(id).map_err(lang::ui_error)?.ok_or(lang::tr("Flug nicht gefunden", "Flight not found"))?;
     let samples = store.get_track(id).map_err(lang::ui_error)?.unwrap_or_default();
-    export::export_flight(format, &detail, &samples).map_err(lang::ui_error)
+    export::export_flight(format, &detail, &samples, lang::current()).map_err(lang::ui_error)
 }
 
 /// Excel only detects UTF-8 in a CSV that starts with a BOM.

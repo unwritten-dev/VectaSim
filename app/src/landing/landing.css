@@ -520,27 +520,6 @@
 }
 
 /* logbook: summary card of the last landing */
-.landing-summary {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-4);
-  flex-wrap: wrap;
-  padding: var(--sp-3);
-  background: var(--surface-2);
-  border-radius: var(--r-md);
-  border-left: 3px solid var(--border-strong);
-  margin-bottom: var(--sp-3);
-}
-.landing-summary-title {
-  font-weight: var(--fw-title);
-}
-.landing-summary .facts {
-  display: flex;
-  gap: var(--sp-4);
-  flex-wrap: wrap;
-  font-size: var(--fs-sm);
-}
-
 /* debrief head: Touchdown Card export (save / copy) */
 .debrief-card-actions {
   display: flex;
@@ -729,93 +708,10 @@
 }
 
 /* shared replay cursor + 2D playback (replayStore.ts, ReplayBar.tsx) */
-.replay-hit {
-  cursor: crosshair;
-}
 .rd-cursor {
   fill: var(--accent);
   stroke: var(--surface-1);
   stroke-width: 2;
-}
-.replay-wrap {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-2) var(--sp-4);
-  align-items: flex-start;
-  margin-top: var(--sp-2);
-}
-.replay {
-  flex: 1 1 420px;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-}
-.replay-row {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  flex-wrap: wrap;
-}
-.replay-play {
-  min-width: 2.6em;
-}
-.replay-slider {
-  flex: 1 1 160px;
-  min-width: 120px;
-  accent-color: var(--accent);
-}
-.replay-time {
-  font-family: var(--font-num);
-  font-variant-numeric: tabular-nums;
-  min-width: 6.5em;
-  text-align: right;
-}
-.replay-marks {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--sp-1);
-}
-.replay-mark.active {
-  background: var(--accent-soft);
-  color: var(--text);
-}
-.replay-values {
-  flex: 0 1 340px;
-  min-width: 260px;
-  background: var(--surface-1);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--r-md);
-  padding: var(--sp-2) var(--sp-3);
-}
-.replay-values dl {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 2px var(--sp-3);
-  margin: 0;
-}
-.replay-values dl > div {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--sp-2);
-}
-.replay-values dt {
-  color: var(--text-muted);
-  font-size: var(--fs-xs);
-}
-.replay-values dd {
-  margin: 0;
-  font-size: var(--fs-sm);
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-.replay-values p {
-  margin: 0;
-}
-.replay-source {
-  margin-top: var(--sp-1) !important;
-  font-size: var(--fs-xs);
 }
 .sa-table .sa-cursor {
   background: color-mix(in srgb, var(--accent) 12%, transparent);

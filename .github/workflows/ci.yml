@@ -1,5 +1,5 @@
 # Checks on every push to main and every pull request; release.yml calls the same jobs for the
-# tagged commit before it builds. Third-party actions are pinned to a commit SHA (the comment
+# tagged commit, in parallel with its build. Third-party actions are pinned to a commit SHA (the comment
 # names the release); the Rust toolchain comes from rust-toolchain.toml.
 #
 # Not (yet) part of it: `cargo fmt --check` – rustfmt.toml exists, but the tree has not been
@@ -11,19 +11,30 @@ on:
     branches: [main]
   pull_request:
   workflow_call:
+  # the Windows job on demand in the private repository (see the `rust` job)
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 # github.workflow is the caller's name when release.yml runs these jobs, so a release never
-# cancels (or waits for) the CI run of a push
+# cancels (or waits for) the CI run of a push. A newer push cancels an older run except on
+# main: there `release-cache` (≈ 22 min) would otherwise lose the cache it is about to save
+# whenever two pushes land within that time; main pushes queue instead.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  # Windows minutes count double against a private repository's quota, and every commit is
+  # checked locally with the same commands before it is pushed; the public repository (free)
+  # runs this job on every push and tag. Elsewhere (the development repository) it runs only
+  # on demand (`gh workflow run CI -R <owner>/<development repo>`); the Linux jobs below run
+  # everywhere.
   rust:
+    if: github.repository == 'unwritten-dev/VectaSim' || github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -37,6 +48,7 @@ jobs:
 
   audit:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -59,15 +71,19 @@ jobs:
 
   docs:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       # README.md and README.de.md: same headings, lists, tables, images and code blocks
       - run: node scripts/readme-pair-check.mjs
+      # THIRD-PARTY-LICENSES.txt must match the dependency set (scripts/third-party-licenses.mjs)
+      - run: node scripts/third-party-licenses.mjs --check
 
   frontend:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: app
@@ -90,13 +106,21 @@ jobs:
       - run: npm test
 
   # Keeps the release-profile build cache warm on the public main so the next tag's release
-  # job (release.yml, same shared-key) restores the compiled dependencies instead of building
-  # 16 minutes from cold. Public repository only (free minutes; private Windows minutes count
+  # job (release.yml, same key) restores the compiled dependencies instead of building 16
+  # minutes from cold. Public repository only (free minutes; private Windows minutes count
   # double), pushes to main only (a tag run could not save a reusable cache anyway). The
-  # frontend is built first because tauri::generate_context! embeds the dist folder.
+  # frontend is built first because tauri::generate_context! embeds the dist folder. Plain
+  # actions/cache with a key from Cargo.lock + rust-toolchain.toml: rust-cache's key hashes
+  # the runner environment too, which changes with every runner-image rollout, so the release
+  # job never found what this job had saved. An existing key is not saved again (same lock =
+  # same dependencies); a changed Cargo.lock saves a new entry, restored by prefix next time.
+# The build uses the same features as `tauri build` in the release job: the Tauri CLI adds
+# `tauri/custom-protocol` (the app crate has no [features] of its own), and without it tauri,
+# its plugins and everything depending on them would compile again in the release.
   release-cache:
     if: github.repository == 'unwritten-dev/VectaSim' && github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: windows-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -107,12 +131,32 @@ jobs:
           cache: npm
           cache-dependency-path: app/package-lock.json
       - run: rustup toolchain install
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - id: cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          workspaces: ". -> target"
-          shared-key: release
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target/release/.fingerprint
+            target/release/build
+            target/release/deps
+          key: release-build-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            release-build-${{ runner.os }}-
       - run: npm ci
         working-directory: app
       - run: npm run build
         working-directory: app
-      - run: cargo build --release --locked --manifest-path app/src-tauri/Cargo.toml
+      - run: cargo build --release --locked --features tauri/custom-protocol --manifest-path app/src-tauri/Cargo.toml
+      - if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target/release/.fingerprint
+            target/release/build
+            target/release/deps
+          key: release-build-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}

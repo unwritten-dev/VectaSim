@@ -435,6 +435,23 @@ function series(raw: Raw[], bucket: Bucket, window: number, kind: "median" | "qu
 }
 
 /**
+ * Profile choice of the trends: the chips list the assessed approaches of the period shown
+ * (most frequent first), so a chip never leads to empty charts; the active one is the chosen
+ * chip, else the most frequent in the period, else – none assessed there – the most frequent of
+ * `all` (the month tiles look further back than the period).
+ */
+export function trendProfiles(period: ApproachFact[], all: ApproachFact[], chosen: string | null): { options: Array<{ key: string; count: number }>; active: string | null } {
+  const count = (xs: ApproachFact[]) => {
+    const m = new Map<string, number>();
+    for (const a of xs) if (a.band != null) m.set(profileOf(a), (m.get(profileOf(a)) ?? 0) + 1);
+    return [...m.entries()].map(([key, n]) => ({ key, count: n })).sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
+  };
+  const options = count(period);
+  const active = chosen && options.some((o) => o.key === chosen) ? chosen : (options[0]?.key ?? count(all)[0]?.key ?? null);
+  return { options, active };
+}
+
+/**
  * Trend series oldest first: per landing (moving median over `window` landings), per ISO week or
  * per month (median of the bucket, moving median over `window` buckets). "stabil ab" comes from
  * the approach facts (never-stable approaches left out, as everywhere), rotation, gear-down
@@ -632,7 +649,9 @@ export function flightMetricLines(fact: FlightMetricsFact, facts: FlightMetricsF
   const out: MetricLine[] = [];
   const where = (s: Scope) => scopePhrase(s, fact);
 
-  const rot = compareFlightMetric(fact, facts, (f) => f.rotationRateDegS, scope);
+  // the metrics row only knows the landing runway: "same runway" would compare take-offs from
+  // anywhere that ended on it – the rotation starts at the type instead
+  const rot = compareFlightMetric(fact, facts, (f) => f.rotationRateDegS, scope === "runway" ? "type" : scope);
   if (rot && rot.value != null) {
     const band = rotationBand(rot.value);
     const value = band === "normal" ? degS(rot.value) : `${degS(rot.value)} · ${t(band === "slow" ? "map.markers.label.slow" : "map.markers.label.fast")}`;
@@ -672,7 +691,8 @@ export function flightMetricLines(fact: FlightMetricsFact, facts: FlightMetricsF
 
   const g = compareGate500(fact, facts, scope);
   if (g) {
-    const vars = { g1000: gateWord(fact.stable1000), g500: gateWord(fact.stable500), yes: g.yes, count: g.total };
+    // the core's fixed gates (approach.rs), in the language's number format
+    const vars = { gate1000: fmt(1000, 0, "ft"), gate500: fmt(500, 0, "ft"), g1000: gateWord(fact.stable1000), g500: gateWord(fact.stable500), yes: g.yes, count: g.total };
     const w = where(g.scope);
     out.push({ id: "gates", warn: fact.stable1000 === false || fact.stable500 === false, text: w ? t("landingHistory.metrics.gatesWhere", { ...vars, where: w }) : t("landingHistory.metrics.gates", vars) });
   }

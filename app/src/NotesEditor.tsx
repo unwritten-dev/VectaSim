@@ -370,7 +370,16 @@ function RatingField({ flight: f, readOnly }: { flight: FlightRow; readOnly: boo
       </div>
       {/* outside the radiogroup: a radiogroup holds radios only */}
       {!readOnly && rating > 0 && (
-        <button type="button" className="link-btn star-clear" onClick={() => void set(0)} title={t("logbook.notes.clearRatingTitle")}>
+        <button
+          type="button"
+          className="link-btn star-clear"
+          // the button goes away with the rating: the focus moves to the first star (the group's tab stop then)
+          onClick={() => {
+            refs.current[0]?.focus();
+            void set(0);
+          }}
+          title={t("logbook.notes.clearRatingTitle")}
+        >
           {t("logbook.notes.clearRating")}
         </button>
       )}

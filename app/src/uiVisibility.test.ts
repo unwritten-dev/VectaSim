@@ -54,6 +54,34 @@ describe("uiVisible", () => {
 });
 
 describe("watchUiVisibility", () => {
+  it("asks isMinimized at most once at a time: a resize storm costs two round trips, not one per resize", async () => {
+    const doc = fakeDoc();
+    const win = fakeWin();
+    let calls = 0;
+    let release: ((m: boolean) => void) | null = null;
+    win.api.isMinimized = () => {
+      calls++;
+      return new Promise<boolean>((r) => {
+        release = r;
+      });
+    };
+    const seen: boolean[] = [];
+    const w = watchUiVisibility((v) => seen.push(v), doc, win.api);
+    await flush();
+    expect(calls).toBe(1); // the initial check is in flight
+    for (let i = 0; i < 20; i++) win.resize();
+    expect(calls).toBe(1); // coalesced
+    release!(true);
+    await flush();
+    expect(calls).toBe(2); // one follow-up for the storm
+    release!(false);
+    await flush();
+    expect(calls).toBe(2);
+    // the first answer (true) was stale with the storm pending: never reported
+    expect(seen).toEqual([true]);
+    w.stop();
+  });
+
   it("reports minimise and restore from Tauri although document.hidden stays false", async () => {
     const doc = fakeDoc();
     const win = fakeWin();
@@ -134,11 +162,12 @@ describe("watchUiVisibility ordering", () => {
     answers.shift()!(false); // start
     await flush();
     resized(); // minimise
-    resized(); // restored right away
-    const [minimiseAnswer, restoreAnswer] = answers.splice(0);
-    restoreAnswer(false);
+    resized(); // restored right away: coalesced into one follow-up check
+    expect(answers).toHaveLength(1);
+    answers.shift()!(true); // the minimise answer is stale (a newer check is pending): ignored
     await flush();
-    minimiseAnswer(true); // the stale one arrives last
+    expect(answers).toHaveLength(1);
+    answers.shift()!(false); // the follow-up sees the restored window
     await flush();
     expect(seen).toEqual([true]);
 

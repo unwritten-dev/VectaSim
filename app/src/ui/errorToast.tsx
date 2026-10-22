@@ -5,9 +5,17 @@ import type { ReactNode } from "react";
 import { t } from "../i18n";
 import { userMessage, type ErrorContext } from "../errors";
 
+export interface ErrorToastOptions {
+  /** The caller's plain explanation instead of the generic one from userMessage. */
+  hint?: string;
+  /** Applied to the technical text behind "Details" (e.g. the Streamer-Modus path mask). */
+  maskDetail?: (detail: string) => string;
+}
+
 /** `title` (what failed, the caller's text) + body and screen-reader text for showToast. */
-export function errorToast(title: string, e: unknown, ctx?: ErrorContext): { title: string; body: ReactNode; announce: string } {
-  const m = userMessage(e, ctx);
+export function errorToast(title: string, e: unknown, ctx?: ErrorContext, opts: ErrorToastOptions = {}): { title: string; body: ReactNode; announce: string } {
+  const u = userMessage(e, ctx);
+  const m = { hint: opts.hint ?? u.hint, detail: opts.maskDetail ? opts.maskDetail(u.detail) : u.detail };
   const announce = `${title}. ${m.hint}`;
   if (!m.detail) return { title, body: m.hint, announce };
   return {

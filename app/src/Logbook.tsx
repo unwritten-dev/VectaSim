@@ -14,12 +14,13 @@ import { QUICK_FILTERS, TRASH_DAYS, filterFlights, moveSelection, tagCounts, typ
 import Stat from "./ui/Stat";
 import EmptyState from "./ui/EmptyState";
 import { showToast } from "./ui/Toast";
-import { userMessage } from "./errors";
+import { rawText, userMessage } from "./errors";
+import { errorToast } from "./ui/errorToast";
 import { isDebriefOpen, openDebrief } from "./landing/debriefStore";
 import { isModalOpen } from "./ui/modalStack";
 import type { ApproachFactsResult } from "./landing/approachTypes";
 import { stripFactsFrom, type LandingStripFact } from "./stripFacts";
-import { mergeHint, mergeKey } from "./resume";
+import { mergeHint, mergeKey, mergeRefusal } from "./resume";
 import { loadFlightDetail, sleep } from "./logbookDetail";
 import { latestOnly } from "./latest";
 import { handleMenuKey, menuItems } from "./ui/menu";
@@ -459,8 +460,12 @@ export default function Logbook({ active = true, focus, onGoLive }: Props) {
         });
       })
       .catch((e) => {
-        const m = userMessage(e, "logbook");
-        showToast({ tone: "warn", title: t("logbook.list.toastMergeFailed"), body: m.detail || m.hint, durationMs: 10_000 });
+        // a refusal (gap too long, positions apart …) is readable as it is; a technical error
+        // shows the plain next step and keeps its raw text behind "Details"
+        const title = t("logbook.list.toastMergeFailed");
+        const reason = mergeRefusal(rawText(e));
+        const fields = reason ? { title, body: reason, announce: `${title}. ${reason}` } : errorToast(title, e, "logbook");
+        showToast({ tone: "warn", ...fields, durationMs: 10_000 });
       })
       .finally(() => setMerging(false));
   };

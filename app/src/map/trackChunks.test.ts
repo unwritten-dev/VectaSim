@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ALT_BAND_FT, ChunkedTrack, bandedRuns, bandedTrackGeoJson, curtainGeoJson, curtainRuns, groundHeightFt, withGroundHeights, thinPoints, type TimedPoint, positionJumped } from "./trackChunks";
+import { ALT_BAND_FT, ChunkedTrack, bandedRuns, bandedTrackGeoJson, curtainGeoJson, curtainRuns, groundHeightFt, withGroundHeights, thinPoints, type TimedPoint, positionJumped, seedStartAfterJump } from "./trackChunks";
 
 const pt = (i: number, altFt: number): TimedPoint => ({ lon: i * 0.01, lat: 50, altFt, tMs: i * 1000 });
 
@@ -85,6 +85,27 @@ describe("positionJumped (live track teleport rule)", () => {
   });
 });
 
+describe("N-3: seedStartAfterJump (live-track seed cut at the last jump)", () => {
+  /** 1 Hz cruise eastwards at `gs` kt and time acceleration `rate` from lon `lon0`. */
+  const cruise = (n: number, lon0: number, t0: number, gs = 450, rate = 1) =>
+    Array.from({ length: n }, (_, i) => ({ lon: lon0 + (i * gs * rate) / 3600 / 60 / Math.cos((50 * Math.PI) / 180), lat: 50, tMs: t0 + i * 1000, gsKt: gs }));
+  it("no jump: the whole seed", () => {
+    expect(seedStartAfterJump(cruise(100, 8, 0))).toBe(0);
+    expect(seedStartAfterJump([])).toBe(0);
+  });
+  it("steady time acceleration (16×, 2 nm per sample) is no jump", () => {
+    expect(seedStartAfterJump(cruise(100, 8, 0, 450, 16))).toBe(0);
+  });
+  it("keeps only the part after the last jump", () => {
+    const seed = [...cruise(50, 8, 0), ...cruise(50, 20, 50_000), ...cruise(30, 40, 100_000)];
+    expect(seedStartAfterJump(seed)).toBe(100);
+  });
+  it("a parked aircraft moved to another airport", () => {
+    const parked = (lon: number, lat: number, t0: number, n: number) => Array.from({ length: n }, (_, i) => ({ lon, lat, tMs: t0 + i * 1000, gsKt: 0 }));
+    expect(seedStartAfterJump([...parked(8.57, 50.03, 0, 20), ...parked(79.9, 7.2, 20_000, 5)])).toBe(20);
+  });
+});
+
 describe("ChunkedTrack", () => {
   it("closes a chunk every N points and keeps the open block small", () => {
     const tr = new ChunkedTrack(10);
@@ -152,6 +173,10 @@ describe("ChunkedTrack", () => {
 });
 
 describe("curtainRuns (3D view)", () => {
+  it("H-4: the fallback curtain carries the gear-down tint from the tinted point on", () => {
+    const pts = [0, 1, 2, 3].map((i) => ({ lon: 8 + i * 0.01, lat: 50, altFt: 1000, ...(i >= 2 ? { color: "#00ff00" } : {}) }));
+    expect(curtainRuns(pts).map((f) => f.properties?.color)).toEqual([undefined, undefined, "#00ff00"]);
+  });
   it("one closed convex rectangle per consecutive pair, extruded to the pair's mean altitude in metres", () => {
     const pts = Array.from({ length: 50 }, (_, i) => pt(i, 35000));
     const f = curtainRuns(pts);

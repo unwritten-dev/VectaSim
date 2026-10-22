@@ -4,7 +4,7 @@
 //! review the diff of the golden files like code.
 
 use std::path::PathBuf;
-use vectasim_core::{AircraftInfo, FlightPhase, GLoadPoint, GLoadSource, GLoadStats, IntegrityFlags, LandingRateSource, TouchdownReport};
+use vectasim_core::{AircraftInfo, FlightPhase, GLoadPoint, GLoadSource, GLoadStats, IntegrityFlags, Lang, LandingRateSource, TouchdownReport};
 use vectasim_store::export::{LogbookPlan, export_csv, export_flight, export_logbook_csv, export_logbook_csv_with_plans};
 use vectasim_store::{ExportFormat, FlightDetail, FlightRow, PhaseEventRow, TrackSample};
 
@@ -196,12 +196,12 @@ fn logbook_csv_matches_golden() {
 
 #[test]
 fn gpx_matches_golden() {
-    check("flight.gpx", &export_flight(ExportFormat::Gpx, &detail(), &samples()).unwrap());
+    check("flight.gpx", &export_flight(ExportFormat::Gpx, &detail(), &samples(), Lang::De).unwrap());
 }
 
 #[test]
 fn kml_matches_golden() {
-    check("flight.kml", &export_flight(ExportFormat::Kml, &detail(), &samples()).unwrap());
+    check("flight.kml", &export_flight(ExportFormat::Kml, &detail(), &samples(), Lang::De).unwrap());
 }
 
 #[test]
@@ -210,18 +210,36 @@ fn kml_says_unrated_instead_of_zero_fpm() {
     let mut d = detail();
     d.touchdowns[0].landing_rate_fpm = 0.0;
     d.touchdowns[0].landing_rate_source = LandingRateSource::Unrated;
-    let kml = export_flight(ExportFormat::Kml, &d, &samples()).unwrap();
+    let kml = export_flight(ExportFormat::Kml, &d, &samples(), Lang::De).unwrap();
     assert!(kml.contains("<description>Landerate nicht bewertbar · 1.21 g"), "{kml}");
     assert!(!kml.contains("0 fpm"));
 }
 
 #[test]
+fn kml_texts_follow_the_app_language() {
+    // the placemark texts were German whatever the app language
+    let de = export_flight(ExportFormat::Kml, &detail(), &samples(), Lang::De).unwrap();
+    let mut d = detail();
+    d.touchdowns[0].landing_rate_source = LandingRateSource::Unrated;
+    let en = export_flight(ExportFormat::Kml, &d, &samples(), Lang::En).unwrap();
+    for word in ["Abflug", "Ankunft", "Flugweg", "Aufsetzen", "Landerate", "wahr"] {
+        assert!(!en.contains(word), "{word} in the English KML");
+    }
+    for word in ["<name>Flight path</name>", "<name>Touchdown 1</name>", "Landing rate not assessable · 1.21 g", "Departure", "Arrival"] {
+        assert!(en.contains(word), "{word} missing: {en}");
+    }
+    // the data is the same in both
+    let coords = |k: &str| k.lines().filter(|l| l.contains("<gx:coord>") || l.contains("<when>")).collect::<Vec<_>>().join("\n");
+    assert_eq!(coords(&de), coords(&en));
+}
+
+#[test]
 fn json_matches_golden() {
-    let json = export_flight(ExportFormat::Json, &detail(), &samples()).unwrap();
+    let json = export_flight(ExportFormat::Json, &detail(), &samples(), Lang::De).unwrap();
     check("flight.json", &json);
 }
 
 #[test]
 fn flight_csv_is_the_track_csv() {
-    assert_eq!(export_flight(ExportFormat::Csv, &detail(), &samples()).unwrap(), export_csv(&samples()));
+    assert_eq!(export_flight(ExportFormat::Csv, &detail(), &samples(), Lang::De).unwrap(), export_csv(&samples()));
 }

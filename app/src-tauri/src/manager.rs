@@ -149,7 +149,7 @@ pub struct Stats {
 /// app, a recording fake in tests.
 pub(crate) trait Outbox: Send + 'static {
     fn emit_value(&self, event: &str, payload: serde_json::Value);
-    /// A flight was closed (completed or interrupted): cache its approach facts.
+    /// A flight was closed (completed or interrupted) and its end is written: cache its approach facts.
     fn flight_closed(&self, store: &Store, flight_id: &str);
     /// Fetch the METAR for one end of a flight.
     fn capture_metar(&self, store: &Store, flight_id: &str, slot: MetarSlot, lat: f64, lon: f64, at_ms: u64);
@@ -631,7 +631,8 @@ impl<O: Outbox> Forwarder<O> {
     /// First evaluated sample after connecting / after an interrupted flight: is there an
     /// interrupted flight this position continues? Emits `flight:resumable` once per flight.
     fn check_resumable(&mut self, t: &Telemetry) {
-        if !self.resume_check || !self.resume_allowed || t.paused || self.session.debug_state().sim_stopped {
+        // a sim's load placeholder (0/0) is no position: wait for the real one
+        if !self.resume_check || !self.resume_allowed || t.paused || t.placeholder_position() || self.session.debug_state().sim_stopped {
             return;
         }
         self.resume_check = false;
@@ -784,6 +785,8 @@ impl<O: Outbox> Forwarder<O> {
         }
         let outcomes = self.record_outcomes();
         let discarded = self.record_discarded(t.timestamp_ms);
+        self.facts_for_closed();
+        self.sync_current_flight();
         self.announce(&events, closing, &discarded);
         self.announce_outcomes(&outcomes);
         self.announce_discarded(&discarded);
@@ -831,6 +834,7 @@ impl<O: Outbox> Forwarder<O> {
         if events.is_empty() {
             let outcomes = self.record_outcomes();
             let discarded = self.record_discarded(ts);
+            self.facts_for_closed();
             self.announce_outcomes(&outcomes);
             self.announce_discarded(&discarded);
             return;
@@ -841,6 +845,7 @@ impl<O: Outbox> Forwarder<O> {
         }
         let outcomes = self.record_outcomes();
         let discarded = self.record_discarded(ts);
+        self.facts_for_closed();
         self.announce(&events, closing, &discarded);
         self.announce_outcomes(&outcomes);
         self.announce_discarded(&discarded);
@@ -861,10 +866,6 @@ impl<O: Outbox> Forwarder<O> {
             if matches!(fe, FlightEvent::FlightStarted { .. } | FlightEvent::FlightEnded { .. }) {
                 emit(&self.out, "logbook:changed", &());
             }
-            // track is flushed and the flight closed by now: cache its approach facts
-            if let (FlightEvent::FlightEnded { .. }, Some(id)) = (fe, &closing) {
-                self.out.flight_closed(&self.store, id);
-            }
             let was_discarded = matches!(fe, FlightEvent::FlightEnded { timestamp_ms, .. } if discarded.iter().any(|d| d.timestamp_ms == *timestamp_ms));
             if !was_discarded {
                 self.notify_event(fe, closing.as_deref());
@@ -877,6 +878,29 @@ impl<O: Outbox> Forwarder<O> {
         if !events.is_empty() && !self.superseded() {
             self.flight_active.store(self.session.summary().state == FlightState::Active, Ordering::Relaxed);
             *lock(&self.current_flight) = self.recorder.current_flight_id().map(str::to_owned);
+        }
+    }
+
+    /// Cache the approach facts of the flights whose end the recorder has written by now (see
+    /// `FlightRecorder::take_closed`): not while the end is still pending (the stored track
+    /// would be the last flush), but after a successful retry, and never for a discarded
+    /// ground session. Called after [`Self::record_discarded`].
+    fn facts_for_closed(&mut self) {
+        for id in self.recorder.take_closed() {
+            self.out.flight_closed(&self.store, &id);
+        }
+    }
+
+    /// `current_flight` follows the recorder after every sample: a flight start whose row could
+    /// only be written by a later retry comes without a flight event of its own.
+    fn sync_current_flight(&self) {
+        if self.superseded() {
+            return;
+        }
+        let id = self.recorder.current_flight_id();
+        let mut current = lock(&self.current_flight);
+        if current.as_deref() != id {
+            *current = id.map(str::to_owned);
         }
     }
 
@@ -986,6 +1010,7 @@ impl<O: Outbox> Forwarder<O> {
         if let Err(e) = self.recorder.checkpoint(self.session.summary(), ts) {
             log::error!("logbook checkpoint failed: {e}");
         }
+        self.facts_for_closed();
         if !self.superseded() {
             self.flight_active.store(false, Ordering::Relaxed);
             *lock(&self.current_flight) = None;

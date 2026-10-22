@@ -4,7 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { revealPath } from "./revealPath";
 import { open as openFileDialog, save as saveFileDialog } from "@tauri-apps/plugin-dialog";
-import { desktopDir, join } from "@tauri-apps/api/path";
+import { desktopDir, join, resolveResource } from "@tauri-apps/api/path";
 import type {
   BackupEntry,
   BackupInfo,
@@ -134,6 +134,11 @@ function IntegrationStatus({ tone, children }: { tone: Tone; children: ReactNode
 }
 
 const THIRD_PARTY_NOTICES_URL = "https://github.com/unwritten-dev/VectaSim/blob/main/THIRD-PARTY-NOTICES.md";
+/** Bundled next to vectasim.exe (tauri.conf.json → bundle.resources); shown in Explorer, no browser needed. */
+const THIRD_PARTY_FILES = ["THIRD-PARTY-NOTICES.md", "THIRD-PARTY-LICENSES.txt"] as const;
+function revealBundled(name: (typeof THIRD_PARTY_FILES)[number]) {
+  return resolveResource(name).then((p) => revealPath(p));
+}
 
 /**
  * Settings, reduced to what cannot be detected (everything else is automatic): Simulator · Flugplanung ·
@@ -348,12 +353,16 @@ export default function Settings({ providers, onProvider, online, status, flight
   const toggle = (key: keyof Prefs, value: boolean) => setPref(key, value).catch((e) => setError(String(e)));
   // "Send test message" into the sim (SimConnect_Text), answered by the running session
   const [simTextBusy, setSimTextBusy] = useState(false);
-  const [simTextResult, setSimTextResult] = useState<SimTextTestResult | null>(null);
+  // the result belongs to the connection it was sent over: after a disconnect it is no longer shown
+  const simConn = `${status?.provider ?? ""}|${status?.state ?? ""}`;
+  const [simTextAnswer, setSimTextAnswer] = useState<{ conn: string; r: SimTextTestResult } | null>(null);
+  const simTextResult = simTextAnswer?.conn === simConn ? simTextAnswer.r : null;
   const simTextTest = async () => {
+    const conn = simConn;
     setSimTextBusy(true);
-    setSimTextResult(null);
+    setSimTextAnswer(null);
     try {
-      setSimTextResult(await invoke<SimTextTestResult>("sim_text_test"));
+      setSimTextAnswer({ conn, r: await invoke<SimTextTestResult>("sim_text_test") });
     } catch (e) {
       setError(String(e));
     } finally {
@@ -529,11 +538,10 @@ export default function Settings({ providers, onProvider, online, status, flight
             <button onClick={() => void simTextTest()} disabled={simTextBusy || status?.provider !== "simconnect" || status?.state !== "connected"} title={t("settings.sim.textTestTitle")}>
               {simTextBusy ? t("settings.sim.textTestBusy") : t("settings.sim.textTest")}
             </button>
-            {simTextResult && (
-              <span className={simTextResult.status === "sent" ? "ok-text" : "detail"} role="status">
-                {simTextResultText(simTextResult)}
-              </span>
-            )}
+            {/* always mounted: a live region inserted together with its text is often not announced */}
+            <span className={simTextResult?.status === "sent" ? "ok-text" : "detail"} role="status">
+              {simTextResult && simTextResultText(simTextResult)}
+            </span>
           </div>
         </Panel>
 
@@ -845,6 +853,10 @@ export default function Settings({ providers, onProvider, online, status, flight
         {t("settings.about", { version: info?.version ?? "" })}{" "}
         <button className="link-btn" onClick={() => openUrl(THIRD_PARTY_NOTICES_URL).catch(() => {})} title={THIRD_PARTY_NOTICES_URL}>
           {t("settings.thirdParty")}
+        </button>
+        {" · "}
+        <button className="link-btn" onClick={() => void revealBundled("THIRD-PARTY-LICENSES.txt").catch(() => void revealBundled("THIRD-PARTY-NOTICES.md").catch(() => {}))} title={t("settings.thirdPartyTextsHint")}>
+          {t("settings.thirdPartyTexts")}
         </button>
       </p>
     </section>

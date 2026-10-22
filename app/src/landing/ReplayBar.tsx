@@ -1,3 +1,4 @@
+import "./shared.css";
 import { useEffect, useMemo, type KeyboardEvent } from "react";
 import { NNBSP, fmt, fmtClock, fmtNum, fmtSigned } from "../i18n/number";
 import { useT, type TFunction } from "../i18n";

@@ -214,3 +214,18 @@ describe("H-5 / H-7: the selected aircraft's loop", () => {
     vi.useRealTimers();
   });
 });
+
+describe("H-1: WebGL context lost", () => {
+  it("contextLost marks the model layer removed (no onRemove from MapLibre); the next attach brings a live one", () => {
+    const m = new FakeMap();
+    const t = new Traffic3D(() => Promise.resolve([]));
+    t.attach(m as never, COLORS);
+    const old = t.layer!;
+    t.contextLost();
+    expect(old.removed).toBe(true);
+    t.attach(m as never, COLORS);
+    expect(t.layer).not.toBe(old);
+    expect(t.layer!.removed).toBe(false);
+    t.dispose();
+  });
+});

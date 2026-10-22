@@ -18,14 +18,29 @@
 //! Sampling cadence and flushes go on regardless. The whole track of the
 //! current flight stays in memory (a 10 h flight at 1 Hz is ~4 MB) and is upserted every
 //! `FLUSH_INTERVAL_MS` and on flight end; each flush only encodes the samples added since the
-//! last one ([`TrackEncoder`]) and compresses the stream again.
+//! last one ([`TrackEncoder`]) and compresses the stream again. That zstd pass runs over the
+//! whole stream (the columnar format cannot be appended to), so long tracks are flushed less
+//! often ([`flush_interval_ms`]: 30 s from 2 h, 60 s from 6 h of track).
 //!
 //! Failure handling: every event of a sample is handled on its own, so a failed
 //! write (database locked, disk full) never swallows the events after it – least of
-//! all `FlightEnded`. What failed and matters is kept and retried with the next sample:
+//! all `FlightEnded`. What failed and matters is kept and retried with the next samples:
 //! the flight row of a `FlightStarted`, touchdowns, and the end of a flight (the
 //! flight stays "ending" until its final state is written). The first error of a
 //! call is returned after everything else was attempted; the rest are logged.
+//! The end and the start are retried with a backoff ([`Backoff`]: 1 s, 2 s, 4 s … up to 60 s
+//! on the telemetry clock), not with every sample: each attempt at the end recompresses the
+//! whole track, and at 10–30 Hz on a full disk that was a busy CPU and a log file full of
+//! retries pushing the actual error out of the rotation. The retry is logged at the first
+//! attempt and then at most once a minute.
+//!
+//! Flights whose end has been written (completed or interrupted, not discarded) are handed out
+//! once through [`FlightRecorder::take_closed`]: the app computes their approach facts from the
+//! stored track then, and only then – not while the end could not be written yet (the stored
+//! track would be the last flush, up to 15 s short), and once more after a retry succeeded.
+//!
+//! Samples at a placeholder position (`Telemetry::placeholder_position`, 0° N / 0° E while a
+//! sim loads) never go into the track.
 //!
 //! Ground sessions (`FlightState::Discarded`, see `vectasim_core::flight`): a flight that ends
 //! without having flown is stored with state `discarded` and goes straight to the Papierkorb.
@@ -46,6 +61,18 @@ const SAMPLE_INTERVAL_MS: u64 = 1_000;
 /// Track upsert cadence: bounds what a crash or a hard close loses to 15 s of track
 /// (one `UPDATE tracks` + `UPDATE flights` per 15 s is negligible store load).
 const FLUSH_INTERVAL_MS: u64 = 15_000;
+
+/// Flush cadence for a track of `samples` (1 Hz): [`FLUSH_INTERVAL_MS`] up to 2 h, then 30 s,
+/// from 6 h 60 s. Each flush compresses the whole stream again (~1.4 MB raw after 10 h); a
+/// crash on a long flight loses at most a minute of track, the flight end flushes in any case.
+fn flush_interval_ms(samples: usize) -> u64 {
+    const HOUR: usize = 3_600;
+    match samples {
+        n if n < 2 * HOUR => FLUSH_INTERVAL_MS,
+        n if n < 6 * HOUR => 30_000,
+        _ => 60_000,
+    }
+}
 /// 1/30 Hz preview: ~120 points for an hour of flying.
 pub(crate) const PREVIEW_EVERY: usize = 30;
 /// Flights closed by this recorder that a later [`FlightDiscardedEvent`] may still refer to.
@@ -56,6 +83,49 @@ const AIRPORT_MATCH_NM: f64 = 3.0;
 /// Backward clock steps up to this size keep the samples (1 ms after the last one); larger ones
 /// leave a hole in the track (see the module doc), ms.
 pub const MAX_TRACK_CLAMP_MS: u64 = 10_000;
+
+/// First wait before retrying a failed flight start or end, ms (doubled per failure) …
+const RETRY_FIRST_MS: u64 = 1_000;
+/// … up to this, ms; the retry is logged at most this often, too.
+const RETRY_MAX_MS: u64 = 60_000;
+
+/// Exponential backoff on the recorder's monotonic clock for a write retried with the samples.
+#[derive(Clone, Copy, Debug, Default)]
+struct Backoff {
+    /// Monotonic time of the next attempt (`None`: not armed, the first check arms it).
+    next_mono: Option<u64>,
+    delay_ms: u64,
+    last_log_mono: Option<u64>,
+}
+
+impl Backoff {
+    /// Whether an attempt is due at `mono`; arms the backoff on the first call after a failure.
+    fn due(&mut self, mono: u64) -> bool {
+        match self.next_mono {
+            None => {
+                self.delay_ms = RETRY_FIRST_MS;
+                self.next_mono = Some(mono + RETRY_FIRST_MS);
+                false
+            }
+            Some(next) => mono >= next,
+        }
+    }
+
+    /// The attempt at `mono` failed: wait twice as long.
+    fn failed(&mut self, mono: u64) {
+        self.delay_ms = (self.delay_ms * 2).clamp(RETRY_FIRST_MS, RETRY_MAX_MS);
+        self.next_mono = Some(mono + self.delay_ms);
+    }
+
+    /// Log this attempt? The first one and then once per [`RETRY_MAX_MS`].
+    fn log_now(&mut self, mono: u64) -> bool {
+        let log = self.last_log_mono.is_none_or(|last| mono.saturating_sub(last) >= RETRY_MAX_MS);
+        if log {
+            self.last_log_mono = Some(mono);
+        }
+        log
+    }
+}
 
 /// A flight started in the air below this AGL near an airport is arriving there (see
 /// [`low_airborne_start`]), ft.
@@ -173,6 +243,11 @@ pub struct FlightRecorder {
     clock: MonoClock,
     /// (id, off-block) of the last flights this recorder closed, newest last.
     recently_closed: Vec<(String, Option<u64>)>,
+    /// Flights whose end was written and not discarded, not yet taken ([`Self::take_closed`]).
+    closed: Vec<String>,
+    /// Backoff for retrying a flight end / a flight start (see the module doc).
+    end_retry: Backoff,
+    start_retry: Backoff,
 }
 
 /// Keeps the first error of a batch, logs the others.
@@ -205,7 +280,17 @@ impl FlightRecorder {
             planned: PlannedSlot::default(),
             clock: MonoClock::new(),
             recently_closed: Vec::new(),
+            closed: Vec::new(),
+            end_retry: Backoff::default(),
+            start_retry: Backoff::default(),
         }
+    }
+
+    /// Flights closed since the last call whose end is written (completed or interrupted; a
+    /// discarded ground session is left out, also when it is discarded after its end was
+    /// written), oldest first. See the module doc.
+    pub fn take_closed(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.closed)
     }
 
     pub fn with_planned(mut self, planned: PlannedSlot) -> Self {
@@ -295,12 +380,13 @@ impl FlightRecorder {
         let now = t.timestamp_ms;
         let mono = self.clock.advance(now);
         let mut errs = Errors::default();
-        self.retry(summary, events, now, &mut errs);
+        self.retry(summary, events, now, mono, &mut errs);
         if let Err(e) = self.on_events(summary, events, now) {
             errs.0.get_or_insert(e);
         }
 
-        if let Some(c) = self.current.as_mut().filter(|c| c.ending.is_none()) {
+        // a sim's placeholder position is no part of the track (see the module doc)
+        if let Some(c) = self.current.as_mut().filter(|c| c.ending.is_none() && !t.placeholder_position()) {
             if c.last_sample_mono.is_none_or(|last| mono.saturating_sub(last) >= SAMPLE_INTERVAL_MS) {
                 let mut sample = TrackSample::from(t);
                 let mut live = self.live.lock().unwrap_or_else(|e| e.into_inner());
@@ -322,7 +408,7 @@ impl FlightRecorder {
                 c.last_sample_mono = Some(mono);
             }
             let due = match c.last_flush_mono {
-                Some(last) => mono.saturating_sub(last) >= FLUSH_INTERVAL_MS,
+                Some(last) => mono.saturating_sub(last) >= flush_interval_ms(c.encoded.upto),
                 None => {
                     c.last_flush_mono = Some(mono);
                     false
@@ -409,18 +495,50 @@ impl FlightRecorder {
         errs.into_result()
     }
 
-    /// Retry what failed before: the end of a flight, its touchdowns, a flight start.
-    fn retry(&mut self, summary: &FlightSummary, events: &[FlightEvent], now: u64, errs: &mut Errors) {
-        if let Some(c) = self.current.as_ref().filter(|c| c.ending.is_some()) {
-            let s = c.summary.clone();
-            log::info!("logbook: retrying the end of flight {}", c.id);
-            errs.note("flight end (retry)", self.finish(&s, now));
+    /// Retry what failed before: the end of a flight, its touchdowns, a flight start. End and
+    /// start wait for their backoff (see the module doc).
+    fn retry(&mut self, summary: &FlightSummary, events: &[FlightEvent], now: u64, mono: u64, errs: &mut Errors) {
+        match self.current.as_ref().filter(|c| c.ending.is_some()) {
+            Some(c) if self.end_retry.due(mono) => {
+                let (s, id) = (c.summary.clone(), c.id.clone());
+                let log = self.end_retry.log_now(mono);
+                if log {
+                    log::info!("logbook: retrying the end of flight {id}");
+                }
+                if let Err(e) = self.finish(&s, now) {
+                    self.end_retry.failed(mono);
+                    if log {
+                        log::error!("logbook: flight end (retry) failed: {e}");
+                    }
+                    errs.0.get_or_insert(e);
+                }
+            }
+            Some(_) => {}
+            None => self.end_retry = Backoff::default(),
         }
-        errs.note("touchdown (retry)", self.retry_touchdowns());
+        // while the end is pending, its attempts (with the backoff) write the touchdowns first
+        if self.current.as_ref().is_some_and(|c| c.ending.is_none()) {
+            errs.note("touchdown (retry)", self.retry_touchdowns());
+        }
         let starts_now = events.iter().any(|e| matches!(e, FlightEvent::FlightStarted { .. }));
-        if self.pending_start && !starts_now && self.current.is_none() && summary.state == FlightState::Active {
-            log::info!("logbook: retrying the flight start");
-            errs.note("flight start (retry)", self.start(summary, now));
+        if !self.pending_start {
+            self.start_retry = Backoff::default();
+        } else if !starts_now && self.current.is_none() && summary.state == FlightState::Active && self.start_retry.due(mono) {
+            let log = self.start_retry.log_now(mono);
+            if log {
+                log::info!("logbook: retrying the flight start");
+            }
+            let r = self.start(summary, now);
+            // the flight row could not be written: wait longer (what fails after it is logged by `start`)
+            if self.pending_start {
+                self.start_retry.failed(mono);
+            }
+            if let Err(e) = r {
+                if log || !self.pending_start {
+                    log::error!("logbook: flight start (retry) failed: {e}");
+                }
+                errs.0.get_or_insert(e);
+            }
         }
     }
 
@@ -498,6 +616,9 @@ impl FlightRecorder {
             self.store.discard_flight_at(&c.id, now)?;
         }
         log::info!("flight {} {state} with {} track samples", c.id, self.samples().len());
+        if state != "discarded" {
+            self.closed.push(c.id.clone());
+        }
         let closed = (c.id.clone(), c.summary.off_block_ms);
         if self.recently_closed.len() >= RECENTLY_CLOSED {
             self.recently_closed.remove(0);
@@ -531,6 +652,8 @@ impl FlightRecorder {
                 continue;
             };
             let (id, _) = self.recently_closed.remove(pos);
+            // a ground session needs no approach facts
+            self.closed.retain(|c| *c != id);
             match self.store.discard_flight_at(&id, now) {
                 Ok(_) => {
                     log::info!("flight {id} discarded (ground session, in the Papierkorb)");
@@ -583,5 +706,21 @@ impl FlightRecorder {
             }
             _ => self.flush(summary, now),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn long_tracks_are_flushed_less_often() {
+        // the zstd pass of a flush runs over the whole track: 15 s, then 30 s from 2 h, 60 s from 6 h
+        assert_eq!(flush_interval_ms(0), FLUSH_INTERVAL_MS);
+        assert_eq!(flush_interval_ms(7_199), FLUSH_INTERVAL_MS);
+        assert_eq!(flush_interval_ms(7_200), 30_000);
+        assert_eq!(flush_interval_ms(21_599), 30_000);
+        assert_eq!(flush_interval_ms(21_600), 60_000);
+        assert_eq!(flush_interval_ms(usize::MAX), 60_000);
     }
 }

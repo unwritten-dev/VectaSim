@@ -9,9 +9,13 @@
 //! is used.
 //!
 //! The files are tens of MB, so they are parsed once, lazily, on a background thread
-//! ([`XPlaneNav::index`]); callers wait for it with a timeout. Memory is bounded by
-//! [`MAX_LINES`] per file and [`MAX_FILE_BYTES`]; the index keeps idents, regions and positions
-//! only (≈ 30–50 MB for a full AIRAC).
+//! ([`XPlaneNav::index`]); callers wait for it with a timeout. The files come from third-party
+//! nav data packages and are not trusted: memory is bounded by [`MAX_FILE_BYTES`] and
+//! [`MAX_LINES`] per file, [`MAX_LINE_BYTES`] per line (longer lines are skipped unread),
+//! [`MAX_AIRWAY_NAMES`] per airway segment (a line with more is skipped) and [`MAX_ENTRIES`]
+//! for the whole index – a file that would go beyond it is dropped as a whole and logged. The
+//! index keeps idents, regions and positions only (≈ 30–50 MB for a full AIRAC). Install
+//! folders on a network share (UNC) are not read.
 //!
 //! Formats (X-Plane DSF/nav data specs): fix 1101/1200 `lat lon ident terminal region …`
 //! (600: `lat lon ident`); nav 1150/1200 `code lat lon elev freq range magvar ident terminal
@@ -22,7 +26,7 @@
 use crate::Candidate;
 use crate::SourceId;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -31,6 +35,13 @@ use std::time::{Duration, Instant};
 pub const MAX_LINES: usize = 3_000_000;
 /// Files larger than this are not read.
 pub const MAX_FILE_BYTES: u64 = 512 * 1024 * 1024;
+/// Longest line read (real lines are well under 200 bytes); longer ones are skipped.
+pub const MAX_LINE_BYTES: usize = 4096;
+/// Most airway names one segment may carry (`UZ650-T180`; real data has 1–3).
+pub const MAX_AIRWAY_NAMES: usize = 8;
+/// Most entries of the whole index: fixes and navaids, airway nodes and airway segments (one
+/// per name). A full AIRAC needs ≈ 0.8 million; a file that would go beyond it is dropped.
+pub const MAX_ENTRIES: usize = 2_000_000;
 
 const FIX: u8 = 11;
 const NDB: u8 = 2;
@@ -59,9 +70,15 @@ pub struct XpIndex {
     nodes: Vec<Node>,
     /// Airway name → segments (node indices).
     airways: HashMap<Box<str>, Vec<(u32, u32)>>,
+    /// Fixes, navaids, nodes and segments held (against [`MAX_ENTRIES`]).
+    entries: usize,
     /// Where it came from (log, diagnostics).
     pub folder: PathBuf,
 }
+
+/// A nav file would have taken the index beyond its entry budget and was dropped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TooManyEntries;
 
 fn region2(s: &str) -> [u8; 2] {
     let b = s.as_bytes();
@@ -77,9 +94,41 @@ fn coord(lat: &str, lon: &str) -> Option<(f64, f64)> {
     (lat.abs() <= 90.0 && lon.abs() <= 180.0).then_some((lat, lon))
 }
 
+/// Lines of at most [`MAX_LINE_BYTES`]: a longer line is skipped without being held in memory,
+/// a line that is not UTF-8 is skipped; a read error ends the file.
+struct CappedLines<R> {
+    inner: R,
+    buf: Vec<u8>,
+}
+
+impl<R: BufRead> Iterator for CappedLines<R> {
+    type Item = String;
+
+    fn next(&mut self) -> Option<String> {
+        loop {
+            self.buf.clear();
+            let n = (&mut self.inner).take(MAX_LINE_BYTES as u64 + 1).read_until(b'\n', &mut self.buf).ok()?;
+            if n == 0 {
+                return None;
+            }
+            if self.buf.last() != Some(&b'\n') && self.buf.len() > MAX_LINE_BYTES {
+                // the rest of an overlong line, unread
+                self.inner.skip_until(b'\n').ok()?;
+                continue;
+            }
+            while matches!(self.buf.last(), Some(b'\n' | b'\r')) {
+                self.buf.pop();
+            }
+            if let Ok(l) = std::str::from_utf8(&self.buf) {
+                return Some(l.to_owned());
+            }
+        }
+    }
+}
+
 /// Data lines of an X-Plane `.dat` file: header ("I"/"A" + version line) and the "99" end skipped.
 fn data_lines(text: impl BufRead) -> impl Iterator<Item = String> {
-    text.lines().map_while(Result::ok).skip(2).take(MAX_LINES).take_while(|l| l.trim() != "99")
+    CappedLines { inner: text, buf: Vec::new() }.skip(2).take(MAX_LINES).take_while(|l| l.trim() != "99")
 }
 
 impl XpIndex {
@@ -91,7 +140,28 @@ impl XpIndex {
         self.airways.len()
     }
 
-    pub fn add_fixes(&mut self, text: impl BufRead) {
+    /// Entries held (fixes, navaids, airway nodes and segments; at most [`MAX_ENTRIES`]).
+    pub fn entry_count(&self) -> usize {
+        self.entries
+    }
+
+    /// Takes the fixes of one file in (all of them: the caller stopped at the budget).
+    fn merge_fixes(&mut self, found: Vec<(Box<str>, XpFix)>) {
+        self.entries += found.len();
+        for (ident, fix) in found {
+            self.fixes.entry(ident).or_default().push(fix);
+        }
+    }
+
+    /// Waypoints (`earth_fix.dat`); a file that would take the index beyond [`MAX_ENTRIES`] is
+    /// dropped as a whole.
+    pub fn add_fixes(&mut self, text: impl BufRead) -> Result<(), TooManyEntries> {
+        self.add_fixes_within(text, MAX_ENTRIES)
+    }
+
+    fn add_fixes_within(&mut self, text: impl BufRead, budget: usize) -> Result<(), TooManyEntries> {
+        let room = budget.saturating_sub(self.entries);
+        let mut found = Vec::new();
         for line in data_lines(text) {
             let f: Vec<&str> = line.split_whitespace().collect();
             if f.len() < 3 {
@@ -99,11 +169,24 @@ impl XpIndex {
             }
             let Some((lat, lon)) = coord(f[0], f[1]) else { continue };
             let region = f.get(4).map_or([b' '; 2], |r| region2(r));
-            self.fixes.entry(f[2].to_ascii_uppercase().into()).or_default().push(XpFix { lat, lon, region, kind: FIX });
+            if found.len() >= room {
+                return Err(TooManyEntries);
+            }
+            found.push((f[2].to_ascii_uppercase().into(), XpFix { lat, lon, region, kind: FIX }));
         }
+        self.merge_fixes(found);
+        Ok(())
     }
 
-    pub fn add_navaids(&mut self, text: impl BufRead) {
+    /// VORs and NDBs (`earth_nav.dat`); a file that would take the index beyond [`MAX_ENTRIES`]
+    /// is dropped as a whole.
+    pub fn add_navaids(&mut self, text: impl BufRead) -> Result<(), TooManyEntries> {
+        self.add_navaids_within(text, MAX_ENTRIES)
+    }
+
+    fn add_navaids_within(&mut self, text: impl BufRead, budget: usize) -> Result<(), TooManyEntries> {
+        let room = budget.saturating_sub(self.entries);
+        let mut found = Vec::new();
         for line in data_lines(text) {
             let f: Vec<&str> = line.split_whitespace().collect();
             if f.len() < 8 {
@@ -120,8 +203,13 @@ impl XpIndex {
                 Some(r) if r.len() == 2 && f.len() >= 10 => region2(r),
                 _ => [b' '; 2],
             };
-            self.fixes.entry(f[7].to_ascii_uppercase().into()).or_default().push(XpFix { lat, lon, region, kind });
+            if found.len() >= room {
+                return Err(TooManyEntries);
+            }
+            found.push((f[7].to_ascii_uppercase().into(), XpFix { lat, lon, region, kind }));
         }
+        self.merge_fixes(found);
+        Ok(())
     }
 
     fn node(&mut self, keys: &mut HashMap<(Box<str>, [u8; 2], u8), u32>, ident: &str, region: [u8; 2], kind: u8) -> Option<u32> {
@@ -138,18 +226,42 @@ impl XpIndex {
     }
 
     /// Airway segments; call after the fixes and navaids are in (1100 refers to them by ident/region).
-    pub fn add_airways(&mut self, text: impl BufRead) {
+    /// A segment with more than [`MAX_AIRWAY_NAMES`] names is skipped; a file that would take the
+    /// index beyond [`MAX_ENTRIES`] is dropped as a whole (none of its nodes or segments stay).
+    pub fn add_airways(&mut self, text: impl BufRead) -> Result<(), TooManyEntries> {
+        self.add_airways_within(text, MAX_ENTRIES)
+    }
+
+    fn add_airways_within(&mut self, text: impl BufRead, budget: usize) -> Result<(), TooManyEntries> {
+        let nodes_before = self.nodes.len();
+        let mut airways: HashMap<Box<str>, Vec<(u32, u32)>> = HashMap::new();
         let mut keys: HashMap<(Box<str>, [u8; 2], u8), u32> = HashMap::new();
         // 640 format: nodes by ident + rounded position
         let mut pos_keys: HashMap<(Box<str>, i64, i64), u32> = HashMap::new();
+        let mut segments = 0usize;
         for line in data_lines(text) {
+            if self.entries + (self.nodes.len() - nodes_before) + segments > budget {
+                self.nodes.truncate(nodes_before);
+                return Err(TooManyEntries);
+            }
             let f: Vec<&str> = line.split_whitespace().collect();
-            let (a, b, names) = if f.len() >= 11 && f[1].len() <= 2 && f[2].parse::<u8>().is_ok() {
+            let v1100 = f.len() >= 11 && f[1].len() <= 2 && f[2].parse::<u8>().is_ok();
+            let v640 = !v1100 && f.len() >= 10 && f[1].contains('.');
+            let names = match (v1100, v640) {
+                (true, _) => f[10],
+                (_, true) => f[9],
+                _ => continue,
+            };
+            let count = names.split('-').filter(|n| !n.is_empty()).count();
+            if count > MAX_AIRWAY_NAMES {
+                continue;
+            }
+            let (a, b) = if v1100 {
                 let (t1, t2) = (f[2].parse::<u8>().unwrap_or(FIX), f[5].parse::<u8>().unwrap_or(FIX));
                 let a = self.node(&mut keys, &f[0].to_ascii_uppercase(), region2(f[1]), t1);
                 let b = self.node(&mut keys, &f[3].to_ascii_uppercase(), region2(f[4]), t2);
-                (a, b, f[10])
-            } else if f.len() >= 10 && f[1].contains('.') {
+                (a, b)
+            } else {
                 let mut by_pos = |ident: &str, lat: &str, lon: &str| -> Option<u32> {
                     let (lat, lon) = coord(lat, lon)?;
                     let key: (Box<str>, i64, i64) =
@@ -159,15 +271,24 @@ impl XpIndex {
                         (self.nodes.len() - 1) as u32
                     }))
                 };
-                (by_pos(f[0], f[1], f[2]), by_pos(f[3], f[4], f[5]), f[9])
-            } else {
-                continue;
+                (by_pos(f[0], f[1], f[2]), by_pos(f[3], f[4], f[5]))
             };
             let (Some(a), Some(b)) = (a, b) else { continue };
             for name in names.split('-').filter(|n| !n.is_empty()) {
-                self.airways.entry(name.to_ascii_uppercase().into()).or_default().push((a, b));
+                airways.entry(name.to_ascii_uppercase().into()).or_default().push((a, b));
             }
+            segments += count;
         }
+        let added = self.nodes.len() - nodes_before + segments;
+        if self.entries + added > budget {
+            self.nodes.truncate(nodes_before);
+            return Err(TooManyEntries);
+        }
+        self.entries += added;
+        for (name, segs) in airways {
+            self.airways.entry(name).or_default().extend(segs);
+        }
+        Ok(())
     }
 
     /// Every fix/navaid with this ident.
@@ -252,13 +373,31 @@ impl XpIndex {
     }
 }
 
-/// X-Plane install folders named in `%LOCALAPPDATA%\x-plane_install_{12,11}.txt`, existing ones only.
+/// A network or device path (`\\server\share\…`, `//server/…`, `\\?\UNC\…`, `\\.\…`): opening
+/// it makes Windows connect to that host over SMB and offer the user's NTLM login. `\\?\C:\…`
+/// is a drive path; mapped drives (`Z:\…`) stay allowed. The same rule as the app's
+/// `data::is_unc` (app/src-tauri/src/data.rs), which this crate cannot depend on.
+fn is_unc(raw: &str) -> bool {
+    let r = raw.trim().replace('/', "\\");
+    if let Some(rest) = r.strip_prefix(r"\\?\") {
+        let b = rest.as_bytes();
+        return !(b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && b[2] == b'\\');
+    }
+    r.starts_with(r"\\")
+}
+
+/// X-Plane install folders named in `%LOCALAPPDATA%\x-plane_install_{12,11}.txt`, existing ones
+/// only. Network paths (UNC) are skipped without being touched.
 pub fn install_dirs(local_app_data: Option<&Path>) -> Vec<PathBuf> {
     let Some(base) = local_app_data else { return Vec::new() };
     let mut out: Vec<PathBuf> = Vec::new();
     for name in ["x-plane_install_12.txt", "x-plane_install_11.txt"] {
         let Ok(text) = std::fs::read_to_string(base.join(name)) else { continue };
         for line in text.lines().map(str::trim).filter(|l| !l.is_empty()) {
+            if is_unc(line) {
+                log::info!("X-Plane install on a network path not read (listed in {name})");
+                continue;
+            }
             let p = PathBuf::from(line.trim_end_matches(['/', '\\']));
             if p.is_dir() && !out.contains(&p) {
                 out.push(p);
@@ -297,14 +436,24 @@ pub fn load(installs: &[PathBuf]) -> Option<XpIndex> {
         }
         let started = Instant::now();
         let mut idx = XpIndex { folder: dir.clone(), ..XpIndex::default() };
-        if let Some(r) = open(&files[0]) {
-            idx.add_fixes(r);
+        let dropped = |file: &Option<PathBuf>| {
+            let name = file.as_deref().and_then(Path::file_name).map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            log::warn!("X-Plane nav file {name} dropped: more than {MAX_ENTRIES} entries");
+        };
+        if let Some(r) = open(&files[0])
+            && idx.add_fixes(r).is_err()
+        {
+            dropped(&files[0]);
         }
-        if let Some(r) = open(&files[1]) {
-            idx.add_navaids(r);
+        if let Some(r) = open(&files[1])
+            && idx.add_navaids(r).is_err()
+        {
+            dropped(&files[1]);
         }
-        if let Some(r) = open(&files[2]) {
-            idx.add_airways(r);
+        if let Some(r) = open(&files[2])
+            && idx.add_airways(r).is_err()
+        {
+            dropped(&files[2]);
         }
         log::info!(
             "X-Plane nav data from {}: {} fixes/navaids, {} airways in {} ms",
@@ -392,9 +541,9 @@ mod tests {
     pub(crate) fn fixture_index() -> XpIndex {
         let rd = |n: &str| BufReader::new(std::fs::File::open(fixture(n)).unwrap());
         let mut idx = XpIndex::default();
-        idx.add_fixes(rd("earth_fix.dat"));
-        idx.add_navaids(rd("earth_nav.dat"));
-        idx.add_airways(rd("earth_awy.dat"));
+        idx.add_fixes(rd("earth_fix.dat")).unwrap();
+        idx.add_navaids(rd("earth_nav.dat")).unwrap();
+        idx.add_airways(rd("earth_awy.dat")).unwrap();
         idx
     }
 
@@ -468,5 +617,79 @@ mod tests {
         // the second call does not start a second parse and gets the result
         let idx = nav.index_from(Duration::from_secs(5), || panic!("parsed twice")).unwrap().unwrap();
         assert_eq!(idx.candidates("FFM").len(), 1);
+    }
+
+    const AWY_HEADER: &str = "I\n1100 Version - crafted VectaSim test file.\n\n";
+
+    #[test]
+    fn a_crafted_airway_file_cannot_blow_up_the_index() {
+        let tmp = tempfile::tempdir().unwrap();
+        let xp = tmp.path().join("X-Plane 12");
+        let custom = xp.join("Custom Data");
+        std::fs::create_dir_all(&custom).unwrap();
+        std::fs::copy(fixture("earth_fix.dat"), custom.join("earth_fix.dat")).unwrap();
+        std::fs::copy(fixture("earth_nav.dat"), custom.join("earth_nav.dat")).unwrap();
+        // one segment with 20 names (more than MAX_AIRWAY_NAMES), one line of ~2 MB with
+        // 300 000 names (beyond MAX_LINE_BYTES), a line that is not UTF-8, and real segments around them
+        let many: Vec<String> = (0..20).map(|i| format!("N{i}")).collect();
+        let huge: Vec<String> = (0..300_000).map(|i| format!("H{i}")).collect();
+        let mut awy = String::from(AWY_HEADER);
+        awy.push_str("ANEKI ED 11 KOPOR ED 11 N 2 245 460 UZ650\n");
+        awy.push_str(&format!("ANEKI ED 11 KOPOR ED 11 N 2 245 460 {}\n", many.join("-")));
+        awy.push_str(&format!("KOPOR ED 11 FFM ED 3 N 2 245 460 {}\n", huge.join("-")));
+        let mut bytes = awy.into_bytes();
+        bytes.extend_from_slice(b"KOPOR ED 11 FFM ED 3 N 2 245 460 \xff\xfe\n");
+        bytes.extend_from_slice(b"KOPOR ED 11 FFM ED 3 N 2 245 460 UZ650\n99\n");
+        std::fs::write(custom.join("earth_awy.dat"), bytes).unwrap();
+        let idx = load(std::slice::from_ref(&xp)).unwrap();
+        assert_eq!(idx.airway_count(), 1, "only UZ650");
+        assert!(!idx.airways.contains_key("N0") && !idx.airways.contains_key("H0"));
+        let via = idx.airway("UZ650", &cand("ANEKI", 49.72, 8.47), &cand("FFM", 50.05, 8.64)).unwrap();
+        assert_eq!(via.into_iter().map(|c| c.ident).collect::<Vec<_>>(), ["KOPOR"]);
+        assert!(idx.entry_count() < 20, "{}", idx.entry_count());
+    }
+
+    #[test]
+    fn a_file_beyond_the_entry_budget_is_dropped_whole() {
+        let rd = |n: &str| BufReader::new(std::fs::File::open(fixture(n)).unwrap());
+        // fixes: the fixture has 7 data lines; a budget of 3 drops all of them
+        let mut idx = XpIndex::default();
+        assert_eq!(idx.add_fixes_within(rd("earth_fix.dat"), 3), Err(TooManyEntries));
+        assert_eq!((idx.fix_count(), idx.entry_count()), (0, 0));
+        idx.add_fixes(rd("earth_fix.dat")).unwrap();
+        let fixes = idx.entry_count();
+        assert_eq!(fixes, idx.fix_count());
+        assert_eq!(idx.add_navaids_within(rd("earth_nav.dat"), fixes + 1), Err(TooManyEntries));
+        assert_eq!(idx.entry_count(), fixes);
+        idx.add_navaids(rd("earth_nav.dat")).unwrap();
+        let before = idx.entry_count();
+        // airways: 5 000 segments between known fixes with 8 names each – far beyond a budget of 500
+        let mut awy = String::from(AWY_HEADER);
+        for i in 0..5_000 {
+            let names: Vec<String> = (0..MAX_AIRWAY_NAMES).map(|k| format!("W{i}X{k}")).collect();
+            awy.push_str(&format!("ANEKI ED 11 KOPOR ED 11 N 2 245 460 {}\n", names.join("-")));
+        }
+        assert_eq!(idx.add_airways_within(awy.as_bytes(), before + 500), Err(TooManyEntries));
+        assert_eq!((idx.airway_count(), idx.nodes.len(), idx.entry_count()), (0, 0, before), "nothing of the file stays");
+        // the real file still fits afterwards
+        idx.add_airways(rd("earth_awy.dat")).unwrap();
+        assert_eq!(idx.airway_count(), 3);
+        assert!(idx.entry_count() <= MAX_ENTRIES);
+    }
+
+    #[test]
+    fn network_install_paths_are_not_touched() {
+        for p in [r"\\nas\X-Plane 12", r"//nas/X-Plane 12", r"\\?\UNC\nas\x", r"\\.\pipe\x", r" \\nas\x"] {
+            assert!(is_unc(p), "{p}");
+        }
+        for p in [r"C:\X-Plane 12", r"\\?\C:\X-Plane 12", r"Z:\X-Plane 12", r"D:/X-Plane 12"] {
+            assert!(!is_unc(p), "{p}");
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let xp = tmp.path().join("X-Plane 12");
+        std::fs::create_dir_all(&xp).unwrap();
+        let list = format!("\\\\nas.invalid\\share\\X-Plane 12\r\n//nas.invalid/share/X-Plane 11\r\n{}\r\n", xp.display());
+        std::fs::write(tmp.path().join("x-plane_install_12.txt"), list).unwrap();
+        assert_eq!(install_dirs(Some(tmp.path())), vec![xp]);
     }
 }

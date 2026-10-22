@@ -28,11 +28,17 @@ import {
 import "./trends.css";
 import { isRated } from "./rated";
 import { profileName, profileOf, profileTooltip, useApproachProfiles } from "./approachProfiles";
+import { latestOnly } from "../latest";
+import ProfileTip from "./ProfileTip";
 
 // ---- shared facts store -------------------------------------------------------------------
 // One request per list for every consumer (debrief, logbook detail, after-flight card, trends);
 // reloaded on `logbook:changed` (all), `approach:facts` (approaches) and `flight:metrics`
-// (per-flight metrics: at flight end and while older flights are filled in the background).
+// (per-flight metrics: at flight end and while older flights are filled in the background); a
+// runway correction emits `logbook:changed` from the frontend (RunwayEditor).
+// Each list applies only the answer to its newest request: at flight end `logbook:changed`,
+// `approach:facts` and `flight:metrics` arrive within milliseconds, and the first metrics request
+// (sent before the row is written) can answer last.
 
 /** Upper limit of both commands. */
 const FETCH_LIMIT = 200;
@@ -56,45 +62,52 @@ function set(patch: Partial<HistoryFacts>) {
   subs.forEach((s) => s());
 }
 
+const latestLandings = latestOnly();
+const latestApproaches = latestOnly();
+const latestMetrics = latestOnly();
+
 function loadLandings() {
+  const isLatest = latestLandings();
   invoke<LandingFactsResult>("landing_facts_recent", { limit: FETCH_LIMIT, includeDemo: true })
     // unrated touchdowns are no points in trends and rankings (the backend leaves them out already)
-    .then((r) => set({ landings: r.facts.filter(isRated), error: null }))
-    .catch((e) => set({ landings: state.landings ?? [], error: String(e) }));
+    .then((r) => isLatest() && set({ landings: r.facts.filter(isRated), error: null }))
+    .catch((e) => isLatest() && set({ landings: state.landings ?? [], error: String(e) }));
 }
 
 function loadApproaches() {
+  const isLatest = latestApproaches();
   invoke<ApproachFactsResult>("approach_facts_recent", { limit: FETCH_LIMIT, includeDemo: true })
-    .then((r) => set({ approaches: r.facts }))
+    .then((r) => isLatest() && set({ approaches: r.facts }))
     // the approach is an extra; landings work without it
-    .catch(() => set({ approaches: state.approaches ?? [] }));
+    .catch(() => isLatest() && set({ approaches: state.approaches ?? [] }));
 }
 
 function loadMetrics() {
+  const isLatest = latestMetrics();
   invoke<FlightMetricsResult>("flight_metrics_recent", { limit: FETCH_LIMIT, includeDemo: true })
-    .then((r) => set({ metrics: r.facts }))
+    .then((r) => isLatest() && set({ metrics: r.facts }))
     // an extra like the approaches
-    .catch(() => set({ metrics: state.metrics ?? [] }));
+    .catch(() => isLatest() && set({ metrics: state.metrics ?? [] }));
+}
+
+function loadAll() {
+  loadLandings();
+  loadApproaches();
+  loadMetrics();
 }
 
 function subscribe(cb: () => void): () => void {
   subs.add(cb);
   if (subs.size === 1) {
     unlisten = [
-      listen("logbook:changed", () => {
-        loadLandings();
-        loadApproaches();
-        loadMetrics();
-      }),
+      listen("logbook:changed", loadAll),
       listen("approach:facts", loadApproaches),
       listen("flight:metrics", loadMetrics),
     ];
     // events were missed while nobody listened
     if (stale) {
       stale = false;
-      loadLandings();
-      loadApproaches();
-      loadMetrics();
+      loadAll();
     }
   }
   return () => {
@@ -108,6 +121,10 @@ function subscribe(cb: () => void): () => void {
 }
 
 const snapshot = () => state;
+
+/** Test seams: the store without React. */
+export const subscribeHistoryFacts = subscribe;
+export const historyFactsSnapshot = snapshot;
 
 /** The pilot's landing and approach facts (newest first, demo included), kept fresh by events. */
 export function useHistoryFacts(): HistoryFacts {
@@ -359,9 +376,9 @@ function ProfileScope({ profileId }: { profileId: string }) {
   const t = useT();
   const profiles = useApproachProfiles();
   return (
-    <p className="detail hist-profile" title={profileTooltip(profileId, profiles, t)}>
+    <ProfileTip as="p" className="detail hist-profile" tip={profileTooltip(profileId, profiles, t)}>
       {t("landingHistory.profileScope", { name: profileName(profileId, profiles, t) })}
-    </p>
+    </ProfileTip>
   );
 }
 

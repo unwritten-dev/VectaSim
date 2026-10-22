@@ -1366,21 +1366,44 @@ fn helicopter_or_stol_hop_is_a_completed_flight_with_a_landing() {
 
 #[test]
 fn low_hop_out_of_a_take_off_roll_is_flown_not_a_ground_session() {
-    // 15 s airborne below 50 ft after a take-off roll – no landing (never qualified), but
-    // it flew: completed, not discarded
+    // 15 s airborne below 50 ft after a take-off roll: it flew – completed, not discarded, and
+    // with take-off and landing time (it went back to TaxiOut as a rejected take-off and ended
+    // "completed" without either, so the statistics did not count it)
     let mut sim = Sim::new(500);
     sim.run(10.0, ground(12.0));
     sim.run(5.0, ground(50.0));
+    let lift_off = sim.wall_ms + sim.step_ms;
     sim.run(15.0, air(30.0, 0.0, 45.0));
+    let contact = sim.wall_ms + sim.step_ms;
     sim.run(10.0, ground(20.0));
     sim.run(10.0, ground(5.0));
     sim.run(40.0, |t| {
         ground(0.0)(t);
         t.engines_running = 0;
     });
-    assert!(sim.phases().ends_with(&[Takeoff, TaxiOut, Shutdown]), "{:?}", sim.phases());
-    assert_eq!(sim.session.summary().state, FlightState::Completed);
+    assert!(sim.phases().ends_with(&[Takeoff, Landing, TaxiIn, Shutdown]), "{:?}", sim.phases());
+    let s = sim.session.summary();
+    assert_eq!(s.state, FlightState::Completed);
+    assert_eq!(s.takeoff_ms, Some(lift_off), "the lift-off is the take-off time");
+    assert_eq!(s.landing_ms, Some(contact), "the ground contact is the landing time");
+    assert!(s.flight_time_ms().is_some());
     assert!(sim.session.take_discarded_flights().is_empty());
+}
+
+#[test]
+fn short_float_out_of_the_take_off_roll_stays_a_rejected_take_off() {
+    // a few seconds off the ground (a bump, a flicker) and back below 40 kt: no flight
+    let mut sim = Sim::new(500);
+    sim.run(10.0, ground(12.0));
+    sim.run(5.0, ground(50.0));
+    sim.run(4.0, air(10.0, 0.0, 45.0));
+    sim.run(10.0, ground(20.0));
+    sim.run(40.0, |t| {
+        ground(0.0)(t);
+        t.engines_running = 0;
+    });
+    assert!(sim.phases().ends_with(&[Takeoff, TaxiOut, Shutdown]), "{:?}", sim.phases());
+    assert_eq!(sim.session.summary().state, FlightState::Discarded);
 }
 
 #[test]
@@ -1415,22 +1438,199 @@ fn airborne_phase_on_the_ground_without_qualification_taxies_in() {
     assert_eq!(sim.session.summary().state, FlightState::Completed, "a start in the air flew");
 }
 
-#[test]
-fn aborted_pushback_parks_again_and_ends() {
-    // Pushback had no way out without an engine start
-    let mut sim = Sim::new(500);
+/// Parked, then pushed back by the tug for 20 s (brake released, engines off).
+fn push_back(sim: &mut Sim) -> u64 {
     sim.run(10.0, parked);
+    let push_start = sim.wall_ms;
     sim.run(20.0, |t| {
         ground(3.0)(t);
         t.engines_running = 0;
     });
     assert_eq!(sim.session.phase(), Pushback);
+    push_start
+}
+
+#[test]
+fn push_held_on_the_brake_before_the_engine_start_keeps_the_flight() {
+    // push, stop, parking brake, tug off, clearance, then the engine start 90 s later: the
+    // flight that began with the push goes on (it was discarded after 30 s, and a new one with
+    // a later off-block began at the taxi)
+    let mut sim = Sim::new(500);
+    let push_start = push_back(&mut sim);
+    let off_block = sim.session.summary().off_block_ms.unwrap();
+    assert!(off_block > push_start && off_block <= push_start + 2_500, "{off_block}");
     sim.run(25.0, parked);
     assert_eq!(sim.session.phase(), Pushback, "30 s dwell like TaxiOut");
-    sim.run(10.0, parked);
-    assert_eq!(sim.phases(), vec![Pushback, Shutdown]);
+    sim.run(65.0, parked);
+    assert_eq!(sim.session.phase(), Preflight, "held: back on the blocks, the flight still open");
+    assert_eq!(sim.session.summary().state, FlightState::Active);
+    sim.run(30.0, |t| {
+        ground(0.0)(t); // engine start on the brake
+        t.engines_running = 2;
+        t.parking_brake = true;
+    });
+    sim.run(20.0, ground(12.0));
+    assert_eq!(sim.phases(), vec![Pushback, Preflight, TaxiOut]);
+    assert!(sim.ended().is_empty(), "nothing ended");
+    assert!(sim.session.take_discarded_flights().is_empty());
+    assert_eq!(flight_starts(&sim), 1);
+    let s = sim.session.summary();
+    assert_eq!((s.state, s.off_block_ms), (FlightState::Active, Some(off_block)), "the push's off-block");
+    // and it flies and closes as one flight
+    sim.run(5.0, ground(90.0));
+    sim.climb(400.0, 8_000.0, 2_000.0, 220.0);
+    sim.run(90.0, air(8_000.0, 0.0, 250.0));
+    sim.approach_and_land();
+    sim.run(20.0, parked);
+    assert_eq!(sim.ended(), vec![false]);
+    let s = sim.session.summary();
+    assert_eq!((s.state, s.off_block_ms), (FlightState::Completed, Some(off_block)));
+}
+
+#[test]
+fn second_push_after_a_held_one_continues_the_flight() {
+    let mut sim = Sim::new(500);
+    push_back(&mut sim);
+    let off_block = sim.session.summary().off_block_ms;
+    sim.run(40.0, parked);
+    assert_eq!(sim.session.phase(), Preflight);
+    sim.run(10.0, |t| {
+        ground(3.0)(t);
+        t.engines_running = 0;
+    });
+    sim.run(20.0, ground(12.0));
+    assert_eq!(sim.phases(), vec![Pushback, Preflight, Pushback, TaxiOut]);
+    assert_eq!((flight_starts(&sim), sim.session.summary().off_block_ms), (1, off_block));
+}
+
+#[test]
+fn push_given_up_ends_as_a_discarded_ground_session() {
+    // pushed, parked on the brake, and nothing follows: a ground session after 15 min more
+    let mut sim = Sim::new(1000);
+    push_back(&mut sim);
+    let off_block = sim.session.summary().off_block_ms;
+    sim.run(40.0, parked);
+    assert_eq!(sim.session.phase(), Preflight);
+    sim.run(14.0 * 60.0, parked);
+    assert_eq!((sim.session.phase(), sim.session.summary().state), (Preflight, FlightState::Active), "still held");
+    sim.run(90.0, parked);
+    assert_eq!(sim.phases(), vec![Pushback, Preflight, Shutdown]);
     assert_eq!((sim.ended(), sim.session.summary().state), (vec![false], FlightState::Discarded));
+    let d = sim.session.take_discarded_flights();
+    assert_eq!(d.len(), 1);
+    assert_eq!((d[0].off_block_ms, d[0].shut_down), (off_block, true));
+    // the next taxi is a new flight
+    sim.run(20.0, ground(12.0));
+    assert_eq!((flight_starts(&sim), sim.session.summary().state), (2, FlightState::Active));
+    assert!(sim.session.summary().off_block_ms > off_block);
+}
+
+#[test]
+fn held_push_cut_off_by_a_provider_stop_is_discarded() {
+    let mut sim = Sim::new(500);
+    push_back(&mut sim);
+    sim.run(40.0, parked);
+    assert_eq!(sim.session.phase(), Preflight);
+    let ev = sim.session.interrupt(sim.wall_ms);
+    sim.events.extend(ev);
+    assert_eq!((sim.ended(), sim.session.summary().state), (vec![true], FlightState::Discarded));
     assert_eq!(sim.session.take_discarded_flights().len(), 1);
+}
+
+/// The MSFS load placeholder: 0° N / 0° E at 53 819 ft, standing still.
+fn placeholder(t: &mut Telemetry) {
+    t.on_ground = false;
+    t.latitude = 0.0;
+    t.longitude = 0.0;
+    t.altitude_msl_ft = 53_819.0;
+    t.altitude_agl_ft = 53_819.0;
+    t.ground_speed_kt = 0.0;
+    t.vertical_speed_fpm = 0.0;
+}
+
+#[test]
+fn msfs_load_placeholder_at_null_island_starts_no_flight() {
+    // after a completed flight MSFS loads the next one: AircraftLoaded, unpause, ~9 s of the
+    // placeholder, FlightLoaded, then the new aircraft at the gate
+    let mut sim = Sim::new(250);
+    sim.fly_to_cruise();
+    sim.approach_and_land();
+    sim.run(20.0, parked);
+    assert_eq!((sim.ended(), sim.session.summary().state), (vec![false], FlightState::Completed));
+    sim.sim_event(SimEvent::AircraftLoaded { path: "b".into() });
+    sim.sim_event(SimEvent::Paused { paused: false });
+    sim.run(9.0, placeholder);
+    // also a small offset inside the box
+    sim.run(1.0, |t| {
+        placeholder(t);
+        t.latitude = 0.004;
+        t.longitude = -0.008;
+    });
+    assert_eq!(sim.session.phase(), Shutdown, "{:?}", sim.phases());
+    sim.sim_event(SimEvent::FlightLoaded { path: "b.FLT".into() });
+    sim.lat += 3.0;
+    sim.run(20.0, parked);
+    assert_eq!(flight_starts(&sim), 1, "no ghost flight: {:?}", sim.phases());
+    assert_eq!(sim.ended(), vec![false]);
+    assert!(sim.session.take_discarded_flights().is_empty());
+    assert_eq!(sim.session.summary().state, FlightState::Completed, "the summary is still the real flight's");
+}
+
+#[test]
+fn placeholder_samples_on_connect_and_mid_flight_are_ignored() {
+    // connected while the sim loads: nothing starts until a real sample comes
+    let mut sim = Sim::new(500);
+    sim.run(9.0, placeholder);
+    assert_eq!((sim.session.phase(), sim.session.summary().state), (Preflight, FlightState::Idle));
+    assert!(sim.events.is_empty());
+    // a placeholder in the middle of a cruise is no teleport and no distance
+    sim.fly_to_cruise();
+    let before = sim.session.summary().distance_nm;
+    sim.run(3.0, placeholder);
+    sim.run(2.0, air(8_000.0, 0.0, 250.0));
+    let s = sim.session.summary();
+    assert!(!s.integrity.teleport_detected);
+    assert!(s.distance_nm - before < 1.0, "{} nm", s.distance_nm - before);
+    assert_eq!(sim.session.phase(), Cruise);
+}
+
+#[test]
+fn start_in_the_air_far_up_and_standing_still_is_no_flight() {
+    // a placeholder somewhere else than 0/0: above 45 000 ft AGL at 0 kt
+    let mut sim = Sim::new(500);
+    sim.run(9.0, |t| {
+        placeholder(t);
+        t.latitude = 50.0;
+        t.longitude = 8.0;
+    });
+    assert_eq!((sim.session.phase(), sim.session.summary().state), (Preflight, FlightState::Idle));
+    // a real aircraft up there moves: that is a start in the air
+    sim.run(2.0, air(41_000.0, 0.0, 480.0));
+    assert_eq!((sim.session.phase(), sim.session.summary().state), (Cruise, FlightState::Active));
+}
+
+#[test]
+fn start_in_the_air_counts_as_flown_only_once_it_moved() {
+    // standing still at 3 000 ft (a load glitch, a frozen sim) until the next FlightLoaded
+    let mut sim = Sim::new(500);
+    sim.run(9.0, air(3_000.0, 0.0, 0.0));
+    assert_eq!((sim.session.phase(), sim.session.summary().state), (Cruise, FlightState::Active));
+    sim.sim_event(SimEvent::FlightLoaded { path: "x.FLT".into() });
+    assert_eq!((sim.ended(), sim.session.summary().state), (vec![true], FlightState::Discarded));
+    assert_eq!(sim.session.take_discarded_flights().len(), 1);
+
+    // flying at 120 kt for a few seconds: a flight, interrupted
+    let mut sim = Sim::new(500);
+    sim.run(9.0, air(3_000.0, 0.0, 120.0));
+    sim.sim_event(SimEvent::FlightLoaded { path: "x.FLT".into() });
+    assert_eq!((sim.ended(), sim.session.summary().state), (vec![true], FlightState::Interrupted));
+    assert!(sim.session.take_discarded_flights().is_empty());
+
+    // under 3 s of movement is not enough yet
+    let mut sim = Sim::new(500);
+    sim.run(2.0, air(3_000.0, -800.0, 0.0));
+    sim.sim_event(SimEvent::FlightLoaded { path: "x.FLT".into() });
+    assert_eq!(sim.session.summary().state, FlightState::Discarded);
 }
 
 #[test]

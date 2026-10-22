@@ -48,6 +48,20 @@ export function samplesToPoints(samples: TrackSample[], tintFrom = -1, tint?: st
 }
 
 /**
+ * Track points of a recorded flight (tinted from `tintFrom(samples)` on) and their 3D heights,
+ * cached by the samples and the tint colour: a redraw of the same flight (marker data arriving
+ * late, a language change, the 3D switch) hands the curtain the same array, so it is not rebuilt.
+ */
+export function flightPointsCache(tintFrom: (samples: TrackSample[]) => number) {
+  let last: { samples: TrackSample[]; tint: string; points: TrackPoint[]; ground?: TrackPoint[] } | null = null;
+  return (samples: TrackSample[], tint: string) => {
+    if (!last || last.samples !== samples || last.tint !== tint) last = { samples, tint, points: samplesToPoints(samples, tintFrom(samples), tint) };
+    const l = last;
+    return { points: l.points, ground: () => (l.ground ??= withGroundHeights(l.points)) };
+  };
+}
+
+/**
  * One short LineString per consecutive pair, carrying the altitude, so the line can be
  * coloured by altitude with a plain data-driven `line-color` (no line-gradient/lineMetrics).
  */
@@ -170,6 +184,15 @@ export function addCurtainLayers(
       feedFallback(map, entry);
     });
   replaceCustomLayer(map, layer, before);
+}
+
+/**
+ * WebGL context lost: MapLibre drops the style's custom layers without `onRemove`, so mark this
+ * map's curtain instances removed by hand – drawCurtainTrack stops syncing them until the style
+ * load after the restore adds fresh ones (audit 3 H-1).
+ */
+export function markCurtainsLost(map: maplibregl.Map) {
+  for (const e of curtains.get(map)?.values() ?? []) e.layer.removed = true;
 }
 
 /**

@@ -7,8 +7,8 @@
 // The token is only needed on the first load: the server answers it with an HttpOnly cookie, and
 // the script takes it out of the address bar (history, bookmarks) and keeps it for this tab only
 // (sessionStorage) for the WebSocket URL and the links on the start page. The start page also gets
-// it from the server (<meta name="vectasim-token">, only for an authorised request while LAN
-// access is on), so its copy URLs carry the token after a bookmark load through the cookie too;
+// it from the server (<meta name="vectasim-token">, only for a request that sent the token itself
+// while LAN access is on), so its copy URLs carry the token after a bookmark load through the cookie too;
 // the element is removed right after reading.
 (function () {
   "use strict";

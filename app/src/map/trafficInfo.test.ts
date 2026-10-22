@@ -10,6 +10,7 @@ import {
   flightRulesLabel,
   formatRegistration,
   greatCircle,
+  networkShown,
   plannedAltitude,
   registrationFromCallsign,
   registrationFromRemarks,
@@ -154,6 +155,19 @@ describe("distance and bearing", () => {
     for (let i = 1; i < line.length; i++) expect(Math.abs(line[i][0] - line[i - 1][0])).toBeLessThan(10);
     expect(line[32][0]).toBeCloseTo(-157.9 + 360, 3);
     expect(line[32][1]).toBeCloseTo(21.3, 3);
+  });
+});
+
+describe("N-4: networkShown (close the card of a network no longer shown)", () => {
+  it("both shows either network, one shows only itself, off none", () => {
+    expect(networkShown({ network: "both", shown: "both" }, "ivao")).toBe(true);
+    expect(networkShown({ network: "both", shown: "vatsim" }, "ivao")).toBe(false);
+    expect(networkShown({ network: "both", shown: "vatsim" }, "vatsim")).toBe(true);
+    expect(networkShown({ network: "both", shown: "off" }, "vatsim")).toBe(false);
+  });
+  it("older builds without shown: the enabled networks", () => {
+    expect(networkShown({ network: "ivao" }, "ivao")).toBe(true);
+    expect(networkShown({ network: "ivao" }, "vatsim")).toBe(false);
   });
 });
 

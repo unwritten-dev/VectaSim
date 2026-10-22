@@ -337,6 +337,19 @@ describe("trafficRefTile (globe: no vertex beyond the shader's tile-coordinate r
     }
   });
 
+  it("H-9: a centre beyond 180° (following across the date line) keeps the zoom in its world copy", () => {
+    const [cx0, cy] = merc(-175, 0);
+    const cx = cx0 + 1; // 185°
+    const t = trafficRefTile(cx, cy, 9.4, [
+      [cx + 0.0001, cy],
+      [cx - 0.0001, cy],
+    ]);
+    expect(t.tz).toBe(9);
+    expect(t.wrap).toBe(1);
+    const n = 2 ** t.tz;
+    expect(Math.abs(((cx - t.wrap) * n - t.tx) * 8192)).toBeLessThan(8192);
+  });
+
   it("falls back to zoom 0 at worst", () => {
     expect(trafficRefTile(0.5, 0.5, 12, [[0.01, 0.02], [0.99, 0.98]]).tz).toBeLessThanOrEqual(2);
   });

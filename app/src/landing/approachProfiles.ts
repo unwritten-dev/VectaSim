@@ -89,23 +89,39 @@ export interface ApproachProfilesResult {
 
 // ---- shared list ----------------------------------------------------------------------------
 
-let list: ApproachProfilesResult | null = null;
+/** The shared list and whether it is loading, loaded or failed (`list` keeps the last good one). */
+export interface ApproachProfilesState {
+  status: "loading" | "ok" | "error";
+  list: ApproachProfilesResult | null;
+}
+
+let state: ApproachProfilesState = { status: "loading", list: null };
 const subs = new Set<() => void>();
 let unlisten: Promise<() => void> | null = null;
 let loading = false;
+/** An event / reload arrived while a load was running: load once more when it ends. */
+let again = false;
+
+function set(next: ApproachProfilesState) {
+  state = next;
+  subs.forEach((s) => s());
+}
 
 function load() {
-  if (loading) return;
+  if (loading) {
+    again = true;
+    return;
+  }
   loading = true;
+  again = false;
+  if (state.status === "error") set({ ...state, status: "loading" });
   invoke<ApproachProfilesResult>("approach_profiles")
-    .then((r) => {
-      list = r;
-      subs.forEach((s) => s());
-    })
+    .then((r) => set({ status: "ok", list: r }))
     // without the list the names fall back to the ids / built-in names
-    .catch(() => {})
+    .catch(() => set({ status: "error", list: state.list }))
     .finally(() => {
       loading = false;
+      if (again) load();
     });
 }
 
@@ -124,14 +140,20 @@ function subscribe(cb: () => void): () => void {
   };
 }
 
-const snapshot = () => list;
+const snapshot = () => state;
+const listSnapshot = () => state.list;
 
 /** The built-in and imported profiles (null while loading), kept fresh by `approach:profiles`. */
 export function useApproachProfiles(): ApproachProfilesResult | null {
+  return useSyncExternalStore(subscribe, listSnapshot, listSnapshot);
+}
+
+/** The list with its load state (the settings panel: "loading" / error with retry). */
+export function useApproachProfilesState(): ApproachProfilesState {
   return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
 
-/** Reload after an import / delete in this window (the event does it for the others too). */
+/** Reload after an import / delete in this window (the event does it for the others too), or as "retry". */
 export const reloadApproachProfiles = load;
 
 // ---- texts ----------------------------------------------------------------------------------
@@ -141,11 +163,15 @@ export const isBuiltinProfile = (id: string): id is BuiltinProfileId => (BUILTIN
 /** Profile id of a fact / analysis; missing (cached before profiles) = generic. */
 export const profileOf = (x: { profileId?: string | null } | null | undefined): string => x?.profileId || GENERIC_PROFILE;
 
-/** "Airbus-style profile", a custom profile's own name, or its id when it is gone. */
+/**
+ * "Airbus-style profile", a custom profile's own name, its id while the list is not there
+ * (loading or failed: not known to be gone), or "profile "x" (deleted)" when the list lacks it.
+ */
 export function profileName(id: string | null | undefined, profiles: ApproachProfilesResult | null, tr: TFunction = t): string {
   const pid = id || GENERIC_PROFILE;
   if (isBuiltinProfile(pid)) return tr(`approach.assessment.name.${pid}`);
-  const p = profiles?.profiles.find((x) => x.id === pid);
+  if (!profiles) return pid;
+  const p = profiles.profiles.find((x) => x.id === pid);
   return p ? p.name : tr("approach.assessment.unknown", { id: pid });
 }
 

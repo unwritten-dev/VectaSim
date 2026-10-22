@@ -384,3 +384,196 @@ fn approach_profile_per_airframe_resolves_and_invalidates() {
     store.merge_airframes("D-AVCT", "D-AINA", 11).unwrap();
     assert_eq!(store.get_airframe("D-AINA").unwrap().unwrap().approach_profile.as_deref(), Some("boeing"));
 }
+
+/// A recorded circuit, booked onto D-AVCT (the mock's ATC ID, type A20N).
+fn recorded_flight(store: &Store) -> String {
+    let mut rec = FlightRecorder::new(
+        store.clone(),
+        RecorderContext { provider: "mock".into(), aircraft: Some(MockFlight::aircraft()), ..Default::default() },
+    );
+    run(&mut rec, 60.0);
+    let id = rec.current_flight_id().unwrap().to_owned();
+    assert_eq!(reg_of(store, &id).as_deref(), Some("D-AVCT"));
+    id
+}
+
+/// Cache an approach fact and a metrics row for the flight, as the app does at its end.
+fn cache_results(store: &Store, id: &str) {
+    let row = vectasim_store::ApproachFactRow { outcome: "landed".into(), profile_id: Some("airbus".into()), ..Default::default() };
+    assert!(store.put_approach_facts(id, vectasim_store::APPROACH_FACTS_VERSION, &[row]).unwrap());
+    let m = vectasim_store::FlightMetricsRow {
+        version: vectasim_store::FLIGHT_METRICS_VERSION,
+        approach_profile: Some("airbus".into()),
+        ..Default::default()
+    };
+    assert!(store.put_flight_metrics(id, &m).unwrap());
+    assert_eq!(cached(store, id), (true, true));
+}
+
+/// (approach facts, flight metrics) still cached for the flight.
+fn cached(store: &Store, id: &str) -> (bool, bool) {
+    (!store.approach_facts_for_flight(id).unwrap().is_empty(), store.flight_metrics(id).unwrap().is_some())
+}
+
+fn profile_of(store: &Store, id: &str) -> String {
+    store.resolve_flight_profile(id, None, None).unwrap().0.id
+}
+
+#[test]
+fn icao_type_change_drops_the_cached_results() {
+    let store = Store::open_in_memory().unwrap();
+    let id = recorded_flight(&store);
+    assert_eq!(profile_of(&store, &id), "airbus");
+    cache_results(&store, &id);
+    let edit = |t: &str| AirframeEdit { registration: "D-AVCT".into(), icao_type: Some(t.into()), ..Default::default() };
+    // the same type again (any case) changes nothing
+    store.upsert_airframe(&edit(" a20n "), 5).unwrap();
+    assert_eq!(cached(&store, &id), (true, true), "unchanged type keeps the cache");
+    // corrected: another automatic profile
+    let a = store.upsert_airframe(&edit("c172"), 6).unwrap().unwrap();
+    assert_eq!(a.icao_type.as_deref(), Some("C172"));
+    assert_ne!(profile_of(&store, &id), "airbus");
+    assert_eq!(cached(&store, &id), (false, false), "recomputed lazily with the new profile");
+    // cleared (empty type) is a change, too
+    cache_results(&store, &id);
+    assert_eq!(store.upsert_airframe(&edit(""), 7).unwrap().unwrap().icao_type, None);
+    assert_eq!(cached(&store, &id), (false, false));
+}
+
+#[test]
+fn rebooking_and_unbooking_a_flight_drops_its_cached_results() {
+    let store = Store::open_in_memory().unwrap();
+    let id = recorded_flight(&store);
+    store
+        .upsert_airframe(
+            &AirframeEdit { registration: "D-AVCT".into(), approach_profile: Some("ga_piston".into()), ..Default::default() },
+            5,
+        )
+        .unwrap();
+    assert_eq!(profile_of(&store, &id), "ga_piston");
+    cache_results(&store, &id);
+    // unbooked: the airframe's choice no longer applies
+    assert!(store.set_flight_airframe(&id, None, 6).unwrap());
+    assert_eq!(reg_of(&store, &id), None);
+    assert_ne!(profile_of(&store, &id), "ga_piston");
+    assert_eq!(cached(&store, &id), (false, false), "unbooking drops the cache");
+    // booked onto another airframe
+    cache_results(&store, &id);
+    assert!(store.set_flight_airframe(&id, Some("D-AVCT"), 7).unwrap());
+    assert_eq!(profile_of(&store, &id), "ga_piston");
+    assert_eq!(cached(&store, &id), (false, false), "rebooking drops the cache");
+}
+
+#[test]
+fn merging_airframes_drops_the_cached_results_of_both() {
+    let store = Store::open_in_memory().unwrap();
+    let a = recorded_flight(&store);
+    let b = recorded_flight(&store);
+    assert_ne!(a, b);
+    assert!(store.set_flight_airframe(&b, Some("D-AINA"), 5).unwrap());
+    store
+        .upsert_airframe(&AirframeEdit { registration: "D-AINA".into(), approach_profile: Some("boeing".into()), ..Default::default() }, 6)
+        .unwrap();
+    store.upsert_airframe(&AirframeEdit { registration: "D-AVCT".into(), vapp_kt: Some(130.0), ..Default::default() }, 6).unwrap();
+    cache_results(&store, &a);
+    cache_results(&store, &b);
+    // D-AVCT's flight takes D-AINA's profile; D-AINA's flight takes the Vapp D-AVCT brings along
+    store.merge_airframes("D-AVCT", "D-AINA", 7).unwrap().unwrap();
+    assert_eq!(profile_of(&store, &a), "boeing");
+    assert_eq!(store.flight_vapp_kt(&b).unwrap(), Some(130.0));
+    assert_eq!(cached(&store, &a), (false, false), "flights of the merged airframe");
+    assert_eq!(cached(&store, &b), (false, false), "flights of the target");
+}
+
+#[test]
+fn deleting_an_airframe_drops_the_cached_results_of_its_flights() {
+    let store = Store::open_in_memory().unwrap();
+    let id = recorded_flight(&store);
+    store
+        .upsert_airframe(&AirframeEdit { registration: "D-AVCT".into(), approach_profile: Some("boeing".into()), ..Default::default() }, 5)
+        .unwrap();
+    cache_results(&store, &id);
+    assert!(store.delete_airframe("D-AVCT").unwrap());
+    assert_eq!(reg_of(&store, &id), None);
+    assert_ne!(profile_of(&store, &id), "boeing");
+    assert_eq!(cached(&store, &id), (false, false));
+}
+
+fn reg_of(store: &Store, id: &str) -> Option<String> {
+    store.get_flight(id).unwrap().unwrap().flight.airframe_reg
+}
+
+#[test]
+fn a_result_computed_before_an_invalidation_is_not_stored_as_current() {
+    // the backfill read the flight, the pilot changed the profile meanwhile: the old assessment
+    // must not land with the current version (it would never be recomputed)
+    let store = Store::open_in_memory().unwrap();
+    let id = recorded_flight(&store);
+    let row = vectasim_store::ApproachFactRow {
+        version: vectasim_store::APPROACH_FACTS_VERSION,
+        outcome: "landed".into(),
+        profile_id: Some("airbus".into()),
+        ..Default::default()
+    };
+    let m = vectasim_store::FlightMetricsRow {
+        version: vectasim_store::FLIGHT_METRICS_VERSION,
+        approach_profile: Some("airbus".into()),
+        ..Default::default()
+    };
+    let put = |epoch| store.put_flight_results(&id, epoch, vectasim_store::APPROACH_FACTS_VERSION, std::slice::from_ref(&row), &m).unwrap();
+    let epoch = store.results_epoch();
+    store
+        .upsert_airframe(
+            &AirframeEdit { registration: "D-AVCT".into(), approach_profile: Some("ga_piston".into()), ..Default::default() },
+            5,
+        )
+        .unwrap();
+    assert!(!put(epoch), "stale: computed with the old profile");
+    assert_eq!(cached(&store, &id), (false, false));
+    assert!(!store.flight_results_fresh(&id).unwrap());
+    // computed after the change: stored, both parts together
+    let epoch = store.results_epoch();
+    assert!(put(epoch));
+    assert_eq!(cached(&store, &id), (true, true));
+    assert!(store.flight_results_fresh(&id).unwrap());
+    // edits that change no assessment input do not discard a result in flight
+    let epoch = store.results_epoch();
+    store.upsert_airframe(&AirframeEdit { registration: "D-AVCT".into(), notes: Some("x".into()), ..Default::default() }, 6).unwrap();
+    assert_eq!(store.results_epoch(), epoch);
+    // every invalidation path raises the epoch
+    let bumps = |f: &dyn Fn()| {
+        let before = store.results_epoch();
+        f();
+        assert!(store.results_epoch() > before);
+    };
+    bumps(&|| store.invalidate_runway_facts(Some("EDDF")).map(|_| ()).unwrap());
+    bumps(&|| {
+        store.set_flight_airframe(&id, None, 7).unwrap();
+    });
+    bumps(&|| {
+        store.delete_airframe("D-AVCT").unwrap();
+    });
+    // an old metrics version is not fresh
+    assert!(store.put_flight_results(&id, store.results_epoch(), vectasim_store::APPROACH_FACTS_VERSION, &[], &m).unwrap());
+    assert!(store.flight_results_fresh(&id).unwrap());
+    store.put_flight_metrics(&id, &vectasim_store::FlightMetricsRow { version: 0, ..Default::default() }).unwrap();
+    assert!(!store.flight_results_fresh(&id).unwrap());
+}
+
+#[test]
+fn deleting_a_custom_profile_changes_setting_airframes_and_caches_together() {
+    let store = Store::open_in_memory().unwrap();
+    let id = recorded_flight(&store);
+    store.import_approach_profile(r#"{ "id": "my-va", "name": "My VA", "basedOn": "airbus" }"#).unwrap();
+    store
+        .upsert_airframe(&AirframeEdit { registration: "D-AVCT".into(), approach_profile: Some("my-va".into()), ..Default::default() }, 5)
+        .unwrap();
+    cache_results(&store, &id);
+    let epoch = store.results_epoch();
+    assert!(store.delete_approach_profile("my-va").unwrap());
+    assert!(store.results_epoch() > epoch);
+    assert!(store.custom_approach_profiles().unwrap().is_empty());
+    assert!(!store.approach_profile_exists("my-va").unwrap());
+    assert_eq!(store.get_airframe("D-AVCT").unwrap().unwrap().approach_profile, None);
+    assert_eq!(cached(&store, &id), (false, false));
+}

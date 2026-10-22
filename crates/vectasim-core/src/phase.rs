@@ -7,7 +7,8 @@
 //! |-------------------------|--------------------------------------------------------|-------|
 //! | Preflight → airborne    | start in the air (see below)                           | 0     |
 //! | Preflight → Pushback    | 0.5–8 kt, engines off, parking brake released          | 2 s   |
-//! | Pushback → Shutdown     | < 1 kt, engines off, parking brake set (push aborted)   | 30 s  |
+//! | Pushback → Preflight    | < 1 kt, engines off, parking brake set (push held, see below) | 30 s |
+//! | Preflight → Shutdown    | after a held push: still < 1 kt, engines off, parking brake set | 15 min |
 //! | Preflight → TaxiOut     | > 1 kt, engines running                                | 2 s   |
 //! | ground → Takeoff        | > 40 kt with engines running or airborne, or airborne above 50 ft AGL | 1 s |
 //! | Takeoff → Climb         | airborne and (> 1 500 ft AGL or airborne > 45 s and qualified) | 0 |
@@ -20,6 +21,7 @@
 //! | Approach → Final        | < 1 500 ft AGL                                          | 3 s   |
 //! | Approach/Final → Climb  | go-around: V/S > +500 fpm                              | 10 s  |
 //! | airborne → Landing      | on ground after having been airborne (qualified, see below) | 0 |
+//! | Takeoff → Landing       | on ground after 10 s airborne out of the take-off roll (low hop) | 0 |
 //! | airborne → TaxiIn       | on ground below 35 kt without a qualified flight (ground exit) | 5 s |
 //! | Landing → TaxiIn        | < 35 kt                                                | 3 s   |
 //! | Landing → Climb         | touch-and-go: airborne again and > 50 ft AGL           | 10 s  |
@@ -50,8 +52,12 @@
 //! strips (30 s at 200 ft) was a rejected take-off and its flight a discarded ground session.
 //! Such a hop now lands like any flight (Takeoff → Landing, the lift-off is the take-off time).
 //! [`PhaseEngine::lifted_off`] also reports a hop that stayed lower but was airborne for 10 s
-//! out of the Takeoff phase: the session counts that flight as flown. Takeoff → Climb on air
-//! time waits for the qualification, and an airborne phase that finds itself on the ground
+//! out of the Takeoff phase: the session counts that flight as flown, and its ground contact is
+//! a Landing like the qualified hop's (Takeoff → Landing: take-off time = lift-off, landing time
+//! = the contact), not a rejected take-off back to TaxiOut – that left a "completed" flight
+//! without take-off and landing time that the statistics did not count. A hover or hop that
+//! never entered Takeoff (below 50 ft and 40 kt from a ground phase) is no flight.
+//! Takeoff → Climb on air time waits for the qualification, and an airborne phase that finds itself on the ground
 //! below 35 kt without one (a start in the air that touched down at once, a stretch the
 //! qualification never covered) leaves through TaxiIn instead of staying "Cruise" on the ground
 //! for good.
@@ -71,6 +77,19 @@
 //! Time base: dwells run on a [`MonoClock`] fed with the wall-clock sample time. A backward
 //! step of the system clock counts as Δt = 0 instead of stopping the engine until the
 //! clock has caught up again; transition timestamps stay wall-clock.
+//!
+//! A push that stops on the parking brake with the engines still off is normally no abort: the
+//! tug disconnects, then the engines are started, and that can take a minute or two. Ending
+//! the flight there (as a Pushback → Shutdown after 30 s did) discarded the ground session and
+//! started a new flight at the first taxi, without the push and its off-block. So Pushback goes
+//! back to Preflight after 30 s ([`PhaseEngine::push_held`]); the session keeps the flight open,
+//! and the next "leaving the blocks" (engine start and taxi, or another push) continues it with
+//! the original off-block. Only when it stays parked like that for 15 min is it a push that was
+//! given up: Preflight → Shutdown ends it (a ground session).
+//!
+//! Start in the air, plausibility: a first sample far above any airfield (> 45 000 ft AGL) and
+//! almost standing still (< 50 kt GS) is no flight either – a sim's placeholder while it loads.
+//! Preflight stays Preflight until a believable sample comes.
 //!
 //! Block-on follows EASA ORO.FTL.105 ("parked and all engines stopped"): a stop with the
 //! parking brake set and the engines running (waiting for the stand or the marshaller)
@@ -169,8 +188,14 @@ const FT_LIFT_OFF: f64 = 50.0;
 const MS_LIFT_OFF_CONFIRM: u64 = 1_000;
 /// Start in the air: only when the first sample is above this AGL (or faster than 40 kt).
 const FT_AIRBORNE_START: f64 = 100.0;
-/// TaxiOut → Shutdown (and an aborted Pushback): stopped with all engines off this long.
+/// TaxiOut → Shutdown (and a held Pushback → Preflight): stopped with all engines off this long.
 const MS_TAXI_OUT_SHUTDOWN: u64 = 30_000;
+/// After a held push: parked with the engines off this long in Preflight is a push given up.
+const MS_PUSH_GIVEN_UP: u64 = 15 * 60_000;
+/// Start in the air, plausibility: above this AGL (MSL without a usable AGL) …
+const FT_AIRBORNE_START_IMPLAUSIBLE: f64 = 45_000.0;
+/// … slower than this is no aircraft but a placeholder.
+const KT_AIRBORNE_START_IMPLAUSIBLE: f64 = 50.0;
 /// Airborne this long out of the Takeoff phase (at any height) is a lift-off that flew.
 const MS_TAKEOFF_HOP_FLOWN: u64 = 10_000;
 /// Ground exit of an airborne phase without a qualified flight: on the ground this long.
@@ -223,6 +248,11 @@ pub struct PhaseEngine {
     continuous: bool,
     /// The latest sample showed a confirmed lift-off (see [`PhaseEngine::lifted_off`]).
     lifted_off: bool,
+    /// The Takeoff phase in progress saw 10 s of air time (a low hop, see the module doc): its
+    /// ground contact is a landing. Cleared by every phase change and context reset.
+    takeoff_hop: bool,
+    /// Preflight was entered from a held Pushback (see the module doc).
+    push_held: bool,
 }
 
 impl Default for PhaseEngine {
@@ -253,6 +283,8 @@ impl PhaseEngine {
             takeoff_lift_off: None,
             continuous: true,
             lifted_off: false,
+            takeoff_hop: false,
+            push_held: false,
         }
     }
 
@@ -273,6 +305,7 @@ impl PhaseEngine {
         self.last_skip = None;
         self.above_lift_off_since = None;
         self.lifted_off = false;
+        self.takeoff_hop = false;
         self.continuous = false;
         self.qualify_ms = if resume_airborne { MS_REQUALIFY_AFTER_RESET } else { MS_AIRBORNE_QUALIFIED };
     }
@@ -340,6 +373,12 @@ impl PhaseEngine {
     /// phase (see the module doc). Cleared when the engine is back on the blocks.
     pub fn started_airborne(&self) -> bool {
         self.started_airborne
+    }
+
+    /// Back in Preflight from a push that stopped on the parking brake with the engines off
+    /// (see the module doc): the flight it began is not over yet.
+    pub fn push_held(&self) -> bool {
+        self.push_held
     }
 
     /// Proposed next phase: (phase, since, dwell it needs, time still missing), as of the
@@ -423,13 +462,16 @@ impl PhaseEngine {
                 self.airborne_qualified = true;
                 self.qualify_ms = MS_AIRBORNE_QUALIFIED;
             }
-            self.lifted_off = confirmed
-                || self.phase == FlightPhase::Takeoff && self.continuous && now.saturating_sub(lift_off) >= MS_TAKEOFF_HOP_FLOWN;
+            let hop = self.phase == FlightPhase::Takeoff && self.continuous && now.saturating_sub(lift_off) >= MS_TAKEOFF_HOP_FLOWN;
+            self.takeoff_hop |= hop;
+            self.lifted_off = confirmed || hop;
             self.max_altitude_msl_ft = self.max_altitude_msl_ft.max(t.altitude_msl_ft);
         }
     }
 
     fn on_enter(&mut self, from: FlightPhase, phase: FlightPhase, t: &Telemetry) {
+        self.push_held = from == FlightPhase::Pushback && phase == FlightPhase::Preflight;
+        self.takeoff_hop = false;
         if from == FlightPhase::Preflight && phase.is_airborne_phase() {
             // start in the air: no take-off seen, a short stretch of air time qualifies
             self.started_airborne = true;
@@ -480,6 +522,13 @@ impl PhaseEngine {
         }
     }
 
+    /// A first airborne sample that is no aircraft: far up and standing still (see the module doc).
+    fn implausible_airborne_start(t: &Telemetry) -> bool {
+        let height = if t.altitude_agl_ft.is_finite() { t.altitude_agl_ft } else { t.altitude_msl_ft };
+        // NaN GS counts as standing still
+        height > FT_AIRBORNE_START_IMPLAUSIBLE && (t.ground_speed_kt.is_nan() || t.ground_speed_kt < KT_AIRBORNE_START_IMPLAUSIBLE)
+    }
+
     fn desired(&self, t: &Telemetry, now: u64) -> FlightPhase {
         use FlightPhase::*;
         let gs = t.ground_speed_kt;
@@ -493,6 +542,11 @@ impl PhaseEngine {
         if on_ground && self.airborne_qualified && !matches!(self.phase, Preflight | Landing | TaxiIn | Shutdown) {
             return Landing;
         }
+        // a low hop out of the take-off roll (10 s airborne below 50 ft) lands, too: a flight
+        // with take-off and landing time, not a rejected take-off (see the module doc)
+        if on_ground && self.takeoff_hop && self.phase == Takeoff {
+            return Landing;
+        }
         // From a ground phase: a take-off roll, or real air under the wheels (see the module doc).
         let taking_off = gs > KT_TAKEOFF && (engines_on || airborne) || airborne && t.altitude_agl_ft > FT_LIFT_OFF;
         // An airborne phase on the ground without a qualified flight (the Landing gate above is
@@ -502,6 +556,8 @@ impl PhaseEngine {
         }
 
         match self.phase {
+            // a placeholder far up and standing still: wait for a real sample (see the module doc)
+            Preflight if airborne && !self.seen_ground && Self::implausible_airborne_start(t) => Preflight,
             Preflight if airborne && !self.seen_ground && (t.altitude_agl_ft > FT_AIRBORNE_START || gs > KT_TAKEOFF) => {
                 Self::airborne_start_phase(t)
             }
@@ -512,6 +568,9 @@ impl PhaseEngine {
                     TaxiOut
                 } else if !engines_on && !t.parking_brake && gs > 0.5 && gs <= KT_PUSHBACK_MAX {
                     Pushback
+                } else if self.phase == Preflight && self.push_held && gs < KT_STOPPED && !engines_on && t.parking_brake {
+                    // still parked like that long after the push: it was given up (15 min dwell)
+                    Shutdown
                 } else {
                     self.phase
                 }
@@ -522,8 +581,8 @@ impl PhaseEngine {
                 } else if engines_on && gs > KT_STOPPED {
                     TaxiOut
                 } else if gs < KT_STOPPED && !engines_on && t.parking_brake {
-                    // push aborted: parked again without an engine start
-                    Shutdown
+                    // pushed and parked on the brake, engines not started yet: held, the flight goes on
+                    Preflight
                 } else {
                     Pushback
                 }
@@ -633,7 +692,8 @@ impl PhaseEngine {
             (_, Takeoff) => MS_LIFT_OFF_CONFIRM,
             (Takeoff, Climb) => 0,
             (Takeoff, TaxiOut) | (Takeoff, TaxiIn) => 3_000,
-            (TaxiOut, Shutdown) | (Pushback, Shutdown) => MS_TAXI_OUT_SHUTDOWN,
+            (TaxiOut, Shutdown) | (Pushback, Preflight) => MS_TAXI_OUT_SHUTDOWN,
+            (Preflight, Shutdown) => MS_PUSH_GIVEN_UP,
             (from, TaxiIn) if from.is_airborne_phase() => MS_GROUND_EXIT,
             (Climb, Cruise) | (Descent, Cruise) => 60_000,
             (Climb, Descent) | (Cruise, Descent) | (Cruise, Climb) | (Descent, Climb) => 30_000,

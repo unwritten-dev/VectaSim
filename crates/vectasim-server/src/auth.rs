@@ -11,9 +11,11 @@
 //!   (`history.replaceState`), so it does not stay in the browser history or in bookmarks;
 //!   a bookmark without it keeps working through the cookie. A cookie with a token that is
 //!   no longer valid (Regenerate, LAN access off) is deleted by the next answer (`Max-Age=0`).
-//! * The start page (`/`) of an authorised request carries the token in a `<meta>` element
-//!   while LAN access is on, so its copy URLs for OBS on another PC work even when the page
-//!   was opened from a bookmark through the cookie (the JS reads and removes it).
+//! * The start page (`/`) of a request that sent the valid token itself (query, header or
+//!   cookie) carries it in a `<meta>` element while LAN access is on, so its copy URLs for OBS
+//!   on another PC work even when the page was opened from a bookmark through the cookie (the
+//!   JS reads and removes it). A token-free loopback request gets the empty element, so a local
+//!   process cannot read the LAN token with a plain `GET /`.
 //! * Token-free means: the peer is a loopback address **and** the `Host` header names the
 //!   loopback (`127.0.0.1`, `localhost`, `[::1]`). A web page that rebinds its own domain to
 //!   127.0.0.1 (DNS rebinding) sends its own `Host` and is refused.

@@ -34,6 +34,9 @@ import AirframeCard from "./airframes/AirframeCard";
 import { navigate } from "./airframes/navigation";
 import { Modal } from "./ui/Modal";
 import { ROTATION_FAST_DEG_S, ROTATION_SLOW_DEG_S, flightMetrics, fmtDegS, rotationBand, trackEvents, type FlightMetrics } from "./trackEvents";
+import { useApproachRevision } from "./landing/approachChanges";
+import { latestOnly } from "./latest";
+import { isFullscreenKey } from "./trackFullscreenKey";
 
 /** The flight is the one being recorded (state active, not in the Papierkorb): it cannot be deleted. */
 export const isRecording = (f: Pick<FlightRow, "state">, trashed = false): boolean => f.state === "active" && !trashed;
@@ -260,7 +263,7 @@ export default function FlightDetail({ detail, track, onDelete, deleteRequest, o
           </div>
         ) : (
           <>
-          <LandingSummary flightId={f.id} touchdowns={detail.touchdowns.length} updatedMs={f.updatedMs} />
+          <LandingSummary flightId={f.id} registration={bookedRegistration(f)} touchdowns={detail.touchdowns.length} updatedMs={f.updatedMs} />
           <HistoryPanel flightId={f.id} />
           <details className="fold">
             <summary>{t("logbook.detail.allLandings", { count: detail.touchdowns.length })}</summary>
@@ -603,19 +606,29 @@ const EXPORT_FORMATS = [
 
 type Pos = { latitude: number; longitude: number } | null;
 
-/** The flight's approaches (approach_analysis) for the path markers; [] while recording or when unavailable. */
-function useApproaches(flightId: string, settled: boolean, hasTrack: boolean): ApproachAnalysis[] {
+/** Registration whose fleet changes (Vapp, landing flaps, profile) re-rate this flight. */
+const bookedRegistration = (f: FlightRow): string | null => f.airframeReg || effectiveRegistration(f) || null;
+
+/** Same list as before (deep equal): keep the old reference so markers and charts do not redraw. */
+const sameList = (a: ApproachAnalysis[], b: ApproachAnalysis[]): boolean => a === b || JSON.stringify(a) === JSON.stringify(b);
+
+/**
+ * The flight's approaches (approach_analysis) for the path markers and the metrics row; [] while
+ * recording or when unavailable. Reloaded (debounced, newest answer only) when a fleet or profile
+ * change or a runway correction may have re-rated the flight (`useApproachRevision`); a failed
+ * reload keeps what is shown.
+ */
+function useApproaches(flightId: string, registration: string | null, settled: boolean, hasTrack: boolean): ApproachAnalysis[] {
   const [list, setList] = useState<{ id: string; list: ApproachAnalysis[] } | null>(null);
+  const [latest] = useState(latestOnly);
+  const rev = useApproachRevision(flightId, registration);
   useEffect(() => {
     if (!settled || !hasTrack) return;
-    let live = true;
+    const isLatest = latest();
     invoke<ApproachAnalysis[]>("approach_analysis", { flightId })
-      .then((l) => live && setList({ id: flightId, list: l }))
-      .catch(() => live && setList({ id: flightId, list: [] }));
-    return () => {
-      live = false;
-    };
-  }, [flightId, settled, hasTrack]);
+      .then((l) => isLatest() && setList((prev) => (prev?.id === flightId && sameList(prev.list, l) ? prev : { id: flightId, list: l })))
+      .catch(() => isLatest() && setList((prev) => (prev?.id === flightId ? prev : { id: flightId, list: [] })));
+  }, [flightId, settled, hasTrack, rev, latest]);
   return list?.id === flightId ? list.list : EMPTY_APPROACHES;
 }
 const EMPTY_APPROACHES: ApproachAnalysis[] = [];
@@ -628,7 +641,8 @@ const EMPTY_APPROACHES: ApproachAnalysis[] = [];
 function FlightTrackView({ detail, track, departure, arrival, route }: { detail: Detail; track: TrackSample[]; departure: Pos; arrival: Pos; route: string }) {
   const t = useT();
   const f = detail.flight;
-  const approaches = useApproaches(f.id, f.state !== "active", track.length > 1);
+  // the full-screen view shows this same block (re-parented), so it follows every reload too
+  const approaches = useApproaches(f.id, bookedRegistration(f), f.state !== "active", track.length > 1);
   const events = useMemo(() => trackEvents(track, approaches, detail.touchdowns), [track, approaches, detail.touchdowns]);
   const metrics = useMemo(() => flightMetrics(track, approaches, detail.touchdowns), [track, approaches, detail.touchdowns]);
   const [full, setFull] = useState(false);
@@ -644,13 +658,11 @@ function FlightTrackView({ detail, track, departure, arrival, route }: { detail:
   }, [full, fullSlot, host]);
   useEffect(() => setFull(false), [f.id]);
   const toggle = () => setFull((v) => !v);
-  const isF = (e: { key: string; ctrlKey: boolean; altKey: boolean; metaKey: boolean; target: EventTarget | null }) =>
-    e.key.toLowerCase() === "f" && !e.ctrlKey && !e.altKey && !e.metaKey && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement);
   const body = (
     <div
       className="flight-track-body"
       onKeyDown={(e) => {
-        if (!full && isF(e)) {
+        if (!full && isFullscreenKey(e)) {
           e.preventDefault();
           setFull(true);
         }
@@ -664,7 +676,7 @@ function FlightTrackView({ detail, track, departure, arrival, route }: { detail:
   return (
     <>
       <div ref={inlineRef} className="flight-track-slot" />
-      <FlightMetricsRow m={metrics} />
+      <FlightMetricsRow m={metrics} assessWindow={assessedWindow(approaches)} />
       {full && (
         <Modal
           className="track-fullscreen"
@@ -672,7 +684,8 @@ function FlightTrackView({ detail, track, departure, arrival, route }: { detail:
           onClose={() => setFull(false)}
           returnFocus={returnFocus}
           onKeyDown={(e) => {
-            if (isF(e)) {
+            // the dialog's key handler is window-wide: only keys from inside the dialog
+            if (isFullscreenKey(e, fullSlot?.closest<HTMLElement>('[role="dialog"]'))) {
               e.preventDefault();
               setFull(false);
             }
@@ -692,12 +705,23 @@ function FlightTrackView({ detail, track, departure, arrival, route }: { detail:
   );
 }
 
+/** Assessment window (top → bottom, ft) of the approach the metrics come from: the last landed one, else the last. */
+function assessedWindow(approaches: ApproachAnalysis[]): { top: number; bottom: number } {
+  const a = [...approaches].reverse().find((x) => x.outcome.kind === "landed") ?? approaches[approaches.length - 1];
+  return { top: a?.config.windowTopFt ?? DEFAULT_WINDOW.top, bottom: a?.config.windowBottomFt ?? DEFAULT_WINDOW.bottom };
+}
+/** ApproachConfig::default() (before the analysis arrived). */
+const DEFAULT_WINDOW = { top: 1000, bottom: 50 };
+/** The two fixed gates of the core (approach.rs), labelled like the debrief tiles. */
+const GATE_1000_FT = 1000;
+const GATE_500_FT = 500;
+
 /**
  * The flight's metrics in one compact row under the track (the same derivation the backend
  * stores for the comparisons): rotation, gear down, landing flaps, exceedances, gates. Hidden
  * when nothing is determinable (no take-off and no landing in the track).
  */
-function FlightMetricsRow({ m }: { m: FlightMetrics }) {
+function FlightMetricsRow({ m, assessWindow: w }: { m: FlightMetrics; assessWindow: { top: number; bottom: number } }) {
   const t = useT();
   const degS = fmtDegS;
   const band = m.rotationRateDegS != null ? rotationBand(m.rotationRateDegS) : "normal";
@@ -718,13 +742,13 @@ function FlightMetricsRow({ m }: { m: FlightMetrics }) {
         size="sm"
         label={t("flightMetrics.gearDown")}
         value={fmt(m.gearDownAglFt, 0)}
-        unit="ft AGL"
+        unit={t("flightMetrics.unitAgl")}
         sub={m.gearDownDistNm != null ? t("flightMetrics.gearDownSub", { dist: fmt(m.gearDownDistNm, 1, "nm") }) : undefined}
       />
-      <Stat size="sm" label={t("flightMetrics.landingFlaps")} value={fmt(m.landingFlapsAglFt, 0)} unit="ft AGL" />
-      <Stat size="sm" label={t("flightMetrics.exceedances")} value={fmt(m.exceedances, 0)} sub={m.exceedances != null ? t("flightMetrics.exceedancesSub") : undefined} />
-      <Stat size="sm" label={t("flightMetrics.gate1000")} value={gate(m.stable1000)} warn={m.stable1000 === false ? t("flightMetrics.gateUnstable") : null} />
-      <Stat size="sm" label={t("flightMetrics.gate500")} value={gate(m.stable500)} warn={m.stable500 === false ? t("flightMetrics.gateUnstable") : null} />
+      <Stat size="sm" label={t("flightMetrics.landingFlaps")} value={fmt(m.landingFlapsAglFt, 0)} unit={t("flightMetrics.unitAgl")} />
+      <Stat size="sm" label={t("flightMetrics.exceedances")} value={fmt(m.exceedances, 0)} sub={m.exceedances != null ? t("flightMetrics.exceedancesSub", { top: fmt(w.top, 0, "ft"), bottom: fmt(w.bottom, 0, "ft") }) : undefined} />
+      <Stat size="sm" label={t("flightMetrics.gate", { gate: fmt(GATE_1000_FT, 0, "ft") })} value={gate(m.stable1000)} warn={m.stable1000 === false ? t("flightMetrics.gateUnstable") : null} />
+      <Stat size="sm" label={t("flightMetrics.gate", { gate: fmt(GATE_500_FT, 0, "ft") })} value={gate(m.stable500)} warn={m.stable500 === false ? t("flightMetrics.gateUnstable") : null} />
     </div>
   );
 }

@@ -113,9 +113,13 @@ export function metersPerUnit(y: number): number {
   return EARTH_CIRCUMFERENCE_M / Math.cosh(Math.PI * (1 - 2 * y));
 }
 
+const sameTint = (a?: RGB, b?: RGB) => a === b || (!!a && !!b && a[0] === b[0] && a[1] === b[1] && a[2] === b[2]);
+
 /**
  * Douglas-Peucker in 3D (horizontal metres, height scaled by tolH/tolV): indices to keep,
- * ascending, first and last always. Iterative (no recursion depth limit on long tracks).
+ * ascending, first and last always, and every point whose tint differs from its predecessor's
+ * (the colour change – e.g. the green approach – starts exactly there, as on the 2D line).
+ * Iterative (no recursion depth limit on long tracks).
  */
 export function simplifyIndices(pts: CPt[], tolH = TOL_H_M, tolV = TOL_V_M): number[] {
   const n = pts.length;
@@ -127,6 +131,7 @@ export function simplifyIndices(pts: CPt[], tolH = TOL_H_M, tolV = TOL_V_M): num
   const Z = (i: number) => pts[i].h * vz;
   const keep = new Uint8Array(n);
   keep[0] = keep[n - 1] = 1;
+  for (let i = 1; i < n; i++) if (!sameTint(pts[i].tint, pts[i - 1].tint)) keep[i] = 1;
   const stack: Array<[number, number]> = [[0, n - 1]];
   const tol2 = tolH * tolH;
   while (stack.length) {

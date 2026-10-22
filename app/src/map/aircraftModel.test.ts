@@ -232,4 +232,19 @@ describe("invisible pose changes (no blend, no frame)", () => {
     layer.setPose({ ...base, lon: base.lon + 0.5 }, 200);
     expect(repaints).toBe(before + 1);
   });
+  it("H-2: setPose(null) repaints once, not again while there is no pose (2D replay frames)", () => {
+    let repaints = 0;
+    const layer = new AircraftModelLayer("m", { body: "#ffd54a", dark: "#000000" });
+    const map = { getZoom: () => 6, triggerRepaint: () => repaints++ };
+    layer.onAdd(map as never, { createBuffer: () => ({}), bindBuffer() {}, bufferData() {}, ARRAY_BUFFER: 1, STATIC_DRAW: 1 } as never);
+    layer.setPose(null);
+    expect(repaints).toBe(0);
+    layer.setPose(base, 0);
+    const before = repaints;
+    layer.setPose(null);
+    expect(repaints).toBe(before + 1);
+    layer.setPose(null);
+    layer.setPose(null);
+    expect(repaints).toBe(before + 1);
+  });
 });

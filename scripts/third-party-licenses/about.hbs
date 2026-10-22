@@ -1,0 +1,11 @@
+{{#each licenses}}
+--------------------------------------------------------------------------------
+{{{name}}} ({{{id}}})
+Used by:
+{{#each used_by}}
+  - {{{crate.name}}} {{{crate.version}}}{{#if crate.authors}} ({{#each crate.authors}}{{#unless @first}}, {{/unless}}{{{this}}}{{/each}}){{/if}}
+{{/each}}
+
+{{{text}}}
+
+{{/each}}

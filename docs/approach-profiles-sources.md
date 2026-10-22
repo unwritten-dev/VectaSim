@@ -1,8 +1,16 @@
 # Approach assessment profiles: public sources
 
 Research for manufacturer- and category-specific approach assessment profiles
-(`ApproachConfig` in `crates/vectasim-core/src/approach.rs`). Status: research,
-nothing implemented. Compiled 2026-10-21.
+(`ApproachConfig` in `crates/vectasim-core/src/approach.rs`). Compiled 2026-10-21.
+Status: implemented in 0.6.2 (`crates/vectasim-core/src/approach_profile.rs`); the
+profiles as built, their values and the type mapping are described in
+[approach-profiles.md](approach-profiles.md), which wins where the two differ. This
+document stays the research record. Deviations of the implementation from the proposals
+below: the P4 "hard gate" parameter exists (`hardGateFt`, 300 ft for GA piston);
+single-engine turboprops get the GA piston profile with the thrust check left on (their
+gas-generator N1 stays high at idle, so it practically never fires); and the sim's
+`ENGINE TYPE` is not recorded – for a type outside the table only a piston engine is
+recognised (turbine N1 at 0 in the air), everything else falls back to P0.
 
 ## Scope and citation rules
 
@@ -282,7 +290,7 @@ can label the profile and so that a later public Boeing source can be added in o
 | `config_gate_ft` | **500** | AFH9 (500 ft VMC gate; full flaps only once on final) | VMC assumed |
 | `window_top_ft` | 1000 (= generic) or 500, see open questions | AFH9 | – |
 | thrust check | inherit (already skipped: piston N1 = 0, `n1_valid_min_pct`) | – | – |
-| possible new parameter: hard gate | 300 ft AGL ("unstable below 300 ft" instead of 500) | AFH9, FSF-GA | needs a new parameter |
+| possible new parameter: hard gate | 300 ft AGL ("unstable below 300 ft" instead of 500) | AFH9, FSF-GA | implemented as `hardGateFt` (GA piston: 300) |
 | possible new rule | sink > 500 fpm below 300 ft | AFH9 | needs a new check |
 
 ## Type mapping (ICAO designator → profile)
@@ -302,10 +310,10 @@ can label the profile and so that a later public Boeing source can be added in o
 | DHC-8 / Q400 | DH8A, DH8B, DH8C, DH8D | P3 | no public De Havilland values; turboprop category only |
 | Other multi-crew turboprops | SF34, JS31, JS32, JS41, D328, F50, B190, DHC6, BE20, BE30, BE9L | P3 | category, not manufacturer |
 | Business jets | C25A, C25B, C25C, C25M, C510, C525, C550, C560, C56X, C680, C68A, C700, C750, CL30, CL35, CL60, GLEX, GL5T, GL7T, G150, G280, GLF4, GLF5, GLF6, LJ35, LJ45, LJ60, E50P, E55P, E545, E550, FA7X, FA8X, F900, F2TH, PRM1, HDJT, PC24, SF50 | P0 | FSF ALAR applies to turbine aircraft; NBAA has no public numbers |
-| Single-engine turboprops | PC12, TBM7, TBM8, TBM9, C208, KODI, M600 | P4 with thrust check disabled | VectaSim convention: flown like light aircraft, single pilot |
+| Single-engine turboprops | PC12, TBM7, TBM8, TBM9, C208, KODI, M600 | P4 with thrust check disabled (implemented: P4 with the thrust check on, see the status note at the top) | VectaSim convention: flown like light aircraft, single pilot |
 | GA piston | C150, C152, C172, C177, C182, C206, C210, P28A, P28B, P28R, P32R, PA34, PA44, PA46, SR20, SR22, S22T, DA20, DV20, DA40, DA42, DA62, BE33, BE35, BE36, BE55, BE58, M20P, M20T, AA5, TB20 | P4 | – |
 | Helicopters | any H… type | none (optional) | outside the fixed-wing model; HELI as a pointer |
-| Unknown / no designator | – | fallback by sim data: `ENGINE TYPE` jet → P0, turboprop with ≥ 2 engines → P3, turboprop single → P4 (no thrust check), piston → P4; nothing known → P0 | VectaSim convention |
+| Unknown / no designator | – | fallback by sim data: `ENGINE TYPE` jet → P0, turboprop with ≥ 2 engines → P3, turboprop single → P4 (no thrust check), piston → P4; nothing known → P0 (implemented: only piston → P4, recognised from the track; everything else → P0) | VectaSim convention |
 
 Always show the profile in the debrief ("Assessed with: Airbus-style") so it is
 transparent, and let the user override it per aircraft in the fleet.
@@ -325,8 +333,8 @@ transparent, and let the user override it per aircraft in the fleet.
    limits. Using them as gate failures may be too strict; alternative: show them as
    "callout would have been made" hints.
 5. **Bank gate 15°**: labelled "FSF" in the code comment, but FSF71 has no bank number;
-   the 15° comes from D4S S1 / AFH9. The code comment should be corrected when the
-   profiles are implemented.
+   the 15° comes from D4S S1 / AFH9. *Done in 0.6.2:* the code comment now names D4S S1 /
+   AFH9.
 6. **Thrust**: no public N1 value; D4S uses a fleet-specific 1st percentile over 10 s
    (VectaSim: 40 % for 5 s). Turboprop torque/power-lever criteria: none public.
 7. **IMC/VMC**: all sources use two gates by weather; VectaSim has no IMC flag. Could
@@ -339,7 +347,8 @@ transparent, and let the user override it per aircraft in the fleet.
    counting base-to-final turns)?
 10. **New checks not in `ApproachConfig`**: EASA sink-rate variation ≤ 50 % of target;
     ATR ±300 fpm; AFH "below 500 fpm by 300 ft"; D4S pitch S1 > 10°/< −3°, S2 >
-    15°/< −10°; a separate LOC gate; a 300 ft hard gate.
+    15°/< −10°; a separate LOC gate; a 300 ft hard gate (*done in 0.6.2:* `hardGateFt`,
+   300 ft for GA piston; the others are still open).
 11. **Business jets / NBAA**: no public numbers; profile stays generic.
 12. **AC 91-79B**: the FAA URL for AC 91-79B returned no PDF; this file cites
     AC 91-79A Chg 2. Check whether a newer revision has changed App. 1.

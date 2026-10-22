@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { AirframeEdit, AirframeRow, FlightRow } from "./types";
@@ -15,6 +15,7 @@ import { LANDING_FLAPS_MAX, VAPP_MAX_KT, VAPP_MIN_KT, airframeName, matchesAirfr
 import { useAirframes } from "./airframes/hooks";
 import { navigate } from "./airframes/navigation";
 import { errorToast } from "./ui/errorToast";
+import { focusAfter } from "./ui/focusAfter";
 import { BUILTIN_PROFILES, profileName, profileTooltip, useApproachProfiles } from "./landing/approachProfiles";
 
 const PLANE_ICON = (
@@ -209,15 +210,27 @@ function AirframeDetail({ row: a, onSelect }: { row: AirframeRow; onSelect: (reg
     approachProfile: a.approachProfile ?? "",
   });
   const [form, setForm] = useState(initial);
+  // the stored profile changed elsewhere (a custom profile deleted in the settings sets it back
+  // to automatic): an untouched field follows, so the form is not "changed" and "Speichern"
+  // never sends the deleted id
+  const storedProfile = a.approachProfile ?? "";
+  const [prevStoredProfile, setPrevStoredProfile] = useState(storedProfile);
+  if (storedProfile !== prevStoredProfile) {
+    setPrevStoredProfile(storedProfile);
+    if (form.approachProfile === prevStoredProfile) setForm({ ...form, approachProfile: storedProfile });
+  }
   const [flights, setFlights] = useState<FlightRow[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [merging, setMerging] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  /** "Nein" puts the focus back on "Entfernen" (the confirmation replaced it). */
+  const removeRef = useRef<HTMLButtonElement>(null);
   const { airframePhotos } = usePrefs();
   const profiles = useApproachProfiles();
   const customProfiles = (profiles?.profiles ?? []).filter((p) => !p.builtin);
   // a chosen custom profile that is gone (deleted elsewhere) still shows until saved
-  const unknownProfile = form.approachProfile && !(BUILTIN_PROFILES as readonly string[]).includes(form.approachProfile) && profiles && !customProfiles.some((p) => p.id === form.approachProfile);
+  // also while the list loads or failed: the select must show the chosen id, not fall to "automatic"
+  const unknownProfile = form.approachProfile && !(BUILTIN_PROFILES as readonly string[]).includes(form.approachProfile) && !customProfiles.some((p) => p.id === form.approachProfile);
 
   useEffect(() => {
     invoke<FlightRow[]>("airframe_flights", { registration: a.registration, limit: 200 })
@@ -390,12 +403,20 @@ function AirframeDetail({ row: a, onSelect }: { row: AirframeRow; onSelect: (reg
               <button className="btn-sm danger" onClick={remove} autoFocus>
                 {t("logbook.fleet.yes")}
               </button>
-              <button className="btn-sm" onClick={() => setConfirmDelete(false)}>
+              <button
+                className="btn-sm"
+                onClick={() =>
+                  focusAfter(
+                    () => setConfirmDelete(false),
+                    () => removeRef.current,
+                  )
+                }
+              >
                 {t("logbook.fleet.no")}
               </button>
             </span>
           ) : (
-            <button className="btn-sm danger" onClick={() => setConfirmDelete(true)}>
+            <button ref={removeRef} className="btn-sm danger" onClick={() => setConfirmDelete(true)}>
               {t("logbook.fleet.remove")}
             </button>
           )}

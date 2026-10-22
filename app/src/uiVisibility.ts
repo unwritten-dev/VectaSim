@@ -47,18 +47,34 @@ export function watchUiVisibility(
     last = v;
     report(v);
   };
-  let seq = 0;
+  // one IPC round trip at a time: a resize storm (window drag, minimise + restore) asks once
+  // now and once more afterwards instead of once per resize
+  let inflight = false;
+  let again = false;
   const checkMinimized = () => {
     if (!win) return;
-    const mine = ++seq;
+    if (inflight) {
+      again = true;
+      return;
+    }
+    inflight = true;
     void win
       .isMinimized()
       .then((m) => {
-        if (mine !== seq) return; // a newer check is under way: its answer counts
+        // a newer check is pending: this answer is stale (minimise + quick restore), the
+        // follow-up's answer counts
+        if (again) return;
         minimized = m;
         push();
       })
-      .catch(() => {});
+      .catch(() => {})
+      .then(() => {
+        inflight = false;
+        if (again && !closed) {
+          again = false;
+          checkMinimized();
+        }
+      });
   };
   const onVisibility = () => {
     push();

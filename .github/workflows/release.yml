@@ -4,15 +4,19 @@
 #
 # Trigger: a tag like v0.2.0 on the public repository, created by the snapshot script
 # (docs/releasing.md). The `versions` job fails the run when the tag and the version fields
-# in the tree differ; the `ci` job runs every check of ci.yml (clippy, tests, cargo audit /
+# in the tree differ, CHANGELOG.md has no `## X.Y.Z` section or the README status lines name
+# another minor version; the `ci` job runs every check of ci.yml (clippy, tests, cargo audit /
 # deny, npm audit, lint, tsc, README pair) on the tagged commit. The build runs in parallel
 # with those checks (it only needs `versions`); the result is a *draft*, and the run is red
 # when any check fails – publish the draft only from a green run (docs/releasing.md).
 #
 # Build time: a tag run can only restore caches saved on the default branch, so ci.yml keeps a
-# release-profile cache warm on the public main (`release-cache`, shared-key `release`); with
-# it the dependencies (tauri, webview2, …) come from the cache and only the workspace crates
-# compile. The tag run itself saves nothing (a cache saved on a tag is never read again).
+# release-profile cache warm on the public main (`release-cache`); with it the dependencies
+# (tauri, webview2, …) come from the cache and only the workspace crates compile. The cache is
+# keyed by Cargo.lock and the toolchain file only (actions/cache/restore with a prefix restore
+# key) – rust-cache's key also hashes the runner environment, which changes with every
+# runner-image rollout and made the restore miss. The tag run itself saves nothing (a cache
+# saved on a tag is never read again).
 #
 # Every third-party action is pinned to a full commit SHA (the comment names the release):
 # the release job holds the updater signing key and a token that can write releases, so a
@@ -31,6 +35,7 @@ permissions:
 jobs:
   versions:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -59,6 +64,16 @@ jobs:
             found.push([`Cargo.lock ${m[1]}`, m[2]]);
           }
           if (!found.some(([where]) => where.startsWith("Cargo.lock"))) found.push(["Cargo.lock vectasim*", "missing"]);
+          // CHANGELOG.md needs a section for the version ("## 0.6.2 – 2026-10-22 (Beta)")
+          const changelog = fs.readFileSync("CHANGELOG.md", "utf8");
+          const hasSection = changelog.split(/\r?\n/).some((l) => l === `## ${want}` || l.startsWith(`## ${want} `));
+          found.push(["CHANGELOG.md (## section)", hasSection ? want : "missing"]);
+          // README status line names the minor version ("Beta 0.6")
+          const minor = want.split(".").slice(0, 2).join(".");
+          for (const f of ["README.md", "README.de.md"]) {
+            const status = /^Beta (\d+\.\d+) – /m.exec(fs.readFileSync(f, "utf8"));
+            found.push([`${f} (status line, minor)`, status && status[1] === minor ? want : status ? status[1] : "missing"]);
+          }
           let bad = 0;
           for (const [where, v] of found) {
             if (v === want) console.log(`ok     ${where} = ${v}`);
@@ -73,7 +88,11 @@ jobs:
 
   release:
     needs: [versions]
+    # only the public repository builds and signs: a tag mirrored into the development
+    # repository would otherwise start a 20-minute Windows job that fails at the signing key
+    if: github.repository == 'unwritten-dev/VectaSim'
     runs-on: windows-latest
+    timeout-minutes: 60
     permissions:
       contents: write # tauri-action creates the draft release and uploads the assets
     defaults:
@@ -93,11 +112,18 @@ jobs:
       # installs the pinned toolchain named in rust-toolchain.toml
       - run: rustup toolchain install
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          workspaces: ". -> target"
-          shared-key: release
-          save-if: false
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target/release/.fingerprint
+            target/release/build
+            target/release/deps
+          key: release-build-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            release-build-${{ runner.os }}-
 
       - run: npm ci
 

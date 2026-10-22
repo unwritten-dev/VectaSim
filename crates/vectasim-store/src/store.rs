@@ -7,6 +7,7 @@ use crate::{Field, Invalid, Result, StoreError};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use vectasim_core::approach::{self, ApproachAnalysis, ApproachBand, ElevationSource, EnergyBand, FafReason, GateKind, GoAroundSource, LateralBand, LocalizerSource, MarkerKind, Severity};
 use vectasim_core::landing::{CriterionKind, RunwayEnd, RunwayFrame, RunwayGeometrySource, angle_diff_deg, blend_runway, opposite_ident};
@@ -318,19 +319,27 @@ pub(crate) const RATED_LANDING_RATE_SQL: &str = "CASE WHEN COALESCE(landing_rate
 const USER_RUNWAY_LANDINGS_FLIGHT_INDEX: &str =
     "CREATE INDEX IF NOT EXISTS user_runway_landings_flight ON user_runway_landings(flight_id);";
 
+/// A recorded flight that only ended in an airborne phase (started in the air, interrupted before
+/// its landing) counts in statistics from this distance on, nm (see `counts_in_stats_sql`).
+pub const AIRBORNE_ONLY_MIN_DISTANCE_NM: f64 = 1.0;
+
 /// Phases (as stored) that only an aircraft in the air reaches: Climb to Final.
 const AIRBORNE_PHASES_SQL: &str = "('climb', 'cruise', 'descent', 'approach', 'final')";
 
 /// Whether the flight row `alias` counts in statistics (counters, airports, countries, fleet):
 /// not a discarded ground session, and – for recorded flights (imports carry their own facts) –
-/// it took off, touched down, or ended in an airborne phase. Rows from before 0.5.1 that only
-/// taxied fall out this way. The last one is a flight started in the air (no take-off time) that
-/// was interrupted before its landing: it flew, so it counts (flights, distance, airports; its
-/// block time is unknown without an on-block). [`FlightRow::counts_in_stats`] is the same rule.
+/// it took off, touched down, or ended in an airborne phase having covered at least
+/// [`AIRBORNE_ONLY_MIN_DISTANCE_NM`]. Rows from before 0.5.1 that only taxied fall out this way.
+/// The last one is a flight started in the air (no take-off time) that was interrupted before
+/// its landing: it flew, so it counts (flights, distance, airports; its block time is unknown
+/// without an on-block). The distance keeps out the "flights" a sim's load placeholder started
+/// (0/0 high up, standing still for a few seconds), including the rows recorded before the
+/// session learnt to ignore it. No duration instead: an interrupted row has no end time, and
+/// `updated_ms` moves with every edit. [`FlightRow::counts_in_stats`] is the same rule.
 pub(crate) fn counts_in_stats_sql(alias: &str) -> String {
     format!(
         "({alias}.state <> 'discarded' AND ({alias}.takeoff_ms IS NOT NULL OR COALESCE({alias}.provider, '') LIKE 'import:%' \
-          OR {alias}.phase IN {AIRBORNE_PHASES_SQL} \
+          OR ({alias}.phase IN {AIRBORNE_PHASES_SQL} AND {alias}.distance_nm >= {AIRBORNE_ONLY_MIN_DISTANCE_NM:.1}) \
           OR EXISTS (SELECT 1 FROM touchdowns tc WHERE tc.flight_id = {alias}.id)))"
     )
 }
@@ -375,6 +384,9 @@ pub struct Store {
     path: Option<PathBuf>,
     /// What opening the file wants the pilot to know ([`Store::take_notices`]).
     notices: Arc<Mutex<Vec<StoreNotice>>>,
+    /// Raised by every invalidation of cached approach facts / flight metrics (see
+    /// [`Store::results_epoch`]): a result computed before it is not stored as current.
+    results_epoch: Arc<AtomicU64>,
 }
 
 /// Something that happened while opening the logbook and that the UI should show once
@@ -667,12 +679,13 @@ pub struct FlightRow {
 
 impl FlightRow {
     /// Same rule as `counts_in_stats_sql`: not discarded, and a recorded flight took off,
-    /// touched down or ended in an airborne phase (imports always count).
+    /// touched down or ended in an airborne phase after [`AIRBORNE_ONLY_MIN_DISTANCE_NM`]
+    /// (imports always count).
     pub fn counts_in_stats(&self) -> bool {
         self.state != "discarded"
             && (self.takeoff_ms.is_some()
                 || self.landing_count > 0
-                || self.phase.is_airborne_phase()
+                || self.phase.is_airborne_phase() && self.distance_nm >= AIRBORNE_ONLY_MIN_DISTANCE_NM
                 || self.provider.as_deref().is_some_and(|p| p.starts_with("import:")))
     }
 }
@@ -1262,6 +1275,73 @@ fn refuse_active(conn: &Connection, id: &str) -> Result<()> {
     if active { Err(Invalid::FlightRecording.into()) } else { Ok(()) }
 }
 
+/// The approach-facts part of [`Store::put_approach_facts`] inside `tx`. False if the flight
+/// does not exist.
+fn write_approach_facts(tx: &rusqlite::Transaction<'_>, flight_id: &str, version: u32, rows: &[ApproachFactRow]) -> Result<bool> {
+    use rusqlite::types::Value;
+    let exists: bool = tx.query_row("SELECT EXISTS (SELECT 1 FROM flights WHERE id = ?1)", params![flight_id], |r| r.get(0))?;
+    if !exists {
+        return Ok(false);
+    }
+    tx.execute("DELETE FROM approach_facts WHERE flight_id = ?1", params![flight_id])?;
+    let now = vectasim_core::now_ms() as i64;
+    if rows.is_empty() {
+        tx.execute(
+            "INSERT INTO approach_facts (flight_id, approach_index, version, computed_ms, outcome, ended_ms)
+             VALUES (?1, -1, ?2, ?3, 'none', 0)",
+            params![flight_id, version, now],
+        )?;
+    }
+    {
+        let placeholders = (2..=38).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ");
+        let mut stmt = tx.prepare(&format!("INSERT INTO approach_facts (flight_id, {APPROACH_COLS}) VALUES (?1, {placeholders})"))?;
+        for f in rows {
+            let values: Vec<Value> = vec![
+                flight_id.to_string().into(),
+                (f.approach_index as i64).into(),
+                (f.version as i64).into(),
+                now.into(),
+                f.outcome.clone().into(),
+                f.touchdown_index.map(|v| v as i64).into(),
+                f.airport_icao.clone().into(),
+                f.runway_ident.clone().into(),
+                (f.ended_ms as i64).into(),
+                f.established_nm.into(),
+                f.established_hat_ft.into(),
+                f.stable_from_ft.into(),
+                f.vapp_kt.into(),
+                f.vapp_source.clone().into(),
+                f.gp_deg.into(),
+                f.gp_source.clone().into(),
+                f.g10_alt_dev_ft.into(),
+                f.g10_ias_kt.into(),
+                f.g10_energy_dev_ft.into(),
+                f.gfaf_alt_dev_ft.into(),
+                f.gfaf_ias_dev_kt.into(),
+                f.g1000_alt_dev_ft.into(),
+                f.g1000_ias_dev_kt.into(),
+                f.g1000_lat_dev_m.into(),
+                f.g1000_vs_fpm.into(),
+                f.g1000_pass.into(),
+                f.g500_alt_dev_ft.into(),
+                f.g500_ias_dev_kt.into(),
+                f.g500_lat_dev_m.into(),
+                f.g500_vs_fpm.into(),
+                f.g500_pass.into(),
+                f.gp_rms_ft.into(),
+                f.lat_rms_m.into(),
+                f.ias_mad_kt.into(),
+                f.vs_sd_fpm.into(),
+                f.ga_lowest_hat_ft.into(),
+                f.detail_json.clone().into(),
+                f.profile_id.clone().into(),
+            ];
+            stmt.execute(rusqlite::params_from_iter(values))?;
+        }
+    }
+    Ok(true)
+}
+
 fn approach_facts_of(conn: &Connection, flight_id: &str) -> Result<Vec<ApproachFactRow>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT {APPROACH_COLS} FROM approach_facts WHERE flight_id = ?1 AND approach_index >= 0 ORDER BY approach_index"
@@ -1347,7 +1427,12 @@ impl Store {
             "UPDATE flights SET state = 'interrupted', updated_ms = ?1 WHERE state = 'active'",
             params![now],
         )?;
-        Ok(Self { conn: Arc::new(Mutex::new(conn)), path, notices: Arc::new(Mutex::new(notices)) })
+        Ok(Self {
+            conn: Arc::new(Mutex::new(conn)),
+            path,
+            notices: Arc::new(Mutex::new(notices)),
+            results_epoch: Arc::new(AtomicU64::new(0)),
+        })
     }
 
     /// Notices from opening the logbook that the UI should show once (see [`StoreNotice`]):
@@ -1446,6 +1531,19 @@ impl Store {
 
     pub(crate) fn conn(&self) -> MutexGuard<'_, Connection> {
         self.conn.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Generation of the cached results: read it before computing a flight's approach facts and
+    /// metrics and hand it to [`Store::put_flight_results`], which stores them only when no
+    /// invalidation (profile, Vapp, flaps, type, booking, runway, merge) happened in between.
+    pub fn results_epoch(&self) -> u64 {
+        self.results_epoch.load(Ordering::SeqCst)
+    }
+
+    /// Called by every path that drops or marks stale cached approach facts / flight metrics,
+    /// before (or while holding the connection for) the change.
+    pub(crate) fn results_changed(&self) {
+        self.results_epoch.fetch_add(1, Ordering::SeqCst);
     }
 
     // ---- writes used by the recorder -------------------------------------------------
@@ -2193,6 +2291,7 @@ impl Store {
     /// with such an approach stale and drop their flight metrics, so all are recomputed
     /// lazily with the new geometry.
     pub fn invalidate_runway_facts(&self, airport_icao: Option<&str>) -> Result<()> {
+        self.results_changed();
         let icao = airport_icao.map(runway_key);
         let mut conn = self.conn();
         let tx = conn.transaction()?;
@@ -2304,71 +2403,54 @@ impl Store {
     /// stores the marker row "computed, nothing to assess" with `version`. False if the
     /// flight does not exist.
     pub fn put_approach_facts(&self, flight_id: &str, version: u32, rows: &[ApproachFactRow]) -> Result<bool> {
-        use rusqlite::types::Value;
         let mut conn = self.conn();
         let tx = conn.transaction()?;
-        let exists: bool = tx.query_row("SELECT EXISTS (SELECT 1 FROM flights WHERE id = ?1)", params![flight_id], |r| r.get(0))?;
-        if !exists {
+        if !write_approach_facts(&tx, flight_id, version, rows)? {
             return Ok(false);
-        }
-        tx.execute("DELETE FROM approach_facts WHERE flight_id = ?1", params![flight_id])?;
-        let now = vectasim_core::now_ms() as i64;
-        if rows.is_empty() {
-            tx.execute(
-                "INSERT INTO approach_facts (flight_id, approach_index, version, computed_ms, outcome, ended_ms)
-                 VALUES (?1, -1, ?2, ?3, 'none', 0)",
-                params![flight_id, version, now],
-            )?;
-        }
-        {
-            let placeholders = (2..=38).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ");
-            let mut stmt = tx.prepare(&format!("INSERT INTO approach_facts (flight_id, {APPROACH_COLS}) VALUES (?1, {placeholders})"))?;
-            for f in rows {
-                let values: Vec<Value> = vec![
-                    flight_id.to_string().into(),
-                    (f.approach_index as i64).into(),
-                    (f.version as i64).into(),
-                    now.into(),
-                    f.outcome.clone().into(),
-                    f.touchdown_index.map(|v| v as i64).into(),
-                    f.airport_icao.clone().into(),
-                    f.runway_ident.clone().into(),
-                    (f.ended_ms as i64).into(),
-                    f.established_nm.into(),
-                    f.established_hat_ft.into(),
-                    f.stable_from_ft.into(),
-                    f.vapp_kt.into(),
-                    f.vapp_source.clone().into(),
-                    f.gp_deg.into(),
-                    f.gp_source.clone().into(),
-                    f.g10_alt_dev_ft.into(),
-                    f.g10_ias_kt.into(),
-                    f.g10_energy_dev_ft.into(),
-                    f.gfaf_alt_dev_ft.into(),
-                    f.gfaf_ias_dev_kt.into(),
-                    f.g1000_alt_dev_ft.into(),
-                    f.g1000_ias_dev_kt.into(),
-                    f.g1000_lat_dev_m.into(),
-                    f.g1000_vs_fpm.into(),
-                    f.g1000_pass.into(),
-                    f.g500_alt_dev_ft.into(),
-                    f.g500_ias_dev_kt.into(),
-                    f.g500_lat_dev_m.into(),
-                    f.g500_vs_fpm.into(),
-                    f.g500_pass.into(),
-                    f.gp_rms_ft.into(),
-                    f.lat_rms_m.into(),
-                    f.ias_mad_kt.into(),
-                    f.vs_sd_fpm.into(),
-                    f.ga_lowest_hat_ft.into(),
-                    f.detail_json.clone().into(),
-                    f.profile_id.clone().into(),
-                ];
-                stmt.execute(rusqlite::params_from_iter(values))?;
-            }
         }
         tx.commit()?;
         Ok(true)
+    }
+
+    /// Store what one analysis of a flight yielded – its approach facts (`version`) and its
+    /// metrics – in one transaction, but only if [`Store::results_epoch`] is still `epoch`, the
+    /// value read before the analysis began: an invalidation in between means the result was
+    /// computed with the old profile / Vapp / runway, and storing it as current would keep it
+    /// for good. Returns false when nothing was written (stale, or the flight is gone); the next
+    /// lazy read computes it again.
+    pub fn put_flight_results(
+        &self,
+        flight_id: &str,
+        epoch: u64,
+        version: u32,
+        rows: &[ApproachFactRow],
+        metrics: &crate::FlightMetricsRow,
+    ) -> Result<bool> {
+        let mut conn = self.conn();
+        // checked under the connection lock: an invalidation raises the epoch before it takes
+        // the lock, so it either comes after this write (and drops it) or is seen here
+        if self.results_epoch() != epoch {
+            return Ok(false);
+        }
+        let tx = conn.transaction()?;
+        if !write_approach_facts(&tx, flight_id, version, rows)? {
+            return Ok(false);
+        }
+        crate::metrics::write_flight_metrics(&tx, flight_id, metrics)?;
+        tx.commit()?;
+        Ok(true)
+    }
+
+    /// Both cached results of a flight are there and current (approach facts of
+    /// [`APPROACH_FACTS_VERSION`], metrics of [`crate::FLIGHT_METRICS_VERSION`]).
+    pub fn flight_results_fresh(&self, flight_id: &str) -> Result<bool> {
+        let fresh: Option<bool> = self.conn().query_row(
+            "SELECT (SELECT MIN(version) FROM approach_facts WHERE flight_id = ?1) = ?2
+                AND (SELECT version FROM flight_metrics WHERE flight_id = ?1) = ?3",
+            params![flight_id, APPROACH_FACTS_VERSION, crate::FLIGHT_METRICS_VERSION],
+            |r| r.get(0),
+        )?;
+        Ok(fresh.unwrap_or(false))
     }
 
     /// Cached approach facts of one flight, in order (empty when none or not computed yet).

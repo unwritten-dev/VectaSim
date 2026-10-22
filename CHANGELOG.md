@@ -2,13 +2,87 @@
 
 Entries are in English from 2026-10-18 on; earlier entries were translated.
 
+## 0.6.3 – 2026-10-22 (Beta)
+
+The third audit, fixed in full: all eight medium findings, the 32 low findings and the 56 notes (a few are documented as accepted residual risks) – no ghost flights from the MSFS load screen, a held pushback keeps the flight, profile changes re-assess everything they touch, the live map draws no lines across position jumps, the overlay token stays off the page for local requests, full licence texts in the installer, and measured resource figures in the README.
+
+### Recording
+
+- A pushback that stops on the parking brake before the engines are started no longer ends the flight as a "ground session": the flight stays open and keeps the off-block of the push. Only an aircraft that then stays parked with the engines off for 15 minutes ends as a discarded ground session.
+- Loading a new flight in MSFS no longer records a ghost flight "? → ?" high above 0° N / 0° E: the simulator's placeholder position while it loads is ignored, and a flight started in the air only counts once the aircraft actually moves.
+- When the logbook cannot be written (disk full, database locked), saving the end of a flight is retried with growing pauses (up to once a minute) instead of with every sample, so the app no longer loads the CPU or floods the log. The approach assessment is computed once the flight is really saved.
+- A short hop out of the take-off roll (airborne for 10 s but below 50 ft) is now logged as a flight with take-off and landing time and counts in the statistics; before, it ended as a completed flight without times that the statistics ignored.
+- Very long flights save their track every 30 s (from 2 h) and every 60 s (from 6 h) instead of every 15 s, which keeps the CPU load of the track encoding flat on long-haul flights.
+- Jets whose add-on reports no turbine N1 are no longer assessed with the GA piston profile; piston is assumed only together with a slow approach (below 120 kt under 1000 ft).
+
+### Logbook
+
+- Ghost flights like that, recorded by earlier versions (interrupted in the air without covering any distance), no longer count in the flight totals, the fleet and the year statistics.
+- Adding or correcting an aircraft's ICAO type, rebooking or unbooking a flight, merging two aircraft or deleting one now re-assesses the affected approaches with the right assessment profile. Debrief comparisons, the approach strip and trends update instead of keeping the old thresholds.
+- The flight detail now updates by itself when you change an aircraft's assessment profile, Vapp or landing flaps in the fleet, or import, replace or delete a custom profile. Before, it updated only after you switched to another flight. This covers the track markers, the metrics row, the full-screen view and "Assessed with …".
+- After a runway correction in the debrief, the flight detail behind it updates too, so the touchdown summary and metrics no longer show the old runway's values.
+- Comparison sentences and per-flight metrics no longer drop the just-landed flight when several updates arrive at the end of a flight at once (only the newest answer counts).
+- Gate heights and the assessment window in the metrics row and comparison sentences use the language's number format ("1,000 ft" / "1 000 ft"). The exceedance window shows the profile's actual window top instead of a fixed "1000 → 50 ft".
+- An assessment computed while you changed a profile, Vapp, flaps, type, booking or runway could be stored with the old thresholds and was never recomputed; such a result is now discarded and recomputed. After an update, the approach list and the background metrics computation no longer analyse the same flights twice.
+- Deleting a custom assessment profile is now a single step; an error can no longer leave aircraft pointing at a deleted profile. A .vectasim import that brings an aircraft with a custom profile this logbook does not have sets the aircraft back to automatic and says so in the import report.
+- Trends: the assessment-profile chips and their counts come from the approaches of the period shown, so a chip no longer leads to empty charts; the per-landing table hides "Stable from" and exceedances of other profiles like the charts. The approach dispersion legend names the hard gate of the profiles shown ("unstable below 300 / 500 ft").
+- Debrief: the take-off rotation is no longer compared by the landing runway (the take-off runway is not stored); it is compared from the aircraft type outwards.
+- Merging flights: a refusal (gap too long, positions too far apart …) is shown as a readable reason; technical errors show a next step with the raw text only behind "Details".
+- Fleet: after a custom assessment profile is deleted in the settings, the airframe form follows the automatic choice instead of counting as changed and saving the deleted id.
+- The KML export follows the app language (placemark names, "Landing rate not assessable", bounces).
+- The flight detail's landing line and the replay bar keep their spacing and size before any debrief was opened: their styles arrived only with the debrief, so the summary ran together ("normal351 m past the threshold") and the full-screen map collapsed to a strip once a debrief had been open.
+
+### Interface
+
+- Settings → Approach assessment: a failed profile import says in plain words what went wrong. The technical text, with its file path masked in Streamer mode, is only behind "Details".
+- The profile list shows when it is still loading, or when it failed with a "Try again" button. Until the list is there, custom profiles are no longer shown as "(deleted)", and the fleet no longer shows them as "Automatic".
+- Sources of the built-in assessment profiles now appear in the UI language, without internal shorthand.
+- "Assessed with …" and the profile notes in the comparison and trends can be focused with the keyboard, and screen readers read the values that differ from the generic profile.
+- Settings → About links the installed THIRD-PARTY-LICENSES.txt and the notices next to vectasim.exe (shown in Explorer), not only the GitHub page.
+- Keyboard: inline confirmations (delete a custom profile, remove an airframe, clear a rating) put the focus back on a sensible button instead of the start of the page. Full-screen track view: "F" no longer toggles it while a selection list or an editable field has the focus, or while the focus is outside the dialog.
+- Settings → Simulator: the result of "Send test message" is announced by screen readers and disappears after a disconnect. Online traffic: the first status after start no longer overwrites a newer status update.
+- Wording: "Airbus-/Boeing-style profile" in German ("Profil nach Airbus-Art"), "ft über Grund" in the German metrics row, cleaner English "assessed with" phrases, and Settings → Approach assessment now says that the published values are traced to their sources while a few limits are VectaSim conventions.
+- The window's minimised state is asked once per resize storm instead of once per resize (one IPC round trip in flight at a time).
+
+### Map
+- The green approach in the 3D curtain now starts exactly at the gear extension, as on the 2D line; before, thinning could start it up to about 2.4 nm late. Switching the logbook map to 3D now shows the green approach too, and so does the fallback curtain on systems without WebGL shaders.
+- After a teleport, slew or a flight loaded elsewhere, the 3D curtain no longer flashes a wall across the map for up to a second; after restarting the app mid-flight, the live track no longer draws a line across a position jump that happened earlier in the same flight.
+- Switching the traffic from "both" to a single network closes the card, ring and route of an aircraft whose network is no longer shown. A pilot changing their flight plan while their route is shown only redraws the route; the camera no longer re-zooms.
+- Exceedance runs across the antimeridian take the short way instead of going around the world. A filed route whose departure and arrival are both unknown no longer places an ambiguous waypoint name on whichever candidate came first.
+- Weather tiles the map no longer needs are dropped from the recolouring worker's queue; a worker that stops answering or sends an unreadable message falls back to the main thread instead of leaving tiles empty.
+- Performance: the logbook map builds track and curtain once per flight (not again when markers arrive or the language changes); 2D replay no longer repaints the hidden 3D model every frame; marker tooltips are no longer rebuilt on every mouse move; traffic models keep full precision when the camera is beyond ±180°; after a WebGL context loss the old curtain and traffic layers stop being updated.
+
+### Privacy and security
+
+- The overlay start page puts the network token into the page only when the request itself carried it (link, header or cookie). Programs on this PC can no longer read it with a plain request to the start page; the copy links on other devices keep working, and the app shows the network URLs itself.
+- A local program can no longer block the OBS overlays by opening connections that send only part of a request: such a connection gives its slot to a new local request after a quarter of a second instead of after the 10-second header timeout.
+- X-Plane nav data is read with limits: overlong lines and airway segments with more than 8 names are skipped, and a nav file that would make the index exceed 2 million entries is ignored and logged. A broken or crafted `earth_awy.dat` can no longer exhaust memory. X-Plane install folders on a network share (UNC paths in `x-plane_install_*.txt`) are no longer read.
+- Profile import error messages quote at most 60 characters of the file; control and bidi characters in a profile's name or source are refused.
+
+### Installer
+
+- The installer now also places THIRD-PARTY-LICENSES.txt next to vectasim.exe: the full licence texts with their copyright notices of the bundled data (OurAirports, Natural Earth, Unicode CLDR), the fonts (SIL Open Font License 1.1), the frontend libraries and the Rust crates in the app. CI and the snapshot script refuse a file that no longer matches the dependency set.
+
+### Documentation
+
+- Installation guide and third-party notices: online traffic is described as it works since 0.6.0 – an enabled network is downloaded from app start on, every 15 s while its traffic is shown and every 60 s while it is hidden or the window is minimised; *Show route* reads waypoints only on this PC (a running MSFS, an installed X-Plane's navigation files) and sends nothing anywhere.
+- README: status Beta 0.6; the approach bands end at "unstable below the hard gate" (500 ft, GA piston 300 ft). SECURITY.md describes when the built-in updater offers a fix. The sim-PC checklist covers the 0.6 features.
+- README: a "Resource usage" section with measured memory and CPU of the release build in five states (idle, 2D following, 3D with traffic, minimised) and the measurement script `scripts/measure-resources.ps1`.
+- README: new screenshots of the track markers and the green approach path (2D and 3D), the full-screen flight view, the metrics row with "Assessed with", Settings → Approach assessment and a traffic card with its route; the profile sources are described as published values traced to their source, with the VectaSim conventions marked. Overlay API: `approachBand` depends on the aircraft's assessment profile.
+
+### Release
+
+- Release builds and the Windows check job run only in the public repository; the sanitiser no longer trips over a workflow comment.
+- The release check also fails when CHANGELOG.md has no section for the version or the README status line names another minor version; every CI job has a time limit, pushes to main no longer cancel each other, and the release build cache is built with the same Tauri features as the release. The snapshot script scans compressed data files and general user paths as well; unpacked diagnostics packages are ignored by git.
+
+
 ## 0.6.2 – 2026-10-22 (Beta)
 
-Assessment profiles: the approach is now rated by aircraft category – Airbus-style, Boeing-style, turboprop, GA piston or the generic FSF/EASA set – with every value traced to a public source, and your own SOP as an importable profile.
+Assessment profiles: the approach is now rated by aircraft category – Airbus-style, Boeing-style, turboprop, GA piston or the generic FSF/EASA set – with every published value traced to its public source (a few limits are VectaSim conventions, marked as such), and your own SOP as an importable profile.
 
 ### Approach
 
-- Approach assessment profiles: the thresholds of the approach rating now follow the aircraft – generic (FSF/EASA, as before), Airbus-style (gate speed Vapp −5/+10 kt), Boeing-style (same as generic until Boeing publishes values), turboprop (gate speed ±5 kt, no thrust check) and GA piston (tighter speed and sink-rate limits, configuration gate 500 ft, “unstable below 300 ft”), every value taken from a public source. VectaSim picks the profile by ICAO type (else by engine), the debrief and the flight detail name it (“Assessed with: Airbus-style profile”, the tooltip lists what differs), and comparisons and trends only compare approaches assessed with the same profile. In the fleet you can choose another profile per aircraft; *Settings → Approach assessment* lists the profiles with their sources and imports your own (JSON, e.g. your VA’s SOP). Flights already in the logbook are assessed again with their profile in the background.
+- Approach assessment profiles: the thresholds of the approach rating now follow the aircraft – generic (FSF/EASA, as before), Airbus-style (gate speed Vapp −5/+10 kt), Boeing-style (same as generic until Boeing publishes values), turboprop (gate speed ±5 kt, no thrust check) and GA piston (tighter speed and sink-rate limits, configuration gate 500 ft, “unstable below 300 ft”), every published value traced to its public source; a few limits are VectaSim conventions, marked as such in docs/approach-profiles.md. VectaSim picks the profile by ICAO type (else by engine), the debrief and the flight detail name it (“Assessed with: Airbus-style profile”, the tooltip lists what differs), and comparisons and trends only compare approaches assessed with the same profile. In the fleet you can choose another profile per aircraft; *Settings → Approach assessment* lists the profiles with their sources and imports your own (JSON, e.g. your VA’s SOP). Flights already in the logbook are assessed again with their profile in the background.
 
 ## 0.6.1 – 2026-10-21 (Beta)
 
@@ -54,34 +128,13 @@ Second audit round: flight detection corrected again (reconnect gaps, short hops
 - The Windows notification, the in-sim landing text, the KML export and a resumed flight’s summary say “landing rate not rated” instead of “0 fpm (smooth)” for an unrated touchdown; a landing right after a short stream hole is rated with the vertical speed from just before the hole.
 - An aborted pushback (parked again, brake set, engines off) ends the recording; time acceleration no longer sets the teleport flag; a reconnect during the initial climb keeps the take-off time; a taxi-only recording left open by a crash is discarded on the next start; a flight whose end is still being saved cannot be deleted; a flight loaded low on the approach gets that airport as arrival, not departure; a flight started in the air and interrupted before landing counts in the statistics; merging a bundle no longer double-counts runway landings of duplicate flights.
 - The live map track no longer freezes after the system clock is set back; long flights use less CPU while recording (incremental track encoding); if a backup restore could not be applied, VectaSim says so after the start (the previous logbook stays open).
-
-### Map
-
-- After the window returns from the tray, the map draws the skipped frame right away instead of freezing until the next sample; following near a pole or across the date line no longer throws or jumps; clicking a traffic aircraft hidden under the card while “Follow” is on brings it into view; 3D traffic models are hidden behind the globe’s horizon; radar and cloud tiles are recoloured off the main thread; the follow loops sleep between frames and reuse their buffers.
-
-### Interface
-
-- Faster start: the landing debrief and the maps load on first use, cutting the start bundle from 2.30 MB to 1.07 MB (gzip 673 kB to 335 kB).
-- Collapsible sections no longer reference a body that is not rendered and are not landmarks; the folded “Events” section shows the newest event; the debrief’s landing pager and the logbook tag filter keep keyboard focus; closing nested dialogs together returns focus to the opener; the runway editor cannot be closed with Esc while saving; installing an update twice at once is ignored; a focused toast keeps its countdown; the “connection lost” notice goes away when the flight ends; telemetry throttling no longer stays at 1 Hz after a quick minimise and restore.
-- When a ground session is discarded, VectaSim no longer flashes the taskbar or re-saves an older flight’s landing card, whatever order the events arrive in; failed exports, a failed pre-update backup, a failed resume and a port that could not be saved show a plain next step with the reason behind “Details”.
-- “Show in folder” goes through a checked backend command that opens only existing local items.
-
-### Privacy and security
-
-- The overlay start page shows the OBS copy links with the token even when opened from a bookmark through the cookie; the token cookie is bound to the port and outdated cookies are deleted by the next answer.
-- Idle local connections can no longer block the overlay server (a new local request takes an idle slot, waits at most 2 s, then gets 503); other devices’ WebSockets have a quota of their own (16, at most 4 per device), so the local OBS overlays keep their connections; every refused request closes its connection.
-- The streamer-mode redaction finds registrations written without a dash, in lower case or with a space, and no longer hangs on long lines of dashes; the “no airport near” position message is logged at debug level only.
-- An X-Plane host name is resolved on every connection and refused when it points only to public addresses; network paths (`\\server\share`) are refused for exports, imports, the landing card folder and the SimConnect.dll choice; saving a landing card accepts only PNG images up to 32 MB; SimConnect.dll is no longer searched in the SDK’s drive-root folders on its own; links opened from the app are limited to the sites it links to; the VATSIM data address is only accepted on vatsim.net; diagnostics start `reg.exe` by its full path.
-- Dependencies: the TLS certificate libraries were updated past published advisories (RUSTSEC-2026-0381/0382/0383).
-
-### Recording
-
 - Runway matching, derived runways and the landing debrief work for runways across the antimeridian (Fiji, Tonga, Chukotka) instead of seeing them as pointing the wrong way; the nearest-airport lookup is exact at high latitudes (Scandinavia, Svalbard, Alaska, Antarctica) and across the date line.
 - A flight you delete permanently no longer keeps counting as a landing on a runway VectaSim learnt from your tracks; leftovers of flights deleted earlier are cleaned up once (with the usual backup before the logbook is updated).
 - Every round of the demo flight is a flight of its own; the bouncing demo landing no longer shows an unrealistic 3 g spike.
 
 ### Map
 
+- After the window returns from the tray, the map draws the skipped frame right away instead of freezing until the next sample; following near a pole or across the date line no longer throws or jumps; clicking a traffic aircraft hidden under the card while “Follow” is on brings it into view; 3D traffic models are hidden behind the globe’s horizon; radar and cloud tiles are recoloured off the main thread; the follow loops sleep between frames and reuse their buffers.
 - The live map leaves more of the graphics card to the simulator: VectaSim’s own map updates (following the aircraft, the 3D model, traffic) are capped at 30 fps, at 15 fps while another window such as the simulator has the focus, and nothing is drawn while VectaSim is minimised, with or without the tray icon (the live data in the background slows down as well). Dragging, zooming and rotating and the map’s own camera animations stay at full rate; camera steps too small to see draw nothing, and labels appear without fading in. Restoring the window draws at once and the camera glides back to the aircraft. Measured in 3D follow mode: about 25 frames per second with VectaSim focused, 14 unfocused and 0 minimised (before: 32, 32 and 10).
 - Switching the theme frees the graphics memory of the 3D layers right away; switching 3D on late in a long flight or opening a long logbook track no longer freezes the map while the altitude curtain is built; 3D traffic in busy areas costs less time per update.
 - Weather radar: RainViewer’s magenta step (55–64 dBZ) is shown in white; the missing “circle-11” basemap icon is no longer requested.
@@ -89,6 +142,10 @@ Second audit round: flight detection corrected again (reconnect gaps, short hops
 
 ### Interface
 
+- Faster start: the landing debrief and the maps load on first use, cutting the start bundle from 2.30 MB to 1.07 MB (gzip 673 kB to 335 kB).
+- Collapsible sections no longer reference a body that is not rendered and are not landmarks; the folded “Events” section shows the newest event; the debrief’s landing pager and the logbook tag filter keep keyboard focus; closing nested dialogs together returns focus to the opener; the runway editor cannot be closed with Esc while saving; installing an update twice at once is ignored; a focused toast keeps its countdown; the “connection lost” notice goes away when the flight ends; telemetry throttling no longer stays at 1 Hz after a quick minimise and restore.
+- When a ground session is discarded, VectaSim no longer flashes the taskbar or re-saves an older flight’s landing card, whatever order the events arrive in; failed exports, a failed pre-update backup, a failed resume and a port that could not be saved show a plain next step with the reason behind “Details”.
+- “Show in folder” goes through a checked backend command that opens only existing local items.
 - All dialogs (landing debrief, year-review lightbox, CSV import, runway editor) behave the same: Tab and Shift+Tab stay inside the dialog and wrap around, Esc closes only the topmost one, nothing behind it can be clicked or reached with the keyboard, focus returns to where you were and the background keeps its scroll position, the fade-in respects “reduce motion”, and Ctrl+F / Ctrl+. are blocked while a dialog is open, like Ctrl+1…4.
 - Saving landing, approach, year-review and country-map images is much faster: “Save all” and the year-review stack no longer stall on large images.
 - At 125–150 % in-app zoom in a small window the live side panel lies over the map and the logbook stacks list above detail; totals and filter chips wrap instead of being cut off.
@@ -97,6 +154,11 @@ Second audit round: flight detection corrected again (reconnect gaps, short hops
 
 ### Privacy and security
 
+- The overlay start page shows the OBS copy links with the token even when opened from a bookmark through the cookie; the token cookie is bound to the port and outdated cookies are deleted by the next answer.
+- Idle local connections can no longer block the overlay server (a new local request takes an idle slot, waits at most 2 s, then gets 503); other devices’ WebSockets have a quota of their own (16, at most 4 per device), so the local OBS overlays keep their connections; every refused request closes its connection.
+- The streamer-mode redaction finds registrations written without a dash, in lower case or with a space, and no longer hangs on long lines of dashes; the “no airport near” position message is logged at debug level only.
+- An X-Plane host name is resolved on every connection and refused when it points only to public addresses; network paths (`\\server\share`) are refused for exports, imports, the landing card folder and the SimConnect.dll choice; saving a landing card accepts only PNG images up to 32 MB; SimConnect.dll is no longer searched in the SDK’s drive-root folders on its own; links opened from the app are limited to the sites it links to; the VATSIM data address is only accepted on vatsim.net; diagnostics start `reg.exe` by its full path.
+- Dependencies: the TLS certificate libraries were updated past published advisories (RUSTSEC-2026-0381/0382/0383).
 - Overlay server: a tablet or second PC needs the token in the link only once – the browser then keeps it in a cookie and the overlay pages remove it from the address bar, so it stays out of the browser history and bookmarks; bookmarks without the token keep working until you regenerate the token.
 - The diagnostics package always replaces the Windows user name in file paths, not only in streamer mode.
 - The VATSIM METAR fallback (metar.vatsim.net) is only used while VATSIM is switched on; with VATSIM off, VectaSim contacts no VATSIM server.
